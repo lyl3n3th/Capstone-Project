@@ -1,0 +1,459 @@
+/* ===== STUDENT PORTAL MAIN LAYOUT ===== */
+.s-portal {
+  display: flex;
+  min-height: 100vh;
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.s-main {
+  flex: 1;
+  margin-left: 280px;
+  min-height: 100vh;
+  min-width: 0;
+  background: #f5f7fa;
+  display: flex;
+  flex-direction: column;
+}
+
+.s-content {
+  padding: 24px;
+  flex: 1;
+  min-width: 0;
+}
+
+.s-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1100;
+}
+
+/* ===== WELCOME BANNER ===== */
+.s-welcome-banner {
+  background: #ffffff;
+  color: black;
+  padding: 20px;
+  margin-top: 0;
+  border-radius: 12px;
+  margin-bottom: 22px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+}
+
+.s-welcome-banner h1 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+/* ===== DASHBOARD CARDS ===== */
+.s-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.s-groupc .g2 {
+  margin-top: 1rem;
+}
+
+.s-card {
+  position: relative;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 0;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.s-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+}
+
+.s-card-header {
+  margin-right: 80px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.s-card-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333333;
+  line-height: 1.3;
+}
+
+.s-card-header1 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 2px;
+  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 12px;
+  width: 100%;
+}
+
+.s-card-header1 h3 {
+  font-weight: 600;
+  font-size: 21px;
+  overflow-wrap: anywhere;
+}
+
+.s-box-icon {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #066287;
+  width: 50px;
+  height: 50px;
+  border-radius: 20%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.s-card-header svg {
+  font-size: 28px;
+  color: #ffffff;
+}
+
+.s-card-value {
+  font-size: 26px;
+  font-weight: 600;
+  color: #1A3D5C;
+  margin-bottom: 4px;
+}
+
+.s-card-value1 {
+  margin-top: 30px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.s-card-label1 {
+  font-size: 16px;
+  color: #666666;
+  margin-bottom: 16px;
+  overflow-wrap: anywhere;
+}
+
+.s-str-p {
+  font-size: 14px;
+  font-weight: 500;
+  color: #666666;
+  overflow-wrap: anywhere;
+}
+
+/* ===== CREDENTIAL STATUS SECTION ===== */
+.s-credential-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.s-icon-ac {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.s-co {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #066287;
+  font-size: 20px;
+}
+
+.s-section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333333;
+  margin: 0;
+}
+
+/* Submit Documents Button */
+.s-submit-docs-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #066287;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.s-submit-docs-btn:hover {
+  background: #1A3D5C;
+  box-shadow: 0 4px 12px rgba(6, 98, 135, 0.3);
+}
+
+/* Activity/Documents List */
+.s-activity-list {
+  background: #ffffff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.s-activity-item {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e0e0e0;
+  transition: background 0.3s;
+  gap: 16px;
+}
+
+.s-activity-item:hover {
+  background: rgba(6, 98, 135, 0.05);
+}
+
+.s-activity-item:last-child {
+  border-bottom: none;
+}
+
+.s-activity-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 25%;
+  background: #fafafa;
+  border: 2px dashed #e0e0e0;
+  color: #333;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.s-activity-icon:hover {
+  border-color: #066287;
+  background: #f0f5ff;
+  transform: scale(1.05);
+}
+
+.s-upload-spinner {
+  font-size: 16px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.s-activity-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.s-activity-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: #333333;
+  margin-bottom: 2px;
+  overflow-wrap: anywhere;
+}
+
+.s-uploaded-file-info {
+  margin-top: 4px;
+}
+
+.s-file-name {
+  display: inline-block;
+  color: #28a745;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f0f9f0;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+}
+
+.s-activity-status {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  justify-self: end;
+}
+
+.s-status-completed {
+  background: #d4edda;
+  color: #28a745;
+}
+
+.s-status-pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+/* Responsive Styles */
+@media (max-width: 768px) {
+  .s-main {
+    margin-left: 0;
+  }
+  
+  .s-content {
+    padding: 20px 16px 24px;
+  }
+  
+  .s-welcome-banner {
+    padding: 20px;
+  }
+  
+  .s-welcome-banner h1 {
+    font-size: 20px;
+  }
+  
+  .s-dashboard-grid {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  
+  .s-groupc {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+  
+  .s-card {
+    padding: 16px;
+  }
+  
+  .s-card-header {
+    margin-right: 68px;
+  }
+  
+  .s-box-icon {
+    width: 45px;
+    height: 45px;
+    right: 15px;
+    top: 18px;
+    transform: none;
+  }
+  
+  .s-card-value {
+    font-size: 22px;
+    padding-right: 48px;
+  }
+  
+  .s-credential-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .s-icon-ac {
+    gap: 8px;
+  }
+  
+  .s-submit-docs-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .s-activity-item {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    padding: 14px 16px;
+    gap: 12px;
+  }
+  
+  .s-activity-icon {
+    width: 35px;
+    height: 35px;
+  }
+  
+  .s-activity-title {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .s-content {
+    padding: 12px;
+  }
+  
+  .s-welcome-banner {
+    padding: 15px;
+  }
+  
+  .s-welcome-banner h1 {
+    font-size: 18px;
+  }
+
+  .s-dashboard-grid {
+    gap: 12px;
+  }
+
+  .s-card {
+    padding: 14px;
+    border-radius: 10px;
+  }
+  
+  .s-card-header h3 {
+    font-size: 15px;
+  }
+
+  .s-card-header1 h3 {
+    font-size: 18px;
+  }
+  
+  .s-card-value {
+    font-size: 20px;
+  }
+  
+  .s-card-value1 {
+    margin-top: 15px;
+    font-size: 13px;
+  }
+  
+  .s-card-label1 {
+    font-size: 14px;
+  }
+
+  .s-section-title {
+    font-size: 16px;
+  }
+
+  .s-submit-docs-btn {
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+
+  .s-activity-item {
+    grid-template-columns: 36px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .s-activity-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

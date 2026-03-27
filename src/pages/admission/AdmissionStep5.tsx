@@ -19,7 +19,6 @@ interface Toast {
 
 function AdmissionStep5() {
   const selectedBranch = getQueryParam("branch") || "";
-  const studentStatus = getQueryParam("status") || "";
   const trackingNumber = getQueryParam("trackingNumber") || "";
   const program = getQueryParam("program") || "";
 

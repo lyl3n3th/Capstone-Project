@@ -3,11 +3,14 @@
 @import "./components/dropdown.css";
 @import "./components/buttons.css";
 @import "./components/cards.css";
+@import "./components/sidebar.css"; 
+@import "./components/header.css";
 @import "./admission/admission-step1.css";
 @import "./admission/admission-step2.css";
 @import "./admission/admission-step3.css";
 @import "./admission/admission.step4.css";
 @import "./admission/admission-step5.css";
+@import "./student/student-home.css";
 
 
 

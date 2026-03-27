@@ -2,7 +2,7 @@ import "../../styles/main.css";
 import { FaCopy } from "react-icons/fa";
 import { FaCircleExclamation } from "react-icons/fa6";
 import Progress from "../../components/Progress";
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { ToastContainer } from "../../components/common/Toast";
 
 function getQueryParam(name: string): string | null {
@@ -41,7 +41,6 @@ function AdmissionStep4() {
   const [applicationData, setApplicationData] = useState<any>(null);
   const [studentHonor, setStudentHonor] = useState("");
   const [applyScholarship, setApplyScholarship] = useState(false);
-  const [applicationStatus, setApplicationStatus] = useState("pending");
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Add toast notification
@@ -75,7 +74,6 @@ function AdmissionStep4() {
         if (parsedDraft.trackingNumber && !foundTrackingNumber) {
           foundTrackingNumber = parsedDraft.trackingNumber;
         }
-        setApplicationStatus(parsedDraft.application_status || "pending");
       } catch (err) {
         console.warn("Failed to parse draft", err);
       }

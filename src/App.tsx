@@ -6,6 +6,9 @@ import AdmissionStep3 from "./pages/admission/AdmissionStep3";
 import AdmissionStep4 from "./pages/admission/AdmissiontStep4";
 import AdmissionStep5 from "./pages/admission/AdmissionStep5";
 
+import { StudentProvider } from "./contexts";
+import StudentHome from "./pages/student/StudentHome.tsx";
+
 function App() {
   return (
     <BrowserRouter>
@@ -18,6 +21,16 @@ function App() {
         <Route path="/requirements" element={<AdmissionStep3 />} />
         <Route path="/confirmation" element={<AdmissionStep4 />} />
         <Route path="/scholarship-exam" element={<AdmissionStep5 />} />
+
+        {/* Private student side */}
+        <Route
+          path="/student/home"
+          element={
+            <StudentProvider>
+              <StudentHome />
+            </StudentProvider>
+          }
+        />
       </Routes>
     </BrowserRouter>
   );
