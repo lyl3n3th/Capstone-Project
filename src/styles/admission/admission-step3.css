@@ -1,0 +1,400 @@
+/* ============================================ */
+/* ADMISSION REQUIREMENTS PAGE STYLES           */
+/* ============================================ */
+/* Using specific class names to avoid conflicts with other pages */
+
+.admission-req-container .header2 {
+  position: relative;
+  background: white;
+  width: 100%;
+  max-width: 800px;
+  padding: 30px;
+  border-radius: 15px;
+  box-shadow: 0 1px 2px rgb(0, 0, 0, 0.2);
+  border: 1px solid #e0e0e0;
+  min-height: auto;
+  bottom: 70px;
+  margin-bottom: 30px;
+}
+
+.admission-req-container .syb {
+  text-align: center;
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 10px;
+
+}
+
+.admission-req-container .syb > p {
+  text-align: center;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 20px;
+}
+
+/* Honor Notice Styles */
+.admission-req-container .honor-notice {
+  background: #fff3cd;
+  border-left: 4px solid #ffc107;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 15px 0 20px 0;
+}
+
+.admission-req-container .honor-notice p {
+  margin: 4px 0;
+  font-size: 13px;
+  color: #856404;
+}
+
+.admission-req-container .honor-notice p:first-child {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.admission-req-container .header2 h2 {
+  text-align: center;
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.admission-req-container .header2 > p {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  font-size: 12px;
+  color: #333;
+  opacity: 0.7;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* Honor Notice Styles - Scoped to admission-req-container */
+.admission-req-container .s-honor-notice {
+  background: #fff3cd;
+  border-left: 4px solid #ffc107;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 15px 0 20px 0;
+}
+
+.admission-req-container .s-honor-notice p {
+  margin: 4px 0;
+  font-size: 13px;
+  color: #856404;
+}
+
+.admission-req-container .s-honor-notice p:first-child {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+/* Upload Form Styles - Scoped to admission-req-container */
+.admission-req-container .upload-form {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.admission-req-container .upload-row {
+  display: flex;
+  gap: 30px;
+  margin-bottom: 30px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.admission-req-container .upload-group {
+  flex: 1;
+  min-width: 250px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.admission-req-container .upload-group label:first-child {
+  font-size: 14px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 10px;
+  text-align: left;
+  width: 100%;
+  padding: 3px;
+}
+
+.admission-req-container .file-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 350px;
+  height: 180px;
+  border: 2px dashed #e0e0e0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  background: #fafafa;
+}
+
+.admission-req-container .file-wrapper:hover {
+  border-color: #333;
+  background: #f0f5ff;
+}
+
+.admission-req-container .upload-text {
+  position: absolute;
+  font-size: 13px;
+  color: #999;
+  text-align: center;
+  margin-bottom: 10px;
+  top: 120px;
+  padding: 0 10px;
+  font-weight: lighter;
+}
+
+.admission-req-container .file-wrapper .file-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.admission-req-container .file-wrapper .cont-icon {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #e0e0e0;
+  border-radius: 10px;
+  width: 50px;
+  height: 50px;
+  transition: all 0.3s ease;
+  margin-bottom: 20px;
+}
+
+.admission-req-container .file-wrapper:hover .cont-icon {
+  background: #333;
+}
+
+.admission-req-container .cont-icon .icon {
+  color: white;
+  font-size: 28px;
+}
+
+/* Notes Section - Scoped */
+.admission-req-container .choices-note {
+  display: flex;
+  flex-direction: column;
+  margin-top: 20px;
+  background: rgba(26, 61, 92, 0.05); /* #1A3D5C with 5% opacity */
+  border: 1px solid rgba(6, 98, 135, 0.3); /* #066287 with 30% opacity */
+  padding: 20px;
+  border-radius: 15px;
+  width: 100%;
+  gap: 10px;
+}
+
+.admission-req-container .note-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admission-req-container .choices-note .exclamation-icon {
+  color: #066287; /* Changed from hsl to #066287 */
+  font-size: 20px;
+  opacity: 0.8;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.admission-req-container .choices-note .note {
+  font-size: 14px;
+  color: #1A3D5C; /* Changed from hsl to #1A3D5C */
+  margin: 0;
+  padding: 0;
+  font-weight: bold;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.admission-req-container .choices-note .notice-text {
+  font-size: 13px;
+  color: #066287; /* Changed from hsl to #066287 */
+  text-align: left;
+  margin: 0;
+  padding-left: 30px;
+  position: relative;
+  font-weight: lighter;
+}
+
+.admission-req-container .choices-note .notice-text::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: #1A3D5C; /* Changed from hsl to #1A3D5C */
+  opacity: 0.7;
+}
+
+/* Buttons Section - Scoped */
+.admission-req-container .choices2 {
+  display: flex;
+  gap: 15px;
+  margin-top: 30px;
+  justify-content: flex-end;
+}
+
+.admission-req-container .btn5 {
+  background: white;
+  padding: 12px 20px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  min-width: 120px;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.admission-req-container .btn5:hover {
+  border-color: #333;
+  box-shadow: 0 2px 4px rgb(0, 0, 0, 0.3);
+}
+
+.admission-req-container .btn6 {
+  background: #1A3D5C;
+  padding: 12px 20px;
+  border: none;
+  color: white;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  min-width: 180px;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.admission-req-container .btn6:hover {
+  background: #066287;
+  box-shadow: 0 2px 4px rgb(0, 0, 0, 0.3);
+}
+
+.admission-req-container .btn6:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Responsive Styles for AdmissionReq */
+@media (max-width: 860px) {
+  .admission-req-container .header2 {
+    padding: 22px;
+    bottom: 50px;
+  }
+  
+  .admission-req-container .upload-row {
+    flex-direction: column;
+    gap: 20px;
+    align-items: center;
+  }
+  
+  .admission-req-container .upload-group {
+    width: 100%;
+    align-items: center;
+  }
+  
+  .admission-req-container .file-wrapper {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .admission-req-container .header2 {
+    padding: 20px;
+    bottom: 40px;
+  }
+  
+  .admission-req-container .upload-row {
+    flex-direction: column;
+    gap: 20px;
+    align-items: center;
+  }
+  
+  .admission-req-container .upload-group {
+    width: 100%;
+    align-items: center;
+  }
+  
+  .admission-req-container .choices2 {
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .admission-req-container .btn5,
+  .admission-req-container .btn6 {
+    width: 100%;
+    min-width: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .admission-req-container .header2 {
+    margin-top: 40px;
+    padding: 20px;
+    bottom: 30px;
+  }
+  
+  .admission-req-container .upload-group label:first-child {
+    font-size: 12px;
+  }
+  
+  .admission-req-container .upload-text {
+    font-size: 11px;
+    top: 100px;
+  }
+  
+  .admission-req-container .file-wrapper {
+    height: 150px;
+  }
+  
+  .admission-req-container .file-wrapper .cont-icon {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .admission-req-container .cont-icon .icon {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 350px) {
+  .admission-req-container .upload-text {
+    display: none;
+  }
+  
+  .admission-req-container .file-wrapper {
+    height: 90px;
+    overflow: hidden;
+    width: 220px;
+    right: 20px;
+  }
+  
+  .admission-req-container .file-input {
+    height: 80px;
+  }
+  
+  .admission-req-container .file-wrapper .cont-icon {
+    width: 30px !important;
+    height: 30px !important;
+    margin-top: 20px;
+  }
+  
+  .admission-req-container .choices2 {
+    flex-direction: column;
+  }
+}

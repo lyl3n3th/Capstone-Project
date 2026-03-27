@@ -1,0 +1,424 @@
+/* ===== ADMISSION STEP 2 - PERSONAL INFORMATION ===== */
+/* This file contains ALL styles for AdmissionStep2.tsx */
+
+/* Layout */
+.mcontainer1 {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 0 20px;
+  position: absolute;
+  margin-top: 10%;
+}
+
+.header1 {
+  position: relative;
+  background: white;
+  width: 100%;
+  max-width: 1020px;
+  padding: 30px;
+  border-radius: 15px;
+  box-shadow: 0 1px 2px rgb(0, 0, 0, 0.2);
+  border: 1px solid #e0e0e0;
+  height: auto; /* Changed from fixed height */
+  bottom: 70px;
+  text-align: center;
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 20px; /* Add some bottom margin */
+}
+
+.header1 p {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  font-size: 12px;
+  color: #333;
+  opacity: 0.7;
+  text-align: center;
+}
+
+.syb {
+  text-align: center;
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.syb p {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #666;
+  opacity: 0.7;
+}
+
+/* Form Styles */
+.pinfo {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.form-row {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 15px;
+}
+
+.form-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group label {
+  font-size: 14px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 8px;
+  text-align: left;
+  margin-top: 15px;
+}
+
+.form-group input {
+  padding: 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.form-group input:focus {
+  border-color: #333;
+  outline: none;
+  box-shadow: 0 2px 4px rgb(0, 0, 0, 0.3);
+}
+
+.form-group .address-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 72px;
+  padding: 10px 16px;
+  line-height: 1.2;
+}
+
+.address-input::placeholder {
+  color: #666;
+  line-height: 1.2;
+}
+
+/* Honor & Scholarship Row */
+.honor-scholarship-row {
+  display: flex;
+  gap: 30px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.honor-group {
+  flex: 1;
+  min-width: 250px;
+}
+
+.scholarship-group {
+  flex: 1;
+  min-width: 280px;
+}
+
+.scholarship-options {
+  display: flex;
+  gap: 20px;
+  margin: 1px 0;
+  flex-wrap: wrap;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+}
+
+.radio-label input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.scholarship-note {
+  display: block;
+  font-size: 11px;
+  color: #066287;
+  margin-top: 1px;
+  font-style: italic;
+}
+
+/* Dropdown Styles (specific to Step 2) */
+.dropdown {
+  position: relative;
+  width: 100%;
+  max-width: 450px;
+  margin-top: 3px;
+  flex: 1;
+}
+
+.dropdown-row .dropdown {
+  display: flex;
+  gap: 10px;
+  flex-direction: column;
+}
+
+.dropdown * {
+  box-sizing: border-box;
+}
+
+.dropdown label {
+  display: block;
+  width: 100%;
+  font-size: 14px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 8px;
+  text-align: left;
+  margin-top: 15px;
+}
+
+.select {
+  background: white;
+  color: #666;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.5em;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+
+.cart {
+  border-top: 0.3em solid rgb(8, 8, 8);
+  border-left: 0.3em solid transparent;
+  border-right: 0.3em solid transparent;
+  width: 0;
+  height: 0;
+  opacity: 0.7;
+}
+
+.cart-rotate {
+  transform: rotate(180deg);
+}
+
+.selected {
+  font-size: 14px;
+  font-weight: normal;
+}
+
+.menu {
+  position: absolute;
+  width: 100%;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.5em;
+  margin-top: 0.2em;
+  padding: 0%;
+  list-style-type: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  display: none;
+  z-index: 999;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.menu li {
+  list-style: none;
+  padding: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: normal;
+}
+
+.menu li:hover {
+  background: #f0f0f0;
+  border-radius: 0.5em;
+}
+
+.menu.show {
+  display: block;
+  opacity: 1;
+}
+
+.select-clicked {
+  border-color: #333;
+  box-shadow: 0 2px 4px rgb(0, 0, 0, 0.3);
+}
+
+/* Honor Dropdown Specific */
+.menu-honor {
+  position: absolute;
+  width: 100%;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.5em;
+  margin-top: -10px;
+  padding: 0%;
+  list-style-type: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  display: none;
+  z-index: 999;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.menu-honor li {
+  list-style: none;
+  padding: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: normal;
+}
+
+.menu-honor li:hover {
+  background: #f0f0f0;
+  border-radius: 0.5em;
+}
+
+.menu-honor.show {
+  display: block;
+  opacity: 1;
+}
+
+/* Button Styles */
+.btn3 {
+  background: white;
+  padding: 12px 20px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.btn3:hover {
+  border-color: #333;
+  box-shadow: 0 2px 4px rgb(0, 0, 0, 0.3);
+}
+
+.btn4 {
+  background: #1A3D5C;
+  padding: 12px 20px;
+  border: none;
+  color: white;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.btn4:hover {
+  background: #066287;
+  box-shadow: 0 2px 4px rgb(0, 0, 0, 0.3);
+}
+
+.choices3 {
+  margin-top: 20px; /* Reduced from 30px */
+  margin-bottom: 50px;
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 1024px) {
+  .header1 {
+    height: auto;
+    padding: 50px;
+  }
+
+  .pinfo .form-row {
+    gap: 1px;
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .dropdown {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .mcontainer1 {
+    margin-top: 12%;
+    padding: 0 10px;
+  }
+
+  .header1 {
+    font-size: 20px;
+    padding: 50px;
+    height: auto;
+  }
+
+  .header1 p {
+    font-size: 11px;
+  }
+
+  .form-group label {
+    font-size: 13px;
+  }
+
+  .form-group input,
+  .select,
+  .btn3,
+  .btn4 {
+    font-size: 14px;
+    padding: 10px;
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .dropdown {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .header1 {
+    font-size: 18px;
+    padding: 50px;
+  }
+
+  .container1 {
+    top: 15px;
+  }
+
+  .mcontainer1 {
+    margin-top: 20%;
+  }
+
+  .form-group label {
+    font-size: 12px;
+  }
+
+  .form-group input,
+  .select,
+  .btn3,
+  .btn4 {
+    font-size: 13px;
+    padding: 8px;
+  }
+}

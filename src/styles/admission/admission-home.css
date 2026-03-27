@@ -1,0 +1,312 @@
+/* AdmissionHome.css*/
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+
+
+.hero {
+  position: relative;
+  height: 100vh;
+  width: 100%;
+  min-height: 600px;               
+  background-color: blue;
+  background-image: url("../../assets/images/bg2.png");
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("../../assets/images/bg.jpg");
+  background-size: cover;
+  background-position: center;
+  opacity: 0.5;
+  z-index: 1;
+}
+
+.hero > * {
+  position: relative;
+  z-index: 2;
+}
+
+
+/* Fixed logo - positioned relative to viewport */
+.logo {
+  position: fixed;
+  top: 50px; /* Adjusted to account for browser chrome */
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(90px, 9vw, 120px); /* Slightly smaller for better fit */
+  height: auto;
+  z-index: 100;
+  pointer-events: none;
+}
+
+
+/* Content container - properly centered with padding for logo */
+.content {
+  width: 100%;
+  max-width: 1000px; /* Slightly narrower for better fit */
+  padding: 20px 20px 20px; /* Reduced top padding since logo is smaller */
+  text-align: center;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin: 0 auto;
+  height: 100%;
+}
+
+.content h1 {
+  font-size: clamp(32px, 5vw, 48px); /* Slightly smaller */
+  font-weight: 900;
+  line-height: 1.05;
+  margin-top: 20px; /* Small gap after logo */
+}
+
+.content p {
+  font-size: clamp(17px, 2.5vw, 22px);
+  font-weight: bold;
+  color: yellow;
+  margin: 0;
+  letter-spacing: 0.6px;
+}
+
+#p2 {
+  color: white;
+  font-size: clamp(22px, 4vw, 34px);
+  font-weight: bold;
+   margin: 5px 0 30px; /* Reduced margin */
+}
+
+.content a {
+  background-color: #6AE18C;
+  color: white;
+  text-decoration: none;
+  font-size: clamp(18px, 2.8vw, 24px);
+  font-weight: bold;
+  padding: 14px 60px; /* Reduced padding */
+  border-radius: 10px;
+  display: inline-block;
+  letter-spacing: 1px;
+  transition: transform 0.2s ease; /* Smooth hover effect */
+}
+
+.content a:hover {
+  transform: scale(1.02); /* Slight grow on hover */
+  background-color: #5bc97a; /* Slightly darker on hover */
+}
+
+
+.form-and-track-wrapper {
+  position: fixed;
+  bottom: 30px; /* Adjusted for better visibility */          
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 90%;
+  max-width: 360px; /* Slightly smaller */
+}
+
+.input-field {
+  flex: 1;
+  min-width: 220px;
+  max-width: 320px;
+  padding: 12px 16px; /* Reduced padding */
+  font-size: 16px;
+  text-align: center;
+  font-style: italic;
+  border: none;
+  border-radius: 10px;
+  outline: none;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1); /* Add subtle shadow */
+}
+
+.track-container {
+  flex-shrink: 0;
+}
+
+.track-container a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;                        
+  width: 70px; /* Slightly smaller */                      
+  min-height: 50px;
+  background-color: #1064CB;
+  border-radius: 10px;
+  color: white;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.track-container a:hover {
+  background-color: #0a4a9e; /* Darker on hover */
+}
+
+.disabled-branch {
+  opacity: 0.4;
+  pointer-events: none; 
+  cursor: not-allowed;
+}
+
+@media (max-width: 1440px) {
+  .logo {
+  position: fixed;
+  top: 50px;                      
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(100px, 12vw, 120px);
+  height: auto;
+  z-index: 5;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1440px) and (max-height: 800px) {
+  .logo {
+    top: 15px;
+    width: 100px;
+  }
+  
+  .content {
+    padding-top: 70px;
+  }
+  
+  .content h1 {
+    font-size: 42px;
+    margin-top: 10px;
+  }
+  
+  #p2 {
+    margin: 5px 0 25px;
+  }
+  
+  .content a {
+    padding: 12px 50px;
+  }
+  
+  .form-and-track-wrapper {
+    bottom: 25px;
+  }
+
+  .track-container .track-cont{
+    width: 120px;
+    font-size: 12px;
+  }
+
+}
+
+
+@media (max-width: 720px) {
+  .track-container a {
+    width: 84px;
+    min-height: 64px;
+    font-size: 12.5px;
+    padding: 6px 4px;
+  }
+
+  .track-container a svg {
+    font-size: 1.3rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .track-container a {
+    width: 78px;
+    min-height: 60px;
+    font-size: 11.5px;             
+    gap: 3px;
+    padding: 6px 4px;
+  }
+
+  .track-container span {
+    font-size: 11px;
+  }
+
+  .track-container a svg {
+    font-size: 1.2rem;
+  }
+
+}
+
+.disabled-branch {
+  opacity: 0.4;
+  pointer-events: none; 
+  cursor: not-allowed;
+}
+
+
+
+@media (max-width: 720px) {
+  .logo {
+    top: 20px;
+    width: clamp(100px, 12vw, 120px);
+  }
+
+  .content {
+    padding: 120px 20px 220px;     
+  }
+
+  .content h1 { font-size: clamp(32px, 8vw, 44px); }
+  .content a  { padding: 16px 60px; font-size: 20px; }
+  #p2         { margin: 8px 0 40px; font-size: clamp(20px, 5.5vw, 28px); }
+
+  .form-and-track-wrapper {
+    bottom: 30px;
+    width: 94%;
+    flex-direction: row;
+    gap: 10px;
+  }
+
+  .input-field {
+    font-size: 15px;
+    padding: 14px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .logo {
+    top: 16px;
+    width: clamp(100px, 12vw, 120px);
+  }
+
+  .content {
+    padding-top: 110px;
+    padding-bottom: 200px;
+  }
+
+  .content a { padding: 14px 50px; font-size: 18px; }
+
+  .form-and-track-wrapper {
+    bottom: 24px;
+    flex-wrap: nowrap;
+  }
+
+  .input-field {
+    min-width: 180px;
+    font-size: 14.5px;
+  }
+
+  .track-container a {
+    width: 50px;
+    height: 50px;
+    font-size: 1.4rem;
+  }
+}

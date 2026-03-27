@@ -1,0 +1,67 @@
+/* ===== BRANCH CARDS ===== */
+.choices {
+  display: flex;
+  margin-top: 30px;
+  top: 10px;
+  position: relative;
+  align-items: center;
+  background: white;
+  border: 1px solid #e0e0e0;
+  padding: 16px;
+  border-radius: 15px;
+  width: 100%;
+  height: 90px;
+  box-shadow: 0 1px 2px rgb(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.choices .circle1 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  color: white;
+  font-size: 20px;
+  font-weight: 500;
+  border-radius: 50%;
+  background: #e0e0e0;
+  margin-right: 15px;
+  flex-shrink: 0;
+}
+
+.choices .location-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.choices .location {
+  font-size: 18px;
+  font-weight: bold;
+  color: #333;
+  margin: 0;
+}
+
+.choices .campus {
+  font-size: 12px;
+  color: #666;
+  margin: 0;
+  left: 18px;
+}
+
+.choices:hover {
+  border-color: #066287;
+  box-shadow: 0 2px 4px rgb(0, 0, 0, 0.3);
+}
+
+/* selected choice styles */
+.choices.selected {
+  border-color: #066287;
+  box-shadow: 0 4px 8px rgba(0, 24, 252, 0.12);
+}
+
+.choices.selected .circle1 {
+  background: #066287;
+  color: white;
+  transition: background 200ms ease;
+}

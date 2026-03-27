@@ -1,0 +1,223 @@
+/* ===== ADMISSION STEP 1 - PAGE LAYOUT ===== */
+.container {
+  height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: white;
+  padding-top: 50px;
+}
+
+.container1 {
+  max-width: 800px;
+  width: 100%;
+}
+
+.ttle {
+  max-width: 700px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.header {
+  text-align: center;
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.header p {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #333;
+  opacity: 0.7;
+  text-align: center;
+}
+
+.mcontainer {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 0 20px;
+  position: absolute;
+  margin-top: 10%;
+}
+
+.header {
+  position: relative;
+  background: white;
+  width: 100%;
+  max-width: 800px;
+  padding: 40px 36px 60px;
+  border-radius: 15px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e0e0e0;
+  height: auto;
+  bottom: 60px;
+}
+
+@media (max-width: 1440px) {
+
+  .container1 {
+    position: absolute;
+    top: 20px;
+  }
+
+  .steps {
+    max-width: 100%;
+  }
+  .content-wrapper {
+    padding: 0 30px;
+  }
+  .header h1 {
+    font-size: 26px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .container {
+    padding-top: 95px;
+  }
+  .progress-wrapper {
+    padding: 14px 18px;
+  }
+  .steps .circle {
+    width: 52px;
+    height: 52px;
+    font-size: 20px;
+  }
+  .steps .progress-bar {
+    top: 26px;
+  }
+  .steps .step p {
+    font-size: 11px;
+  }
+  .choices {
+    padding: 16px;
+  }
+  .choices .circle1 {
+    width: 58px;
+    height: 58px;
+    font-size: 22px;
+  }
+  .choices .location {
+    font-size: 17px;
+  }
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 768px) {
+
+  .container1 {
+    position: absolute;
+    top: 20px;
+  }
+
+  .container {
+    padding-top: 90px;
+  }
+
+  .progress-wrapper {
+    padding: 12px 16px;
+  }
+
+  .steps .circle {
+    width: 44px;
+    height: 44px;
+    font-size: 17px;
+  }
+
+  .steps .progress-bar {
+    top: 22px;
+  }
+
+  .steps .step p {
+    font-size: 10px;
+  }
+
+  .header h1 {
+    font-size: 22px;
+  }
+
+  .choices {
+    padding: 14px;
+  }
+
+  .choices .circle1 {
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+  }
+
+  .choices .location {
+    font-size: 16px;
+  }
+
+  .choices2 {
+    gap: 12px;
+  }
+
+  .btn1, .btn2 {
+    width: 100%;
+    max-width: 380px;
+  }
+}
+
+@media (max-width: 480px) {
+
+  .header {
+    margin-top: 80px;
+  }
+
+  .container1 {
+    position: absolute;
+    top: 50px;
+  }
+  .container {
+    padding-top: 80px;
+  }
+
+  .progress-wrapper {
+    padding: 20px 12px;
+  }
+
+  .steps .circle {
+    width: 40px;
+    height: 40px;
+    font-size: 15px;
+  }
+
+  .steps .progress-bar {
+  
+    top: 20px;
+  }
+
+  .steps .step p {
+    font-size: 9px;
+    margin-top: 6px;
+  }
+
+  .header h1 {
+    font-size: 20px;
+  }
+
+  .choices .circle1 {
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+  }
+
+  .choices .location {
+    font-size: 15px;
+  }
+
+  .choices .campus {
+    font-size: 12px;
+  }
+}

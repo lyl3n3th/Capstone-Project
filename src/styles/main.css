@@ -1,0 +1,35 @@
+/* ===== MAIN CSS ===== */
+@import "./components/progress.css";
+@import "./components/dropdown.css";
+@import "./components/buttons.css";
+@import "./components/cards.css";
+@import "./admission/admission-step1.css";
+@import "./admission/admission-step2.css";
+@import "./admission/admission-step3.css";
+@import "./admission/admission.step4.css";
+@import "./admission/admission-step5.css";
+
+
+
+/* Toast Animation */
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}

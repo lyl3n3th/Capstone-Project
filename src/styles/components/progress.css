@@ -1,0 +1,95 @@
+/* ===== PROGRESS BAR ===== */
+.container1 .steps {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.steps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  padding: 0 20px;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 2;
+}
+
+.steps .step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 2;
+}
+
+.steps .step p {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #333;
+  text-align: center;
+}
+
+.steps .circle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+  width: 60px;
+  color: white;
+  font-size: 20px;
+  font-weight: 500;
+  border-radius: 50%;
+  background: #1A3D5C;
+  border: 4px solid #e0e0e0;
+}
+
+.circle.inactive {
+  background: #e0e0e0;
+  color: #666;
+}
+
+.circle.active {
+  background: #1A3D5C;
+}
+
+.circle.completed {
+  background: #1A3D5C;
+}
+
+.steps .progress-bar {
+  position: absolute;
+  height: 4px;
+  width: calc(100% - 100px);
+  top: 35px;
+  left: 35px;
+  background: #e0e0e0;
+  z-index: 1;
+}
+
+.progress-bar .indicator {
+  position: absolute;
+  height: 100%;
+  background: #1A3D5C;
+  transition: width 300ms ease;
+}
+
+.progress-bar {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 100%;
+  height: 4px;
+  background: #e0e0e0;
+  z-index: 1;
+}
