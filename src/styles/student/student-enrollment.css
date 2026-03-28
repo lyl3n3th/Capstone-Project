@@ -1,0 +1,390 @@
+/* ===== ENROLLMENT PAGE STYLES ===== */
+
+/* Enrollment Row (Two Cards Side by Side) */
+.s-enrollment-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.s-enrollment-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.s-enrollment-card h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1A3D5C;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+/* Eligibility Card */
+.s-eligibility-item {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.s-eligibility-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #666;
+}
+
+.s-eligibility-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+/* Status Colors */
+.s-status-completed {
+  color: #28a745 !important;
+}
+
+.s-status-pending {
+  color: #856404 !important;
+}
+
+/* Student Info Card */
+.s-student-info-item {
+  display: flex;
+  margin-bottom: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.s-info-label {
+  width: 130px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #666;
+}
+
+.s-info-value {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+/* Note Card */
+.s-note-card {
+  background: #fff3cd;
+  border-left: 4px solid #ffc107;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.s-warning-note {
+  background: #f8d7da;
+  border-left-color: #dc3545;
+}
+
+.s-note-icon {
+  color: #856404;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.s-warning-note .s-note-icon {
+  color: #721c24;
+}
+
+.s-note-content p {
+  font-size: 13px;
+  color: #856404;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.s-warning-note .s-note-content p {
+  color: #721c24;
+}
+
+.s-notice-text {
+  margin-top: 8px !important;
+  font-weight: 600;
+}
+
+/* Requirements Section */
+.s-requirements-section {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.s-requirements-section h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1A3D5C;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.s-requirements-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.s-requirement-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.s-requirement-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  min-width: 180px;
+}
+
+.s-requirement-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.s-file-name {
+  font-size: 12px;
+  color: #28a745;
+  background: #f0f9f0;
+  padding: 4px 8px;
+  border-radius: 12px;
+}
+
+.s-upload-btn, .s-download-btn-small {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.s-upload-btn {
+  background: #066287;
+  color: white;
+}
+
+.s-upload-btn:hover {
+  background: #1A3D5C;
+}
+
+.s-upload-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.s-download-btn-small {
+  background: #28a745;
+  color: white;
+}
+
+.s-download-btn-small:hover {
+  background: #218838;
+}
+
+/* Subjects Section */
+.s-subjects-section {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.s-subjects-section h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1A3D5C;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+/* Enrollment Table */
+.s-table-wrapper {
+  overflow-x: auto;
+}
+
+.s-enrollment-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.s-enrollment-table th {
+  text-align: left;
+  padding: 12px 16px;
+  background: #f8f9fa;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.s-enrollment-table td {
+  padding: 10px 16px;
+  font-size: 13px;
+  color: #666;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.s-subject-code {
+  font-weight: 600;
+  color: #066287;
+}
+
+.s-subject-semester {
+  color: #666;
+}
+
+/* Status Section */
+.s-status-section {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.s-status-section h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1A3D5C;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.s-status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.s-status-approved {
+  background: #d4edda;
+  color: #28a745;
+}
+
+.s-status-pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+/* Action Buttons */
+.s-enrollment-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.s-enroll-btn {
+  background: #066287;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.s-enroll-btn:hover {
+  background: #1A3D5C;
+  transform: translateY(-2px);
+}
+
+.s-download-confirmation-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #28a745;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.s-download-confirmation-btn:hover {
+  background: #218838;
+  transform: translateY(-2px);
+}
+
+.s-download-confirmation-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Spinner Animation */
+.s-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .s-enrollment-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .s-requirement-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .s-requirement-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  
+  .s-enrollment-actions {
+    flex-direction: column;
+  }
+  
+  .s-enroll-btn, .s-download-confirmation-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

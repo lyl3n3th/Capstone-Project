@@ -1,0 +1,398 @@
+/* Student Profile Styles */
+
+
+.s-profile-content {
+  padding: 20px;
+  max-width: 1500px;
+  margin: 0;
+  margin-left: 180px; 
+  width: calc(100% - 280px);
+}
+
+
+.s-profile-header-card {
+  background: linear-gradient(135deg, #1A3D5C, #066287);
+  border-radius: 16px;
+  padding: 30px;
+  margin-bottom: 30px;
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  color: white;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+}
+
+.s-profile-avatar-large {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: white;
+  color: #1A3D5C;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  font-weight: 600;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+  border: 4px solid rgba(255,255,255,0.3);
+  flex-shrink: 0;
+}
+
+.s-profile-header-info h1 {
+  font-size: 32px;
+  font-weight: 700;
+  margin: 0 0 10px 0;
+}
+
+.s-profile-badges {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.s-badge {
+  background: rgba(255,255,255,0.2);
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  backdrop-filter: blur(5px);
+}
+
+.s-badge-success {
+  background: #28a745;
+  color: white;
+}
+
+.s-profile-track {
+  font-size: 16px;
+  margin: 5px 0;
+  opacity: 0.9;
+}
+
+.s-profile-grade {
+  font-size: 14px;
+  margin: 0;
+  opacity: 0.8;
+}
+
+/* Profile Sections */
+.s-profile-section {
+  background: white;
+  border-radius: 12px;
+  padding: 25px;
+  margin-bottom: 25px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.s-section-title-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 20px;
+  font-weight: 600;
+  color: #1A3D5C;
+  margin: 0 0 20px 0;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.s-section-title-with-icon svg {
+  color: #066287;
+}
+
+/* Profile Grid - Desktop: 2 columns */
+.s-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.s-profile-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.s-profile-field.s-full-width {
+  grid-column: span 2;
+}
+
+.s-profile-field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.s-profile-field span {
+  font-size: 16px;
+  color: #333;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+/* Profile Page Additional Styles */
+.s-profile-name-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  position: relative;
+}
+
+.s-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #066287;
+  color: white;
+  border: none;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.3s;
+  white-space: nowrap;
+}
+
+.s-edit-btn:hover {
+  background: #1A3D5C;
+}
+
+.s-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.s-save-btn, .s-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.s-save-btn {
+  background: #28a745;
+  color: white;
+}
+
+.s-save-btn:hover {
+  background: #218838;
+}
+
+.s-save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.s-cancel-btn {
+  background: #dc3545;
+  color: white;
+}
+
+.s-cancel-btn:hover {
+  background: #c82333;
+}
+
+.s-profile-field input,
+.s-profile-field select,
+.s-profile-field textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.s-profile-field textarea {
+  resize: vertical;
+}
+
+.s-profile-field input:focus,
+.s-profile-field select:focus,
+.s-profile-field textarea:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 2px rgba(6, 98, 135, 0.1);
+}
+
+.s-loading-container,
+.s-error-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-size: 18px;
+  color: #666;
+}
+
+.s-error-container button {
+  margin-left: 16px;
+  padding: 8px 16px;
+  background: #066287;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* ===== RESPONSIVE BREAKPOINTS ===== */
+@media (max-width: 1024px) {
+  .s-profile-content {
+    margin-left: 0;
+    width: 100%;
+    padding: 20px;
+  }
+  
+  .s-profile-header-card {
+    padding: 25px;
+    gap: 20px;
+  }
+  
+  .s-profile-avatar-large {
+    width: 100px;
+    height: 100px;
+    font-size: 40px;
+  }
+  
+  .s-profile-header-info h1 {
+    font-size: 28px;
+  }
+}
+
+/* Tablet Portrait */
+@media (max-width: 768px) {
+  .s-mobile-menu-btn {
+    display: flex !important;
+  }
+  
+  .s-profile-content {
+    padding: 20px;
+    margin-top: 70px;
+  }
+  
+  .s-profile-header-card {
+    flex-direction: column;
+    text-align: center;
+    padding: 25px;
+  }
+  
+  .s-profile-header-info h1 {
+    font-size: 24px;
+  }
+  
+  .s-profile-badges {
+    justify-content: center;
+  }
+  
+  .s-profile-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Mobile Landscape */
+@media (max-width: 640px) {
+  .s-profile-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .s-profile-field.s-full-width {
+    grid-column: span 1;
+  }
+  
+  .s-profile-section {
+    padding: 20px;
+  }
+  
+  .s-section-title-with-icon {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  .s-profile-content {
+    padding: 15px;
+    margin-top: 20px;
+  }
+  
+  .s-profile-header-card {
+    padding: 20px;
+  }
+
+ 
+  .s-profile-name-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    width: 100%;
+     margin-bottom: 10px;
+  }
+  
+  .s-profile-name-row h1 {
+    font-size: 20px;
+    margin: 0;
+   
+  }
+
+  .s-edit-btn {
+    position: relative;
+    top: auto;
+    right: auto;
+    display: inline-flex;
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+  
+  .s-profile-avatar-large {
+    width: 80px;
+    height: 80px;
+    font-size: 32px;
+  }
+  
+  .s-profile-header-info h1 {
+    font-size: 20px;
+    margin: 0;
+  }
+  
+  .s-profile-track {
+    font-size: 14px;
+    text-align: center;
+  }
+  
+  .s-profile-grade {
+    font-size: 12px;
+    text-align: center;
+  }
+  
+  .s-profile-badges {
+    justify-content: center;
+  }
+  
+  .s-section-title-with-icon {
+    font-size: 16px;
+  }
+  
+  .s-profile-field label {
+    font-size: 11px;
+  }
+  
+  .s-profile-field span {
+    font-size: 14px;
+  }
+}

@@ -10,11 +10,43 @@ import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
 import { useStudent } from "../../contexts/StudentContext";
 import "../../styles/main.css";
+import { ToastContainer } from "../../components/common/Toast";
+
+// Custom hook for toast management
+const useToast = () => {
+  const [toasts, setToasts] = useState<
+    Array<{
+      id: string;
+      message: string;
+      type: "success" | "error" | "info" | "warning";
+    }>
+  >([]);
+
+  const addToast = (
+    message: string,
+    type: "success" | "error" | "info" | "warning",
+  ) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts((prev) => [...prev, { id, message, type }]);
+
+    // Auto remove after 3 seconds
+    setTimeout(() => {
+      removeToast(id);
+    }, 3000);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  };
+
+  return { toasts, addToast, removeToast };
+};
 
 function StudentHome() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const { student, isLoading } = useStudent();
+  const { toasts, addToast, removeToast } = useToast();
 
   const handleMenuClick = () => {
     setSidebarOpen(!sidebarOpen);
@@ -57,9 +89,10 @@ function StudentHome() {
         }));
 
         console.log(`File uploaded for activity ${activityId}:`, file.name);
+        addToast(`${file.name} uploaded successfully!`, "success");
       } catch (error) {
         console.error("Upload failed:", error);
-        alert("Upload failed. Please try again.");
+        addToast("Upload failed. Please try again.", "error");
       } finally {
         setUploadingId(null);
       }
@@ -72,13 +105,16 @@ function StudentHome() {
     const hasUploads = Object.keys(uploadedFiles).length > 0;
 
     if (!hasUploads) {
-      alert("Please upload at least one document before submitting.");
+      addToast(
+        "Please upload at least one document before submitting.",
+        "warning",
+      );
       return;
     }
 
     if (window.confirm("Are you sure you want to submit these documents?")) {
       console.log("Submitting documents:", uploadedFiles);
-      alert("Documents submitted successfully!");
+      addToast("Documents submitted successfully!", "success");
     }
   };
 
@@ -130,6 +166,7 @@ function StudentHome() {
 
   const handleLogout = () => {
     console.log("Logging out...");
+    addToast("Logging out...", "info");
   };
 
   // Get current date
@@ -199,6 +236,9 @@ function StudentHome() {
 
   return (
     <div className="s-portal s-home">
+      {/* Toast Container */}
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+
       <div ref={sidebarRef}>
         <Sidebar
           isOpen={sidebarOpen}

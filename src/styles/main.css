@@ -11,7 +11,10 @@
 @import "./admission/admission.step4.css";
 @import "./admission/admission-step5.css";
 @import "./student/student-home.css";
-
+@import "./student/student-profile.css";
+@import "./student/student-grades.css";
+@import "./student/student-subjects.css";
+@import "./student/student-enrollment.css";
 
 
 /* Toast Animation */

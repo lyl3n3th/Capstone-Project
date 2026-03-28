@@ -31,6 +31,7 @@ function AdmissionStep3() {
 
   // State for honor selection from draft
   const [studentHonor, setStudentHonor] = useState<string>("No Honor");
+  const [isCollegeProgram, setIsCollegeProgram] = useState<boolean>(false);
 
   // Add toast notification
   const addToast = (message: string, type: Toast["type"]) => {
@@ -46,6 +47,9 @@ function AdmissionStep3() {
   // Load and verify draft data on component mount
   useEffect(() => {
     const draft = sessionStorage.getItem("enrollmentDraft");
+    const isCollege = program === "College";
+    setIsCollegeProgram(isCollege);
+
     if (draft) {
       try {
         const parsedDraft = JSON.parse(draft);
@@ -56,14 +60,44 @@ function AdmissionStep3() {
           strand: parsedDraft.strand_or_course,
           trackingNumber: parsedDraft.trackingNumber,
           honor: parsedDraft.honor,
+          isCollege: isCollege,
         });
 
-        if (parsedDraft.honor) setStudentHonor(parsedDraft.honor);
+        // Only set honor if it's a College program and honor exists
+        if (
+          isCollege &&
+          parsedDraft.honor &&
+          parsedDraft.honor !== "No Honor"
+        ) {
+          setStudentHonor(parsedDraft.honor);
+        } else {
+          // Reset honor for non-college programs
+          setStudentHonor("No Honor");
+
+          // Also update the draft to clear honor if it exists
+          if (parsedDraft.honor && !isCollege) {
+            const updatedDraft = {
+              ...parsedDraft,
+              honor: "No Honor",
+              apply_scholarship: false,
+            };
+            sessionStorage.setItem(
+              "enrollmentDraft",
+              JSON.stringify(updatedDraft),
+            );
+            console.log("Cleared honor data for non-college program");
+          }
+        }
       } catch (err) {
         console.warn("Failed to parse draft", err);
       }
+    } else {
+      // No draft, ensure honor is reset for non-college
+      if (!isCollege) {
+        setStudentHonor("No Honor");
+      }
     }
-  }, []);
+  }, [program]); // Re-run when program changes
 
   // Base requirements for all students
   const baseRequirements: Record<string, string[]> = {
@@ -99,13 +133,13 @@ function AdmissionStep3() {
     ],
   };
 
-  // Check if student has honor (not "No Honor")
-  const hasHonor = studentHonor !== "No Honor";
+  // Check if student has honor (not "No Honor") AND is college program
+  const hasHonor = isCollegeProgram && studentHonor !== "No Honor";
 
   // Get base requirements
   let currentRequirements = [...(baseRequirements[studentStatus] || [])];
 
-  // Add Honor Certificate requirement if student has honor
+  // Add Honor Certificate requirement ONLY if student has honor AND is college program
   if (hasHonor) {
     currentRequirements.push("Honor Certificate");
   }
@@ -163,6 +197,20 @@ function AdmissionStep3() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Check if required honor certificate is missing
+    if (hasHonor) {
+      const honorInput = document.getElementById(
+        "honorcertificate",
+      ) as HTMLInputElement;
+      if (!honorInput?.files?.[0]) {
+        addToast(
+          "Honor Certificate is required to verify your academic honors.",
+          "warning",
+        );
+        return;
+      }
+    }
+
     const hasFiles = currentRequirements.some((req) => {
       const input = document.getElementById(
         req.replace(/\s+/g, "").toLowerCase(),
@@ -180,6 +228,8 @@ function AdmissionStep3() {
 
     const formData = new FormData();
     formData.append("trackingNumber", trackingNumber);
+    formData.append("program", program);
+    formData.append("hasHonor", String(hasHonor));
 
     currentRequirements.forEach((req) => {
       const input = document.getElementById(
@@ -299,13 +349,29 @@ function AdmissionStep3() {
             <h2>Upload Requirements</h2>
             <p>Upload the necessary documents to complete your application.</p>
             {hasHonor && (
-              <div className="honor-notice">
-                <p>
+              <div
+                className="honor-notice"
+                style={{
+                  background: "#e3f2fd",
+                  borderLeft: "4px solid #066287",
+                  padding: "12px 16px",
+                  borderRadius: "8px",
+                  marginTop: "12px",
+                }}
+              >
+                <p style={{ margin: 0, color: "#066287" }}>
                   <strong>Honor Certificate Required</strong>
                 </p>
-                <p>
+                <p
+                  style={{
+                    margin: "4px 0 0 0",
+                    fontSize: "13px",
+                    color: "#066287",
+                  }}
+                >
                   You indicated: <strong>{studentHonor}</strong>. Please upload
-                  your Honor Certificate as proof.
+                  your Honor Certificate to verify your academic honors and
+                  qualify for tuition discounts.
                 </p>
               </div>
             )}
@@ -401,15 +467,11 @@ function AdmissionStep3() {
               <p className="notice-text">
                 You will need to bring physical copies on your schedule visit
               </p>
-              {hasHonor && (
-                <p
-                  className="notice-text"
-                  style={{ color: "#066287", fontWeight: "500" }}
-                >
-                  Honor Certificate is required to verify your academic honors
-                  and qualify for tuition discounts.
-                </p>
-              )}
+
+              <p className="notice-text">
+                Honor Certificate is required to verify your academic honors and
+                qualify for tuition discounts.
+              </p>
             </div>
 
             <div

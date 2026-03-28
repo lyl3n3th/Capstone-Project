@@ -102,6 +102,30 @@ const mockSubjectsSHS: Subject[] = [
     semester: "1st Semester",
     academicYear: "2025-2026",
   },
+  {
+    id: "7",
+    code: "EAP112",
+    title: "English for Academic and Professional Purposes",
+    schedule: "TTH 3:30-5:00",
+    room: "Room 105",
+    professor: "Prof. Mendoza",
+    days: "TTH",
+    time: "3:30 PM - 5:00 PM",
+    semester: "1st Semester",
+    academicYear: "2025-2026",
+  },
+  {
+    id: "8",
+    code: "PRR1",
+    title: "Practical Research 1",
+    schedule: "TTH 3:30-5:00",
+    room: "Room 105",
+    professor: "Prof. Mendoza",
+    days: "TTH",
+    time: "3:30 PM - 5:00 PM",
+    semester: "1st Semester",
+    academicYear: "2025-2026",
+  },
 ];
 
 const mockSubjectsCollege: Subject[] = [

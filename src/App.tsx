@@ -8,6 +8,10 @@ import AdmissionStep5 from "./pages/admission/AdmissionStep5";
 
 import { StudentProvider } from "./contexts";
 import StudentHome from "./pages/student/StudentHome.tsx";
+import StudentProfile from "./pages/student/StudentProfile.tsx";
+import StudentGrades from "./pages/student/StudentGrades.tsx";
+import StudentSubjects from "./pages/student/StudentSubjects.tsx";
+import StudentEnrollment from "./pages/student/StudentEnrollment.tsx";
 
 function App() {
   return (
@@ -28,6 +32,38 @@ function App() {
           element={
             <StudentProvider>
               <StudentHome />
+            </StudentProvider>
+          }
+        />
+        <Route
+          path="/student/profile"
+          element={
+            <StudentProvider>
+              <StudentProfile />
+            </StudentProvider>
+          }
+        />
+        <Route
+          path="/student/grades"
+          element={
+            <StudentProvider>
+              <StudentGrades />
+            </StudentProvider>
+          }
+        />
+        <Route
+          path="/student/subjects"
+          element={
+            <StudentProvider>
+              <StudentSubjects />
+            </StudentProvider>
+          }
+        />
+        <Route
+          path="/student/enrollment"
+          element={
+            <StudentProvider>
+              <StudentEnrollment />
             </StudentProvider>
           }
         />
