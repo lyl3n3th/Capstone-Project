@@ -5,17 +5,24 @@
 @import "./components/cards.css";
 @import "./components/sidebar.css"; 
 @import "./components/header.css";
+
 @import "./admission/admission-step1.css";
 @import "./admission/admission-step2.css";
 @import "./admission/admission-step3.css";
 @import "./admission/admission.step4.css";
 @import "./admission/admission-step5.css";
+
 @import "./student/student-home.css";
 @import "./student/student-profile.css";
 @import "./student/student-grades.css";
 @import "./student/student-subjects.css";
 @import "./student/student-enrollment.css";
 
+@import "./admin/admin-dashboard.css";
+@import "./admin/admin-sidebar.css";
+@import "./admin/admin-students.css";
+@import "./admin/admin-grades.css";
+@import "./admin/admin-enrolles.css";
 
 /* Toast Animation */
 @keyframes slideIn {

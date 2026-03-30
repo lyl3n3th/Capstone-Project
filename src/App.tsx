@@ -13,7 +13,19 @@ import StudentGrades from "./pages/student/StudentGrades.tsx";
 import StudentSubjects from "./pages/student/StudentSubjects.tsx";
 import StudentEnrollment from "./pages/student/StudentEnrollment.tsx";
 
+import AdminDashboard from "./pages/admin/AdminDashboard.tsx";
+import AdminStudents from "./pages/admin/AdminStudents.tsx";
+import AdminGrades from "./pages/admin/AdminGrades.tsx";
+import AdminEnrollees from "./pages/admin/AdminEnrollees.tsx";
+
 function App() {
+  const appProps = {
+    onLogout: () => {},
+    loggedInUsername: "Liza Mae Guyo",
+    loggedInRole: "Admin" as const,
+    canAccessBackup: true,
+  };
+
   return (
     <BrowserRouter>
       <Routes>
@@ -67,6 +79,20 @@ function App() {
             </StudentProvider>
           }
         />
+        {/* Private admin side */}
+        <Route
+          path="/admin/students"
+          element={<AdminStudents {...appProps} />}
+        />
+        <Route
+          path="/admin/dashboard"
+          element={<AdminDashboard {...appProps} />}
+        />
+        <Route
+          path="/admin/enrollees"
+          element={<AdminEnrollees {...appProps} />}
+        />
+        <Route path="/admin/grades" element={<AdminGrades {...appProps} />} />
       </Routes>
     </BrowserRouter>
   );

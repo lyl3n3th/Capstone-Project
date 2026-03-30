@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import { IoMenu } from "react-icons/io5";
 import { FaCalendarAlt, FaGraduationCap } from "react-icons/fa";
 import { FaFilter, FaDownload } from "react-icons/fa";
 import Sidebar from "../../components/common/Sidebar";
@@ -60,8 +59,6 @@ function StudentSubjects() {
   const sidebarRef = useRef<HTMLDivElement>(null);
   const { toasts, addToast, removeToast } = useToast();
 
-  const isCollege =
-    student?.programType === "BS" || student?.programType === "Short Course";
   const isSHS = student?.programType === "SHS";
 
   const academicYears = ["2024-2025", "2025-2026", "2026-2027"];

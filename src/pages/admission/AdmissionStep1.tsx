@@ -25,7 +25,7 @@ const statusOptions = [
   "Senior High Graduate",
   "Transferee",
   "Foreign Student",
-  "Cross-Registrant",
+  "Returnee",
 ];
 
 const branchRules: Record<string, string[]> = {
@@ -186,13 +186,6 @@ function AdmissionStep1() {
 
       <div className="mcontainer">
         <div className="header">
-          {fromInfo && (
-            <div className="restore-message">
-              ✓ Returning from information page. Your selection has been
-              restored.
-            </div>
-          )}
-
           <StatusDropdown
             label="Student Status"
             options={statusOptions}

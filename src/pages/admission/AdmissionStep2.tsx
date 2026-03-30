@@ -110,18 +110,13 @@ function AdmissionStep2() {
   }
 
   const strandOptions: Record<string, string[]> = {
-    College: [
-      "BSIT - Bachelor of Science in Information Technology",
-      "BSCS - Bachelor of Science in Computer Science",
-      "BSHM - Bachelor of Science in Hospitality Management",
-    ],
+    College: ["BSE - Bachelor of Entrepreneurship"],
     "Senior High School": [
-      "STEM - Science, Technology, Engineering, and Mathematics",
       "ABM - Accountancy, Business, and Management",
       "HUMSS - Humanities and Social Sciences",
       "GAS - General Academic Strand",
       "ICT - Information and Communications Technology",
-      "HE - Home Economics",
+      "IA - Industrial Arts",
     ],
   };
 

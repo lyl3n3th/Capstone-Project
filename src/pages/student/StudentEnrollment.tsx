@@ -1,16 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { IoMenu } from "react-icons/io5";
-import {
-  FaCalendarAlt,
-  FaGraduationCap,
-  FaCheckCircle,
-  FaSpinner,
-} from "react-icons/fa";
-import {
-  MdOutlineDriveFolderUpload,
-  MdDownload,
-  MdFileUpload,
-} from "react-icons/md";
+import { FaCheckCircle, FaSpinner } from "react-icons/fa";
+import { MdDownload, MdFileUpload } from "react-icons/md";
 import { IoDocumentText } from "react-icons/io5";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
@@ -53,13 +43,13 @@ function StudentEnrollment() {
     Record<string, { name: string; url?: string }>
   >({});
   const [uploadingId, setUploadingId] = useState<string | null>(null);
-  const [eligibilityStatus, setEligibilityStatus] = useState({
+  const [eligibilityStatus] = useState({
     grade11Completed: true,
     academicYear: "2025-2026",
     passed: true,
     strand: "TVL - ICT",
   });
-  const [enrollmentStatus, setEnrollmentStatus] = useState({
+  const [enrollmentStatus] = useState({
     status: "Pending",
     enrollmentDate: "-",
     semester: "-",

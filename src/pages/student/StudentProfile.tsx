@@ -1,5 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
-import { IoMenu } from "react-icons/io5";
+import { useState, useRef, useEffect } from "react";
 import {
   FaMapMarkerAlt,
   FaEnvelope,

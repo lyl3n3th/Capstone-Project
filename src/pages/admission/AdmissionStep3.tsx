@@ -469,8 +469,8 @@ function AdmissionStep3() {
               </p>
 
               <p className="notice-text">
-                Honor Certificate is required to verify your academic honors and
-                qualify for tuition discounts.
+                If College Honor Certificate is required to verify your academic
+                honors and qualify for tuition discounts.
               </p>
             </div>
 
