@@ -1,0 +1,412 @@
+/* StaffLogin.css - FULLY SCOPED - Only affects .staff-login-page */
+/* No global * selector - everything is scoped */
+
+/* Scoped reset - only inside staff-login-page */
+.staff-login-page {
+  position: relative;
+  height: 100vh;
+  width: 100%;
+  min-height: 600px;
+  background-color: #1a2a3a;
+  background-image: url("../../assets/images/bg2.png");
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Scoped box-sizing for all children */
+.staff-login-page *,
+.staff-login-page *::before,
+.staff-login-page *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Background overlay */
+.staff-login-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("../../assets/images/bgstf.jpg");
+  background-size: cover;
+  background-position: center;
+  opacity: 0.5;
+  z-index: 1;
+}
+
+.staff-login-page > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* Background overlay div */
+.staff-login-page .background-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.2) 50%, rgba(0, 0, 0, 0.4) 100%);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Login Wrapper - Centered Card */
+.staff-login-page .login-wrapper {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 20px;
+  position: relative;
+  z-index: 3;
+}
+
+/* Login Card */
+.staff-login-page .login-card {
+  background: white;
+  border-radius: 20px;
+  padding: 40px 35px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+/* Login Content */
+.staff-login-page .login-content {
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Header Text */
+.staff-login-page .header-text {
+  text-align: center;
+}
+
+.staff-login-page .login-title {
+  font-size: clamp(28px, 5vw, 36px);
+  font-weight: 900;
+  color: #1A3D5C;
+  margin-bottom: 10px;
+}
+
+.staff-login-page .header-text .pent {
+  font-size: clamp(14px, 2.5vw, 16px);
+  color: #666;
+  margin: 5px 0;
+}
+
+.staff-login-page .selected-branch-display {
+  font-size: 14px;
+  color: #333;
+  margin-top: 15px;
+}
+
+.staff-login-page .selected-branch-display strong {
+  color: #1A3D5C;
+  font-weight: 600;
+}
+
+.staff-login-page .selected-branch-display .placeholder {
+  color: #999;
+  font-weight: 400;
+}
+
+/* Login Form */
+.staff-login-page .login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+/* Dropdown Styles */
+.staff-login-page .dropdownlog {
+  position: relative;
+  width: 100%;
+  text-align: left;
+}
+
+.staff-login-page .dropdownlog .lbel {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+.staff-login-page .selectlog {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.staff-login-page .selectlog:hover {
+  border-color: #1A3D5C;
+}
+
+.staff-login-page .select-clicked {
+  border-color: #1A3D5C;
+  box-shadow: 0 0 0 3px rgba(26, 61, 92, 0.1);
+}
+
+.staff-login-page .selectedlog {
+  font-size: 15px;
+  color: #333;
+}
+
+.staff-login-page .cart {
+  border-top: 6px solid #333;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  width: 0;
+  height: 0;
+  transition: transform 0.2s;
+}
+
+.staff-login-page .cart-rotate {
+  transform: rotate(180deg);
+}
+
+.staff-login-page .menulog {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  margin-top: 5px;
+  list-style: none;
+  max-height: 200px;
+  overflow-y: auto;
+  display: none;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.staff-login-page .menulog.show {
+  display: block;
+}
+
+.staff-login-page .menulog li {
+  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.staff-login-page .menulog li:hover {
+  background: #f5f5f5;
+}
+
+/* Divider */
+.staff-login-page .divider {
+  height: 1px;
+  background: #eee;
+  margin: 5px 0;
+}
+
+/* Form Groups */
+.staff-login-page .form-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+.staff-login-page .form-groups label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #444;
+}
+
+.staff-login-page .form-groups input {
+  width: 100%;
+  padding: 14px 16px;
+  font-size: 15px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  outline: none;
+  transition: all 0.2s ease;
+  background: white;
+}
+
+.staff-login-page .form-groups input:focus {
+  border-color: #1A3D5C;
+  box-shadow: 0 0 0 3px rgba(26, 61, 92, 0.1);
+}
+
+.staff-login-page .form-groups input::placeholder {
+  color: #bbb;
+  font-style: italic;
+}
+
+.staff-login-page .field-hint {
+  font-size: 12px;
+  color: #888;
+  margin-top: 4px;
+}
+
+/* Password Wrapper */
+.staff-login-page .password-wrapper {
+  position: relative;
+}
+
+.staff-login-page .password-wrapper input {
+  padding-right: 45px;
+}
+
+.staff-login-page .toggle-password {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #1A3D5C;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+}
+
+/* Forgot Link */
+.staff-login-page .forgot-link-wrapper {
+  text-align: right;
+  margin-top: 5px;
+}
+
+.staff-login-page .forgot-link {
+  font-size: 13px;
+  color: #066287;
+  text-decoration: none;
+}
+
+.staff-login-page .forgot-link:hover {
+  text-decoration: underline;
+}
+
+/* Submit Button - Using the usual color (not green) */
+.staff-login-page .submit-btn {
+  background: linear-gradient(135deg, #1A3D5C 0%, #066287 100%);
+  color: white;
+  text-decoration: none;
+  font-size: clamp(16px, 2.8vw, 18px);
+  font-weight: bold;
+  padding: 14px 30px;
+  border-radius: 12px;
+  display: inline-block;
+  letter-spacing: 1px;
+  transition: transform 0.2s ease;
+  border: none;
+  cursor: pointer;
+  margin-top: 10px;
+  width: 100%;
+}
+
+.staff-login-page .submit-btn:hover {
+  transform: scale(1.02);
+  background: linear-gradient(135deg, #20639e 0%, #0a7ab3 100%);
+}
+
+/* Responsive Breakpoints - Scoped */
+@media (max-width: 1440px) {
+  .staff-login-page .login-card {
+    padding: 35px 30px;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1440px) and (max-height: 800px) {
+  .staff-login-page .login-card {
+    padding: 30px 28px;
+  }
+  
+  .staff-login-page .login-title {
+    font-size: 32px;
+  }
+  
+  .staff-login-page .submit-btn {
+    padding: 12px 28px;
+  }
+}
+
+@media (max-width: 720px) {
+  .staff-login-page .login-wrapper {
+    max-width: 90%;
+    padding: 15px;
+  }
+  
+  .staff-login-page .login-card {
+    padding: 30px 25px;
+  }
+  
+  .staff-login-page .login-title {
+    font-size: 28px;
+  }
+  
+  .staff-login-page .form-groups input,
+  .staff-login-page .selectlog {
+    padding: 12px 14px;
+  }
+  
+  .staff-login-page .submit-btn {
+    padding: 12px 25px;
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .staff-login-page .login-wrapper {
+    max-width: 95%;
+    padding: 10px;
+  }
+  
+  .staff-login-page .login-card {
+    padding: 25px 20px;
+  }
+  
+  .staff-login-page .login-title {
+    font-size: 24px;
+  }
+  
+  .staff-login-page .header-text .pent {
+    font-size: 13px;
+  }
+  
+  .staff-login-page .selected-branch-display {
+    font-size: 12px;
+  }
+  
+  .staff-login-page .form-groups label,
+  .staff-login-page .dropdownlog .lbel {
+    font-size: 13px;
+  }
+  
+  .staff-login-page .form-groups input,
+  .staff-login-page .selectlog {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  
+  .staff-login-page .submit-btn {
+    padding: 10px 20px;
+    font-size: 15px;
+  }
+  
+  .staff-login-page .menulog li {
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+}

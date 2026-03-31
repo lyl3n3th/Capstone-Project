@@ -1,11 +1,7 @@
 import type { ReactNode } from "react";
 import { BsCardList } from "react-icons/bs";
 import { MdDashboard } from "react-icons/md";
-import {
-  FaDatabase,
-  FaGraduationCap,
-  FaUserCheck,
-} from "react-icons/fa";
+import { FaDatabase, FaGraduationCap, FaUserCheck } from "react-icons/fa";
 import { FiLogOut } from "react-icons/fi";
 import { IoPeopleSharp } from "react-icons/io5";
 import { MdDeleteOutline, MdOutlineAssessment } from "react-icons/md";
@@ -74,7 +70,7 @@ export default function AdminSidebar({
     {
       icon: <MdOutlineAssessment />,
       label: "Report",
-      path: "/admin/report",
+      path: "/admin/reports",
     },
     {
       icon: <FaDatabase />,
@@ -85,7 +81,7 @@ export default function AdminSidebar({
     {
       icon: <MdDeleteOutline />,
       label: "Trash",
-      path: "/admin/archive",
+      path: "/admin/trash",
     },
   ];
 

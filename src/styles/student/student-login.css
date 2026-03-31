@@ -1,0 +1,876 @@
+/* ==========================================================================
+   STUDENT LOGIN PAGE - COMPLETE CSS
+   Fully scoped - affects ONLY .student-login-page
+   No scrolling on any device
+   ========================================================================== */
+
+/* Reset and Base */
+.student-login-page {
+  all: initial;
+  min-height: 100vh;
+  height: 100vh;
+  width: 100%;
+  background: #f8f9fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  box-sizing: border-box;
+}
+
+.student-login-page *,
+.student-login-page *::before,
+.student-login-page *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+
+
+/* ==========================================================================
+   MAIN WRAPPER - RESPONSIVE, NO FIXED HEIGHTS
+   ========================================================================== */
+.student-login-page .login-wrapper {
+  width: 100%;
+  max-width: 1300px;
+  height: auto;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 1.25rem;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+  background: white;
+}
+
+/* Tablet and up - horizontal layout */
+@media (min-width: 768px) {
+  .student-login-page .login-wrapper {
+    flex-direction: row;
+    max-height: 80vh;
+  }
+}
+
+/* Laptop */
+@media (min-width: 1024px) {
+  .student-login-page .login-wrapper {
+    max-width: 1100px;
+    max-height: 75vh;
+  }
+}
+
+/* Desktop */
+@media (min-width: 1280px) {
+  .student-login-page .login-wrapper {
+    max-width: 1050px;
+    max-height: 90vh;
+  }
+}
+
+/* Large Desktop */
+@media (min-width: 1440px) {
+  .student-login-page .login-wrapper {
+    max-width: 1000px;
+    max-height: 65vh;
+  }
+}
+
+/* Extra Large */
+@media (min-width: 1600px) {
+  .student-login-page .login-wrapper {
+    max-width: 950px;
+    max-height: 60vh;
+  }
+}
+
+/* ==========================================================================
+   SLIDER SIDE - WIDER (65-70% of width)
+   ========================================================================== */
+.student-login-page .swiper-side {
+  flex: 2;
+  min-height: 250px;
+  position: relative;
+  overflow: hidden;
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .swiper-side {
+    flex: 2.2;
+    min-height: 450px;
+  }
+  .student-login-page .login-card {
+    flex: 1;
+  }
+}
+
+@media (min-width: 1024px) {
+  .student-login-page .swiper-side {
+    flex: 2.5;
+  }
+}
+
+@media (min-width: 1280px) {
+  .student-login-page .swiper-side {
+    flex: 2.8;
+  }
+  .student-login-page .login-card {
+    flex: 0.9;
+  }
+}
+
+@media (min-width: 1440px) {
+  .student-login-page .swiper-side {
+    flex: 3;
+  }
+  .student-login-page .login-card {
+    flex: 0.8;
+  }
+}
+
+/* ==========================================================================
+   LOGIN CARD - NARROWER (30-35% of width)
+   ========================================================================== */
+.student-login-page .login-card {
+  flex: 1;
+  background: white;
+  padding: 1.5rem;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+/* Responsive padding */
+@media (min-width: 480px) {
+  .student-login-page .login-card {
+    padding: 1.75rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .student-login-page .login-card {
+    padding: 1.5rem 2rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .student-login-page .login-card {
+    padding: 1.75rem 2.25rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .student-login-page .login-card {
+    padding: 2rem 2.5rem;
+  }
+}
+
+/* Subtle scrollbar (rarely needed) */
+.student-login-page .login-card::-webkit-scrollbar {
+  width: 4px;
+}
+
+.student-login-page .login-card::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.student-login-page .login-card::-webkit-scrollbar-thumb {
+  background: #1A3D5C;
+  border-radius: 3px;
+}
+
+/* ==========================================================================
+   CUSTOM SLIDER
+   ========================================================================== */
+.student-login-page .custom-slider {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 250px;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .custom-slider {
+    min-height: 450px;
+  }
+}
+
+.student-login-page .slide {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  transition: opacity 0.8s ease-in-out;
+  pointer-events: none;
+}
+
+.student-login-page .slide.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.student-login-page .slide-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.45), transparent 60%);
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   NAVIGATION ARROWS
+   ========================================================================== */
+.student-login-page .nav-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.4);
+  color: white;
+  border: none;
+  font-size: 1.25rem;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  z-index: 10;
+  transition: all 0.3s;
+  display: none;
+  border-radius: 50%;
+  backdrop-filter: blur(2px);
+}
+
+@media (min-width: 768px) {
+  .student-login-page .nav-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .student-login-page .nav-arrow {
+    font-size: 1.75rem;
+    padding: 0.6rem 0.9rem;
+  }
+}
+
+.student-login-page .nav-arrow:hover {
+  background: rgba(0, 0, 0, 0.7);
+  transform: translateY(-50%) scale(1.05);
+}
+
+.student-login-page .prev {
+  left: 10px;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .prev {
+    left: 15px;
+  }
+}
+
+.student-login-page .next {
+  right: 10px;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .next {
+    right: 15px;
+  }
+}
+
+/* ==========================================================================
+   DOTS / PAGINATION
+   ========================================================================== */
+.student-login-page .dots {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  z-index: 10;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .dots {
+    bottom: 15px;
+    gap: 8px;
+  }
+}
+
+.student-login-page .dot {
+  width: 6px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .dot {
+    width: 8px;
+    height: 8px;
+  }
+}
+
+.student-login-page .dot:hover {
+  background: rgba(255, 255, 255, 0.8);
+  transform: scale(1.2);
+}
+
+.student-login-page .dot.active {
+  background: white;
+  transform: scale(1.3);
+}
+
+/* ==========================================================================
+   LOGIN CONTENT
+   ========================================================================== */
+.student-login-page .login-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Logo Section */
+.student-login-page .logo-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.student-login-page .logo-1 {
+  height: 40px;
+  width: auto;
+  max-width: 120px;
+  object-fit: contain;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .logo-1 {
+    height: 45px;
+    max-width: 135px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .student-login-page .logo-1 {
+    height: 50px;
+    max-width: 150px;
+  }
+}
+
+/* Header Text */
+.student-login-page .header-text {
+  text-align: center;
+  margin-bottom: 1rem;
+  margin-top: 0;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .header-text {
+    margin-bottom: 1.25rem;
+  }
+}
+
+.student-login-page .header-text p {
+  margin-top: 0.35rem;
+  color: #666;
+  font-size: 0.8rem;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .header-text p {
+    font-size: 0.85rem;
+  }
+}
+
+/* Branch Display */
+.student-login-page .selected-branch-display {
+  min-height: 1.2em;
+  font-size: 0.75rem;
+  color: #333;
+  font-weight: 400;
+  margin-top: 0.5rem;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .selected-branch-display {
+    font-size: 0.8rem;
+  }
+}
+
+.student-login-page .selected-branch-display strong {
+  color: #1A3D5C;
+  font-weight: 600;
+}
+
+.student-login-page .selected-branch-display .placeholder {
+  color: #999;
+  font-weight: 400;
+}
+
+/* ==========================================================================
+   FORM STYLES
+   ========================================================================== */
+.student-login-page .login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .login-form {
+    gap: 1rem;
+  }
+}
+
+/* Form Groups */
+.student-login-page .form-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.student-login-page .form-groups label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #444;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .form-groups label {
+    font-size: 0.8rem;
+  }
+}
+
+.student-login-page .form-groups input {
+  width: 100%;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.65rem;
+  font-size: 0.85rem;
+  color: #333;
+  transition: all 0.2s ease;
+  background: white;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .form-groups input {
+    padding: 0.7rem 1rem;
+    font-size: 0.9rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .student-login-page .form-groups input {
+    padding: 0.75rem 1rem;
+  }
+}
+
+.student-login-page .form-groups input:focus {
+  outline: none;
+  border-color: #1A3D5C;
+  box-shadow: 0 0 0 3px rgba(26, 61, 92, 0.12);
+}
+
+.student-login-page .form-groups input::placeholder {
+  color: #bbb;
+  font-size: 0.8rem;
+}
+
+/* Password Wrapper */
+.student-login-page .password-wrapper {
+  position: relative;
+}
+
+.student-login-page .toggle-password {
+  position: absolute;
+  right: 0.9rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #1A3D5C;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .toggle-password {
+    font-size: 1rem;
+    right: 1rem;
+  }
+}
+
+.student-login-page .toggle-password:hover {
+  color: #066287;
+}
+
+/* Forgot Link */
+.student-login-page .forgot-link-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+}
+
+.student-login-page .forgot-link {
+  font-size: 0.7rem;
+  color: #066287;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .forgot-link {
+    font-size: 0.75rem;
+  }
+}
+
+.student-login-page .forgot-link:hover {
+  color: #0a7ab3;
+  text-decoration: underline;
+}
+
+/* Submit Button */
+.student-login-page .submit-btn {
+  width: 100%;
+  padding: 0.7rem;
+  background: linear-gradient(135deg, #1A3D5C 0%, #066287 100%);
+  color: white;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border: none;
+  border-radius: 0.65rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  margin-top: 0.5rem;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .submit-btn {
+    padding: 0.8rem;
+    font-size: 0.95rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .student-login-page .submit-btn {
+    padding: 0.85rem;
+    font-size: 1rem;
+  }
+}
+
+.student-login-page .submit-btn:hover {
+  background: linear-gradient(135deg, #20639e 0%, #0a7ab3 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(6, 98, 135, 0.3);
+}
+
+.student-login-page .submit-btn:active {
+  transform: translateY(0);
+}
+
+/* Register Prompt */
+.student-login-page .register-prompt {
+  margin-top: 1.25rem;
+  text-align: center;
+  color: #666;
+  font-size: 0.75rem;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .register-prompt {
+    margin-top: 1.5rem;
+    font-size: 0.8rem;
+  }
+}
+
+.student-login-page .register-link {
+  color: #066287;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.student-login-page .register-link:hover {
+  color: #0a7ab3;
+  text-decoration: underline;
+}
+
+/* ==========================================================================
+   DROPDOWN / SELECT BRANCH
+   ========================================================================== */
+.student-login-page .dropdownlog {
+  position: relative;
+  width: 100%;
+  margin-top: 0;
+  flex: 1;
+}
+
+.student-login-page .dropdownlog .lbel {
+  display: block;
+  width: 100%;
+  font-size: 0.75rem;
+  color: #444;
+  margin-bottom: 5px;
+  text-align: left;
+  font-weight: 500;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .dropdownlog .lbel {
+    font-size: 0.8rem;
+    margin-bottom: 6px;
+  }
+}
+
+.student-login-page .selectlog {
+  background: white;
+  color: #666;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.65rem;
+  padding: 0.65rem 0.9rem;
+  cursor: pointer;
+  height: auto;
+  min-height: 42px;
+  transition: all 0.2s;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .selectlog {
+    padding: 0.7rem 1rem;
+    min-height: 44px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .student-login-page .selectlog {
+    padding: 0.75rem 1rem;
+    min-height: 46px;
+  }
+}
+
+.student-login-page .selectlog:hover {
+  border-color: #1A3D5C;
+}
+
+.student-login-page .select-clicked {
+  border-color: #1A3D5C;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.student-login-page .selectedlog {
+  font-size: 0.85rem;
+  font-weight: normal;
+  color: #333;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .selectedlog {
+    font-size: 0.9rem;
+  }
+}
+
+.student-login-page .cart {
+  border-top: 0.3em solid #333;
+  border-left: 0.3em solid transparent;
+  border-right: 0.3em solid transparent;
+  width: 0;
+  height: 0;
+  opacity: 0.7;
+  transition: transform 0.2s;
+}
+
+.student-login-page .cart-rotate {
+  transform: rotate(180deg);
+}
+
+/* Dropdown Menu */
+.student-login-page .menulog {
+  position: absolute;
+  width: 100%;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.65rem;
+  padding: 0;
+  list-style-type: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  display: none;
+  z-index: 999;
+  max-height: 180px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.student-login-page .menulog.show {
+  display: block;
+  opacity: 1;
+}
+
+.student-login-page .menulog li {
+  list-style: none;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: normal;
+  transition: background 0.2s;
+  color: #333;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .menulog li {
+    padding: 10px 16px;
+    font-size: 0.9rem;
+  }
+}
+
+.student-login-page .menulog li:hover {
+  background: #f0f0f0;
+}
+
+/* ==========================================================================
+   DIVIDER
+   ========================================================================== */
+.student-login-page .divider {
+  border: none;
+  height: 1px;
+  background: #e6e6e6;
+  margin: 0.4rem 0;
+}
+
+@media (min-width: 768px) {
+  .student-login-page .divider {
+    margin: 0.5rem 0;
+  }
+}
+
+/* ==========================================================================
+   MOBILE SPECIFIC (SMALL SCREENS)
+   ========================================================================== */
+@media (max-width: 480px) {
+  .student-login-page .login-wrapper {
+    max-height: 90vh;
+    border-radius: 1rem;
+  }
+  
+  .student-login-page .swiper-side {
+    min-height: 200px;
+  }
+  
+  .student-login-page .custom-slider {
+    min-height: 200px;
+  }
+  
+  .student-login-page .login-card {
+    padding: 1.25rem;
+  }
+  
+  .student-login-page .submit-btn {
+    padding: 0.6rem;
+    font-size: 0.85rem;
+  }
+  
+  .student-login-page .logo-1 {
+    height: 35px;
+    max-width: 100px;
+  }
+  
+  .student-login-page .header-text p {
+    font-size: 0.75rem;
+  }
+}
+
+/* ==========================================================================
+   EXTRA SMALL DEVICES
+   ========================================================================== */
+@media (max-width: 360px) {
+  .student-login-page .login-card {
+    padding: 1rem;
+  }
+  
+  .student-login-page .form-groups input {
+    padding: 0.55rem 0.8rem;
+    font-size: 0.8rem;
+  }
+  
+  .student-login-page .submit-btn {
+    padding: 0.55rem;
+    font-size: 0.8rem;
+  }
+  
+  .student-login-page .register-prompt {
+    font-size: 0.7rem;
+  }
+}
+
+/* ==========================================================================
+   LANDSCAPE MODE ON MOBILE
+   ========================================================================== */
+@media (max-width: 768px) and (orientation: landscape) {
+  .student-login-page .login-wrapper {
+    max-height: 95vh;
+    flex-direction: row;
+  }
+  
+  .student-login-page .swiper-side {
+    min-height: 300px;
+  }
+  
+  .student-login-page .custom-slider {
+    min-height: 300px;
+  }
+  
+  .student-login-page .login-card {
+    padding: 1rem;
+    overflow-y: auto;
+  }
+  
+  .student-login-page .logo-1 {
+    height: 30px;
+  }
+  
+  .student-login-page .header-text {
+    margin-bottom: 0.5rem;
+  }
+  
+  .student-login-page .login-form {
+    gap: 0.5rem;
+  }
+  
+  .student-login-page .form-groups input {
+    padding: 0.5rem 0.8rem;
+  }
+  
+  .student-login-page .submit-btn {
+    padding: 0.5rem;
+    margin-top: 0.25rem;
+  }
+  
+  .student-login-page .register-prompt {
+    margin-top: 0.75rem;
+  }
+}

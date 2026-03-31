@@ -17,12 +17,20 @@
 @import "./student/student-grades.css";
 @import "./student/student-subjects.css";
 @import "./student/student-enrollment.css";
+@import "./student/student-login.css";
+@import "./student/student-regis.css";
 
 @import "./admin/admin-dashboard.css";
 @import "./admin/admin-sidebar.css";
 @import "./admin/admin-students.css";
 @import "./admin/admin-grades.css";
 @import "./admin/admin-enrolles.css";
+@import "./admin/admin-alumni.css";
+@import "./admin/admin-reports.css";
+@import "./admin/admin-backup.css";
+@import "./admin/admin-trash.css";
+@import "./staff/staff-login.css";
+
 
 /* Toast Animation */
 @keyframes slideIn {

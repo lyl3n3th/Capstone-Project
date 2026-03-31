@@ -1,0 +1,782 @@
+/* ==========================================================================
+   STUDENT REGISTRATION PAGE - COMPLETE CSS
+   Fully scoped - affects ONLY .student-registration-page
+   No scrolling on any device
+   ========================================================================== */
+
+/* Reset and Base */
+.student-registration-page {
+  all: initial;
+  min-height: 100vh;
+  height: 100vh;
+  width: 100%;
+  background: #f8f9fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  box-sizing: border-box;
+}
+
+.student-registration-page *,
+.student-registration-page *::before,
+.student-registration-page *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ==========================================================================
+   MAIN WRAPPER - RESPONSIVE, NO FIXED HEIGHTS
+   ========================================================================== */
+.student-registration-page .registration-wrapper {
+  width: 100%;
+  max-width: 1000px;
+  height: auto;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 1.25rem;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+  background: white;
+  
+}
+
+/* Tablet and up */
+@media (min-width: 768px) {
+  .student-registration-page .registration-wrapper {
+    max-height: 85vh;
+  }
+}
+
+/* Laptop */
+@media (min-width: 1024px) {
+  .student-registration-page .registration-wrapper {
+    max-width: 950px;
+    max-height: 80vh;
+  }
+}
+
+/* Desktop */
+@media (min-width: 1280px) {
+  .student-registration-page .registration-wrapper {
+    max-width: 900px;
+    max-height: 90vh;
+  }
+}
+
+/* Large Desktop */
+@media (min-width: 1440px) {
+  .student-registration-page .registration-wrapper {
+    max-width: 850px;
+    max-height: 70vh;
+  }
+}
+
+/* ==========================================================================
+   REGISTRATION CARD
+   ========================================================================== */
+.student-registration-page .registration-card {
+  background: white;
+  padding: 1.5rem;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+/* Responsive padding */
+@media (min-width: 480px) {
+  .student-registration-page .registration-card {
+    padding: 1.75rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .registration-card {
+    padding: 1.5rem 2rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .student-registration-page .registration-card {
+    padding: 1.75rem 2.25rem;
+  }
+}
+
+@media (max-width: 1440px) {
+  .student-registration-page .registration-wrapper {
+    max-height: 95vh;
+  }
+  
+  .student-registration-page .registration-card {
+    padding: 0.6rem 1.25rem;
+  }
+  
+  .student-registration-page .registration-header {
+    margin-bottom: 0.15rem;
+  }
+  
+  .student-registration-page .registration-logo {
+    height: 28px;  /* Smaller logo */
+  }
+  
+  .student-registration-page .registration-title {
+    font-size: 1rem;  /* Even smaller title */
+    margin: 0.05rem 0;
+  }
+  
+  .student-registration-page .registration-branch-display {
+    font-size: 0.65rem;
+    margin-top: 0;
+  }
+  
+  .student-registration-page .registration-divider {
+    margin: 0.15rem 0 0.4rem;
+  }
+  
+  .student-registration-page .registration-form {
+    gap: 0.45rem;  /* Tighter form gap */
+  }
+  
+  .student-registration-page .registration-branch-section {
+    margin-bottom: 0;
+  }
+  
+  .student-registration-page .registration-grid {
+    gap: 0.6rem;  /* Tighter grid gap */
+  }
+  
+  .student-registration-page .registration-grid-column {
+    gap: 0.4rem;  /* Tighter column gap */
+  }
+  
+  .student-registration-page .form-field {
+    gap: 0.2rem;  /* Smaller field gap */
+  }
+  
+  .student-registration-page .form-field label {
+    font-size: 0.65rem;
+    margin-bottom: 0;
+  }
+  
+  .student-registration-page .form-field input {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.7rem;
+  }
+  
+  .student-registration-page .dropdown-reg {
+    margin-bottom: 0;
+  }
+  
+  .student-registration-page .dropdown-label {
+    font-size: 0.65rem;
+    margin-bottom: 3px;
+  }
+  
+  .student-registration-page .dropdown-select {
+    padding: 0.35rem 0.6rem;
+    min-height: 32px;
+  }
+  
+  .student-registration-page .dropdown-selected {
+    font-size: 0.7rem;
+  }
+  
+  .student-registration-page .registration-submit-btn {
+    padding: 0.4rem;
+    font-size: 0.75rem;
+    margin-top: 0.15rem;
+  }
+  
+  .student-registration-page .registration-prompt {
+    margin-top: 0.5rem;
+    font-size: 0.65rem;
+  }
+  
+  .student-registration-page .field-hint {
+    font-size: 0.6rem;
+    margin-top: 0.15rem;
+  }
+}
+
+/* Subtle scrollbar (rarely needed) */
+.student-registration-page .registration-card::-webkit-scrollbar {
+  width: 4px;
+}
+
+.student-registration-page .registration-card::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.student-registration-page .registration-card::-webkit-scrollbar-thumb {
+  background: #1A3D5C;
+  border-radius: 3px;
+}
+
+/* ==========================================================================
+   REGISTRATION CONTENT
+   ========================================================================== */
+.student-registration-page .registration-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Header Section */
+.student-registration-page .registration-header {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+.student-registration-page .registration-logo {
+  height: 45px;
+  width: auto;
+  max-width: 135px;
+  object-fit: contain;
+  margin-bottom: 0.5rem;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .registration-logo {
+    height: 50px;
+    max-width: 150px;
+  }
+}
+
+.student-registration-page .registration-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1A3D5C;
+  margin: 0.5rem 0 0.25rem;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .registration-title {
+    font-size: 1.75rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .student-registration-page .registration-title {
+    font-size: 1.9rem;
+  }
+}
+
+/* Branch Display */
+.student-registration-page .registration-branch-display {
+  font-size: 0.8rem;
+  color: #333;
+  font-weight: 400;
+  margin-top: 0.25rem;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .registration-branch-display {
+    font-size: 0.85rem;
+  }
+}
+
+.student-registration-page .registration-branch-display strong {
+  color: #1A3D5C;
+  font-weight: 600;
+}
+
+.student-registration-page .registration-branch-display .placeholder {
+  color: #999;
+  font-weight: 400;
+}
+
+/* ==========================================================================
+   DIVIDER
+   ========================================================================== */
+.student-registration-page .registration-divider {
+  height: 1px;
+  background: #e6e6e6;
+  margin: 0.5rem 0 1rem;
+}
+
+/* ==========================================================================
+   FORM STYLES
+   ========================================================================== */
+.student-registration-page .registration-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+/* Branch Section */
+.student-registration-page .registration-branch-section {
+  margin-bottom: 0.25rem;
+}
+
+/* ==========================================================================
+   DROPDOWN / SELECT BRANCH
+   ========================================================================== */
+.student-registration-page .dropdown-reg {
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+  margin: 0 auto;
+}
+
+.student-registration-page .dropdown-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #444;
+  margin-bottom: 6px;
+  text-align: left;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .dropdown-label {
+    font-size: 0.85rem;
+  }
+}
+
+.student-registration-page .dropdown-select {
+  background: white;
+  color: #666;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.65rem;
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  min-height: 44px;
+  transition: all 0.2s;
+}
+
+.student-registration-page .dropdown-select:hover {
+  border-color: #1A3D5C;
+}
+
+.student-registration-page .select-clicked {
+  border-color: #1A3D5C;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.student-registration-page .dropdown-selected {
+  font-size: 0.85rem;
+  font-weight: normal;
+  color: #333;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .dropdown-selected {
+    font-size: 0.9rem;
+  }
+}
+
+.student-registration-page .dropdown-arrow {
+  border-top: 0.3em solid #333;
+  border-left: 0.3em solid transparent;
+  border-right: 0.3em solid transparent;
+  width: 0;
+  height: 0;
+  opacity: 0.7;
+  transition: transform 0.2s;
+}
+
+.student-registration-page .arrow-rotate {
+  transform: rotate(180deg);
+}
+
+/* Dropdown Menu */
+.student-registration-page .dropdown-menu {
+  position: absolute;
+  width: 100%;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.65rem;
+  padding: 0;
+  list-style-type: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  display: none;
+  z-index: 999;
+  max-height: 180px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.student-registration-page .dropdown-menu.show {
+  display: block;
+  opacity: 1;
+}
+
+.student-registration-page .dropdown-menu li {
+  list-style: none;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: normal;
+  transition: background 0.2s;
+  color: #333;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .dropdown-menu li {
+    padding: 10px 16px;
+    font-size: 0.9rem;
+  }
+}
+
+.student-registration-page .dropdown-menu li:hover {
+  background: #f0f0f0;
+}
+
+/* ==========================================================================
+   FORM GRID
+   ========================================================================== */
+.student-registration-page .registration-grid {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .registration-grid {
+    gap: 2rem;
+  }
+}
+
+.student-registration-page .registration-grid-column {
+  flex: 1;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Form Fields */
+.student-registration-page .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.student-registration-page .form-field label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #444;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .form-field label {
+    font-size: 0.85rem;
+  }
+}
+
+.student-registration-page .form-field input {
+  width: 100%;
+  padding: 0.7rem 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.65rem;
+  font-size: 0.85rem;
+  color: #333;
+  transition: all 0.2s ease;
+  background: white;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .form-field input {
+    padding: 0.75rem 1rem;
+    font-size: 0.9rem;
+  }
+}
+
+.student-registration-page .form-field input:focus {
+  outline: none;
+  border-color: #1A3D5C;
+  box-shadow: 0 0 0 3px rgba(26, 61, 92, 0.12);
+}
+
+.student-registration-page .form-field input::placeholder {
+  color: #bbb;
+  font-size: 0.8rem;
+}
+
+/* Field Hint */
+.student-registration-page .field-hint {
+  font-size: 0.7rem;
+  color: #666;
+  margin-top: 0.25rem;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .field-hint {
+    font-size: 0.75rem;
+  }
+}
+
+/* ==========================================================================
+   PASSWORD FIELD WITH TOGGLE
+   ========================================================================== */
+.student-registration-page .password-input-wrapper {
+  position: relative;
+}
+
+.student-registration-page .password-input-wrapper input {
+  padding-right: 2.5rem;
+}
+
+.student-registration-page .password-toggle {
+  position: absolute;
+  right: 0.9rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #1A3D5C;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .password-toggle {
+    font-size: 1rem;
+    right: 1rem;
+  }
+}
+
+.student-registration-page .password-toggle:hover {
+  color: #066287;
+}
+
+/* ==========================================================================
+   SUBMIT BUTTON
+   ========================================================================== */
+.student-registration-page .registration-submit-btn {
+  width: 100%;
+  max-width: 360px;
+  margin: 0.5rem auto 0;
+  padding: 0.8rem;
+  background: linear-gradient(135deg, #1A3D5C 0%, #066287 100%);
+  color: white;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: none;
+  border-radius: 0.65rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .registration-submit-btn {
+    padding: 0.85rem;
+    font-size: 1rem;
+  }
+}
+
+.student-registration-page .registration-submit-btn:hover {
+  background: linear-gradient(135deg, #20639e 0%, #0a7ab3 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(6, 98, 135, 0.3);
+}
+
+.student-registration-page .registration-submit-btn:active {
+  transform: translateY(0);
+}
+
+/* ==========================================================================
+   REGISTRATION PROMPT (Sign in link)
+   ========================================================================== */
+.student-registration-page .registration-prompt {
+  margin-top: 1.25rem;
+  text-align: center;
+  color: #666;
+  font-size: 0.8rem;
+}
+
+@media (min-width: 768px) {
+  .student-registration-page .registration-prompt {
+    margin-top: 1.5rem;
+    font-size: 0.85rem;
+  }
+}
+
+.student-registration-page .registration-link {
+  color: #066287;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.student-registration-page .registration-link:hover {
+  color: #0a7ab3;
+  text-decoration: underline;
+}
+
+/* ==========================================================================
+   MOBILE SPECIFIC (SMALL SCREENS)
+   ========================================================================== */
+@media (max-width: 480px) {
+  .student-registration-page .registration-wrapper {
+    max-height: 92vh;
+    border-radius: 1rem;
+  }
+  
+  .student-registration-page .registration-card {
+    padding: 1rem;
+  }
+  
+  .student-registration-page .registration-title {
+    font-size: 1.3rem;
+  }
+  
+  .student-registration-page .registration-logo {
+    height: 40px;
+  }
+  
+  .student-registration-page .registration-grid {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .student-registration-page .registration-grid-column {
+    min-width: 100%;
+    gap: 0.8rem;
+  }
+  
+  .student-registration-page .form-field input {
+    padding: 0.6rem 0.85rem;
+    font-size: 0.85rem;
+  }
+  
+  .student-registration-page .dropdown-reg {
+    max-width: 100%;
+  }
+  
+  .student-registration-page .registration-submit-btn {
+    max-width: 100%;
+    padding: 0.7rem;
+    font-size: 0.9rem;
+  }
+  
+  .student-registration-page .registration-prompt {
+    font-size: 0.75rem;
+  }
+  
+  .student-registration-page .field-hint {
+    font-size: 0.65rem;
+  }
+}
+
+/* ==========================================================================
+   EXTRA SMALL DEVICES (<=360px)
+   ========================================================================== */
+@media (max-width: 360px) {
+  .student-registration-page .registration-card {
+    padding: 0.85rem;
+  }
+  
+  .student-registration-page .registration-title {
+    font-size: 1.2rem;
+  }
+  
+  .student-registration-page .registration-logo {
+    height: 35px;
+  }
+  
+  .student-registration-page .form-field input {
+    padding: 0.55rem 0.8rem;
+    font-size: 0.8rem;
+  }
+  
+  .student-registration-page .dropdown-select {
+    padding: 0.6rem 0.85rem;
+    min-height: 40px;
+  }
+  
+  .student-registration-page .dropdown-selected {
+    font-size: 0.8rem;
+  }
+  
+  .student-registration-page .registration-submit-btn {
+    padding: 0.6rem;
+    font-size: 0.85rem;
+  }
+  
+  .student-registration-page .registration-prompt {
+    font-size: 0.7rem;
+  }
+}
+
+/* ==========================================================================
+   LANDSCAPE MODE ON MOBILE
+   ========================================================================== */
+@media (max-width: 768px) and (orientation: landscape) {
+  .student-registration-page .registration-wrapper {
+    max-height: 95vh;
+  }
+  
+  .student-registration-page .registration-card {
+    padding: 0.75rem;
+  }
+  
+  .student-registration-page .registration-title {
+    font-size: 1.2rem;
+    margin: 0.25rem 0;
+  }
+  
+  .student-registration-page .registration-logo {
+    height: 35px;
+  }
+  
+  .student-registration-page .registration-grid {
+    gap: 0.8rem;
+  }
+  
+  .student-registration-page .registration-grid-column {
+    gap: 0.6rem;
+  }
+  
+  .student-registration-page .form-field input {
+    padding: 0.5rem 0.8rem;
+  }
+  
+  .student-registration-page .registration-submit-btn {
+    padding: 0.5rem;
+    margin-top: 0.25rem;
+  }
+  
+  .student-registration-page .registration-prompt {
+    margin-top: 0.75rem;
+  }
+}
+
+/* ==========================================================================
+   TABLET SPECIFIC
+   ========================================================================== */
+@media (min-width: 481px) and (max-width: 768px) {
+  .student-registration-page .registration-grid {
+    gap: 1rem;
+  }
+  
+  .student-registration-page .registration-grid-column {
+    min-width: 220px;
+  }
+  
+  .student-registration-page .dropdown-reg {
+    max-width: 300px;
+  }
+}

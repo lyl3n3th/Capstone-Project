@@ -12,11 +12,19 @@ import StudentProfile from "./pages/student/StudentProfile.tsx";
 import StudentGrades from "./pages/student/StudentGrades.tsx";
 import StudentSubjects from "./pages/student/StudentSubjects.tsx";
 import StudentEnrollment from "./pages/student/StudentEnrollment.tsx";
+import StudentLogin from "./pages/student/StudentLogin.tsx";
+import StudentRegistration from "./pages/student/StudentRegistration.tsx";
 
 import AdminDashboard from "./pages/admin/AdminDashboard.tsx";
 import AdminStudents from "./pages/admin/AdminStudents.tsx";
 import AdminGrades from "./pages/admin/AdminGrades.tsx";
 import AdminEnrollees from "./pages/admin/AdminEnrollees.tsx";
+import AdminAlumni from "./pages/admin/AdminAlumni.tsx";
+import AdminReports from "./pages/admin/AdminReports.tsx";
+import AdminBackup from "./pages/admin/AdminBackup.tsx";
+import AdminTrash from "./pages/admin/AdminTrash.tsx";
+
+import StaffLogin from "./pages/staff/StaffLogin.tsx";
 
 function App() {
   const appProps = {
@@ -39,6 +47,22 @@ function App() {
         <Route path="/scholarship-exam" element={<AdmissionStep5 />} />
 
         {/* Private student side */}
+        <Route
+          path="/student/login"
+          element={
+            <StudentProvider>
+              <StudentLogin />
+            </StudentProvider>
+          }
+        />
+        <Route
+          path="/student/registration"
+          element={
+            <StudentProvider>
+              <StudentRegistration />
+            </StudentProvider>
+          }
+        />
         <Route
           path="/student/home"
           element={
@@ -93,6 +117,13 @@ function App() {
           element={<AdminEnrollees {...appProps} />}
         />
         <Route path="/admin/grades" element={<AdminGrades {...appProps} />} />
+        <Route path="/admin/alumni" element={<AdminAlumni {...appProps} />} />
+        <Route path="/admin/reports" element={<AdminReports {...appProps} />} />
+        <Route path="/admin/backup" element={<AdminBackup {...appProps} />} />
+        <Route path="/admin/trash" element={<AdminTrash {...appProps} />} />
+
+        {/* Staff login */}
+        <Route path="/staff/login" element={<StaffLogin />} />
       </Routes>
     </BrowserRouter>
   );

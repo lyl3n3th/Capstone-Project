@@ -199,6 +199,12 @@
   margin-bottom: 28px;
 }
 
+.program-section {
+  border-radius: 0 !important;
+  border: none !important;
+}
+
+
 .program-section:last-child {
   margin-bottom: 0;
 }
