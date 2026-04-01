@@ -182,12 +182,29 @@ const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const ENROLLEES_API_URL = `${API_BASE_URL}/api/enrollees/`;
 
+// Helper for incremental Student IDs
+const getNextStudentId = () => {
+  const current = sessionStorage.getItem("last_student_id") || "261000";
+  const next = parseInt(current) + 1;
+  sessionStorage.setItem("last_student_id", next.toString());
+  return next.toString();
+};
+
 // Get requirement items for enrollment requests based on current and requested level
 const getEnrollmentRequirementItems = (
   currentYearLevel: string,
   requestedYearLevel: string,
   program: string,
 ) => {
+  if (!currentYearLevel) {
+    // Default requirements for new admissions
+    return [
+      { name: "Form 137 / SF10", required: true, key: "f137" },
+      { name: "PSA Birth Certificate", required: true, key: "psa" },
+      { name: "Good Moral Character", required: true, key: "gmc" },
+      { name: "Certificate of Completion", required: true, key: "coc" },
+    ];
+  }
   const requirements = [];
 
   if (
@@ -263,8 +280,9 @@ export default function AdminEnrollees({
   const [selectedEnrolleeId, setSelectedEnrolleeId] = useState<string | null>(
     null,
   );
-  const [selectedRequest, setSelectedRequest] =
-    useState<EnrollmentRequest | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<
+    EnrollmentRequest | Enrollee | null
+  >(null);
   const [viewingAttachment, setViewingAttachment] = useState<Attachment | null>(
     null,
   );
@@ -288,6 +306,13 @@ export default function AdminEnrollees({
   const [enrollees, setEnrollees] = useState<Enrollee[]>([]);
 
   // Section Manager States
+
+  const isEnrollmentRequest = (
+    item: EnrollmentRequest | Enrollee,
+  ): item is EnrollmentRequest => {
+    return "studentNumber" in item;
+  };
+
   const [showSectionManager, setShowSectionManager] = useState(false);
   const [classSections, setClassSections] = useState<ClassSection[]>([]);
   const [sectionAssignments, setSectionAssignments] = useState<
@@ -349,6 +374,10 @@ export default function AdminEnrollees({
     "3rd Year": false,
     "4th Year": false,
   });
+  // State for expanded sections in Class Assignments
+  const [expandedAssignmentSections, setExpandedAssignmentSections] = useState<
+    Record<string, boolean>
+  >({});
 
   // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {
@@ -1796,6 +1825,11 @@ export default function AdminEnrollees({
       }
       setEnrollees(fetchedEnrollees.map(mapApiEnrolleeToUi));
     } catch (error) {
+      const stored = sessionStorage.getItem("enrollees_session");
+      if (stored) {
+        setEnrollees(JSON.parse(stored));
+        return;
+      }
       console.error("Failed to fetch enrollees", error);
       addToast("Unable to load enrollees from backend.", "error");
       setEnrollees([]);
@@ -1804,9 +1838,31 @@ export default function AdminEnrollees({
     }
   };
 
+  // Effect to handle session storage persistence
   useEffect(() => {
+    if (enrollees.length > 0) {
+      sessionStorage.setItem("enrollees_session", JSON.stringify(enrollees));
+    }
+  }, [enrollees]);
+
+  useEffect(() => {
+    if (enrollmentRequests.length > 0) {
+      sessionStorage.setItem(
+        "requests_session",
+        JSON.stringify(enrollmentRequests),
+      );
+    }
+  }, [enrollmentRequests]);
+
+  useEffect(() => {
+    const storedRequests = sessionStorage.getItem("requests_session");
+    if (storedRequests) {
+      setEnrollmentRequests(JSON.parse(storedRequests));
+    } else {
+      loadEnrollmentRequests();
+    }
+
     loadEnrollees();
-    loadEnrollmentRequests();
     loadClassSections();
     loadSubjects();
     loadInstructors();
@@ -1885,7 +1941,7 @@ export default function AdminEnrollees({
     );
   };
 
-  const handleReviewRequirements = (request: EnrollmentRequest) => {
+  const handleReviewRequirements = (request: EnrollmentRequest | Enrollee) => {
     setSelectedRequest(request);
   };
 
@@ -1908,36 +1964,66 @@ export default function AdminEnrollees({
     if (!selectedAction) return;
 
     try {
+      // Check if it's an enrollment request (existing student)
       const requestToUpdate = enrollmentRequests.find(
         (req) => req.id === selectedAction.id,
       );
+      // Check if it's a new enrollee (applicant)
+      const enrolleeToUpdate = enrollees.find(
+        (e) => e.id === selectedAction.id,
+      );
+
       if (!requestToUpdate) {
-        addToast("Request not found.", "error");
-        setIsConfirmModalOpen(false);
-        setSelectedAction(null);
-        return;
+        if (enrolleeToUpdate) {
+          const isApprove = selectedAction.action === "approve";
+          const updatedEnrollee: Enrollee = {
+            ...enrolleeToUpdate,
+            status: isApprove ? "Approved" : "Pending", // Admission status change
+            id:
+              isApprove && !/^\d{6}$/.test(enrolleeToUpdate.id)
+                ? getNextStudentId()
+                : enrolleeToUpdate.id,
+            // Transition logic for new students
+            yearLevel: isApprove
+              ? enrolleeToUpdate.yearLevel === "Junior High Completer"
+                ? "Grade 11"
+                : enrolleeToUpdate.yearLevel === "Senior High Completer"
+                  ? "1st Year"
+                  : enrolleeToUpdate.yearLevel
+              : enrolleeToUpdate.yearLevel,
+          };
+
+          setEnrollees((prev) =>
+            prev.map((e) => (e.id === selectedAction.id ? updatedEnrollee : e)),
+          );
+          addToast(
+            `Admission ${isApprove ? "approved" : "rejected"} successfully! Student ID: ${updatedEnrollee.id}`,
+            "success",
+          );
+        } else {
+          addToast("Record not found.", "error");
+        }
+      } else {
+        const updatedRequest: EnrollmentRequest = {
+          ...requestToUpdate,
+          enrollmentStatus:
+            selectedAction.action === "approve" ? "Approved" : "Rejected",
+          enrollmentDate:
+            selectedAction.action === "approve"
+              ? new Date().toLocaleDateString()
+              : undefined,
+        };
+
+        setEnrollmentRequests((prevRequests) =>
+          prevRequests.map((req) =>
+            req.id === selectedAction.id ? updatedRequest : req,
+          ),
+        );
+        addToast(
+          `Enrollment request ${selectedAction.action === "approve" ? "approved" : "rejected"} successfully!`,
+          "success",
+        );
       }
-
-      const updatedRequest: EnrollmentRequest = {
-        ...requestToUpdate,
-        enrollmentStatus:
-          selectedAction.action === "approve" ? "Approved" : "Rejected",
-        enrollmentDate:
-          selectedAction.action === "approve"
-            ? new Date().toLocaleDateString()
-            : undefined,
-      };
-
-      setEnrollmentRequests((prevRequests) =>
-        prevRequests.map((req) =>
-          req.id === selectedAction.id ? updatedRequest : req,
-        ),
-      );
-
-      addToast(
-        `Enrollment request ${selectedAction.action === "approve" ? "approved" : "rejected"} successfully!`,
-        "success",
-      );
 
       if (selectedRequest?.id === selectedAction.id) {
         closeReviewModal();
@@ -2049,6 +2135,93 @@ export default function AdminEnrollees({
       ...prev,
       [year]: !prev[year as keyof typeof prev],
     }));
+  };
+
+  const toggleAssignmentSection = (sectionCode: string) => {
+    setExpandedAssignmentSections((prev) => ({
+      ...prev,
+      [sectionCode]: !prev[sectionCode],
+    }));
+  };
+
+  // Automated Class Assignment logic
+  const handleAutoGenerateSchedule = (section: ClassSection) => {
+    const sectionSubjects = subjects.filter(
+      (s) =>
+        s.yearLevel === section.yearLevel &&
+        (s.program === section.program ||
+          (section.program === "SHS" && s.strand === section.strand) ||
+          s.strand === "All"),
+    );
+
+    if (sectionSubjects.length === 0) {
+      addToast(`No subjects found for ${section.yearLevel}`, "warning");
+      return;
+    }
+
+    const newAssignments: SubjectAssignment[] = [];
+    let currentTime = 8 * 60 + 30; // Start at 08:30 AM
+    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
+    sectionSubjects.forEach((subject, index) => {
+      const day = days[index % days.length];
+      const instructor = instructors[index % instructors.length];
+
+      // Add 30 min break after Class 1 (ends 10:00)
+      if (currentTime === 10 * 60) {
+        currentTime += 30;
+      }
+
+      // Add 30 min break after Class 3 (ends 15:00 if lunch was 1hr)
+      if (currentTime === 15 * 60 || currentTime === 14 * 60 + 30) {
+        currentTime += 30;
+      }
+
+      const startHours = Math.floor(currentTime / 60);
+      const startMins = currentTime % 60;
+      const endTotal = currentTime + 90; // 1.5 hour class
+      const endHours = Math.floor(endTotal / 60);
+      const endMins = endTotal % 60;
+
+      const formatTime = (h: number, m: number) =>
+        `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+
+      newAssignments.push({
+        id: `auto_${Date.now()}_${index}`,
+        subjectId: subject.id,
+        subjectCode: subject.code,
+        subjectName: subject.name,
+        instructorId: instructor.id,
+        instructorName: instructor.name,
+        sectionId: section.id,
+        sectionCode: section.code,
+        academicYear: "2026-2027",
+        semester: "1st Semester",
+        schedule: [
+          {
+            day,
+            startTime: formatTime(startHours, startMins),
+            endTime: formatTime(endHours, endMins),
+            room: `RM${100 + index}`,
+          },
+        ],
+      });
+
+      // Increment time for next subject or reset if day changes
+      if (index % days.length === days.length - 1) {
+        currentTime += 90;
+      }
+    });
+
+    setSubjectAssignments((prev) => [
+      ...prev.filter((a) => a.sectionCode !== section.code),
+      ...newAssignments,
+    ]);
+
+    addToast(
+      `Generated ${newAssignments.length} assignments for ${section.code}`,
+      "success",
+    );
   };
 
   // Filter subjects based on filters
@@ -2316,9 +2489,7 @@ export default function AdminEnrollees({
                           <div className="action-buttons">
                             <button
                               className="action-btn review"
-                              onClick={() =>
-                                handleReviewRequirements(enrollee as any)
-                              }
+                              onClick={() => handleReviewRequirements(enrollee)}
                             >
                               Review
                             </button>
@@ -2939,64 +3110,102 @@ export default function AdminEnrollees({
                     <option value="2nd Semester">2nd Semester 2026-2027</option>
                   </select>
                 </div>
+
                 <div className="assignments-list">
-                  {filteredAssignments.map((assignment) => (
-                    <div key={assignment.id} className="assignment-card">
-                      <div className="assignment-header">
-                        <div className="assignment-title">
-                          <h4>
-                            {assignment.subjectCode} - {assignment.subjectName}
-                          </h4>
-                          <span className="section-tag">
-                            {assignment.sectionCode}
-                          </span>
+                  {classSections.map((section) => {
+                    const sectionAssignments = filteredAssignments.filter(
+                      (a) => a.sectionCode === section.code,
+                    );
+                    const isExpanded = expandedAssignmentSections[section.code];
+
+                    return (
+                      <div
+                        key={section.id}
+                        className="section-assignment-group"
+                      >
+                        <div
+                          className="section-group-header"
+                          onClick={() => toggleAssignmentSection(section.code)}
+                        >
+                          <div className="group-info">
+                            <FaLayerGroup />
+                            <h4>{section.code}</h4>
+                            <span className="count-tag">
+                              {sectionAssignments.length} Assignments
+                            </span>
+                          </div>
+                          <div className="group-actions">
+                            <button
+                              className="action-btn auto-assign"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAutoGenerateSchedule(section);
+                              }}
+                            >
+                              <FaMagic /> Auto-Assign
+                            </button>
+                            {isExpanded ? <FaChevronUp /> : <FaChevronDown />}
+                          </div>
                         </div>
-                        <div className="assignment-actions">
-                          <button
-                            className="action-btn edit"
-                            onClick={() => {
-                              setEditingAssignment(assignment);
-                              setShowAssignmentModal(true);
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="action-btn delete"
-                            onClick={() =>
-                              addToast(
-                                `Removed ${assignment.subjectCode} from schedule`,
-                                "success",
-                              )
-                            }
-                          >
-                            Remove
-                          </button>
-                        </div>
+
+                        {isExpanded && (
+                          <div className="section-assignments-content">
+                            {sectionAssignments.length > 0 ? (
+                              sectionAssignments.map((assignment) => (
+                                <div
+                                  key={assignment.id}
+                                  className="assignment-card mini"
+                                >
+                                  <div className="assignment-header">
+                                    <h5>
+                                      {assignment.subjectCode} -{" "}
+                                      {assignment.subjectName}
+                                    </h5>
+                                    <div className="mini-actions">
+                                      <button
+                                        onClick={() => {
+                                          setEditingAssignment(assignment);
+                                          setShowAssignmentModal(true);
+                                        }}
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          addToast("Removed", "info")
+                                        }
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="assignment-details-grid">
+                                    <p>
+                                      <strong>Instructor:</strong>{" "}
+                                      {assignment.instructorName}
+                                    </p>
+                                    <p>
+                                      <strong>Schedule:</strong>{" "}
+                                      {assignment.schedule
+                                        .map(
+                                          (s) =>
+                                            `${s.day} ${s.startTime}-${s.endTime} (${s.room})`,
+                                        )
+                                        .join(", ")}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="empty-assignment">
+                                <p>No schedules assigned to this section.</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div className="assignment-details">
-                        <p>
-                          <strong>Instructor:</strong>{" "}
-                          {assignment.instructorName}
-                        </p>
-                        <p>
-                          <strong>Schedule:</strong>
-                        </p>
-                        <ul className="schedule-list">
-                          {assignment.schedule.map((s, idx) => (
-                            <li key={idx}>
-                              {s.day}, {s.startTime} - {s.endTime} ({s.room})
-                            </li>
-                          ))}
-                        </ul>
-                        <p>
-                          <strong>Academic Year:</strong>{" "}
-                          {assignment.academicYear} | <strong>Semester:</strong>{" "}
-                          {assignment.semester}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -3012,7 +3221,10 @@ export default function AdminEnrollees({
               <div>
                 <h2>Application Review</h2>
                 <p>
-                  {selectedRequest.fullName} • {selectedRequest.studentNumber}
+                  {selectedRequest.fullName} •{" "}
+                  {isEnrollmentRequest(selectedRequest)
+                    ? selectedRequest.studentNumber
+                    : selectedRequest.id}
                 </p>
               </div>
               <button className="review-modal-close" onClick={closeReviewModal}>
@@ -3025,41 +3237,81 @@ export default function AdminEnrollees({
                 <div className="personal-information-card">
                   <div className="personal-info-grid">
                     <div className="personal-info-item">
-                      <span>Student Number</span>
-                      <strong>{selectedRequest.studentNumber}</strong>
+                      {isEnrollmentRequest(selectedRequest) ? (
+                        <>
+                          <span>Student Number</span>
+                          <strong>{selectedRequest.studentNumber}</strong>
+                        </>
+                      ) : (
+                        <>
+                          <span>Tracking ID</span>
+                          <strong>{selectedRequest.id}</strong>
+                        </>
+                      )}
                     </div>
                     <div className="personal-info-item">
                       <span>Full Name</span>
                       <strong>{selectedRequest.fullName}</strong>
                     </div>
+                    {!isEnrollmentRequest(selectedRequest) && (
+                      <>
+                        <div className="personal-info-item">
+                          <span>Email</span>
+                          <strong>{selectedRequest.personalInfo.email}</strong>
+                        </div>
+                        <div className="personal-info-item">
+                          <span>Contact</span>
+                          <strong>
+                            {selectedRequest.personalInfo.contactNumber}
+                          </strong>
+                        </div>
+                      </>
+                    )}
                     <div className="personal-info-item">
                       <span>Program</span>
                       <strong>{selectedRequest.program}</strong>
                     </div>
+                    {isEnrollmentRequest(selectedRequest) ? (
+                      <>
+                        <div className="personal-info-item">
+                          <span>Current Level</span>
+                          <strong>{selectedRequest.currentYearLevel}</strong>
+                        </div>
+                        <div className="personal-info-item">
+                          <span>Requested Level</span>
+                          <strong>
+                            {selectedRequest.program === "SHS" &&
+                            selectedRequest.requestedYearLevel === "College"
+                              ? "1st Year College"
+                              : selectedRequest.requestedYearLevel}
+                          </strong>
+                        </div>
+                        <div className="personal-info-item">
+                          <span>Academic Year</span>
+                          <strong>{selectedRequest.academicYear}</strong>
+                        </div>
+                        <div className="personal-info-item">
+                          <span>Semester</span>
+                          <strong>{selectedRequest.semester}</strong>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="personal-info-item">
+                        <span>Year Level</span>
+                        <strong>{selectedRequest.yearLevel}</strong>
+                      </div>
+                    )}
                     <div className="personal-info-item">
-                      <span>Current Level</span>
-                      <strong>{selectedRequest.currentYearLevel}</strong>
-                    </div>
-                    <div className="personal-info-item">
-                      <span>Requested Level</span>
+                      <span>
+                        {isEnrollmentRequest(selectedRequest)
+                          ? "Request Date"
+                          : "Application Date"}
+                      </span>
                       <strong>
-                        {selectedRequest.program === "SHS" &&
-                        selectedRequest.requestedYearLevel === "College"
-                          ? "1st Year College"
-                          : selectedRequest.requestedYearLevel}
+                        {isEnrollmentRequest(selectedRequest)
+                          ? selectedRequest.requestDate
+                          : selectedRequest.applicationDate}
                       </strong>
-                    </div>
-                    <div className="personal-info-item">
-                      <span>Academic Year</span>
-                      <strong>{selectedRequest.academicYear}</strong>
-                    </div>
-                    <div className="personal-info-item">
-                      <span>Semester</span>
-                      <strong>{selectedRequest.semester}</strong>
-                    </div>
-                    <div className="personal-info-item">
-                      <span>Request Date</span>
-                      <strong>{selectedRequest.requestDate}</strong>
                     </div>
                   </div>
                 </div>
@@ -3068,8 +3320,12 @@ export default function AdminEnrollees({
                 <h3>Document Requirements</h3>
                 {(() => {
                   const requirementItems = getEnrollmentRequirementItems(
-                    selectedRequest.currentYearLevel,
-                    selectedRequest.requestedYearLevel,
+                    isEnrollmentRequest(selectedRequest)
+                      ? selectedRequest.currentYearLevel
+                      : "",
+                    isEnrollmentRequest(selectedRequest)
+                      ? selectedRequest.requestedYearLevel
+                      : "",
                     selectedRequest.program,
                   );
                   const pendingCount = requirementItems.filter(
@@ -3188,7 +3444,9 @@ export default function AdminEnrollees({
               </div>
             </div>
             <div className="review-modal-footer">
-              {selectedRequest.enrollmentStatus === "Pending" && (
+              {(isEnrollmentRequest(selectedRequest)
+                ? selectedRequest.enrollmentStatus === "Pending"
+                : selectedRequest.status === "Pending") && (
                 <>
                   <button
                     className="action-btn approve"

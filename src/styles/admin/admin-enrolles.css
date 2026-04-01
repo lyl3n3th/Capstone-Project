@@ -1,5 +1,9 @@
 /* ==========================================================================
-   ROOT LAYOUT & SIDEBAR FIXES
+   ADMIN ENROLLEES - COMPLETE CSS STRUCTURE
+   ========================================================================== */
+
+/* ==========================================================================
+   1. ROOT LAYOUT & SIDEBAR FIXES
    ========================================================================== */
 .dashboard-layout {
   display: flex;
@@ -34,7 +38,7 @@
   transform: translateX(0);
 }
 
-/* Main Content - Will shift when sidebar is open on mobile */
+/* Main Content */
 .enrollees-content {
   flex: 1;
   width: 100%;
@@ -45,7 +49,7 @@
   transition: margin-left 0.3s ease-in-out;
 }
 
-/* Desktop: Content has margin-left to account for fixed sidebar */
+/* Desktop: Content has margin-left for fixed sidebar */
 @media (min-width: 1024px) {
   .enrollees-content {
     margin-left: 280px;
@@ -53,7 +57,7 @@
   }
 }
 
-/* Mobile: Content takes full width, sidebar overlays with transform */
+/* Mobile: Content takes full width */
 @media (max-width: 1023px) {
   .enrollees-content {
     margin-left: 0;
@@ -62,7 +66,7 @@
   }
 }
 
-/* Menu Toggle Button - Always visible on mobile */
+/* Menu Toggle Button */
 .menu-toggle {
   position: fixed;
   top: 16px;
@@ -88,31 +92,14 @@
   transform: translateY(-2px);
 }
 
-/* Hide menu toggle on desktop */
 @media (min-width: 1024px) {
   .menu-toggle {
     display: none;
   }
 }
 
-/* Overlay for mobile when sidebar is open */
-.mobile-sidebar-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.4);
-  border: none;
-  z-index: 1050;
-  display: none;
-}
-
-@media (max-width: 1023px) {
-  .mobile-sidebar-overlay {
-    display: block;
-  }
-}
-
 /* ==========================================================================
-   PAGE HEADER
+   2. PAGE HEADER
    ========================================================================== */
 .page-header {
   margin-bottom: 28px;
@@ -134,7 +121,7 @@
 }
 
 /* ==========================================================================
-   TABS
+   3. TABS
    ========================================================================== */
 .enrollment-tabs {
   display: flex;
@@ -187,13 +174,17 @@
 }
 
 /* ==========================================================================
-   STATS CARDS
+   4. STATS CARDS
    ========================================================================== */
 .stats-cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 24px;
+}
+
+.stats-cards.academic-stats {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .stat-card {
@@ -205,7 +196,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.05);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
 }
 
 .stat-card:hover {
@@ -237,8 +229,15 @@
   color: #111827;
 }
 
+@media (max-width: 768px) {
+  .stats-cards,
+  .stats-cards.academic-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ==========================================================================
-   CONTROLS
+   5. CONTROLS & FILTERS
    ========================================================================== */
 .controls {
   display: flex;
@@ -283,7 +282,7 @@
   font-size: 14px;
   color: #111827;
   box-sizing: border-box;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
 }
 
 .status-filter:focus {
@@ -293,7 +292,7 @@
 }
 
 /* ==========================================================================
-   TABLE STYLES
+   6. TABLE STYLES
    ========================================================================== */
 .table-container {
   overflow-x: auto;
@@ -336,8 +335,15 @@
   background: #f9fafb;
 }
 
+.no-results {
+  text-align: center;
+  padding: 48px;
+  color: #9ca3af;
+  font-size: 14px;
+}
+
 /* ==========================================================================
-   STATUS BADGES
+   7. STATUS BADGES
    ========================================================================== */
 .status-badge {
   display: inline-flex;
@@ -361,24 +367,6 @@
   color: #28a745;
 }
 
-/* Next Level Badge */
-.next-level-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: #e3f2fd;
-  color: #066287;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.next-icon {
-  font-size: 10px;
-}
-
-/* Enrollment Badge */
 .enrollment-badge {
   display: inline-flex;
   align-items: center;
@@ -404,8 +392,20 @@
   color: #dc2626;
 }
 
+.next-level-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #e3f2fd;
+  color: #066287;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* ==========================================================================
-   ACTION BUTTONS
+   8. ACTION BUTTONS
    ========================================================================== */
 .action-buttons {
   display: flex;
@@ -423,6 +423,9 @@
   font-size: 12px;
   white-space: nowrap;
   transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .action-btn.review {
@@ -469,17 +472,6 @@
   transform: translateY(-1px);
 }
 
-.action-btn.progress {
-  background: #066287;
-  color: white;
-  border-color: #066287;
-}
-
-.action-btn.progress:hover {
-  background: #1A3D5C;
-  transform: translateY(-1px);
-}
-
 .action-btn.cancel {
   background: #f0f0f0;
   color: #666;
@@ -489,8 +481,103 @@
   background: #e0e0e0;
 }
 
+.action-btn.add {
+  background: #066287;
+  color: white;
+  border: none;
+}
+
+.action-btn.add:hover {
+  background: #1A3D5C;
+  transform: translateY(-1px);
+}
+
+.action-btn.edit {
+  background: #f3e8ff;
+  color: #7c3aed;
+  border-color: #d8b4fe;
+}
+
+.action-btn.edit:hover {
+  background: #7c3aed;
+  color: white;
+}
+
+.action-btn.delete {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.action-btn.delete:hover {
+  background: #dc2626;
+  color: white;
+}
+
 /* ==========================================================================
-   MODALS
+   9. SECTION MANAGEMENT BAR
+   ========================================================================== */
+.section-management-bar {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.section-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #0369a1;
+}
+
+.section-info .section-icon {
+  font-size: 20px;
+}
+
+.section-actions-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.action-btn.auto-assign {
+  background: #10b981;
+  color: white;
+  border: none;
+}
+
+.action-btn.auto-assign:hover:not(:disabled) {
+  background: #059669;
+  transform: translateY(-1px);
+}
+
+.action-btn.auto-assign:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.action-btn.section-manager {
+  background: #066287;
+  color: white;
+  border: none;
+}
+
+.action-btn.section-manager:hover {
+  background: #1A3D5C;
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   10. MODALS
    ========================================================================== */
 .review-modal-overlay {
   position: fixed;
@@ -514,6 +601,14 @@
   overflow: hidden;
   max-height: 90vh;
   overflow-y: auto;
+}
+
+.application-review-modal {
+  max-width: 860px;
+}
+
+.confirmation-modal {
+  max-width: 450px;
 }
 
 .review-modal-header {
@@ -563,114 +658,9 @@
   border-top: 1px solid #e5e7eb;
 }
 
-/* Application Review Modal */
-.application-review-modal {
-  max-width: 860px;
-}
-
-.application-review-header {
-  align-items: flex-start;
-}
-
-.application-review-header p {
-  margin: 4px 0 0;
-  color: #6b7280;
-  font-size: 13px;
-}
-
-/* Student Details Modal */
-.student-details-modal {
-  max-width: 500px;
-}
-
-.student-details-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.detail-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.detail-label {
-  font-weight: 600;
-  color: #666;
-  font-size: 13px;
-}
-
-.detail-value {
-  color: #333;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.next-year-notice {
-  background: #e3f2fd;
-  padding: 12px;
-  border-radius: 8px;
-  margin-top: 8px;
-  color: #066287;
-  gap: 8px;
-  display: flex;
-  align-items: center;
-}
-
-/* Progression Modal */
-.progression-modal {
-  max-width: 450px;
-}
-
-.progression-content {
-  text-align: center;
-  padding: 8px 0;
-}
-
-.progression-content p {
-  margin: 0 0 16px;
-  color: #374151;
-}
-
-.progression-details {
-  background: #f8f9fa;
-  border-radius: 12px;
-  padding: 16px;
-  margin: 16px 0;
-  text-align: left;
-}
-
-.progression-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.progression-item:last-child {
-  border-bottom: none;
-}
-
-.progression-item span {
-  color: #6b7280;
-  font-size: 13px;
-}
-
-.progression-item strong {
-  color: #066287;
-  font-size: 14px;
-}
-
-.progression-note {
-  font-size: 12px;
-  color: #6b7280;
-  font-style: italic;
-}
-
-/* Personal Information Section */
+/* ==========================================================================
+   11. PERSONAL INFORMATION SECTION
+   ========================================================================== */
 .personal-information-section {
   margin-bottom: 24px;
 }
@@ -714,11 +704,9 @@
   font-weight: 600;
 }
 
-.personal-info-item.full-row {
-  grid-column: span 2;
-}
-
-/* Requirements Section */
+/* ==========================================================================
+   12. REQUIREMENTS SECTION
+   ========================================================================== */
 .requirements-section {
   margin-bottom: 24px;
 }
@@ -769,7 +757,6 @@
   background: #fee2e2;
 }
 
-/* Document Requirements List */
 .document-requirements-list {
   list-style: none;
   margin: 0;
@@ -783,7 +770,7 @@
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
-  padding: 12px;
+  padding: 16px;
   transition: all 0.2s ease;
 }
 
@@ -792,27 +779,69 @@
   border-color: #86efac;
 }
 
+.document-requirement-card.pending {
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.document-requirement-card.rejected {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
 .document-requirement-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.document-requirement-top p {
+.requirement-title p {
   margin: 0;
   font-weight: 600;
   color: #111827;
   font-size: 14px;
 }
 
-.verified-pill {
-  background: #d4edda;
+.requirement-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-icon {
+  font-size: 14px;
+}
+
+.status-icon.approved {
   color: #28a745;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 11px;
+}
+
+.status-icon.pending {
+  color: #f59e0b;
+}
+
+.status-icon.rejected {
+  color: #dc2626;
+}
+
+.status-text {
+  font-size: 12px;
   font-weight: 600;
+}
+
+.status-text.approved {
+  color: #28a745;
+}
+
+.status-text.pending {
+  color: #f59e0b;
+}
+
+.status-text.rejected {
+  color: #dc2626;
 }
 
 .document-requirement-actions {
@@ -821,28 +850,6 @@
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-}
-
-.view-document-btn {
-  background: none;
-  border: none;
-  color: #066287;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-
-.view-document-btn:hover {
-  background: #e3f2fd;
-  text-decoration: none;
-}
-
-.document-missing-label {
-  font-size: 12px;
-  color: #9ca3af;
-  font-style: italic;
 }
 
 .requirement-action-buttons {
@@ -851,197 +858,6 @@
 }
 
 .requirement-action {
-  padding: 4px 12px;
-  border: none;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.requirement-action.pass {
-  background: #d4edda;
-  color: #28a745;
-}
-
-.requirement-action.pass:hover {
-  background: #c3e6cb;
-}
-
-.requirement-action.redo {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.requirement-action.redo:hover {
-  background: #fecaca;
-}
-
-.requirement-action:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Attachment Viewer */
-.attachment-viewer-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  z-index: 2100;
-}
-
-.attachment-viewer {
-  width: 100%;
-  max-width: 800px;
-  background: #ffffff;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
-}
-
-.attachment-viewer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.attachment-viewer-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1A3D5C;
-}
-
-.attachment-viewer-close {
-  border: none;
-  background: transparent;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  font-size: 20px;
-  cursor: pointer;
-}
-
-.attachment-viewer-close:hover {
-  background: #f0f0f0;
-}
-
-.attachment-viewer-content {
-  padding: 20px;
-  max-height: 70vh;
-  overflow: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.attachment-viewer-content img {
-  max-width: 100%;
-  max-height: 60vh;
-  object-fit: contain;
-}
-
-.attachment-placeholder {
-  text-align: center;
-  padding: 40px;
-}
-
-.download-link {
-  display: inline-block;
-  margin-top: 16px;
-  padding: 8px 16px;
-  background: #066287;
-  color: white;
-  text-decoration: none;
-  border-radius: 8px;
-  font-weight: 600;
-}
-
-.download-link:hover {
-  background: #1A3D5C;
-}
-
-/* No Results */
-.no-results {
-  text-align: center;
-  padding: 48px;
-  color: #9ca3af;
-  font-size: 14px;
-}
-
-/* Requirement Title with Required Badge */
-.requirement-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.requirement-title p {
-  margin: 0;
-  font-weight: 600;
-  color: #111827;
-  font-size: 14px;
-}
-
-.required-badge {
-  background: #fee2e2;
-  color: #dc2626;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 10px;
-  font-weight: 600;
-}
-
-/* Requirement Status Badge */
-.requirement-status-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.status-icon {
-  font-size: 14px;
-}
-
-.status-icon.approved {
-  color: #28a745;
-}
-
-.status-icon.pending {
-  color: #f59e0b;
-}
-
-.status-icon.rejected {
-  color: #dc2626;
-}
-
-.status-text {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.status-text.approved {
-  color: #28a745;
-}
-
-.status-text.pending {
-  color: #f59e0b;
-}
-
-.status-text.rejected {
-  color: #dc2626;
-}
-
-/* Action Buttons with Icons */
-.requirement-action {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1059,7 +875,7 @@
   color: #28a745;
 }
 
-.requirement-action.pass:hover {
+.requirement-action.pass:hover:not(:disabled) {
   background: #c3e6cb;
   transform: translateY(-1px);
 }
@@ -1069,7 +885,7 @@
   color: #dc2626;
 }
 
-.requirement-action.redo:hover {
+.requirement-action.redo:hover:not(:disabled) {
   background: #fecaca;
   transform: translateY(-1px);
 }
@@ -1077,10 +893,8 @@
 .requirement-action:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  transform: none;
 }
 
-/* View Document Button with Icon */
 .view-document-btn {
   display: inline-flex;
   align-items: center;
@@ -1098,460 +912,85 @@
 
 .view-document-btn:hover {
   background: #e3f2fd;
-}
-
-/* Document Requirement Card Enhancements */
-.document-requirement-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 16px;
-  transition: all 0.2s ease;
-}
-
-.document-requirement-card.approved {
-  background: #f0fdf4;
-  border-color: #86efac;
-}
-
-.document-requirement-card.pending {
-  background: #fffbeb;
-  border-color: #fcd34d;
-}
-
-.document-requirement-card.rejected {
-  background: #fef2f2;
-  border-color: #fca5a5;
-}
-
-.document-requirement-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.document-requirement-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-/* Document Missing Label */
-.document-missing-label {
-  font-size: 12px;
-  color: #9ca3af;
-  font-style: italic;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* Add these styles to your admin-enrolles.css file */
-
-/* Requirement Status Badge - Additional styles */
-.requirement-status-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.status-icon {
-  font-size: 14px;
-}
-
-.status-icon.approved {
-  color: #28a745;
-}
-
-.status-icon.pending {
-  color: #f59e0b;
-}
-
-.status-icon.rejected {
-  color: #dc2626;
-}
-
-.status-text {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.status-text.approved {
-  color: #28a745;
-}
-
-.status-text.pending {
-  color: #f59e0b;
-}
-
-.status-text.rejected {
-  color: #dc2626;
-}
-
-/* Requirement Action Buttons with Icons */
-.requirement-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border: none;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.requirement-action.pass {
-  background: #d4edda;
-  color: #28a745;
-}
-
-.requirement-action.pass:hover {
-  background: #c3e6cb;
-  transform: translateY(-1px);
-}
-
-.requirement-action.redo {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.requirement-action.redo:hover {
-  background: #fecaca;
-  transform: translateY(-1px);
-}
-
-.requirement-action:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none;
-}
-
-/* View Document Button with Icon */
-.view-document-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  color: #066287;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 6px 12px;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-}
-
-.view-document-btn:hover {
-  background: #e3f2fd;
-}
-
-/* Document Requirement Card Enhancements */
-.document-requirement-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 16px;
-  transition: all 0.2s ease;
-}
-
-.document-requirement-card.approved {
-  background: #f0fdf4;
-  border-color: #86efac;
-}
-
-.document-requirement-card.pending {
-  background: #fffbeb;
-  border-color: #fcd34d;
-}
-
-.document-requirement-card.rejected {
-  background: #fef2f2;
-  border-color: #fca5a5;
-}
-
-.document-requirement-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.document-requirement-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-/* Document Missing Label */
-.document-missing-label {
-  font-size: 12px;
-  color: #9ca3af;
-  font-style: italic;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* Required Badge */
-.required-badge {
-  background: #fee2e2;
-  color: #dc2626;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 10px;
-  font-weight: 600;
-}
-
-/* Requirement Title */
-.requirement-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.requirement-title p {
-  margin: 0;
-  font-weight: 600;
-  color: #111827;
-  font-size: 14px;
-}
-
-/* Requirement Stats */
-.requirement-stats-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.requirement-stat {
-  background: #f8f9fa;
-  border-radius: 12px;
-  padding: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.requirement-stat span {
-  font-size: 12px;
-  color: #6b7280;
-}
-
-.requirement-stat strong {
-  font-size: 20px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.requirement-stat.pending {
-  background: #fef3c7;
-}
-
-.requirement-stat.approved {
-  background: #d4edda;
-}
-
-.requirement-stat.redo {
-  background: #fee2e2;
-}
-
-/* Document Requirements List */
-.document-requirements-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* Attachment Viewer */
-.attachment-viewer-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  z-index: 2100;
-}
-
-.attachment-viewer {
-  width: 100%;
-  max-width: 800px;
-  background: #ffffff;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
-}
-
-.attachment-viewer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.attachment-viewer-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1A3D5C;
-}
-
-.attachment-viewer-close {
-  border: none;
-  background: transparent;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  font-size: 20px;
-  cursor: pointer;
-}
-
-.attachment-viewer-close:hover {
-  background: #f0f0f0;
-}
-
-.attachment-viewer-content {
-  padding: 20px;
-  max-height: 70vh;
-  overflow: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.attachment-viewer-content img {
-  max-width: 100%;
-  max-height: 60vh;
-  object-fit: contain;
-}
-
-.attachment-placeholder {
-  text-align: center;
-  padding: 40px;
-}
-
-.download-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  padding: 8px 16px;
-  background: #066287;
-  color: white;
-  text-decoration: none;
-  border-radius: 8px;
-  font-weight: 600;
-}
-
-.download-link:hover {
-  background: #1A3D5C;
-}
-
-/* Confirmation Modal */
-.confirmation-modal {
-  max-width: 450px;
-}
-
-.confirmation-note {
-  font-size: 13px;
-  color: #6b7280;
-  margin-top: 8px;
-}
-
-.confirmation-note.warning {
-  color: #dc2626;
 }
 
 /* ==========================================================================
-   SECTION MANAGEMENT BAR
+   13. ATTACHMENT VIEWER
    ========================================================================== */
-.section-management-bar {
-  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-  border: 1px solid #bae6fd;
+.attachment-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 2100;
+}
+
+.attachment-viewer {
+  width: 100%;
+  max-width: 800px;
+  background: #ffffff;
   border-radius: 12px;
-  padding: 16px 20px;
-  margin-bottom: 24px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+}
+
+.attachment-viewer-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
-.section-info {
+.attachment-viewer-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1A3D5C;
+}
+
+.attachment-viewer-content {
+  padding: 20px;
+  max-height: 70vh;
+  overflow: auto;
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 14px;
-  font-weight: 500;
-  color: #0369a1;
+  justify-content: center;
 }
 
-.section-info .section-icon {
-  font-size: 20px;
+.attachment-viewer-content img {
+  max-width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
 }
 
-.section-actions-buttons {
-  display: flex;
-  gap: 12px;
+.attachment-placeholder {
+  text-align: center;
+  padding: 40px;
 }
 
-.action-btn.auto-assign {
-  background: #10b981;
-  color: white;
-  border: none;
+.download-link {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-
-.action-btn.auto-assign:hover:not(:disabled) {
-  background: #059669;
-  transform: translateY(-1px);
-}
-
-.action-btn.auto-assign:disabled {
-  background: #9ca3af;
-  cursor: not-allowed;
-  opacity: 0.6;
-  transform: none;
-}
-
-.action-btn.section-manager {
+  margin-top: 16px;
+  padding: 8px 16px;
   background: #066287;
   color: white;
-  border: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 600;
 }
 
-.action-btn.section-manager:hover {
+.download-link:hover {
   background: #1A3D5C;
-  transform: translateY(-1px);
 }
 
 /* ==========================================================================
-   SECTION MANAGER MODAL
+   14. SECTION MANAGER MODAL
    ========================================================================== */
 .section-manager-overlay,
 .section-students-overlay {
@@ -1579,7 +1018,6 @@
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
 }
 
-/* Modal Header */
 .modal-header {
   display: flex;
   align-items: center;
@@ -1612,14 +1050,12 @@
   color: #1f2937;
 }
 
-/* Modal Body */
 .modal-body {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
 }
 
-/* Modal Footer */
 .modal-footer {
   padding: 16px 24px;
   border-top: 1px solid #e5e7eb;
@@ -1629,7 +1065,172 @@
 }
 
 /* ==========================================================================
-   PENDING ALERT
+   15. SECTIONS GRID
+   ========================================================================== */
+.sections-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.section-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 16px;
+  transition: all 0.2s ease;
+}
+
+.section-card:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.section-card.full {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.section-card .section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.section-card .section-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1A3D5C;
+}
+
+.section-status {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.section-status.available {
+  background: #d4edda;
+  color: #28a745;
+}
+
+.section-status.full {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.section-details {
+  margin-bottom: 12px;
+}
+
+.section-details p {
+  margin: 6px 0;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.section-details strong {
+  color: #111827;
+  font-weight: 600;
+}
+
+.capacity-container {
+  margin: 12px 0;
+}
+
+.capacity-bar {
+  background: #e5e7eb;
+  border-radius: 12px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.capacity-fill {
+  background: #10b981;
+  border-radius: 12px;
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.section-card.full .capacity-fill {
+  background: #ef4444;
+}
+
+.capacity-text {
+  display: block;
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 6px;
+  text-align: right;
+}
+
+.section-card .section-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.section-card .section-actions .action-btn {
+  flex: 1;
+  justify-content: center;
+}
+
+/* ==========================================================================
+   16. MANUAL ASSIGNMENT
+   ========================================================================== */
+.manual-assignment {
+  background: #f9fafb;
+  border-radius: 16px;
+  padding: 20px;
+  margin-top: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.manual-assignment h3 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1A3D5C;
+}
+
+.assignment-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.assignment-controls select {
+  flex: 1;
+  min-width: 200px;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+}
+
+.assignment-controls select:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.1);
+}
+
+.assignment-controls .action-btn.assign {
+  background: #066287;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+}
+
+/* ==========================================================================
+   17. PENDING ALERT
    ========================================================================== */
 .pending-alert {
   background: #fef3c7;
@@ -1665,822 +1266,242 @@
   color: #78350f;
 }
 
-.pending-alert .action-btn.auto-assign {
-  background: #f59e0b;
-  flex-shrink: 0;
-}
-
-.pending-alert .action-btn.auto-assign:hover {
-  background: #d97706;
-}
-
 /* ==========================================================================
-   SECTIONS GRID
+   18. ADD SECTION FORM
    ========================================================================== */
-.sections-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 20px;
+.add-section-form {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
   margin-bottom: 24px;
 }
 
-.section-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 16px;
-  transition: all 0.2s ease;
-}
-
-.section-card:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
-}
-
-.section-card.full {
-  background: #fef2f2;
-  border-color: #fecaca;
-}
-
-.section-card.full:hover {
-  box-shadow: 0 8px 24px rgba(220, 38, 38, 0.1);
-}
-
-/* Section Card Header */
-.section-card .section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.section-card .section-header h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  color: #1A3D5C;
-}
-
-.section-status {
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.section-status.available {
-  background: #d4edda;
-  color: #28a745;
-}
-
-.section-status.full {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-/* Section Details */
-.section-details {
-  margin-bottom: 12px;
-}
-
-.section-details p {
-  margin: 6px 0;
-  font-size: 13px;
-  color: #4b5563;
-}
-
-.section-details strong {
-  color: #111827;
-  font-weight: 600;
-}
-
-/* Capacity Container */
-.capacity-container {
-  margin: 12px 0;
-}
-
-.capacity-bar {
-  background: #e5e7eb;
-  border-radius: 12px;
-  height: 8px;
-  overflow: hidden;
-}
-
-.capacity-fill {
-  background: #10b981;
-  border-radius: 12px;
-  height: 100%;
-  transition: width 0.3s ease;
-}
-
-.section-card.full .capacity-fill {
-  background: #ef4444;
-}
-
-.capacity-text {
-  display: block;
-  font-size: 11px;
-  color: #6b7280;
-  margin-top: 6px;
-  text-align: right;
-}
-
-/* Section Actions */
-.section-card .section-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #f3f4f6;
-}
-
-.section-card .section-actions .action-btn {
-  flex: 1;
-  justify-content: center;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.section-card .section-actions .action-btn.view {
-  background: #e3f2fd;
-  color: #066287;
-  border-color: #066287;
-}
-
-.section-card .section-actions .action-btn.view:hover {
-  background: #066287;
-  color: white;
-}
-
-.section-card .section-actions .action-btn.edit {
-  background: #f3e8ff;
-  color: #7c3aed;
-  border-color: #d8b4fe;
-}
-
-.section-card .section-actions .action-btn.edit:hover {
-  background: #7c3aed;
-  color: white;
-}
-
-/* ==========================================================================
-   MANUAL ASSIGNMENT SECTION
-   ========================================================================== */
-.manual-assignment {
-  background: #f9fafb;
-  border-radius: 16px;
-  padding: 20px;
-  margin-top: 8px;
-  border: 1px solid #e5e7eb;
-}
-
-.manual-assignment h3 {
-  margin: 0 0 16px 0;
+.add-section-form h3 {
   font-size: 16px;
   font-weight: 600;
-  color: #1A3D5C;
+  color: #1a3d5c;
+  margin-bottom: 16px;
 }
 
-.assignment-controls {
+.add-section-form-row {
   display: flex;
+  align-items: flex-end;
   gap: 12px;
+  margin-bottom: 16px;
   flex-wrap: wrap;
 }
 
-.assignment-controls select {
+.add-section-form-row input,
+.add-section-form-row select {
   flex: 1;
-  min-width: 200px;
-  padding: 10px 12px;
+  min-width: 150px;
+  height: 40px;
   border: 1px solid #d1d5db;
   border-radius: 8px;
-  font-size: 14px;
-  background: white;
-  cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.assignment-controls select:focus {
-  outline: none;
-  border-color: #066287;
-  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.1);
-}
-
-.assignment-controls .action-btn.assign {
-  background: #066287;
-  color: white;
-  border: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-}
-
-.assignment-controls .action-btn.assign:hover {
-  background: #1A3D5C;
-  transform: translateY(-1px);
-}
-
-/* ==========================================================================
-   STUDENTS TABLE MODAL
-   ========================================================================== */
-.section-students-modal {
-  max-width: 700px;
-}
-
-.students-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.students-table th,
-.students-table td {
-  padding: 12px;
-  text-align: left;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.students-table th {
-  background: #f9fafb;
-  font-weight: 600;
-  color: #4b5563;
-  font-size: 13px;
-}
-
-.students-table td {
+  background: #ffffff;
   font-size: 14px;
   color: #374151;
+  padding: 0 12px;
 }
 
-.students-table tbody tr:hover td {
-  background: #f9fafb;
-}
-
-/* ==========================================================================
-   RESPONSIVE DESIGN
-   ========================================================================== */
-@media (max-width: 768px) {
-  .section-management-bar {
-    flex-direction: column;
-    align-items: stretch;
-    text-align: center;
-  }
-  
-  .section-info {
-    justify-content: center;
-  }
-  
-  .section-actions-buttons {
-    justify-content: center;
-  }
-  
-  .sections-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .assignment-controls {
-    flex-direction: column;
-  }
-  
-  .assignment-controls select,
-  .assignment-controls .action-btn.assign {
-    width: 100%;
-  }
-  
-  .section-manager-modal,
-  .section-students-modal {
-    max-width: 95%;
-    margin: 16px;
-  }
-  
-  .modal-header {
-    padding: 16px 20px;
-  }
-  
-  .modal-body {
-    padding: 16px;
-  }
-  
-  .pending-alert {
-    flex-direction: column;
-    text-align: center;
-  }
-  
-  .pending-alert .action-btn.auto-assign {
-    width: 100%;
-  }
-  
-  .section-card .section-actions {
-    flex-direction: column;
-  }
-  
-  .students-table {
-    display: block;
-    overflow-x: auto;
-  }
-}
-
-/* ==========================================================================
-   ANIMATIONS
-   ========================================================================== */
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.section-manager-modal,
-.section-students-modal {
-  animation: slideIn 0.2s ease-out;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.section-manager-overlay,
-.section-students-overlay {
-  animation: fadeIn 0.2s ease-out;
-}
-
-/* ==========================================================================
-   UTILITY CLASSES
-   ========================================================================== */
-.text-center {
-  text-align: center;
-}
-
-.mt-4 {
-  margin-top: 16px;
-}
-
-.mb-4 {
-  margin-bottom: 16px;
-}
-
-.gap-2 {
-  gap: 8px;
-}
-
-.flex {
-  display: flex;
-}
-
-.items-center {
-  align-items: center;
-}
-
-.justify-between {
-  justify-content: space-between;
-}
-
-/* ==========================================================================
-   ACADEMIC MANAGEMENT TAB
-   ========================================================================== */
-
-/* Academic Management Container */
-.academic-management-container {
-  background: #ffffff;
-  border-radius: 18px;
-  border: 1px solid #e5e7eb;
-  overflow: hidden;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
-}
-
-/* Academic Sub-tabs */
-.academic-subtabs {
-  display: flex;
-  gap: 4px;
-  padding: 16px 20px 0 20px;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.subtab-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  background: transparent;
-  border: none;
-  font-size: 14px;
-  font-weight: 600;
-  color: #6b7280;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border-radius: 8px 8px 0 0;
-  position: relative;
-}
-
-.subtab-btn:hover {
-  color: #066287;
-  background: rgba(6, 98, 135, 0.05);
-}
-
-.subtab-btn.active {
-  color: #066287;
-  background: #ffffff;
-  border-bottom: 2px solid #066287;
-}
-
-/* Management Section */
-.management-section {
-  padding: 24px;
-}
-
-.section-header-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.section-header-actions h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  color: #1A3D5C;
-}
-
-.action-btn.add {
-  background: #066287;
-  color: white;
-  border: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-}
-
-.action-btn.add:hover {
-  background: #1A3D5C;
-  transform: translateY(-1px);
-}
-
-.action-btn.edit {
-  background: #f3e8ff;
-  color: #7c3aed;
-  border-color: #d8b4fe;
-}
-
-.action-btn.edit:hover {
-  background: #7c3aed;
-  color: white;
-}
-
-.action-btn.delete {
-  background: #fee2e2;
-  color: #dc2626;
-  border-color: #fecaca;
-}
-
-.action-btn.delete:hover {
-  background: #dc2626;
-  color: white;
-}
-
-/* ==========================================================================
-   SUBJECTS MANAGEMENT
-   ========================================================================== */
-
-.subjects-filter {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
-}
-
-.filter-select {
-  padding: 8px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  font-size: 14px;
-  background: white;
-  cursor: pointer;
-  min-width: 160px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.filter-select:focus {
+.add-section-form-row input:focus,
+.add-section-form-row select:focus {
   outline: none;
   border-color: #066287;
   box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.1);
 }
 
-.subjects-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 20px;
-}
-
-.subject-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 16px;
-  transition: all 0.2s ease;
-}
-
-.subject-card:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
-}
-
-.subject-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.subject-header h4 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: #1A3D5C;
-}
-
-.subject-badge {
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
-  background: #e3f2fd;
-  color: #066287;
-}
-
-.subject-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: #111827;
-  margin: 0 0 8px 0;
-}
-
-.subject-units {
-  font-size: 12px;
-  color: #10b981;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-}
-
-.subject-details {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #f3f4f6;
-}
-
-.subject-details span {
-  font-size: 12px;
-  color: #6b7280;
-  background: #f9fafb;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-
-.subject-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
 /* ==========================================================================
-   INSTRUCTORS MANAGEMENT
+   19. CLASS ASSIGNMENTS SECTION
    ========================================================================== */
-
-.instructor-search {
-  position: relative;
-  margin-bottom: 24px;
-}
-
-.instructor-search .search-icon {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #9ca3af;
-}
-
-.instructor-search input {
-  width: 100%;
-  max-width: 400px;
-  padding: 10px 12px 10px 36px;
-  border: 1px solid #d1d5db;
-  border-radius: 10px;
-  font-size: 14px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.instructor-search input:focus {
-  outline: none;
-  border-color: #066287;
-  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.1);
-}
-
-.instructors-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 20px;
-}
-
-.instructor-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 20px;
-  display: flex;
-  gap: 16px;
-  transition: all 0.2s ease;
-}
-
-.instructor-card:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
-}
-
-.instructor-avatar {
-  width: 60px;
-  height: 60px;
-  background: linear-gradient(135deg, #1A3D5C 0%, #066287 100%);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.instructor-avatar svg {
-  font-size: 28px;
-  color: white;
-}
-
-.instructor-info {
-  flex: 1;
-}
-
-.instructor-info h4 {
-  margin: 0 0 4px 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: #1A3D5C;
-}
-
-.instructor-info p {
-  margin: 4px 0;
-  font-size: 13px;
-  color: #6b7280;
-}
-
-.instructor-info .department {
-  color: #066287;
-  font-weight: 600;
-}
-
-.instructor-info .contact {
-  font-size: 12px;
-  color: #9ca3af;
-}
-
-.instructor-actions {
-  display: flex;
-  gap: 8px;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.instructor-actions .action-btn {
-  padding: 6px 12px;
-  font-size: 11px;
-}
-
-/* ==========================================================================
-   CLASS ASSIGNMENTS
-   ========================================================================== */
-
 .assignments-filters {
   display: flex;
   gap: 12px;
   margin-bottom: 24px;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.assignments-filters .filter-select {
+  padding: 10px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+  min-width: 180px;
 }
 
 .assignments-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
 }
 
-.assignment-card {
-  background: #ffffff;
+.section-assignment-group {
+  background: white;
   border: 1px solid #e5e7eb;
   border-radius: 16px;
-  padding: 20px;
-  transition: all 0.2s ease;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
-.assignment-card:hover {
+.section-assignment-group:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: #cbd5e1;
 }
 
-.assignment-header {
+.section-group-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #f3f4f6;
+  padding: 18px 24px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  cursor: pointer;
+  transition: background 0.2s ease;
+  border-bottom: 1px solid #e5e7eb;
 }
 
-.assignment-title {
+.section-group-header:hover {
+  background: linear-gradient(135deg, #f1f5f9 0%, #e9ecef 100%);
+}
+
+.group-info {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
 }
 
-.assignment-title h4 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: #1A3D5C;
+.group-info svg {
+  font-size: 20px;
+  color: #066287;
 }
 
-.section-tag {
+.group-info h4 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1A3D5C;
+  font-family: monospace;
+  letter-spacing: 0.5px;
+}
+
+.count-tag {
   background: #e3f2fd;
   color: #066287;
-  padding: 4px 10px;
-  border-radius: 12px;
+  padding: 4px 12px;
+  border-radius: 20px;
   font-size: 12px;
   font-weight: 600;
 }
 
-.assignment-actions {
+.group-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.group-actions svg {
+  font-size: 18px;
+  
+  transition: transform 0.2s ease;
+}
+
+.section-assignments-content {
+  padding: 20px;
+  background: #ffffff;
+}
+
+.assignment-card.mini {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  transition: all 0.2s ease;
+}
+
+.assignment-card.mini:last-child {
+  margin-bottom: 0;
+}
+
+.assignment-card.mini:hover {
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-color: #cbd5e1;
+}
+
+.assignment-card.mini .assignment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.assignment-card.mini .assignment-header h5 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1A3D5C;
+}
+
+.mini-actions {
   display: flex;
   gap: 8px;
 }
 
-.assignment-details {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.mini-actions button {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  color: #6b7280;
 }
 
-.assignment-details p {
-  margin: 0;
+.mini-actions button:first-child:hover {
+  background: #e3f2fd;
+  color: #066287;
+}
+
+.mini-actions button:last-child:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.assignment-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 12px;
   font-size: 13px;
+}
+
+.assignment-details-grid p {
+  margin: 0;
   color: #4b5563;
 }
 
-.assignment-details strong {
+.assignment-details-grid strong {
   color: #111827;
   font-weight: 600;
 }
 
-.schedule-list {
-  margin: 4px 0 0 20px;
-  padding: 0;
-}
-
-.schedule-list li {
-  margin: 4px 0;
-  font-size: 13px;
-  color: #6b7280;
+.empty-assignment {
+  text-align: center;
+  padding: 40px;
+  color: #9ca3af;
+  font-size: 14px;
 }
 
 /* ==========================================================================
-   ACADEMIC STATS CARDS - SPACE BETWEEN LAYOUT
-   ========================================================================== */
-.stats-cards.academic-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-  margin-bottom: 24px;
-}
-
-@media (max-width: 768px) {
-  .stats-cards.academic-stats {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* ==========================================================================
-   SUBJECTS TABLE VIEW STYLES
+   20. SUBJECTS MANAGEMENT TABLE
    ========================================================================== */
 .subjects-table-view {
   width: 100%;
@@ -2637,48 +1658,31 @@
   font-weight: 600;
 }
 
-.empty-row {
-  text-align: center;
-  color: #9ca3af;
-  padding: 32px !important;
+.minor-badge {
+  background: #fff3cd;
+  color: #856404;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
 }
 
-/* Table Action Buttons */
-.table-actions {
+.major-badge {
+  background: #d4edda;
+  color: #28a745;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.subjects-filter {
   display: flex;
-  gap: 8px;
-}
-
-.icon-btn {
-  background: none;
-  border: none;
-  padding: 6px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
 }
-
-.icon-btn.edit {
-  color: #066287;
-}
-
-.icon-btn.edit:hover {
-  background: #e3f2fd;
-  transform: translateY(-1px);
-}
-
-.icon-btn.delete {
-  color: #dc2626;
-}
-
-.icon-btn.delete:hover {
-  background: #fee2e2;
-  transform: translateY(-1px);
-}
-
 
 .filter-group {
   display: flex;
@@ -2689,15 +1693,18 @@
   border-radius: 8px;
   border: 1px solid #e5e7eb;
 }
+
 .filter-icon {
   color: #6b7280;
   font-size: 14px;
 }
+
 .filter-group .filter-select {
   border: none;
   background: transparent;
   padding-left: 0;
 }
+
 .filter-checkbox {
   display: flex;
   align-items: center;
@@ -2706,151 +1713,174 @@
   color: #374151;
   cursor: pointer;
 }
-.minor-badge {
-  background: #fff3cd;
-  color: #856404;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
-}
-.major-badge {
-  background: #d4edda;
-  color: #28a745;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
-}
-.action-btn.edit {
-  background: #e3f2fd;
-  color: #066287;
-  border-color: #066287;
-}
-.action-btn.edit:hover {
-  background: #066287;
-  color: white;
-}
-.action-btn.delete {
-  background: #fee2e2;
-  color: #dc2626;
-  border-color: #fecaca;
-}
-.action-btn.delete:hover {
-  background: #dc2626;
-  color: white;
-}
-.icon-btn.edit:hover { background: #e3f2fd; transform: translateY(-1px); }
-.icon-btn.delete:hover { background: #fee2e2; transform: translateY(-1px); }
 
+.filter-select {
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+  min-width: 160px;
+}
 
 /* ==========================================================================
-   RESPONSIVE FOR SUBJECTS TABLE
+   21. INSTRUCTORS GRID
    ========================================================================== */
-@media (max-width: 768px) {
-  .semesters-container {
-    padding: 0 12px 12px 12px;
-  }
-  
-  .subjects-table th,
-  .subjects-table td {
-    padding: 8px 12px;
-  }
-  
-  .program-section-header {
-    padding: 12px 16px;
-  }
-  
-  .year-level-header {
-    padding: 10px 16px;
-  }
-  
-  .semester-header {
-    padding: 10px 12px;
-  }
-}
-/* Mobile Responsive */
-@media (max-width: 768px) {
-  .requirement-stats-row {
-    grid-template-columns: 1fr;
-  }
-  
-  .document-requirement-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  
-  .requirement-action-buttons {
-    display: flex;
-    gap: 8px;
-    justify-content: center;
-  }
-  
-  .attachment-viewer {
-    max-width: 95%;
-    margin: 16px;
-  }
+.instructor-search {
+  position: relative;
+  margin-bottom: 24px;
 }
 
-
-/* Mobile Responsive */
-@media (max-width: 768px) {
-  .enrollees-content {
-    padding: 80px 16px 24px;
-  }
-  
-  .page-header h1 {
-    font-size: 28px;
-  }
-  
-  .stats-cards {
-    grid-template-columns: 1fr;
-  }
-  
-  .controls {
-    flex-direction: column;
-  }
-  
-  .search-input,
-  .status-filter {
-    width: 100%;
-    min-width: auto;
-  }
-  
-  .enrollment-tabs {
-    flex-wrap: wrap;
-  }
-  
-  .tab-btn {
-    flex: 1;
-    justify-content: center;
-  }
-  
-  .personal-info-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .personal-info-item.full-row {
-    grid-column: span 1;
-  }
-  
-  .requirement-stats-row {
-    grid-template-columns: 1fr;
-  }
-  
-  .review-modal {
-    max-width: 95%;
-    margin: 16px;
-  }
-  
-  .application-review-modal {
-    max-width: 95%;
-  }
+.instructor-search .search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9ca3af;
 }
 
-/* Form Styles for Modals */
-.form-group {
+.instructor-search input {
+  width: 100%;
+  max-width: 400px;
+  padding: 10px 12px 10px 36px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.instructors-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 20px;
+}
+
+.instructor-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  gap: 16px;
+  transition: all 0.2s ease;
+}
+
+.instructor-card:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.instructor-avatar {
+  width: 60px;
+  height: 60px;
+  background: linear-gradient(135deg, #1A3D5C 0%, #066287 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.instructor-avatar svg {
+  font-size: 28px;
+  color: white;
+}
+
+.instructor-info {
   flex: 1;
+}
+
+.instructor-info h4 {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1A3D5C;
+}
+
+.instructor-info p {
+  margin: 4px 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.instructor-info .department {
+  color: #066287;
+  font-weight: 600;
+}
+
+.instructor-actions {
+  display: flex;
+  gap: 8px;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.instructor-actions .action-btn {
+  padding: 6px 12px;
+  font-size: 11px;
+}
+
+/* ==========================================================================
+   22. ACADEMIC SUBTABS
+   ========================================================================== */
+.academic-subtabs {
+  display: flex;
+  gap: 4px;
+  padding: 16px 20px 0 20px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.subtab-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-radius: 8px 8px 0 0;
+}
+
+.subtab-btn:hover {
+  color: #066287;
+  background: rgba(6, 98, 135, 0.05);
+}
+
+.subtab-btn.active {
+  color: #066287;
+  background: #ffffff;
+  border-bottom: 2px solid #066287;
+}
+
+.management-section {
+  padding: 24px;
+}
+
+.section-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.section-header-actions h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1A3D5C;
+}
+
+/* ==========================================================================
+   23. FORM STYLES
+   ========================================================================== */
+.form-group {
   display: flex;
   flex-direction: column;
   margin-bottom: 16px;
@@ -2858,219 +1888,138 @@
 
 .form-group label {
   font-size: 14px;
-  font-weight: bold;
-  color: #333;
+  font-weight: 600;
+  color: #374151;
   margin-bottom: 8px;
-  text-align: left;
 }
 
 .form-group input,
-.form-group select {
-  padding: 12px;
-  border: 1px solid #e0e0e0;
-  border-radius: 10px;
+.form-group select,
+.form-group textarea {
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
   font-size: 14px;
   background: white;
+  transition: all 0.2s ease;
 }
 
 .form-group input:focus,
-.form-group select:focus {
-  border-color: #333;
+.form-group select:focus,
+.form-group textarea:focus {
   outline: none;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.form-group select {
-  cursor: pointer;
-}
-
-/* 
-   FORM STYLES - ADD SECTION & SCHEDULE
-    */
-
-/* Add Section Form */
-.add-section-form {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 24px;
-}
-
-.add-section-form h3 {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1a3d5c;
-  margin-bottom: 16px;
-}
-
-/* Add Section Button Style */
-.add-section-btn {
-  background: #066287;
-  color: #fff;
-  font-weight: 600;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 16px;
-  margin-left: 8px;
-  cursor: pointer;
-  transition: background 0.2s, transform 0.2s;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  white-space: nowrap;
-  min-width: fit-content;
-}
-.add-section-btn:hover {
-  background: #04496b;
-  transform: translateY(-1px);
-}
-
-/* Form Row - for horizontal layout of form groups in add section */
-.add-section-form-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-
-.add-section-form-row .form-group,
-.add-section-form-row input,
-.add-section-form-row select {
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  flex: 1;
-  min-width: 150px;
-}
-
-.add-section-form-row input,
-.add-section-form-row select {
-  height: 40px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #ffffff;
-  font-size: 14px;
-  color: #374151;
-  padding: 0 12px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.add-section-form-row input:focus,
-.add-section-form-row select:focus {
   border-color: #066287;
-  outline: none;
   box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.1);
 }
 
-.add-section-form-row select {
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
-  background-position: right 12px center;
-  background-repeat: no-repeat;
-  background-size: 16px;
-  padding-right: 40px;
-}
-
-.form-row .form-group {
-  margin-bottom: 0;
-}
-
-/* Schedule Inputs - for time schedule fields */
 .schedule-inputs {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
-  padding: 16px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
   margin-top: 8px;
 }
 
-.schedule-inputs .form-group,
-.schedule-inputs input {
-  width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-}
-
-.schedule-inputs input {
-  height: 40px;
-}
-
-.schedule-inputs .form-group {
-  margin-bottom: 0;
-}
-
-.schedule-inputs .form-group label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #374151;
-  margin-bottom: 6px;
-}
-
-.schedule-inputs .form-group input {
-  padding: 10px;
-  font-size: 13px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-}
-
-.schedule-inputs .form-group input::placeholder {
-  color: #9ca3af;
-}
-
-/* Select dropdowns in modals */
-.student-select,
-.section-select {
-  padding: 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 10px;
-  font-size: 14px;
-  background: #ffffff;
-  color: #374151;
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
-  background-position: right 12px center;
-  background-repeat: no-repeat;
-  background-size: 16px;
-  padding-right: 40px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.student-select:focus,
-.section-select:focus {
-  border-color: #066287;
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.1);
-}
-
-/* Responsive adjustments for schedule inputs */
 @media (max-width: 1024px) {
   .schedule-inputs {
     grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
-  .add-section-form-row {
-    flex-direction: column;
-    align-items: stretch;
   }
 }
 
 @media (max-width: 768px) {
   .schedule-inputs {
     grid-template-columns: 1fr;
-    gap: 10px;
   }
-
+  
   .add-section-form-row {
     flex-direction: column;
     align-items: stretch;
   }
+  
+  .personal-info-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .requirement-stats-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .assignment-controls {
+    flex-direction: column;
+  }
+  
+  .section-group-header {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  
+  .assignment-details-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
+   24. ANIMATIONS
+   ========================================================================== */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.section-manager-modal,
+.section-students-modal,
+.review-modal {
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.section-manager-overlay,
+.section-students-overlay,
+.review-modal-overlay {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* ==========================================================================
+   25. UTILITY CLASSES
+   ========================================================================== */
+.text-center {
+  text-align: center;
+}
+
+.mt-4 {
+  margin-top: 16px;
+}
+
+.mb-4 {
+  margin-bottom: 16px;
+}
+
+.gap-2 {
+  gap: 8px;
+}
+
+.flex {
+  display: flex;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-between {
+  justify-content: space-between;
 }
