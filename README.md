@@ -81,19 +81,31 @@ export default defineConfig([
 // install dependencies
 
 // npm install (just this)
+
 //npm run dev (just this)
+
 // cp .env.example .env
 
 // python -m venv .venv (/)
+
 // .venv\Scripts\activate.bat (/)
+
 // pip install -r requirements.txt (/)
+
 // python manage.py migrate (/)
+
 // python manage.py runserver (/)
 
+// just in case set up...
+
 // npm install axios @supabase/supabase-js react-icons
+
 // cp .env.example .env
 
 // pip install django djangorestframework
+
 // pip install django-cors-headers
+
 // pip install python-dotenv
+
 // pip freeze > requirements.txt
