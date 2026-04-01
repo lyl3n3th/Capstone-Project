@@ -1,39 +1,23 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Progress from "../../components/Progress";
 import { StatusDropdown } from "../../components/common/StatusDropdown";
 import { BranchCard } from "../../components/common/BranchCard";
 import { ActionButtons } from "../../components/common/ActionButtons";
 import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
-
-// Generate tracking number
-function generateAICSTrackingNumber() {
-  const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase();
-  return `AICS-${datePart}-${randomPart}`;
-}
+import {
+  admissionBranches,
+  admissionStatusOptions,
+  generateAicsTrackingNumber,
+} from "../../services/admission";
 
 // Data
-const branches = [
-  { code: "bacoor", name: "Bacoor" },
-  { code: "taytay", name: "Taytay" },
-  { code: "GMA", name: "GMA" },
-];
-
-const statusOptions = [
-  "Junior High Completer",
-  "Senior High Graduate",
-  "Transferee",
-  "Foreign Student",
-  "Returnee",
-];
-
 const branchRules: Record<string, string[]> = {
-  "Junior High Completer": ["bacoor", "taytay", "GMA"],
+  "Junior High Completer": ["bacoor", "taytay", "gma"],
   "Senior High Graduate": ["bacoor"],
-  Transferee: ["bacoor", "taytay", "GMA"],
-  "Foreign Student": ["bacoor", "taytay", "GMA"],
-  "Cross-Registrant": ["bacoor", "taytay", "GMA"],
+  Transferee: ["bacoor", "taytay", "gma"],
+  "Foreign Student": ["bacoor", "taytay", "gma"],
+  "Cross-Registrant": ["bacoor", "taytay", "gma"],
 };
 
 interface Toast {
@@ -42,13 +26,42 @@ interface Toast {
   type: "success" | "error" | "info" | "warning";
 }
 
+const getInitialAdmissionStep1Draft = () => {
+  const savedDraft = sessionStorage.getItem("enrollmentDraft");
+  if (!savedDraft) {
+    return {
+      branch: "",
+      status: "Select Status",
+    };
+  }
+
+  try {
+    const draft = JSON.parse(savedDraft) as {
+      branch?: string;
+      status?: string;
+    };
+
+    return {
+      branch: draft.branch ?? "",
+      status: draft.status ?? "Select Status",
+    };
+  } catch (error) {
+    console.warn("Failed to parse draft", error);
+    return {
+      branch: "",
+      status: "Select Status",
+    };
+  }
+};
+
 function AdmissionStep1() {
-  const [selectedBranch, setSelectedBranch] = useState<string>("");
-  const [status, setStatus] = useState("Select Status");
+  const initialDraft = getInitialAdmissionStep1Draft();
+  const [selectedBranch, setSelectedBranch] = useState<string>(
+    initialDraft.branch,
+  );
+  const [status, setStatus] = useState(initialDraft.status);
   const [loading, setLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const fromInfo =
-    new URLSearchParams(window.location.search).get("from") === "info";
 
   const addToast = (message: string, type: Toast["type"]) => {
     const id = Date.now().toString();
@@ -110,7 +123,7 @@ function AdmissionStep1() {
       try {
         const parsed = JSON.parse(existingDraft);
         const trackingNum =
-          parsed.trackingNumber || generateAICSTrackingNumber();
+          parsed.trackingNumber || generateAicsTrackingNumber();
         draftData = {
           ...parsed,
           trackingNumber: trackingNum,
@@ -119,9 +132,9 @@ function AdmissionStep1() {
           step: 1,
           lastUpdated: new Date().toISOString(),
         };
-      } catch (err) {
+      } catch {
         draftData = {
-          trackingNumber: generateAICSTrackingNumber(),
+          trackingNumber: generateAicsTrackingNumber(),
           branch: selectedBranch,
           status,
           step: 1,
@@ -130,7 +143,7 @@ function AdmissionStep1() {
       }
     } else {
       draftData = {
-        trackingNumber: generateAICSTrackingNumber(),
+        trackingNumber: generateAicsTrackingNumber(),
         branch: selectedBranch,
         status,
         step: 1,
@@ -149,34 +162,6 @@ function AdmissionStep1() {
     window.location.href = "/admission";
   };
 
-  useEffect(() => {
-    const saved = sessionStorage.getItem("enrollmentDraft");
-    if (saved) {
-      try {
-        const draft = JSON.parse(saved);
-        if (draft.status) setStatus(draft.status);
-        if (draft.branch) setSelectedBranch(draft.branch);
-      } catch (err) {
-        console.warn("Failed to parse draft", err);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (fromInfo) {
-      const saved = sessionStorage.getItem("enrollmentDraft");
-      if (saved) {
-        try {
-          const draft = JSON.parse(saved);
-          if (draft.status) setStatus(draft.status);
-          if (draft.branch) setSelectedBranch(draft.branch);
-        } catch (err) {
-          console.warn("Failed to parse draft", err);
-        }
-      }
-    }
-  }, [fromInfo]);
-
   return (
     <div className="container">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
@@ -188,7 +173,7 @@ function AdmissionStep1() {
         <div className="header">
           <StatusDropdown
             label="Student Status"
-            options={statusOptions}
+            options={[...admissionStatusOptions]}
             value={status}
             onChange={handleStatusChange}
             placeholder="Select Status"
@@ -201,7 +186,7 @@ function AdmissionStep1() {
             <p>Choose the branch you wish to enroll in</p>
           </div>
 
-          {branches.map((branch) => (
+          {admissionBranches.map((branch) => (
             <BranchCard
               key={branch.code}
               branch={branch}

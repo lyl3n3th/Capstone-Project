@@ -1,26 +1,41 @@
 // src/pages/staff/StaffLogin.tsx
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
+import { useAuth } from "../../hooks/useAuth";
+import { authenticateStaff } from "../../services/mockStaffAuth";
+import type { StaffRole } from "../../types/user";
 import "../../styles/staff/staff-login.css";
 
 function StaffLogin() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { loginStaff } = useAuth();
   const [selectedBranch, setSelectedBranch] = useState("");
   const [isMenuOpenBranch, setIsMenuOpenBranch] = useState(false);
   const wrapperRefBranch = useRef<HTMLDivElement>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [loginData, setLoginData] = useState({
     branch: "",
-    username: "",
     password: "",
+    role: "admin" as StaffRole,
   });
 
-  const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    const cleaned = value.replace(/[^a-zA-Z0-9_.]/g, "");
-    const limited = cleaned.slice(0, 20);
-    setLoginData({ ...loginData, username: limited });
-  };
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        wrapperRefBranch.current &&
+        !wrapperRefBranch.current.contains(event.target as Node)
+      ) {
+        setIsMenuOpenBranch(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,23 +45,45 @@ function StaffLogin() {
       return;
     }
 
-    if (!loginData.username) {
-      alert("Please enter your username!");
-      return;
-    }
-
-    if (loginData.username.length < 3) {
-      alert("Username must be at least 3 characters!");
-      return;
-    }
-
     if (!loginData.password) {
       alert("Please enter your password!");
       return;
     }
 
-    console.log("Staff Login attempt:", loginData);
-    alert(`Login attempt for branch: ${loginData.branch}`);
+    const redirectPath =
+      (location.state as { from?: { pathname?: string } } | null)?.from
+        ?.pathname || "/admin/dashboard";
+
+    try {
+      setIsSubmitting(true);
+
+      // Authenticate against mock data
+      const staffAccount = authenticateStaff(
+        loginData.branch,
+        loginData.password,
+        loginData.role,
+      );
+
+      if (!staffAccount) {
+        alert("Invalid branch, role, or password. Please try again.");
+        return;
+      }
+
+      // Log in with the authenticated staff member's full name and role
+      await loginStaff({
+        branch: staffAccount.branch,
+        fullName: staffAccount.fullName,
+        password: loginData.password,
+        role: staffAccount.role,
+      });
+
+      navigate(redirectPath, { replace: true });
+    } catch (error) {
+      console.error("Staff login failed", error);
+      alert("Unable to sign in right now. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -99,21 +136,25 @@ function StaffLogin() {
               <div className="divider"></div>
 
               <div className="form-groups">
-                <label htmlFor="username">Username / Employee ID</label>
-                <input
-                  id="username"
-                  type="text"
-                  name="username"
-                  value={loginData.username}
-                  onChange={handleUsernameChange}
-                  placeholder="admin_lyle or AICS-123"
-                  maxLength={20}
-                  required
-                />
+                <label htmlFor="role">Access Role</label>
+                <select
+                  id="role"
+                  name="role"
+                  value={loginData.role}
+                  onChange={(e) =>
+                    setLoginData({
+                      ...loginData,
+                      role: e.target.value as StaffRole,
+                    })
+                  }
+                >
+                  <option value="admin">Administrator</option>
+                  <option value="registrar">Registrar</option>
+                  <option value="manager">Manager</option>
+                </select>
               </div>
 
               <div className="form-groups">
-                <label htmlFor="password">Password</label>
                 <div className="password-wrapper">
                   <input
                     id="password"
@@ -141,8 +182,8 @@ function StaffLogin() {
                 </a>
               </div>
 
-              <button type="submit" className="submit-btn">
-                Login
+              <button type="submit" className="submit-btn" disabled={isSubmitting}>
+                {isSubmitting ? "Signing in..." : "Login"}
               </button>
             </form>
           </div>
@@ -153,3 +194,4 @@ function StaffLogin() {
 }
 
 export default StaffLogin;
+

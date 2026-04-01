@@ -2,13 +2,14 @@ import { FaRegPaperPlane } from "react-icons/fa6";
 import "../../styles/admission/admission-home.css";
 import logow from "../../assets/images/logow.png";
 import { useState } from "react";
+import { getAdmissionDraft, getAdmissionProgress } from "../../services/admission";
 
 function AdmissionHome() {
   const [trackingNumber, setTrackingNumber] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleTrackProgress = () => {
+  const handleTrackProgress = async () => {
     setError("");
 
     if (!trackingNumber.trim()) {
@@ -18,38 +19,29 @@ function AdmissionHome() {
 
     setIsLoading(true);
 
-    setTimeout(() => {
-      try {
-        const draft = sessionStorage.getItem("enrollmentDraft");
-
-        if (draft) {
-          const parsedDraft = JSON.parse(draft);
-          const storedTrackingNumber = parsedDraft.trackingNumber;
-
-          if (
-            storedTrackingNumber &&
-            storedTrackingNumber.toUpperCase() ===
-              trackingNumber.trim().toUpperCase()
-          ) {
-            const branch = parsedDraft.branch || "";
-            const status = parsedDraft.status || "";
-            const program = parsedDraft.program || "";
-
-            window.location.href = `/confirmation?branch=${encodeURIComponent(branch)}&status=${encodeURIComponent(status)}&trackingNumber=${encodeURIComponent(trackingNumber.trim())}&program=${encodeURIComponent(program)}`;
-            return;
-          } else {
-            setError("Tracking number not found. Please check and try again.");
-          }
-        } else {
-          setError("No application found with this tracking number.");
-        }
-      } catch (err) {
-        console.error("Error checking tracking number:", err);
-        setError("An error occurred. Please try again.");
-      } finally {
-        setIsLoading(false);
+    try {
+      const application = await getAdmissionProgress(trackingNumber);
+      if (application) {
+        window.location.href = `/confirmation?trackingNumber=${encodeURIComponent(application.trackingNumber)}`;
+        return;
       }
-    }, 800);
+
+      const draft = getAdmissionDraft();
+      if (
+        draft?.trackingNumber &&
+        draft.trackingNumber.toUpperCase() === trackingNumber.trim().toUpperCase()
+      ) {
+        window.location.href = `/confirmation?trackingNumber=${encodeURIComponent(trackingNumber.trim())}`;
+        return;
+      }
+
+      setError("Tracking number not found. Please check and try again.");
+    } catch (err) {
+      console.error("Error checking tracking number:", err);
+      setError("Unable to check this tracking number right now.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -59,9 +51,9 @@ function AdmissionHome() {
     setError("");
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
-      handleTrackProgress();
+      void handleTrackProgress();
     }
   };
 
@@ -98,7 +90,7 @@ function AdmissionHome() {
               setError("");
             }}
             onPaste={handlePaste}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyDown}
             disabled={isLoading}
           />
           {error && <div className="error-message">{error}</div>}
@@ -111,7 +103,7 @@ function AdmissionHome() {
             onClick={(e) => {
               e.preventDefault();
               if (!isLoading) {
-                handleTrackProgress();
+                void handleTrackProgress();
               }
             }}
           >

@@ -5,6 +5,7 @@ import { IoBookSharp } from "react-icons/io5";
 import { MdOutlineNoteAlt } from "react-icons/md";
 import { FiLogOut } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../hooks/useAuth";
 
 import "../../styles/components/sidebar.css";
 
@@ -22,6 +23,7 @@ function Sidebar({
   onLogout,
 }: SidebarProps) {
   const navigate = useNavigate();
+  const { currentUser, logout } = useAuth();
 
   const menuItems = [
     {
@@ -68,16 +70,13 @@ function Sidebar({
   };
 
   const handleLogoutClick = () => {
-    // Clear any stored user data
-    sessionStorage.removeItem("studentSession");
-    localStorage.removeItem("studentData");
+    logout();
 
     if (onLogout) {
       onLogout();
     }
 
-    // Navigate to login page
-    navigate("/login");
+    navigate("/student/login");
     onClose();
   };
 
@@ -85,7 +84,9 @@ function Sidebar({
     <div className={`s-sidebar ${isOpen ? "s-open" : ""}`}>
       <div className="s-sidebar-header">
         <div className="s-school-name">Asian Institute of Computer Studies</div>
-        <div className="s-branch-name">Bacoor Branch</div>
+        <div className="s-branch-name">
+          {currentUser?.branch || "Bacoor"} Branch
+        </div>
       </div>
 
       <nav className="s-sidebar-nav">

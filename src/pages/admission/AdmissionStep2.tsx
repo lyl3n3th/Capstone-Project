@@ -2,6 +2,15 @@ import React, { useEffect, useState, useRef } from "react";
 import Progress from "../../components/Progress";
 import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
+import {
+  civilStatusOptions,
+  getAdmissionBranchName,
+  getAvailablePrograms,
+  getTrackOptions,
+  honorOptions,
+  saveAdmissionApplication,
+  sexOptions,
+} from "../../services/admission";
 
 // get query
 function getQueryParam(name: string): string | null {
@@ -70,9 +79,6 @@ function AdmissionStep2() {
   const studentStatus = getQueryParam("status") || "";
   const fromRequirements = getQueryParam("from") === "requirements";
 
-  const sexOptions = ["Male", "Female"];
-  const civilStatusOptions = ["Single", "Married", "Widowed", "Separated"];
-
   const addToast = (message: string, type: Toast["type"]) => {
     const id = Date.now().toString();
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -82,43 +88,8 @@ function AdmissionStep2() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  // Honor options
-  const honorOptions = [
-    "No Honor",
-    "With Honor (50%)",
-    "High Honor (60%)",
-    "Highest Honor (80%)",
-  ];
-
-  let availablePrograms: string[] = [];
-
-  if (studentStatus === "Junior High Completer") {
-    availablePrograms = ["Senior High School"];
-  } else if (studentStatus === "Senior High Graduate") {
-    availablePrograms =
-      selectedBranch.toLowerCase() === "bacoor" ? ["College"] : [];
-  } else if (studentStatus === "Transferee") {
-    availablePrograms =
-      selectedBranch.toLowerCase() === "bacoor"
-        ? ["College", "Senior High School"]
-        : ["Senior High School"];
-  } else {
-    availablePrograms =
-      selectedBranch.toLowerCase() === "bacoor"
-        ? ["College", "Senior High School"]
-        : ["Senior High School"];
-  }
-
-  const strandOptions: Record<string, string[]> = {
-    College: ["BSE - Bachelor of Entrepreneurship"],
-    "Senior High School": [
-      "ABM - Accountancy, Business, and Management",
-      "HUMSS - Humanities and Social Sciences",
-      "GAS - General Academic Strand",
-      "ICT - Information and Communications Technology",
-      "IA - Industrial Arts",
-    ],
-  };
+  const availablePrograms = getAvailablePrograms(selectedBranch, studentStatus);
+  const trackOptions = getTrackOptions(program);
 
   // Format contact number (adds space after 4th and 7th digits)
   const formatContactNumber = (value: string) => {
@@ -326,59 +297,30 @@ function AdmissionStep2() {
     setIsSubmitting(true);
     saveDraft();
 
-    const payload = {
-      tracking_number: trackingNumber || initialTrackingNumber,
-      first_name: fname,
-      last_name: lname,
-      middle_name: mname,
-      sex,
-      civil_status: civilStatus,
-      address: address,
-      email: email,
-      contact: contact,
-      last_school_attended: lastSchool,
-      year_completion: yearCompletion,
-      program,
-      strand_or_course: program1,
-      branch: selectedBranch,
-      student_status: studentStatus,
-      honor,
-      apply_scholarship: applyScholarship,
-    };
-
     try {
-      const response = await fetch("/api/admissions/step2/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      const savedApplication = await saveAdmissionApplication({
+        trackingNumber: trackingNumber || initialTrackingNumber,
+        branchCode: selectedBranch,
+        studentStatus,
+        programName: program,
+        trackName: program1,
+        firstName: fname,
+        lastName: lname,
+        middleName: mname,
+        sex,
+        civilStatus,
+        address,
+        email,
+        phoneNumber: contact,
+        lastSchoolAttended: lastSchool,
+        yearCompletion,
+        honorLabel: honor === "Select Honor" ? "No Honor" : honor,
+        applyScholarship,
+        currentStep: 2,
+        applicationStatus: "draft",
       });
 
-      const raw = await response.text();
-      let data: {
-        errors?: unknown;
-        tracking_number?: string;
-        detail?: string;
-      } = {};
-      if (raw) {
-        try {
-          data = JSON.parse(raw);
-        } catch {
-          data = { detail: raw };
-        }
-      }
-
-      if (!response.ok) {
-        const errorMessage =
-          typeof data.errors === "string"
-            ? data.errors
-            : JSON.stringify(data.errors || data, null, 2);
-        addToast(`Validation error: ${errorMessage}`, "error");
-        setIsSubmitting(false);
-        return;
-      }
-
-      const nextTrackingNumber =
-        data.tracking_number || trackingNumber || initialTrackingNumber;
+      const nextTrackingNumber = savedApplication.trackingNumber;
 
       if (nextTrackingNumber) {
         setTrackingNumber(nextTrackingNumber);
@@ -392,12 +334,12 @@ function AdmissionStep2() {
           timestamp: new Date().toISOString(),
           fname,
           lname,
-          mname,
+          middle_name: mname,
           address,
           email,
           contact,
-          lastSchool,
-          yearCompletion,
+          last_school_attended: lastSchool,
+          year_completion: yearCompletion,
           program,
           strand_or_course: program1,
           sex,
@@ -415,7 +357,9 @@ function AdmissionStep2() {
     } catch (err) {
       console.error(err);
       addToast(
-        "Cannot connect to server. Please check your connection.",
+        err instanceof Error
+          ? err.message
+          : "Cannot connect to Supabase right now. Please try again.",
         "error",
       );
       setIsSubmitting(false);
@@ -498,7 +442,7 @@ function AdmissionStep2() {
             <p>
               Branch selected:{" "}
               <strong style={{ margin: "4px", color: "#1A3D5C" }}>
-                {selectedBranch || "—"}
+                {selectedBranch ? getAdmissionBranchName(selectedBranch) : "-"}
               </strong>
               <br />
             </p>
@@ -796,7 +740,7 @@ function AdmissionStep2() {
                   ></div>
                 </div>
                 <ul className={`menu ${menuOpen1 ? "show" : ""}`}>
-                  {(strandOptions[program] || []).map((opt) => (
+                  {trackOptions.map((opt) => (
                     <li
                       key={opt}
                       onClick={() => {

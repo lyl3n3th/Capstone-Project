@@ -38,7 +38,7 @@ export default function Progress({ current, total = 5 }: ProgressProps) {
                     ? "Requirements"
                     : s === 4
                       ? "Confirmation"
-                      : "Entrance Exam"}
+                      : "Scholarship Exam"}
             </p>
           </div>
         );

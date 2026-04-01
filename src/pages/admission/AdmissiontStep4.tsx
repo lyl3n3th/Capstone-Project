@@ -2,29 +2,28 @@ import "../../styles/main.css";
 import { FaCopy } from "react-icons/fa";
 import { FaCircleExclamation } from "react-icons/fa6";
 import Progress from "../../components/Progress";
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
+import {
+  getAdmissionDraft,
+  getAdmissionProgress,
+  updateAdmissionProgress,
+} from "../../services/admission";
+import type { AdmissionApplicationSummary } from "../../types/application";
 
 function getQueryParam(name: string): string | null {
   const params = new URLSearchParams(window.location.search);
   return params.get(name);
 }
 
-function generateAICSTrackingNumber() {
-  const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const randomPart = Math.random().toString(36).substring(2, 8).toUpperCase();
-  return `AICS-${datePart}-${randomPart}`;
-}
-
-// Discount calculation functions
-const getHonorDiscount = (honor: string): number => {
+const getHonorDiscount = (honor: string | null): number => {
+  if (!honor) return 0;
   if (honor.includes("Highest Honor")) return 80;
   if (honor.includes("High Honor")) return 60;
   if (honor.includes("With Honor")) return 50;
   return 0;
 };
 
-// Toast interface
 interface Toast {
   id: string;
   message: string;
@@ -32,143 +31,204 @@ interface Toast {
 }
 
 function AdmissionStep4() {
-  const selectedBranch = getQueryParam("branch") || "";
-  const studentStatus = getQueryParam("status") || "";
   const urlTrackingNumber = getQueryParam("trackingNumber") || "";
-  const program = getQueryParam("program") || "";
-
   const [trackingNumber, setTrackingNumber] = useState("");
-  const [applicationData, setApplicationData] = useState<any>(null);
-  const [studentHonor, setStudentHonor] = useState("");
+  const [applicationData, setApplicationData] =
+    useState<AdmissionApplicationSummary | null>(null);
   const [applyScholarship, setApplyScholarship] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // Add toast notification
   const addToast = (message: string, type: Toast["type"]) => {
     const id = Date.now().toString();
     setToasts((prev) => [...prev, { id, message, type }]);
   };
 
-  // Remove toast notification
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
   useEffect(() => {
-    let foundTrackingNumber = "";
+    const loadApplication = async () => {
+      const draft = getAdmissionDraft();
+      const draftTrackingNumber = draft?.trackingNumber || "";
+      const resolvedTrackingNumber = urlTrackingNumber || draftTrackingNumber;
 
-    if (urlTrackingNumber) {
-      foundTrackingNumber = urlTrackingNumber;
-    }
+      if (!resolvedTrackingNumber) {
+        setPageError("No admission record was found for this page.");
+        setIsLoading(false);
+        return;
+      }
 
-    const draft = sessionStorage.getItem("enrollmentDraft");
-    if (draft) {
+      setTrackingNumber(resolvedTrackingNumber);
+      setApplyScholarship(Boolean(draft?.apply_scholarship));
+
       try {
-        const parsedDraft = JSON.parse(draft);
-        console.log("Draft found in confirmation page:", parsedDraft);
-        setApplicationData(parsedDraft);
+        const application = await getAdmissionProgress(resolvedTrackingNumber);
 
-        if (parsedDraft.honor) setStudentHonor(parsedDraft.honor);
-        if (parsedDraft.apply_scholarship !== undefined)
-          setApplyScholarship(parsedDraft.apply_scholarship);
-        if (parsedDraft.trackingNumber && !foundTrackingNumber) {
-          foundTrackingNumber = parsedDraft.trackingNumber;
+        if (!application) {
+          setPageError("Tracking number not found.");
+          setIsLoading(false);
+          return;
+        }
+
+        setApplicationData(application);
+        setTrackingNumber(application.trackingNumber);
+        if (draft?.apply_scholarship !== undefined) {
+          setApplyScholarship(Boolean(draft.apply_scholarship));
+        } else {
+          setApplyScholarship(application.appliedForScholarship);
         }
       } catch (err) {
-        console.warn("Failed to parse draft", err);
+        console.error(err);
+        setPageError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load this admission record right now.",
+        );
+      } finally {
+        setIsLoading(false);
       }
-    }
+    };
 
-    if (!foundTrackingNumber) {
-      foundTrackingNumber = generateAICSTrackingNumber();
-      if (draft) {
-        try {
-          const parsedDraft = JSON.parse(draft);
-          parsedDraft.trackingNumber = foundTrackingNumber;
-          sessionStorage.setItem(
-            "enrollmentDraft",
-            JSON.stringify(parsedDraft),
-          );
-        } catch (err) {
-          console.warn("Failed to save tracking number", err);
-        }
-      }
-    }
-
-    setTrackingNumber(foundTrackingNumber);
+    void loadApplication();
   }, [urlTrackingNumber]);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(trackingNumber);
-    addToast("Tracking number copied to clipboard!", "success");
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(trackingNumber);
+    addToast("Tracking number copied to clipboard.", "success");
   };
 
   const handleBackToRequirements = () => {
-    const draft = sessionStorage.getItem("enrollmentDraft");
-    if (draft) {
-      try {
-        const parsedDraft = JSON.parse(draft);
-        parsedDraft.lastVisited = new Date().toISOString();
-        sessionStorage.setItem("enrollmentDraft", JSON.stringify(parsedDraft));
-      } catch (err) {
-        console.warn("Failed to update draft", err);
-      }
+    if (!applicationData) {
+      return;
     }
+
     addToast("Returning to requirements page", "info");
     setTimeout(() => {
-      window.location.href = `/requirements?branch=${encodeURIComponent(selectedBranch)}&status=${encodeURIComponent(studentStatus)}&trackingNumber=${trackingNumber}&program=${encodeURIComponent(program)}`;
-    }, 500);
+      window.location.href = `/requirements?branch=${encodeURIComponent(applicationData.branchCode)}&status=${encodeURIComponent(applicationData.studentStatus)}&trackingNumber=${encodeURIComponent(applicationData.trackingNumber)}&program=${encodeURIComponent(applicationData.programName)}`;
+    }, 400);
   };
 
-  const handleContinue = () => {
-    const draft = sessionStorage.getItem("enrollmentDraft");
-    if (draft) {
-      try {
-        const parsedDraft = JSON.parse(draft);
-        parsedDraft.submitted = true;
-        parsedDraft.submissionDate = new Date().toISOString();
-        sessionStorage.setItem("enrollmentDraft", JSON.stringify(parsedDraft));
-      } catch (err) {
-        console.warn("Failed to update draft", err);
+  const handleContinue = async () => {
+    if (!applicationData) {
+      return;
+    }
+
+    const isCollege = applicationData.programLevel === "college";
+
+    try {
+      const updatedApplication = await updateAdmissionProgress({
+        trackingNumber: applicationData.trackingNumber,
+        currentStep: isCollege ? 5 : 4,
+        applicationStatus: "submitted",
+        markSubmitted: true,
+      });
+
+      const draft = getAdmissionDraft();
+      if (draft) {
+        sessionStorage.setItem(
+          "enrollmentDraft",
+          JSON.stringify({
+            ...draft,
+            submitted: true,
+            submissionDate: new Date().toISOString(),
+            trackingNumber: updatedApplication.trackingNumber,
+          }),
+        );
       }
-    }
 
-    const programValue = program || applicationData?.program || "";
-    const isCollege = programValue === "College";
+      setApplicationData(updatedApplication);
+      addToast("Application submitted successfully.", "success");
 
-    if (isCollege) {
-      addToast("Proceeding to scholarship exam", "info");
       setTimeout(() => {
-        window.location.href = `/scholarship-exam?branch=${encodeURIComponent(selectedBranch)}&status=${encodeURIComponent(studentStatus)}&trackingNumber=${trackingNumber}&program=${encodeURIComponent(programValue)}`;
+        if (isCollege) {
+          window.location.href = `/scholarship-exam?trackingNumber=${encodeURIComponent(updatedApplication.trackingNumber)}`;
+          return;
+        }
+
+        window.location.href = "/";
       }, 500);
-    } else {
-      addToast("Application completed! Redirecting to home", "success");
-      setTimeout(() => {
-        window.location.href = `/`;
-      }, 500);
+    } catch (err) {
+      console.error(err);
+      addToast(
+        err instanceof Error
+          ? err.message
+          : "Unable to submit the application right now.",
+        "error",
+      );
     }
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) {
+      return "Not yet submitted";
+    }
+
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
       year: "numeric",
-      month: "numeric",
+      month: "long",
       day: "numeric",
     });
   };
 
-  const programValue = program || applicationData?.program || "";
-  const isCollege = programValue === "College";
-  const honorDiscount = getHonorDiscount(studentHonor);
-  const buttonText = isCollege ? "Continue to Scholarship Exam" : "Go to Home";
+  const applicationStatusMessage = useMemo(() => {
+    switch (applicationData?.applicationStatus) {
+      case "submitted":
+      case "under_review":
+        return "Waiting for Registrar Confirmation";
+      case "accepted":
+        return "Admission Accepted";
+      case "rejected":
+        return "Application Requires Follow-up";
+      default:
+        return "Application Draft Saved";
+    }
+  }, [applicationData]);
 
-  // Mock tuition calculation (would come from backend)
-  const perUnitRate = 600;
-  const mockUnits = 15;
-  const baseTuition = mockUnits * perUnitRate;
+  const isCollege = applicationData?.programLevel === "college";
+  const canEdit = applicationData?.applicationStatus === "draft";
+  const honorDiscount = getHonorDiscount(applicationData?.honorLabel ?? null);
+  const buttonText = canEdit
+    ? isCollege
+      ? "Submit & Continue to Scholarship Exam"
+      : "Submit Application"
+    : isCollege
+      ? "View Scholarship Exam"
+      : "Go to Home";
+
+  const baseTuition = 15 * 600;
   const discountedTuition = baseTuition * (1 - honorDiscount / 100);
   const downPayment = 300;
+
+  if (isLoading) {
+    return <div className="confirmation-page-wrapper">Loading application...</div>;
+  }
+
+  if (pageError || !applicationData) {
+    return (
+      <div className="confirmation-page-wrapper">
+        <ToastContainer toasts={toasts} removeToast={removeToast} />
+        <div className="confirmation-container">
+          <div className="confirmation-card">
+            <p className="conf-status-text">{pageError || "No record found."}</p>
+            <div className="conf-actions">
+              <button
+                className="conf-btn-continue"
+                onClick={() => {
+                  window.location.href = "/";
+                }}
+              >
+                Go to Home
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="confirmation-page-wrapper">
@@ -179,165 +239,158 @@ function AdmissionStep4() {
 
       <div className="confirmation-container">
         <div className="confirmation-card">
-          {/* Application Status Header */}
           <div className="conf-status-header">
             <span className="conf-pending-circle"></span>
             <span className="conf-status-title">Application Status</span>
           </div>
 
-          {/* Status Message */}
           <div className="conf-status-message">
-            <p className="conf-status-text">
-              Waiting for Registrar Confirmation
-            </p>
+            <p className="conf-status-text">{applicationStatusMessage}</p>
           </div>
 
-          {/* Tracking Number Display */}
           <div className="conf-track-wrapper">
             <label className="conf-track-label">Tracking Number:</label>
             <div className="conf-track-number">{trackingNumber}</div>
           </div>
 
-          {/* Copy Button */}
           <div className="conf-copy-wrapper">
-            <button className="conf-copy-btn" onClick={handleCopy}>
+            <button className="conf-copy-btn" onClick={() => void handleCopy()}>
               <FaCopy /> Copy Tracking Number
             </button>
           </div>
 
-          {/* Conditional Message based on program */}
-          {isCollege && (
+          {isCollege && canEdit && (
             <div className="conf-notice conf-notice-warning">
-              <strong>Next Step:</strong> Since you're applying for a College
-              program, you need to take an Scholarship exam. Click "Continue to
-              Scholarship Exam" to schedule your exam.
+              <strong>Next Step:</strong> Submit this application to continue to
+              the scholarship exam schedule page.
             </div>
           )}
 
-          {!isCollege && programValue && (
+          {!canEdit && (
             <div className="conf-notice conf-notice-success">
-              <strong>Application Complete:</strong> Your Senior High School
-              application has been submitted. You may now go back to home.
+              <strong>Application Submitted:</strong> Your admission record is
+              already in Supabase and is waiting for the next registrar update.
             </div>
           )}
 
-          {/* Discount Notice for College with Honor */}
           {isCollege && honorDiscount > 0 && (
             <div className="conf-notice conf-notice-info">
-              <strong>Honor Discount Applied!</strong>
+              <strong>Honor Discount Applied</strong>
               <p>
-                You are qualified for <strong>{honorDiscount}% discount</strong>{" "}
+                You qualify for a <strong>{honorDiscount}% discount</strong>{" "}
                 based on your academic honor.
               </p>
               <p className="conf-discount-detail">
-                Estimated Tuition: ₱{baseTuition.toLocaleString()} → ₱
+                Estimated Tuition: PHP {baseTuition.toLocaleString()} to PHP{" "}
                 {discountedTuition.toLocaleString()}
               </p>
               <p className="conf-discount-note">
-                Down Payment: ₱{downPayment.toLocaleString()} (pay on-site)
+                Down Payment: PHP {downPayment.toLocaleString()} (pay on-site)
               </p>
             </div>
           )}
 
-          {/* Scholarship Notice for College */}
           {isCollege && applyScholarship && (
             <div className="conf-notice conf-notice-exam">
-              <strong>Scholarship Exam Pending</strong>
+              <strong>Scholarship Exam Selected</strong>
               <p>
-                You applied for the scholarship exam. Please proceed to your
-                selected branch to take the exam.
+                This application includes a scholarship exam request for the
+                selected college program.
               </p>
-              <p className="conf-exam-detail">Exam Schedule: Monday - Friday</p>
             </div>
           )}
 
-          {/* Application Summary Section */}
-          {applicationData && (
-            <div className="conf-summary">
-              <p className="conf-summary-title">Application Summary</p>
+          <div className="conf-summary">
+            <p className="conf-summary-title">Application Summary</p>
 
-              <div className="conf-summary-grid">
-                <div className="conf-summary-item">
-                  <span className="conf-summary-label">Branch:</span>
-                  <span className="conf-summary-value">
-                    {applicationData.branch || selectedBranch || "Not selected"}
-                  </span>
-                </div>
-                <div className="conf-summary-item">
-                  <span className="conf-summary-label">Status:</span>
-                  <span className="conf-summary-value">
-                    {applicationData.status || studentStatus || "Not selected"}
-                  </span>
-                </div>
-                {applicationData.program && (
-                  <div className="conf-summary-item">
-                    <span className="conf-summary-label">Program:</span>
-                    <span className="conf-summary-value">
-                      {applicationData.program}
-                    </span>
-                  </div>
-                )}
-                {applicationData.strand_or_course && (
-                  <div className="conf-summary-item">
-                    <span className="conf-summary-label">Course/Strand:</span>
-                    <span className="conf-summary-value">
-                      {applicationData.strand_or_course}
-                    </span>
-                  </div>
-                )}
-                {studentHonor && studentHonor !== "No Honor" && (
+            <div className="conf-summary-grid">
+              <div className="conf-summary-item">
+                <span className="conf-summary-label">Branch:</span>
+                <span className="conf-summary-value">
+                  {applicationData.branchName}
+                </span>
+              </div>
+              <div className="conf-summary-item">
+                <span className="conf-summary-label">Status:</span>
+                <span className="conf-summary-value">
+                  {applicationData.studentStatus}
+                </span>
+              </div>
+              <div className="conf-summary-item">
+                <span className="conf-summary-label">Program:</span>
+                <span className="conf-summary-value">
+                  {applicationData.programName}
+                </span>
+              </div>
+              <div className="conf-summary-item">
+                <span className="conf-summary-label">Course/Strand:</span>
+                <span className="conf-summary-value">
+                  {applicationData.trackName}
+                </span>
+              </div>
+              <div className="conf-summary-item">
+                <span className="conf-summary-label">Name:</span>
+                <span className="conf-summary-value">
+                  {applicationData.firstName} {applicationData.lastName}
+                </span>
+              </div>
+              <div className="conf-summary-item">
+                <span className="conf-summary-label">Submitted:</span>
+                <span className="conf-summary-value">
+                  {formatDate(applicationData.submittedAt)}
+                </span>
+              </div>
+              {applicationData.honorLabel &&
+                applicationData.honorLabel !== "No Honor" && (
                   <div className="conf-summary-item conf-honor-item">
                     <span className="conf-summary-label">Academic Honor:</span>
-                    <span className="conf-summary-value">{studentHonor}</span>
-                  </div>
-                )}
-                {(applicationData.fname || applicationData.lname) && (
-                  <div className="conf-summary-item">
-                    <span className="conf-summary-label">Name:</span>
                     <span className="conf-summary-value">
-                      {applicationData.fname || ""}{" "}
-                      {applicationData.lname || ""}
+                      {applicationData.honorLabel}
                     </span>
                   </div>
                 )}
-                <div className="conf-summary-item">
-                  <span className="conf-summary-label">Submitted:</span>
-                  <span className="conf-summary-value">
-                    {formatDate(
-                      applicationData.submissionDate ||
-                        new Date().toISOString(),
-                    )}
-                  </span>
-                </div>
-              </div>
             </div>
-          )}
+          </div>
 
-          {/* Important Notes Section */}
           <div className="conf-notes">
             <div className="conf-notes-header">
               <FaCircleExclamation className="conf-notes-icon" />
               <p className="conf-notes-title">Important Notes</p>
             </div>
             <p className="conf-notes-text">
-              Please wait for the registrar to review your application and
-              confirm your admission.
+              Keep your tracking number for status updates and recovery.
             </p>
             <p className="conf-notes-text">
-              You may use your tracking number <strong>{trackingNumber}</strong>{" "}
-              to check the status of your application after submission.
+              Uploaded requirements and admission details are now stored in
+              Supabase under this tracking number.
             </p>
           </div>
 
-          {/* Action Buttons */}
           <div className="conf-actions">
+            {canEdit && (
+              <button
+                className="conf-btn-back"
+                onClick={handleBackToRequirements}
+              >
+                Back
+              </button>
+            )}
             <button
-              className="conf-btn-back"
-              onClick={handleBackToRequirements}
+              className="conf-btn-continue"
+              onClick={() => {
+                if (!canEdit) {
+                  if (isCollege) {
+                    window.location.href = `/scholarship-exam?trackingNumber=${encodeURIComponent(applicationData.trackingNumber)}`;
+                    return;
+                  }
+
+                  window.location.href = "/";
+                  return;
+                }
+
+                void handleContinue();
+              }}
             >
-              Back
-            </button>
-            <button className="conf-btn-continue" onClick={handleContinue}>
               {buttonText}
             </button>
           </div>

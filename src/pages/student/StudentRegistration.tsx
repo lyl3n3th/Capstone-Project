@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import aicslogst from "../../assets/images/aicslogst-2.png";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 import "../../styles/student/student-regis.css";
@@ -312,9 +313,9 @@ function StudentRegistration() {
 
             <p className="registration-prompt">
               Already have an account?{" "}
-              <a href="/student/login" className="registration-link">
+              <Link to="/student/login" className="registration-link">
                 Sign in here
-              </a>
+              </Link>
             </p>
           </div>
         </div>

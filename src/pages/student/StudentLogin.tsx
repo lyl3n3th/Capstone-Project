@@ -1,18 +1,24 @@
 import { useState, useEffect, useRef } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import slidelog from "../../assets/images/slidelog.jpg";
 import slidelog2 from "../../assets/images/slidelog2.jpg";
 import slidelog3 from "../../assets/images/slidelog3.jpg";
 import bg from "../../assets/images/bg.jpg";
 import aicslogst from "../../assets/images/aicslogst-2.png";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
+import { useAuth } from "../../hooks/useAuth";
 import "../../styles/student/student-login.css";
 
 function StudentLogin() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { loginStudent } = useAuth();
   const [selectedBranch, setSelectedBranch] = useState("");
   const [isMenuOpenBranch, setIsMenuOpenBranch] = useState(false);
   const wrapperRefBranch = useRef<HTMLDivElement>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const slides = [bg, slidelog, slidelog2, slidelog3];
 
@@ -81,9 +87,20 @@ function StudentLogin() {
       return;
     }
 
-    // TODO: Connect to actual backend after normalization
-    console.log("Login attempt:", loginData);
-    alert(`Login attempt for branch: ${loginData.branch}`);
+    const redirectPath =
+      (location.state as { from?: { pathname?: string } } | null)?.from
+        ?.pathname || "/student/home";
+
+    try {
+      setIsSubmitting(true);
+      await loginStudent(loginData);
+      navigate(redirectPath, { replace: true });
+    } catch (error) {
+      console.error("Student login failed", error);
+      alert("Unable to sign in right now. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -209,16 +226,16 @@ function StudentLogin() {
                 </a>
               </div>
 
-              <button type="submit" className="submit-btn">
-                Submit
+              <button type="submit" className="submit-btn" disabled={isSubmitting}>
+                {isSubmitting ? "Signing in..." : "Submit"}
               </button>
             </form>
 
             <p className="register-prompt">
               Don't have an account?{" "}
-              <a href="/student/registration" className="register-link">
+              <Link to="/student/registration" className="register-link">
                 Create one now
-              </a>
+              </Link>
             </p>
           </div>
         </div>

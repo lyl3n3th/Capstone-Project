@@ -6,6 +6,7 @@ import { FiLogOut } from "react-icons/fi";
 import { IoPeopleSharp } from "react-icons/io5";
 import { MdDeleteOutline, MdOutlineAssessment } from "react-icons/md";
 import { NavLink } from "react-router-dom";
+import { useAuth } from "../../hooks/useAuth";
 import "../../styles/admin/admin-sidebar.css";
 
 interface AdminSidebarProps {
@@ -32,7 +33,9 @@ export default function AdminSidebar({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: AdminSidebarProps) {
+  const { currentUser } = useAuth();
   const displayName = loggedInUsername.trim() || "Administrator";
+  const branchName = currentUser?.branch?.trim() || "Bacoor";
   const userInitials = displayName
     .split(/\s+/)
     .filter(Boolean)
@@ -99,11 +102,13 @@ export default function AdminSidebar({
             <div className="admin-user-info">
               <h3>{displayName}</h3>
               <p className="admin-user-role">
-                {loggedInRole === "Registrar"
+                {currentUser?.role === "manager"
+                  ? "Manager"
+                  : loggedInRole === "Registrar"
                   ? "Registrar"
                   : "Branch administrator"}
               </p>
-              <div className="admin-branch-name">Bacoor Branch</div>
+              <div className="admin-branch-name">{branchName} Branch</div>
             </div>
           </div>
         </div>

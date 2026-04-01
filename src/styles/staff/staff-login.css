@@ -232,7 +232,8 @@
   color: #444;
 }
 
-.staff-login-page .form-groups input {
+.staff-login-page .form-groups input,
+.staff-login-page .form-groups select {
   width: 100%;
   padding: 14px 16px;
   font-size: 15px;
@@ -243,7 +244,8 @@
   background: white;
 }
 
-.staff-login-page .form-groups input:focus {
+.staff-login-page .form-groups input:focus,
+.staff-login-page .form-groups select:focus {
   border-color: #1A3D5C;
   box-shadow: 0 0 0 3px rgba(26, 61, 92, 0.1);
 }
@@ -251,6 +253,11 @@
 .staff-login-page .form-groups input::placeholder {
   color: #bbb;
   font-style: italic;
+}
+
+.staff-login-page .form-groups select {
+  appearance: none;
+  cursor: pointer;
 }
 
 .staff-login-page .field-hint {
@@ -357,6 +364,7 @@
   }
   
   .staff-login-page .form-groups input,
+  .staff-login-page .form-groups select,
   .staff-login-page .selectlog {
     padding: 12px 14px;
   }
@@ -395,6 +403,7 @@
   }
   
   .staff-login-page .form-groups input,
+  .staff-login-page .form-groups select,
   .staff-login-page .selectlog {
     padding: 10px 12px;
     font-size: 14px;

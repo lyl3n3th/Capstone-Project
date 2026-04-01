@@ -1,5 +1,6 @@
 // services/studentApi.ts
 import type { Student } from '../types/student';
+import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 
 // Mock data - matches your current profile data
 const mockStudent: Student = {
@@ -24,11 +25,41 @@ const mockStudent: Student = {
   guardianContact: '0923 456 7890',
 };
 
+const getStudentSessionOverrides = (): Partial<Student> => {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  const rawSession = localStorage.getItem(AUTH_STORAGE_KEY);
+
+  if (!rawSession) {
+    return {};
+  }
+
+  try {
+    const parsedSession = JSON.parse(rawSession) as AuthSession;
+
+    if (parsedSession.user.role !== "student") {
+      return {};
+    }
+
+    return {
+      id: parsedSession.user.id,
+      studentNumber:
+        parsedSession.user.studentNumber || mockStudent.studentNumber,
+      branch: parsedSession.user.branch || mockStudent.branch,
+    };
+  } catch (error) {
+    console.error("Failed to read student session overrides", error);
+    return {};
+  }
+};
+
 export const studentApi = {
   async getStudent(): Promise<Student> {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 500));
-    return mockStudent;
+    return { ...mockStudent, ...getStudentSessionOverrides() };
   },
   
   async updateProfile(data: Partial<Student>): Promise<Student> {

@@ -1,10 +1,14 @@
 import "../../styles/main.css";
 import { FaCalendarAlt, FaClock } from "react-icons/fa";
-import { FaLocationDot } from "react-icons/fa6";
-import { FaCircleExclamation } from "react-icons/fa6";
+import { FaLocationDot, FaCircleExclamation } from "react-icons/fa6";
 import Progress from "../../components/Progress";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
+import {
+  getAdmissionDraft,
+  getAdmissionProgress,
+} from "../../services/admission";
+import type { AdmissionApplicationSummary } from "../../types/application";
 
 function getQueryParam(name: string): string | null {
   const params = new URLSearchParams(window.location.search);
@@ -18,18 +22,17 @@ interface Toast {
 }
 
 function AdmissionStep5() {
-  const selectedBranch = getQueryParam("branch") || "";
-  const trackingNumber = getQueryParam("trackingNumber") || "";
-  const program = getQueryParam("program") || "";
-
+  const trackingNumberFromUrl = getQueryParam("trackingNumber") || "";
+  const [application, setApplication] =
+    useState<AdmissionApplicationSummary | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [examDetails, setExamDetails] = useState({
     date: "",
     time: "",
     location: "",
     room: "",
   });
-
-  const [applicantName, setApplicantName] = useState("");
+  const [pageError, setPageError] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = (message: string, type: Toast["type"]) => {
@@ -42,24 +45,36 @@ function AdmissionStep5() {
   };
 
   useEffect(() => {
-    // Get applicant data from sessionStorage
-    const draft = sessionStorage.getItem("enrollmentDraft");
-    if (draft) {
-      try {
-        const parsed = JSON.parse(draft);
-        setApplicantName(`${parsed.fname || ""} ${parsed.lname || ""}`.trim());
+    const loadApplication = async () => {
+      const draft = getAdmissionDraft();
+      const trackingNumber = trackingNumberFromUrl || draft?.trackingNumber || "";
 
-        // Generate exam details based on branch
+      if (!trackingNumber) {
+        setPageError("No scholarship exam record was found.");
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const result = await getAdmissionProgress(trackingNumber);
+        if (!result) {
+          setPageError("Tracking number not found.");
+          setIsLoading(false);
+          return;
+        }
+
+        setApplication(result);
+
         const examDates = [
-          "Monday - Friday",
-          "March 22, 2026",
-          "March 25, 2026",
-          "March 27, 2026",
+          "Monday to Friday",
+          "April 3, 2026",
+          "April 7, 2026",
+          "April 10, 2026",
         ];
         const examTimes = [
-          "9:00 AM - 11:00 AM",
-          "1:00 PM - 3:00 PM",
-          "3:30 PM - 5:30 PM",
+          "9:00 AM to 11:00 AM",
+          "1:00 PM to 3:00 PM",
+          "3:30 PM to 5:30 PM",
         ];
         const locations: Record<string, { location: string; room: string }> = {
           bacoor: { location: "Bacoor Branch", room: "PE Room" },
@@ -67,16 +82,13 @@ function AdmissionStep5() {
           gma: { location: "GMA Branch", room: "PE Room" },
         };
 
-        // Use branch to determine location, or default
-        const branchInfo = locations[selectedBranch.toLowerCase()] || {
-          location: "Main Campus",
+        const branchInfo = locations[result.branchCode] || {
+          location: result.branchName,
           room: "Room 101",
         };
-
-        // Generate random but consistent exam details based on tracking number
-        const hash = trackingNumber
-          ? trackingNumber.charCodeAt(trackingNumber.length - 1) || 0
-          : 0;
+        const hash = result.trackingNumber.charCodeAt(
+          result.trackingNumber.length - 1,
+        );
         const dateIndex = hash % examDates.length;
         const timeIndex = Math.floor(hash / 2) % examTimes.length;
 
@@ -87,31 +99,57 @@ function AdmissionStep5() {
           room: branchInfo.room,
         });
       } catch (err) {
-        console.warn("Failed to parse draft", err);
+        console.error(err);
+        setPageError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load the scholarship exam details right now.",
+        );
+      } finally {
+        setIsLoading(false);
       }
-    }
-  }, [selectedBranch, trackingNumber]);
+    };
+
+    void loadApplication();
+  }, [trackingNumberFromUrl]);
 
   const handleAddToCalendar = () => {
-    addToast("Exam added to calendar!", "success");
+    addToast("Exam schedule noted.", "success");
     alert(
-      `Added to calendar:\nScholarship Exam\n${examDetails.date} ${examDetails.time}\n${examDetails.location} - ${examDetails.room}`,
+      `Scholarship Exam\n${examDetails.date}\n${examDetails.time}\n${examDetails.location} - ${examDetails.room}`,
     );
   };
 
   const handleDownloadPermit = () => {
-    addToast("Exam permit downloaded!", "success");
+    addToast("Exam permit prepared.", "success");
     alert(
-      `Exam permit downloaded for ${applicantName || "Applicant"}. Please bring this on exam day.`,
+      `Exam permit for ${application?.firstName ?? "Applicant"} ${application?.lastName ?? ""}`.trim(),
     );
   };
 
   const handleBackToHome = () => {
-    addToast("Returning to home page", "info");
-    setTimeout(() => {
-      window.location.href = "/";
-    }, 500);
+    window.location.href = "/";
   };
+
+  if (isLoading) {
+    return <div className="entrance-exam-page">Loading scholarship exam...</div>;
+  }
+
+  if (pageError || !application) {
+    return (
+      <div className="entrance-exam-page">
+        <ToastContainer toasts={toasts} removeToast={removeToast} />
+        <div className="entrance-exam-container">
+          <div className="entrance-exam-card">
+            <p>{pageError || "No scholarship exam details available."}</p>
+            <button className="entrance-exam-back-btn" onClick={handleBackToHome}>
+              Back to Home
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="entrance-exam-page">
@@ -126,14 +164,16 @@ function AdmissionStep5() {
             <h2 className="entrance-exam-title">
               You are assigned to take the Scholarship Exam
             </h2>
-            {applicantName && (
-              <p className="entrance-exam-applicant">
-                Applicant: <strong>{applicantName}</strong>
-              </p>
-            )}
+            <p className="entrance-exam-applicant">
+              Applicant:{" "}
+              <strong>
+                {application.firstName} {application.lastName}
+              </strong>
+            </p>
             <p className="entrance-exam-info">
-              Program: <strong>{program}</strong> &nbsp;|&nbsp; Branch:{" "}
-              <strong>{selectedBranch}</strong>
+              Program: <strong>{application.programName}</strong>
+              {" | "}
+              Branch: <strong>{application.branchName}</strong>
             </p>
           </div>
 
@@ -166,8 +206,7 @@ function AdmissionStep5() {
                   <FaLocationDot />
                 </span>
                 <div className="entrance-exam-text">
-                  <strong>Location:</strong>{" "}
-                  {examDetails.location || "To be announced"} -{" "}
+                  <strong>Location:</strong> {examDetails.location} -{" "}
                   {examDetails.room}
                 </div>
               </div>
@@ -177,22 +216,16 @@ function AdmissionStep5() {
                   <strong>#</strong>
                 </span>
                 <div className="entrance-exam-text">
-                  <strong>Tracking #:</strong> {trackingNumber}
+                  <strong>Tracking #:</strong> {application.trackingNumber}
                 </div>
               </div>
             </div>
 
             <div className="entrance-exam-actions">
-              <button
-                className="entrance-exam-btn"
-                onClick={handleAddToCalendar}
-              >
+              <button className="entrance-exam-btn" onClick={handleAddToCalendar}>
                 <FaCalendarAlt /> Add to Calendar
               </button>
-              <button
-                className="entrance-exam-btn"
-                onClick={handleDownloadPermit}
-              >
+              <button className="entrance-exam-btn" onClick={handleDownloadPermit}>
                 Download Permit
               </button>
             </div>
@@ -203,16 +236,9 @@ function AdmissionStep5() {
                 <p className="entrance-exam-notes-title">Important Notes</p>
               </div>
               <p className="entrance-exam-notes-text">
-                Please bring the following during exam:
+                Bring a school ID, exam permit, black pen, and your tracking
+                number on exam day.
               </p>
-              <ul className="entrance-exam-notes-list">
-                <li>School ID</li>
-                <li>Exam Permit</li>
-                <li>Black pen</li>
-                <li>
-                  Tracking Number: <strong>{trackingNumber}</strong>
-                </li>
-              </ul>
             </div>
 
             <div className="entrance-exam-back">
