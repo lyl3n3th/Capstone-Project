@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
 import { FaTrash, FaUndo, FaSearch } from "react-icons/fa";
 import { ToastContainer } from "../../components/common/Toast";
 import AdminSidebar from "../../components/admin/AdminSidebar";
@@ -60,7 +59,6 @@ export default function AdminTrash({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: ArchiveProps) {
-  const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [students, setStudents] = useState<Student[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -70,7 +68,6 @@ export default function AdminTrash({
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [isLoading, setIsLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const displayName = loggedInUsername.trim() || "Administrator";
 
   // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {

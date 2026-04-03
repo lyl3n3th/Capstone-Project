@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   FaDownload,
   FaFilter,
@@ -8,12 +8,13 @@ import {
 import { IoDocumentText } from "react-icons/io5";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
-import { useStudent } from "../../contexts/StudentContext";
+import { useStudent } from "../../hooks/useStudent";
 import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
 
 // Custom hook for toast management
 const useToast = () => {
+  const toastCounterRef = useRef(0);
   const [toasts, setToasts] = useState<
     Array<{
       id: string;
@@ -26,7 +27,8 @@ const useToast = () => {
     message: string,
     type: "success" | "error" | "info" | "warning",
   ) => {
-    const id = Math.random().toString(36).substr(2, 9);
+    toastCounterRef.current += 1;
+    const id = `student-grades-toast-${toastCounterRef.current}`;
     setToasts((prev) => [...prev, { id, message, type }]);
 
     // Auto remove after 3 seconds
@@ -42,12 +44,23 @@ const useToast = () => {
   return { toasts, addToast, removeToast };
 };
 
+interface GradeRow {
+  id: number;
+  subjectCode: string;
+  subjectTitle: string;
+  firstQuarter: number | "-";
+  secondQuarter: number | "-";
+  thirdQuarter: number | "-";
+  fourthQuarter: number | "-";
+  academicYear: string;
+  semester: string;
+}
+
 function StudentGrades() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedAcademicYear, setSelectedAcademicYear] = useState("2025-2026");
   const [selectedSemester, setSelectedSemester] = useState("1st Semester");
   const [showFilters, setShowFilters] = useState(false);
-  const [filteredGrades, setFilteredGrades] = useState<any[]>([]);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -55,7 +68,8 @@ function StudentGrades() {
 
   const { student } = useStudent();
 
-  const gradesData = [
+  const gradesData = useMemo<GradeRow[]>(
+    () => [
     {
       id: 1,
       subjectCode: "ENG112",
@@ -145,7 +159,9 @@ function StudentGrades() {
       academicYear: "2025-2026",
       semester: "1st Semester",
     },
-  ];
+    ],
+    [],
+  );
 
   const academicYears = ["2024-2025", "2025-2026", "2026-2027"];
   const semesters = ["1st Semester", "2nd Semester", "Summer"];
@@ -176,15 +192,15 @@ function StudentGrades() {
     };
   }, [sidebarOpen]);
 
-  // Filter grades
-  useEffect(() => {
-    const filtered = gradesData.filter(
+  const filteredGrades = useMemo(
+    () =>
+      gradesData.filter(
       (grade) =>
         grade.academicYear === selectedAcademicYear &&
         grade.semester === selectedSemester,
-    );
-    setFilteredGrades(filtered);
-  }, [selectedAcademicYear, selectedSemester]);
+      ),
+    [gradesData, selectedAcademicYear, selectedSemester],
+  );
 
   const handleFilter = () => {
     setShowFilters(!showFilters);
@@ -217,7 +233,7 @@ function StudentGrades() {
   });
 
   const studentData = {
-    name: student?.firstName + " " + student?.lastName || "Hener C. Verdida",
+    name: student ? `${student.firstName} ${student.lastName}` : "Hener C. Verdida",
     id: student?.studentNumber || "20221131",
     progrm: student?.programType || "SHS",
   };

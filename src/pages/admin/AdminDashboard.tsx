@@ -10,6 +10,8 @@ import {
 import { FaFileAlt, FaUsers } from "react-icons/fa";
 import { FiMenu, FiX } from "react-icons/fi";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import { useAuth } from "../../hooks/useAuth";
+import { getStudentsForBranch, normalizeBranchName } from "../../services/adminStorage";
 import "../../styles/admin/admin-dashboard.css";
 
 interface ProgramData {
@@ -23,9 +25,8 @@ interface StudentRecord {
   status: "Complete" | "Incomplete" | "Archived";
   strandOrCourse?: string;
   shsTrackType?: string;
+  branch?: string;
 }
-
-const STORAGE_KEY = "aics-students";
 
 const FALLBACK_PROGRAM_DATA: ProgramData[] = [
   { name: "STEM", value: 85, academicLevel: "SHS" },
@@ -58,19 +59,12 @@ export default function AdminDashboard({
   canAccessBackup = true,
 }: DashboardProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const { currentUser } = useAuth();
+  const currentBranch = normalizeBranchName(currentUser?.branch);
 
   const students = useMemo<StudentRecord[]>(() => {
-    const savedStudents = localStorage.getItem(STORAGE_KEY);
-    if (!savedStudents) return [];
-
-    try {
-      const parsed = JSON.parse(savedStudents);
-      return Array.isArray(parsed) ? (parsed as StudentRecord[]) : [];
-    } catch (error) {
-      console.error("Failed to load students for dashboard", error);
-      return [];
-    }
-  }, []);
+    return getStudentsForBranch(currentBranch);
+  }, [currentBranch]);
 
   const hasStudentData = students.length > 0;
 
@@ -203,7 +197,7 @@ export default function AdminDashboard({
       <main className="dashboard-content">
         <header className="dashboard-header">
           <h1>Dashboard</h1>
-          <p>Asian Institute of Computer Studies - Bacoor Branch</p>
+          <p>Asian Institute of Computer Studies - {currentBranch} Branch</p>
         </header>
 
         <div className="stats-grid">

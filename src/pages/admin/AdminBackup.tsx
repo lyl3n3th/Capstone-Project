@@ -1,5 +1,4 @@
-import { useMemo, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { useMemo, useRef, useState } from "react";
 import {
   FaDatabase,
   FaClock,
@@ -9,7 +8,6 @@ import {
   FaSave,
   FaPlus,
   FaCalendarAlt,
-  FaUser,
   FaHdd,
 } from "react-icons/fa";
 import { ToastContainer } from "../../components/common/Toast";
@@ -45,10 +43,10 @@ export default function AdminBackup({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: BackupProps) {
-  const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const displayName = loggedInUsername.trim() || "Administrator";
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastCounterRef = useRef(0);
 
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(true);
   const [backupTime, setBackupTime] = useState("10:00");
@@ -86,7 +84,8 @@ export default function AdminBackup({
 
   // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {
-    const id = Date.now().toString();
+    toastCounterRef.current += 1;
+    const id = `backup-toast-${toastCounterRef.current}`;
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
@@ -129,7 +128,7 @@ export default function AdminBackup({
         minute: "2-digit",
         hour12: true,
       }),
-      size: `${(Math.random() * 0.5 + 0.8).toFixed(1)} GB`,
+      size: `${(0.8 + ((backups.length + 1) % 5) * 0.1).toFixed(1)} GB`,
       type: "Manual",
       createdBy: displayName,
       status: "Success",

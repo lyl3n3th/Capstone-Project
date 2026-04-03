@@ -1,13 +1,9 @@
 import { useState, useEffect } from "react";
-import { NavLink } from "react-router-dom";
 import {
   FaSearch,
   FaEye,
   FaUserGraduate,
-  FaCalendarAlt,
   FaGraduationCap,
-  FaPhone,
-  FaEnvelope,
 } from "react-icons/fa";
 import { ToastContainer } from "../../components/common/Toast";
 import AdminSidebar from "../../components/admin/AdminSidebar";
@@ -82,7 +78,6 @@ export default function AdminAlumni({
   canAccessBackup = true,
 }: AlumniProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const displayName = loggedInUsername.trim() || "Administrator";
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);

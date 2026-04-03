@@ -478,6 +478,7 @@ export const uploadAdmissionRequirementFile = async (
     .returns<RequirementUploadRow[]>();
 
   if (error) {
+    await supabase.storage.from(REQUIREMENTS_BUCKET).remove([storagePath]);
     throw new Error(getErrorMessage(error));
   }
 

@@ -9,12 +9,14 @@ import {
 import { IoPersonSharp } from "react-icons/io5";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
-import { useStudent } from "../../contexts/StudentContext";
+import { useStudent } from "../../hooks/useStudent";
+import type { Student } from "../../types/student";
 import "../../styles/main.css";
 import { ToastContainer } from "../../components/common/Toast"; // Import Toast components
 
 // Custom hook for toast management
 const useToast = () => {
+  const toastCounterRef = useRef(0);
   const [toasts, setToasts] = useState<
     Array<{
       id: string;
@@ -27,7 +29,8 @@ const useToast = () => {
     message: string,
     type: "success" | "error" | "info" | "warning",
   ) => {
-    const id = Math.random().toString(36).substr(2, 9);
+    toastCounterRef.current += 1;
+    const id = `student-profile-toast-${toastCounterRef.current}`;
     setToasts((prev) => [...prev, { id, message, type }]);
 
     // Auto remove after 3 seconds
@@ -45,9 +48,10 @@ const useToast = () => {
 
 function StudentProfile() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { student, isLoading, error, updateStudent } = useStudent();
+  const { student, credentialSummary, isLoading, error, updateStudent } =
+    useStudent();
   const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState<Partial<any>>({});
+  const [editForm, setEditForm] = useState<Partial<Student>>({});
   const [isSaving, setIsSaving] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const { toasts, addToast, removeToast } = useToast(); // Initialize toast hook
@@ -112,7 +116,7 @@ function StudentProfile() {
       await updateStudent(editForm);
       setEditing(false);
       addToast("Profile updated successfully!", "success");
-    } catch (err) {
+    } catch {
       addToast("Failed to update profile", "error");
     } finally {
       setIsSaving(false);
@@ -407,6 +411,34 @@ function StudentProfile() {
                 ) : (
                   <span>{student.contactNumber}</span>
                 )}
+              </div>
+            </div>
+          </div>
+
+          <div className="s-profile-section">
+            <h2 className="s-section-title-with-icon">
+              <IoPersonSharp /> Academic Record
+            </h2>
+            <div className="s-profile-grid">
+              <div className="s-profile-field">
+                <label>Student Number:</label>
+                <span>{student.studentNumber}</span>
+              </div>
+              <div className="s-profile-field">
+                <label>Branch:</label>
+                <span>{student.branch}</span>
+              </div>
+              <div className="s-profile-field">
+                <label>Section:</label>
+                <span>{student.section || "TBA"}</span>
+              </div>
+              <div className="s-profile-field">
+                <label>Credential Status:</label>
+                <span>
+                  {credentialSummary
+                    ? `${credentialSummary.overallStatus} (${credentialSummary.submitted}/${credentialSummary.total})`
+                    : "No linked admission record"}
+                </span>
               </div>
             </div>
           </div>

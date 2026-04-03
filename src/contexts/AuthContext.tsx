@@ -15,15 +15,6 @@ import {
   type StudentLoginPayload,
 } from "./auth-context";
 
-const formatDisplayName = (value: string) =>
-  value
-    .trim()
-    .replace(/[._-]+/g, " ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(" ");
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [isReady, setIsReady] = useState(false);

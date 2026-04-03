@@ -711,6 +711,7 @@ as $$
 declare
   v_application_id uuid;
   v_requirement_type_id uuid;
+  v_uploaded_at timestamptz := now();
 begin
   select id
   into v_application_id
@@ -757,10 +758,10 @@ begin
       original_file_name = excluded.original_file_name,
       mime_type = excluded.mime_type,
       file_size_bytes = excluded.file_size_bytes,
-      uploaded_at = timezone('utc', now());
+      uploaded_at = v_uploaded_at;
 
   update public.admission_applications as app
-  set requirements_uploaded_at = timezone('utc', now()),
+  set requirements_uploaded_at = v_uploaded_at,
       current_step = greatest(app.current_step, 3)
   where app.id = v_application_id;
 
@@ -771,7 +772,7 @@ begin
     trim(p_requirement_name) as requirement_name,
     p_original_file_name as file_name,
     p_storage_path as storage_path,
-    timezone('utc', now()) as uploaded_at;
+    v_uploaded_at as uploaded_at;
 end;
 $$;
 
@@ -811,6 +812,133 @@ as $$
     and app.phone_number = regexp_replace(trim(p_phone_number), '\D', '', 'g')
   )
   order by app.created_at desc;
+$$;
+
+create or replace function public.get_admin_admission_queue(
+  p_branch_code text default null
+)
+returns table (
+  application_id uuid,
+  tracking_number text,
+  branch_code text,
+  branch_name text,
+  student_status_label text,
+  program_name text,
+  program_level text,
+  track_name text,
+  honor_label text,
+  application_status text,
+  current_step smallint,
+  first_name text,
+  last_name text,
+  middle_name text,
+  sex text,
+  civil_status text,
+  address text,
+  email text,
+  phone_number text,
+  year_completion integer,
+  applied_for_scholarship boolean,
+  requirements_uploaded_at timestamptz,
+  submitted_at timestamptz,
+  created_at timestamptz,
+  updated_at timestamptz,
+  requirement_files jsonb
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    app.id as application_id,
+    app.tracking_number,
+    branch.code as branch_code,
+    branch.name as branch_name,
+    status.label as student_status_label,
+    program.name as program_name,
+    program.level as program_level,
+    track.name as track_name,
+    honor.label as honor_label,
+    app.application_status,
+    app.current_step,
+    app.first_name,
+    app.last_name,
+    app.middle_name,
+    app.sex,
+    app.civil_status,
+    app.address,
+    app.email::text as email,
+    app.phone_number,
+    app.year_completion,
+    app.applied_for_scholarship,
+    app.requirements_uploaded_at,
+    app.submitted_at,
+    app.created_at,
+    app.updated_at,
+    coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'requirement_code', requirement.code,
+          'requirement_name', requirement.name,
+          'file_name', file.original_file_name,
+          'storage_bucket', file.storage_bucket,
+          'storage_path', file.storage_path,
+          'mime_type', file.mime_type,
+          'uploaded_at', file.uploaded_at
+        )
+        order by requirement.sort_order
+      ) filter (where file.id is not null),
+      '[]'::jsonb
+    ) as requirement_files
+  from public.admission_applications app
+  join public.admission_branches branch
+    on branch.id = app.branch_id
+  join public.admission_student_statuses status
+    on status.id = app.student_status_id
+  join public.program_offerings offering
+    on offering.id = app.program_offering_id
+  join public.academic_programs program
+    on program.id = offering.program_id
+  join public.program_tracks track
+    on track.id = app.track_id
+  left join public.admission_honors honor
+    on honor.id = app.honor_id
+  left join public.admission_application_requirement_files file
+    on file.application_id = app.id
+  left join public.admission_requirement_types requirement
+    on requirement.id = file.requirement_type_id
+  where app.application_status <> 'cancelled'
+    and (
+      p_branch_code is null
+      or branch.code = lower(trim(p_branch_code))
+    )
+  group by
+    app.id,
+    app.tracking_number,
+    branch.code,
+    branch.name,
+    status.label,
+    program.name,
+    program.level,
+    track.name,
+    honor.label,
+    app.application_status,
+    app.current_step,
+    app.first_name,
+    app.last_name,
+    app.middle_name,
+    app.sex,
+    app.civil_status,
+    app.address,
+    app.email,
+    app.phone_number,
+    app.year_completion,
+    app.applied_for_scholarship,
+    app.requirements_uploaded_at,
+    app.submitted_at,
+    app.created_at,
+    app.updated_at
+  order by coalesce(app.submitted_at, app.updated_at) desc;
 $$;
 
 alter table public.admission_branches enable row level security;
@@ -915,6 +1043,7 @@ grant execute on function public.save_admission_requirement_file(
   bigint
 ) to anon, authenticated;
 grant execute on function public.find_admission_tracking_numbers(text, text) to anon, authenticated;
+grant execute on function public.get_admin_admission_queue(text) to anon, authenticated;
 
 insert into storage.buckets (
   id,
@@ -949,3 +1078,10 @@ for update
 to anon, authenticated
 using (bucket_id = 'admission-requirements')
 with check (bucket_id = 'admission-requirements');
+
+drop policy if exists "Admission requirement files can be viewed by anyone" on storage.objects;
+create policy "Admission requirement files can be viewed by anyone"
+on storage.objects
+for select
+to anon, authenticated
+using (bucket_id = 'admission-requirements');

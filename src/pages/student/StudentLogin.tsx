@@ -43,6 +43,28 @@ function StudentLogin() {
     return () => clearInterval(interval);
   }, [slides.length]);
 
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    const branch = queryParams.get("branch") || "";
+    const studentNumber = (queryParams.get("studentNumber") || "")
+      .replace(/\D/g, "")
+      .slice(0, 6);
+
+    if (!branch && !studentNumber) {
+      return;
+    }
+
+    if (branch) {
+      setSelectedBranch(branch);
+    }
+
+    setLoginData((prev) => ({
+      ...prev,
+      branch: branch || prev.branch,
+      studentNumber: studentNumber || prev.studentNumber,
+    }));
+  }, [location.search]);
+
   const goToPrevious = () => {
     setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
   };

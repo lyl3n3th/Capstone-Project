@@ -1,5 +1,14 @@
 import { useState, useEffect } from "react";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import { useAuth } from "../../hooks/useAuth";
+import {
+  getNextStudentNumber,
+  getStudentRequirementSnapshot,
+  getStudentsForBranch,
+  normalizeBranchName,
+  readStoredStudents,
+  writeStoredStudents,
+} from "../../services/adminStorage";
 import "../../styles/admin/admin-students.css";
 
 interface StudentsProps {
@@ -23,6 +32,8 @@ interface Student {
   email: string;
   address: string;
   status: "Complete" | "Incomplete" | "Archived";
+  branch: string;
+  trackingNumber?: string;
 }
 
 interface ApiStudent {
@@ -43,7 +54,6 @@ interface ApiStudent {
   document_submitted_date?: string | null;
 }
 
-const STORAGE_KEY = "aics-students";
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
@@ -99,6 +109,7 @@ const mapApiStudentToStudent = (apiStudent: ApiStudent): Student => {
     email: apiStudent.email || "",
     address: apiStudent.address || "",
     status: mapApiStatusToUiStatus(apiStudent.status),
+    branch: "Bacoor",
   };
 };
 
@@ -128,6 +139,8 @@ export default function AdminStudents({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: StudentsProps) {
+  const { currentUser } = useAuth();
+  const currentBranch = normalizeBranchName(currentUser?.branch);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -158,6 +171,7 @@ export default function AdminStudents({
     email: "",
     address: "",
     status: "Incomplete",
+    branch: currentBranch,
   });
 
   // Errors for add/edit
@@ -166,17 +180,9 @@ export default function AdminStudents({
   >({});
 
   // Students data
-  const [students, setStudents] = useState<Student[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Failed to load students", e);
-      }
-    }
-    return [];
-  });
+  const [students, setStudents] = useState<Student[]>(() =>
+    getStudentsForBranch(currentBranch) as Student[],
+  );
 
   const loadStudents = async () => {
     setIsLoading(true);
@@ -206,12 +212,15 @@ export default function AdminStudents({
         }
       }
 
-      setStudents(fetchedStudents.map(mapApiStudentToStudent));
+      setStudents(
+        fetchedStudents.map((student) => ({
+          ...mapApiStudentToStudent(student),
+          branch: currentBranch,
+        })),
+      );
     } catch (error) {
       console.error("Failed to fetch students", error);
-      alert(
-        "Unable to load students from backend. Showing local data if available.",
-      );
+      setStudents(getStudentsForBranch(currentBranch) as Student[]);
     } finally {
       setIsLoading(false);
     }
@@ -219,7 +228,7 @@ export default function AdminStudents({
 
   useEffect(() => {
     loadStudents();
-  }, []);
+  }, [currentBranch]);
 
   useEffect(() => {
     if (window.innerWidth < 1024 && isSidebarOpen) {
@@ -236,8 +245,12 @@ export default function AdminStudents({
   }, [isSidebarOpen]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(students));
-  }, [students]);
+    const studentsFromOtherBranches = readStoredStudents().filter(
+      (student) => normalizeBranchName(student.branch) !== currentBranch,
+    );
+
+    writeStoredStudents([...studentsFromOtherBranches, ...students]);
+  }, [students, currentBranch]);
 
   const filteredStudents = students.filter((student) => {
     const search = searchTerm.toLowerCase();
@@ -358,15 +371,7 @@ export default function AdminStudents({
   };
 
   const generateNextStudentId = () => {
-    const numericIds = students
-      .map((student) => Number(student.id))
-      .filter((idNumber) => Number.isFinite(idNumber));
-
-    if (numericIds.length === 0) {
-      return "20200001";
-    }
-
-    return String(Math.max(...numericIds) + 1);
+    return getNextStudentNumber(currentBranch);
   };
 
   // Open add/edit modal
@@ -454,6 +459,7 @@ export default function AdminStudents({
         email: "",
         address: "",
         status: "Incomplete",
+        branch: currentBranch,
       });
       setShsTrackType("");
       setProgramSpecialization("");
@@ -548,6 +554,11 @@ export default function AdminStudents({
     e.preventDefault();
     if (!validateForm()) return;
 
+    const normalizedStudent: Student = {
+      ...formData,
+      branch: formData.branch || editingStudent?.branch || currentBranch,
+    };
+
     try {
       if (editingStudent?.recordId) {
         const response = await fetch(
@@ -557,7 +568,7 @@ export default function AdminStudents({
             headers: {
               "Content-Type": "application/json",
             },
-            body: JSON.stringify(mapStudentToApiPayload(formData)),
+            body: JSON.stringify(mapStudentToApiPayload(normalizedStudent)),
           },
         );
 
@@ -565,29 +576,38 @@ export default function AdminStudents({
           const errorData = await response.json().catch(() => ({}));
           throw new Error(errorData?.detail || "Failed to update student.");
         }
-      } else if (editingStudent && !editingStudent.recordId) {
-        throw new Error(
-          "This student record is not linked to backend yet. Please refresh and try again.",
-        );
       } else {
-        const response = await fetch(STUDENTS_API_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(mapStudentToApiPayload(formData)),
-        });
+        try {
+          const response = await fetch(STUDENTS_API_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(mapStudentToApiPayload(normalizedStudent)),
+          });
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          const firstError = Object.values(errorData).find((value) =>
-            Array.isArray(value),
-          ) as string[] | undefined;
-          throw new Error(firstError?.[0] || "Failed to create student.");
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const firstError = Object.values(errorData).find((value) =>
+              Array.isArray(value),
+            ) as string[] | undefined;
+            throw new Error(firstError?.[0] || "Failed to create student.");
+          }
+        } catch (networkError) {
+          console.warn(
+            "Falling back to local student storage for save",
+            networkError,
+          );
         }
       }
 
-      await loadStudents();
+      setStudents((prev) =>
+        editingStudent
+          ? prev.map((student) =>
+              student.id === editingStudent.id ? normalizedStudent : student,
+            )
+          : [normalizedStudent, ...prev.filter((student) => student.id !== normalizedStudent.id)],
+      );
       setIsAddEditModalOpen(false);
     } catch (error) {
       console.error("Failed to save student", error);
@@ -665,6 +685,14 @@ export default function AdminStudents({
   const closeViewModal = () => {
     setViewingStudent(null);
   };
+
+  const viewingStudentRequirements = viewingStudent
+    ? getStudentRequirementSnapshot({
+        branch: viewingStudent.branch || currentBranch,
+        studentNumber: viewingStudent.id,
+        trackingNumber: viewingStudent.trackingNumber,
+      })
+    : null;
 
   const handleEditFromView = () => {
     if (!viewingStudent) return;
@@ -1315,6 +1343,92 @@ export default function AdminStudents({
                     {viewingStudent.status}
                   </span>
                 </div>
+
+                <div className="students-detail-item">
+                  <span className="students-detail-label">Requirements:</span>
+                  <span className="students-detail-value">
+                    {viewingStudentRequirements
+                      ? `${viewingStudentRequirements.summary.submitted}/${viewingStudentRequirements.summary.total} submitted`
+                      : "No linked admission record"}
+                  </span>
+                </div>
+
+                {viewingStudentRequirements && (
+                  <>
+                    <div className="students-detail-item">
+                      <span className="students-detail-label">
+                        Submitted Files:
+                      </span>
+                      <span className="students-detail-value">
+                        {viewingStudentRequirements.summary.submitted}
+                      </span>
+                    </div>
+                    <div className="students-detail-item">
+                      <span className="students-detail-label">
+                        Pending Requirements:
+                      </span>
+                      <span className="students-detail-value">
+                        {viewingStudentRequirements.summary.pending}
+                      </span>
+                    </div>
+
+                    <div className="students-detail-item">
+                      <span className="students-detail-label">
+                        Submitted List:
+                      </span>
+                      <span className="students-detail-value">
+                        {viewingStudentRequirements.submittedAttachments.length >
+                        0 ? (
+                          <div>
+                            {viewingStudentRequirements.submittedAttachments.map(
+                              (attachment) => (
+                                <div key={attachment.name}>
+                                  <strong>{attachment.name}</strong>{" "}
+                                  ({attachment.reviewStatus || "Pending"}){" "}
+                                  {attachment.url && attachment.url !== "#" ? (
+                                    <a
+                                      href={attachment.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      View
+                                    </a>
+                                  ) : (
+                                    <span>Reference only</span>
+                                  )}
+                                </div>
+                              ),
+                            )}
+                          </div>
+                        ) : (
+                          "No submitted files"
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="students-detail-item">
+                      <span className="students-detail-label">
+                        Pending List:
+                      </span>
+                      <span className="students-detail-value">
+                        {viewingStudentRequirements.pendingRequirements.length >
+                        0 ? (
+                          <div>
+                            {viewingStudentRequirements.pendingRequirements.map(
+                              (requirement) => (
+                                <div key={requirement.code}>
+                                  {requirement.name}
+                                </div>
+                              ),
+                            )}
+                          </div>
+                        ) : (
+                          "No pending requirements"
+                        )}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="students-modal-actions">

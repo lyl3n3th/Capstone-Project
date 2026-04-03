@@ -1,13 +1,15 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { FaCalendarAlt, FaGraduationCap } from "react-icons/fa";
 import { FaFilter, FaDownload } from "react-icons/fa";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
-import { useStudent } from "../../contexts/StudentContext";
+import { useStudent } from "../../hooks/useStudent";
+import type { StudentPortalSubject } from "../../services/adminStorage";
 import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
 
 const useToast = () => {
+  const toastCounterRef = useRef(0);
   const [toasts, setToasts] = useState<
     Array<{
       id: string;
@@ -20,7 +22,8 @@ const useToast = () => {
     message: string,
     type: "success" | "error" | "info" | "warning",
   ) => {
-    const id = Math.random().toString(36).substr(2, 9);
+    toastCounterRef.current += 1;
+    const id = `student-subjects-toast-${toastCounterRef.current}`;
     setToasts((prev) => [...prev, { id, message, type }]);
 
     setTimeout(() => {
@@ -35,44 +38,53 @@ const useToast = () => {
   return { toasts, addToast, removeToast };
 };
 
-interface Subject {
-  id: string;
-  code: string;
-  title: string;
-  units?: number;
-  schedule: string;
-  room: string;
-  professor: string;
-  days: string;
-  time: string;
-  semester: string;
-  academicYear: string;
-}
-
 function StudentSubjects() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { student, subjects: allSubjects, isLoading } = useStudent();
-  const [filteredSubjects, setFilteredSubjects] = useState<Subject[]>([]);
-  const [selectedAcademicYear, setSelectedAcademicYear] = useState("2025-2026");
-  const [selectedSemester, setSelectedSemester] = useState("1st Semester");
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState("");
+  const [selectedSemester, setSelectedSemester] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const { toasts, addToast, removeToast } = useToast();
 
   const isSHS = student?.programType === "SHS";
 
-  const academicYears = ["2024-2025", "2025-2026", "2026-2027"];
-
-  const semesters = ["1st Semester", "2nd Semester", "Summer"];
-
-  useEffect(() => {
-    const filtered = allSubjects.filter(
+  const availableAcademicYears = useMemo(
+    () =>
+      Array.from(
+        new Set(allSubjects.map((subject) => subject.academicYear).filter(Boolean)),
+      ),
+    [allSubjects],
+  );
+  const effectiveAcademicYear =
+    selectedAcademicYear && availableAcademicYears.includes(selectedAcademicYear)
+      ? selectedAcademicYear
+      : availableAcademicYears[0] || "2026-2027";
+  const availableSemesters = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          allSubjects
+            .filter((subject) => subject.academicYear === effectiveAcademicYear)
+            .map((subject) => subject.semester)
+            .filter(Boolean),
+        ),
+      ),
+    [allSubjects, effectiveAcademicYear],
+  );
+  const effectiveSemester =
+    selectedSemester && availableSemesters.includes(selectedSemester)
+      ? selectedSemester
+      : availableSemesters[0] || "1st Semester";
+  const filteredSubjects: StudentPortalSubject[] = useMemo(
+    () =>
+      allSubjects.filter(
       (subject) =>
-        subject.academicYear === selectedAcademicYear &&
-        subject.semester === selectedSemester,
-    );
-    setFilteredSubjects(filtered);
-  }, [allSubjects, selectedAcademicYear, selectedSemester]);
+          subject.academicYear === effectiveAcademicYear &&
+          subject.semester === effectiveSemester,
+      ),
+    [allSubjects, effectiveAcademicYear, effectiveSemester],
+  );
 
   const handleMenuClick = () => {
     setSidebarOpen(!sidebarOpen);
@@ -102,8 +114,8 @@ function StudentSubjects() {
     scheduleText += `Student: ${student?.firstName} ${student?.lastName}\n`;
     scheduleText += `Student Number: ${student?.studentNumber}\n`;
     scheduleText += `Program: ${student?.program}\n`;
-    scheduleText += `Academic Year: ${selectedAcademicYear}\n`;
-    scheduleText += `Semester: ${selectedSemester}\n`;
+    scheduleText += `Academic Year: ${effectiveAcademicYear}\n`;
+    scheduleText += `Semester: ${effectiveSemester}\n`;
     scheduleText += `\n${"=".repeat(50)}\n\n`;
 
     filteredSubjects.forEach((subject, index) => {
@@ -132,7 +144,7 @@ function StudentSubjects() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `class_schedule_${selectedAcademicYear}_${selectedSemester}.txt`;
+    a.download = `class_schedule_${effectiveAcademicYear}_${effectiveSemester}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -177,7 +189,7 @@ function StudentSubjects() {
   });
 
   const studentData = {
-    name: student?.firstName + " " + student?.lastName || "Student",
+    name: student ? `${student.firstName} ${student.lastName}` : "Student",
     id: student?.studentNumber || "",
     progrm: student?.programType || "SHS",
   };
@@ -228,10 +240,10 @@ function StudentSubjects() {
           <div className="s-grades-controls-row">
             <div className="s-grades-banner-subtitle">
               <span className="s-academic-year">
-                <FaCalendarAlt /> {selectedAcademicYear}
+                <FaCalendarAlt /> {effectiveAcademicYear || "No Academic Year"}
               </span>
               <span className="s-semester">
-                <FaGraduationCap /> {selectedSemester}
+                <FaGraduationCap /> {effectiveSemester || "No Semester"}
               </span>
             </div>
 
@@ -256,7 +268,7 @@ function StudentSubjects() {
                 <div className="s-filter-group">
                   <label>Academic Year</label>
                   <select
-                    value={selectedAcademicYear}
+                    value={effectiveAcademicYear}
                     onChange={(e) => {
                       setSelectedAcademicYear(e.target.value);
                       addToast(
@@ -266,7 +278,10 @@ function StudentSubjects() {
                     }}
                     className="s-filter-select"
                   >
-                    {academicYears.map((year) => (
+                    {(availableAcademicYears.length > 0
+                      ? availableAcademicYears
+                      : ["2026-2027"]
+                    ).map((year) => (
                       <option key={year} value={year}>
                         {year}
                       </option>
@@ -276,7 +291,7 @@ function StudentSubjects() {
                 <div className="s-filter-group">
                   <label>Semester</label>
                   <select
-                    value={selectedSemester}
+                    value={effectiveSemester}
                     onChange={(e) => {
                       setSelectedSemester(e.target.value);
                       addToast(
@@ -286,7 +301,10 @@ function StudentSubjects() {
                     }}
                     className="s-filter-select"
                   >
-                    {semesters.map((sem) => (
+                    {(availableSemesters.length > 0
+                      ? availableSemesters
+                      : ["1st Semester"]
+                    ).map((sem) => (
                       <option key={sem} value={sem}>
                         {sem}
                       </option>

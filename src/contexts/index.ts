@@ -1,2 +1,3 @@
 export { AuthProvider } from "./AuthContext";
-export { StudentProvider, useStudent } from "./StudentContext";
+export { StudentProvider } from "./StudentContext";
+export { useStudent } from "../hooks/useStudent";

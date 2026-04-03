@@ -9,6 +9,11 @@ import {
   getAdmissionProgress,
   updateAdmissionProgress,
 } from "../../services/admission";
+import {
+  findStoredStudent,
+  normalizeBranchName,
+  upsertSubmittedApplicant,
+} from "../../services/adminStorage";
 import type { AdmissionApplicationSummary } from "../../types/application";
 
 function getQueryParam(name: string): string | null {
@@ -139,6 +144,11 @@ function AdmissionStep4() {
         );
       }
 
+      upsertSubmittedApplicant({
+        application: updatedApplication,
+        draft,
+      });
+
       setApplicationData(updatedApplication);
       addToast("Application submitted successfully.", "success");
 
@@ -188,16 +198,57 @@ function AdmissionStep4() {
     }
   }, [applicationData]);
 
+  const linkedStudentRecord = useMemo(() => {
+    if (!applicationData || applicationData.applicationStatus !== "accepted") {
+      return null;
+    }
+
+    return findStoredStudent({
+      branch: applicationData.branchName,
+      trackingNumber: applicationData.trackingNumber,
+    });
+  }, [applicationData]);
+
+  const statusCircleClass = useMemo(() => {
+    switch (applicationData?.applicationStatus) {
+      case "accepted":
+        return "conf-status-circle conf-status-circle-accepted";
+      case "rejected":
+        return "conf-status-circle conf-status-circle-rejected";
+      default:
+        return "conf-status-circle conf-status-circle-pending";
+    }
+  }, [applicationData]);
+
+  const studentPortalLink = useMemo(() => {
+    if (!applicationData || applicationData.applicationStatus !== "accepted") {
+      return "";
+    }
+
+    const params = new URLSearchParams({
+      branch: normalizeBranchName(applicationData.branchName),
+    });
+
+    if (linkedStudentRecord?.id) {
+      params.set("studentNumber", linkedStudentRecord.id);
+    }
+
+    return `/student/login?${params.toString()}`;
+  }, [applicationData, linkedStudentRecord]);
+
   const isCollege = applicationData?.programLevel === "college";
   const canEdit = applicationData?.applicationStatus === "draft";
   const honorDiscount = getHonorDiscount(applicationData?.honorLabel ?? null);
-  const buttonText = canEdit
-    ? isCollege
-      ? "Submit & Continue to Scholarship Exam"
-      : "Submit Application"
-    : isCollege
-      ? "View Scholarship Exam"
-      : "Go to Home";
+  const isAccepted = applicationData?.applicationStatus === "accepted";
+  const buttonText = isAccepted
+    ? "Proceed to Student Portal"
+    : canEdit
+      ? isCollege
+        ? "Submit & Continue to Scholarship Exam"
+        : "Submit Application"
+      : isCollege
+        ? "View Scholarship Exam"
+        : "Go to Home";
 
   const baseTuition = 15 * 600;
   const discountedTuition = baseTuition * (1 - honorDiscount / 100);
@@ -240,7 +291,7 @@ function AdmissionStep4() {
       <div className="confirmation-container">
         <div className="confirmation-card">
           <div className="conf-status-header">
-            <span className="conf-pending-circle"></span>
+            <span className={statusCircleClass}></span>
             <span className="conf-status-title">Application Status</span>
           </div>
 
@@ -270,6 +321,23 @@ function AdmissionStep4() {
             <div className="conf-notice conf-notice-success">
               <strong>Application Submitted:</strong> Your admission record is
               already in Supabase and is waiting for the next registrar update.
+            </div>
+          )}
+
+          {isAccepted && (
+            <div className="conf-notice conf-notice-success">
+              <strong>Student Portal Ready:</strong> Your application has been
+              accepted.
+              {linkedStudentRecord?.id ? (
+                <> Your student number is <strong>{linkedStudentRecord.id}</strong>.</>
+              ) : (
+                <> You may now proceed to the student portal.</>
+              )}
+              {studentPortalLink && (
+                <p style={{ marginTop: "8px" }}>
+                  <a href={studentPortalLink}>Proceed to Student Portal</a>
+                </p>
+              )}
             </div>
           )}
 
@@ -340,6 +408,14 @@ function AdmissionStep4() {
                   {formatDate(applicationData.submittedAt)}
                 </span>
               </div>
+              {linkedStudentRecord?.id && (
+                <div className="conf-summary-item">
+                  <span className="conf-summary-label">Student Number:</span>
+                  <span className="conf-summary-value">
+                    {linkedStudentRecord.id}
+                  </span>
+                </div>
+              )}
               {applicationData.honorLabel &&
                 applicationData.honorLabel !== "No Honor" && (
                   <div className="conf-summary-item conf-honor-item">
@@ -378,6 +454,11 @@ function AdmissionStep4() {
             <button
               className="conf-btn-continue"
               onClick={() => {
+                if (isAccepted && studentPortalLink) {
+                  window.location.href = studentPortalLink;
+                  return;
+                }
+
                 if (!canEdit) {
                   if (isCollege) {
                     window.location.href = `/scholarship-exam?trackingNumber=${encodeURIComponent(applicationData.trackingNumber)}`;

@@ -2,6 +2,7 @@
 export interface Student {
   id: string;
   studentNumber: string;
+  trackingNumber?: string;
   firstName: string;
   lastName: string;
   middleName?: string;
@@ -11,6 +12,7 @@ export interface Student {
   program: string;
   yearLevel: string;
   branch: string;
+  section?: string;
   programType: 'SHS' | 'BS' | 'Short Course';
   gender: 'Male' | 'Female';
   birthday?: string;

@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { PiMicrosoftExcelLogo } from "react-icons/pi";
 import { IoMdCheckmarkCircleOutline } from "react-icons/io";
-import { FiAlertCircle, FiDownload, FiUpload, FiEye } from "react-icons/fi";
+import { FiAlertCircle, FiDownload, FiUpload } from "react-icons/fi";
 import { MdOutlineFileUpload } from "react-icons/md";
 import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
@@ -91,12 +91,6 @@ export default function AdminGrades({
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [isReadyToUpload, setIsReadyToUpload] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [selectedHistoryItem, setSelectedHistoryItem] =
-    useState<UploadHistoryItem | null>(null);
-  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
-  const [historyPreviewRows, setHistoryPreviewRows] = useState<
-    PreviewGradeRow[]
-  >([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Toast functions
@@ -448,30 +442,6 @@ export default function AdminGrades({
     addToast("File reviewed. Ready to upload.", "success");
   };
 
-  const handleViewGrade = (row: PreviewGradeRow) => {
-    addToast(
-      `Viewing: ${row.fullName} - ${row.subjectCode} (Grade: ${row.grade})`,
-      "info",
-    );
-  };
-
-  const handleViewHistory = (item: UploadHistoryItem) => {
-    setSelectedHistoryItem(item);
-    if (item.fileData && item.fileData.length > 0) {
-      setHistoryPreviewRows(item.fileData);
-    } else {
-      // If no file data is stored, use empty array
-      setHistoryPreviewRows([]);
-    }
-    setIsHistoryModalOpen(true);
-  };
-
-  const closeHistoryModal = () => {
-    setIsHistoryModalOpen(false);
-    setSelectedHistoryItem(null);
-    setHistoryPreviewRows([]);
-  };
-
   const handleSidebarToggle = () => {
     setIsSidebarOpen(!isSidebarOpen);
   };
@@ -479,14 +449,6 @@ export default function AdminGrades({
   const handleSidebarClose = () => {
     setIsSidebarOpen(false);
   };
-
-  // Calculate history record counts
-  const historyValidRecords = historyPreviewRows.filter(
-    (row) => row.status === "Valid",
-  ).length;
-  const historyErrorRecords = historyPreviewRows.filter(
-    (row) => row.status === "Error",
-  ).length;
 
   return (
     <div className="dashboard-layout">

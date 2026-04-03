@@ -4,11 +4,12 @@ import { MdDownload, MdFileUpload } from "react-icons/md";
 import { IoDocumentText } from "react-icons/io5";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
-import { useStudent } from "../../contexts/StudentContext";
+import { useStudent } from "../../hooks/useStudent";
 import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
 
 const useToast = () => {
+  const toastCounterRef = useRef(0);
   const [toasts, setToasts] = useState<
     Array<{
       id: string;
@@ -21,7 +22,8 @@ const useToast = () => {
     message: string,
     type: "success" | "error" | "info" | "warning",
   ) => {
-    const id = Math.random().toString(36).substr(2, 9);
+    toastCounterRef.current += 1;
+    const id = `student-enrollment-toast-${toastCounterRef.current}`;
     setToasts((prev) => [...prev, { id, message, type }]);
 
     setTimeout(() => {
@@ -38,7 +40,7 @@ const useToast = () => {
 
 function StudentEnrollment() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { student, isLoading } = useStudent();
+  const { student, subjects, credentialSummary, isLoading } = useStudent();
   const [uploadedFiles, setUploadedFiles] = useState<
     Record<string, { name: string; url?: string }>
   >({});
@@ -195,10 +197,14 @@ function StudentEnrollment() {
     
     ASSIGNED SUBJECTS:
     
-    1. MTH122 - Statistics and Probability
-    2. CP1122 - Computer Programming 2 (Java NC II)
-    3. EAP122 - English for Academic and Professional Purposes
-    4. PEH122 - Physical Education and Health 2
+    ${assignedSubjects.length > 0
+      ? assignedSubjects
+          .map(
+            (subject, index) =>
+              `${index + 1}. ${subject.code} - ${subject.title}`,
+          )
+          .join("\n")
+      : "No subjects assigned yet."}
     
     ${"=".repeat(50)}
     
@@ -262,7 +268,7 @@ function StudentEnrollment() {
     id: student?.studentNumber || "20221131",
     progrm: student?.programType || "SHS",
     strand: student?.program || "TVL - ICT",
-    section: "IC2DA",
+    section: student?.section || "TBA",
   };
 
   if (isLoading && !student) {
@@ -273,28 +279,14 @@ function StudentEnrollment() {
     );
   }
 
-  const assignedSubjects = [
-    {
-      code: "MTH122",
-      title: "Statistics and Probability",
-      semester: "First Semester",
-    },
-    {
-      code: "CP1122",
-      title: "Computer Programming 2 (Java NC II)",
-      semester: "First Semester",
-    },
-    {
-      code: "EAP122",
-      title: "English for Academic and Professional Purposes",
-      semester: "First Semester",
-    },
-    {
-      code: "PEH122",
-      title: "Physical Education and Health 2",
-      semester: "First Semester",
-    },
-  ];
+  const assignedSubjects =
+    subjects.length > 0
+      ? subjects.filter(
+          (subject) =>
+            subject.academicYear === subjects[0].academicYear &&
+            subject.semester === subjects[0].semester,
+        )
+      : [];
 
   return (
     <div className="s-portal">
@@ -404,6 +396,12 @@ function StudentEnrollment() {
                 personnel. The downloaded clearance is not considered valid
                 without complete signatures.
               </p>
+              {credentialSummary && (
+                <p className="s-notice-text">
+                  Admission credentials: {credentialSummary.submitted}/
+                  {credentialSummary.total} submitted
+                </p>
+              )}
             </div>
           </div>
 
@@ -470,7 +468,7 @@ function StudentEnrollment() {
 
           {/* Assigned Subjects Table */}
           <div className="s-subjects-section">
-            <h3>Assigned Subjects (Grade 12)</h3>
+            <h3>Assigned Subjects ({student?.yearLevel || "Current Level"})</h3>
             <div className="s-table-wrapper">
               <table className="s-enrollment-table">
                 <thead>
@@ -481,13 +479,19 @@ function StudentEnrollment() {
                   </tr>
                 </thead>
                 <tbody>
-                  {assignedSubjects.map((subject, index) => (
-                    <tr key={index}>
-                      <td className="s-subject-code">{subject.code}</td>
-                      <td className="s-subject-title">{subject.title}</td>
-                      <td className="s-subject-semester">{subject.semester}</td>
+                  {assignedSubjects.length > 0 ? (
+                    assignedSubjects.map((subject) => (
+                      <tr key={subject.id}>
+                        <td className="s-subject-code">{subject.code}</td>
+                        <td className="s-subject-title">{subject.title}</td>
+                        <td className="s-subject-semester">{subject.semester}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={3}>No subjects assigned yet.</td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>

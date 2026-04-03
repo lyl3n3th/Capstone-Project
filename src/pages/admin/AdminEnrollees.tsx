@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   FaUserPlus,
   FaUserGraduate,
-  FaArrowRight,
   FaCheckCircle,
   FaClock,
   FaExclamationTriangle,
@@ -14,15 +13,11 @@ import {
   FaUsers,
   FaMagic,
   FaLayerGroup,
-  FaEdit,
   FaBook,
   FaChalkboardTeacher,
   FaCalendarAlt,
   FaPlus,
-  FaTrash,
-  FaSave,
   FaUniversity,
-  FaTimes,
   FaSearch,
   FaChevronDown,
   FaChevronUp,
@@ -30,6 +25,19 @@ import {
 } from "react-icons/fa";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
+import { useAuth } from "../../hooks/useAuth";
+import {
+  fetchSupabaseAdmissionApplicants,
+  getDefaultBranchEnrollees,
+  mergeAdminEnrolleeRecords,
+  normalizeBranchName,
+  promoteApplicantToStoredStudent,
+  readBranchScopedData,
+  readStoredStudents,
+  writeBranchScopedData,
+  writeStoredStudents,
+} from "../../services/adminStorage";
+import { updateAdmissionProgress } from "../../services/admission";
 import "../../styles/admin/admin-enrolles.css";
 
 interface EnrolleesProps {
@@ -62,13 +70,19 @@ interface Enrollee {
   recordId?: number;
   id: string;
   trackingNumber: string;
+  studentNumber?: string;
   fullName: string;
   program: string;
   yearLevel: string;
+  strandOrCourse: string;
   applicationDate: string;
   documentsSubmitted: number;
   totalDocuments: number;
-  status: "Pending" | "Approved";
+  status: "Pending" | "Approved" | "Rejected";
+  branch: string;
+  studentStatus: string;
+  honorLabel?: string | null;
+  convertedAt?: string;
   personalInfo: PersonalInformation;
   attachments?: Attachment[];
 }
@@ -151,44 +165,11 @@ interface SubjectAssignment {
   semester: string;
 }
 
-interface ApiEnrollee {
-  id: number;
-  enrollee_code: string;
-  tracking_number: string;
-  full_name: string;
-  program: string;
-  year_level: string;
-  application_date: string;
-  documents_submitted: number;
-  total_documents: number;
-  status: Enrollee["status"];
-  birth_date?: string | null;
-  contact_number?: string | null;
-  guardian_name?: string | null;
-  email?: string | null;
-  address?: string | null;
-  guardian_contact?: string | null;
-  attachments?: Attachment[];
-  personalInfo?: PersonalInformation;
-}
-
 interface Toast {
   id: string;
   message: string;
   type: "success" | "error" | "info" | "warning";
 }
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-const ENROLLEES_API_URL = `${API_BASE_URL}/api/enrollees/`;
-
-// Helper for incremental Student IDs
-const getNextStudentId = () => {
-  const current = sessionStorage.getItem("last_student_id") || "261000";
-  const next = parseInt(current) + 1;
-  sessionStorage.setItem("last_student_id", next.toString());
-  return next.toString();
-};
 
 // Get requirement items for enrollment requests based on current and requested level
 const getEnrollmentRequirementItems = (
@@ -267,19 +248,48 @@ const getEnrollmentRequirementItems = (
   return requirements;
 };
 
+const normalizeAcademicDescriptor = (value?: string) =>
+  (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+const sectionMatchesEnrollee = (
+  section: ClassSection,
+  enrollee: Pick<Enrollee, "program" | "yearLevel" | "strandOrCourse">,
+) => {
+  if (section.program !== enrollee.program || section.yearLevel !== enrollee.yearLevel) {
+    return false;
+  }
+
+  if (!section.strand) {
+    return true;
+  }
+
+  const sectionStrand = normalizeAcademicDescriptor(section.strand);
+  const enrolleeStrand = normalizeAcademicDescriptor(enrollee.strandOrCourse);
+
+  if (!sectionStrand || !enrolleeStrand) {
+    return true;
+  }
+
+  return (
+    enrolleeStrand.includes(sectionStrand) || sectionStrand.includes(enrolleeStrand)
+  );
+};
+
 export default function AdminEnrollees({
   onLogout,
   loggedInUsername,
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: EnrolleesProps) {
+  const { currentUser } = useAuth();
+  const currentBranch = normalizeBranchName(currentUser?.branch);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "admissions" | "enrollments" | "academic"
-  >("enrollments");
-  const [selectedEnrolleeId, setSelectedEnrolleeId] = useState<string | null>(
-    null,
-  );
+  >("admissions");
   const [selectedRequest, setSelectedRequest] = useState<
     EnrollmentRequest | Enrollee | null
   >(null);
@@ -378,6 +388,7 @@ export default function AdminEnrollees({
   const [expandedAssignmentSections, setExpandedAssignmentSections] = useState<
     Record<string, boolean>
   >({});
+  const [hasInitializedBranchData, setHasInitializedBranchData] = useState(false);
 
   // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {
@@ -392,14 +403,34 @@ export default function AdminEnrollees({
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
+  const storageScopes = {
+    enrollees: "enrollees",
+    enrollmentRequests: "enrollment-requests",
+    classSections: "class-sections",
+    sectionAssignments: "section-assignments",
+    subjects: "subjects",
+    instructors: "instructors",
+    subjectAssignments: "subject-assignments",
+  } as const;
+
   // Load class sections
   const loadClassSections = () => {
+    const storedSections = readBranchScopedData<ClassSection[]>(
+      storageScopes.classSections,
+      currentBranch,
+    );
+
+    if (storedSections?.length) {
+      setClassSections(storedSections);
+      return;
+    }
+
     const mockSections: ClassSection[] = [
       {
         id: "1",
         code: "IC1DA",
-        program: "ICT",
-        yearLevel: "1st Year",
+        program: "SHS",
+        yearLevel: "Grade 11",
         strand: "ICT",
         section: "A",
         currentEnrollees: 28,
@@ -409,8 +440,8 @@ export default function AdminEnrollees({
       {
         id: "2",
         code: "IC1MB",
-        program: "ICT",
-        yearLevel: "1st Year",
+        program: "SHS",
+        yearLevel: "Grade 11",
         strand: "ICT",
         section: "B",
         currentEnrollees: 15,
@@ -420,8 +451,8 @@ export default function AdminEnrollees({
       {
         id: "3",
         code: "GA1DA",
-        program: "GAS",
-        yearLevel: "1st Year",
+        program: "SHS",
+        yearLevel: "Grade 11",
         strand: "GAS",
         section: "A",
         currentEnrollees: 30,
@@ -431,8 +462,8 @@ export default function AdminEnrollees({
       {
         id: "4",
         code: "HUM1MB",
-        program: "HUMSS",
-        yearLevel: "1st Year",
+        program: "SHS",
+        yearLevel: "Grade 11",
         strand: "HUMSS",
         section: "B",
         currentEnrollees: 12,
@@ -442,8 +473,9 @@ export default function AdminEnrollees({
       {
         id: "5",
         code: "BSE1A",
-        program: "BS Entrepreneurship",
+        program: "College",
         yearLevel: "1st Year",
+        strand: "BSE - Bachelor of Entrepreneurship",
         section: "A",
         currentEnrollees: 8,
         maxCapacity: 30,
@@ -455,6 +487,16 @@ export default function AdminEnrollees({
 
   // Load subjects - Updated with full SHS and College structure (Semester-based for SHS)
   const loadSubjects = () => {
+    const storedSubjects = readBranchScopedData<Subject[]>(
+      storageScopes.subjects,
+      currentBranch,
+    );
+
+    if (storedSubjects?.length) {
+      setSubjects(storedSubjects);
+      return;
+    }
+
     const mockSubjects: Subject[] = [
       // ========== SHS - GRADE 11 - 1st Semester ==========
       {
@@ -1381,6 +1423,16 @@ export default function AdminEnrollees({
 
   // Load instructors with updated names
   const loadInstructors = () => {
+    const storedInstructors = readBranchScopedData<Instructor[]>(
+      storageScopes.instructors,
+      currentBranch,
+    );
+
+    if (storedInstructors?.length) {
+      setInstructors(storedInstructors);
+      return;
+    }
+
     const mockInstructors: Instructor[] = [
       {
         id: "1",
@@ -1476,6 +1528,16 @@ export default function AdminEnrollees({
 
   // Load subject assignments
   const loadSubjectAssignments = () => {
+    const storedAssignments = readBranchScopedData<SubjectAssignment[]>(
+      storageScopes.subjectAssignments,
+      currentBranch,
+    );
+
+    if (storedAssignments?.length) {
+      setSubjectAssignments(storedAssignments);
+      return;
+    }
+
     const mockAssignments: SubjectAssignment[] = [
       {
         id: "1",
@@ -1543,6 +1605,22 @@ export default function AdminEnrollees({
     setPendingAssignments(approvedUnassigned);
   };
 
+  const syncStudentSection = (enrollee: Enrollee, sectionCode: string) => {
+    if (!enrollee.studentNumber) {
+      return;
+    }
+
+    const storedStudents = readStoredStudents();
+    const nextStudents = storedStudents.map((student) =>
+      student.id === enrollee.studentNumber &&
+      normalizeBranchName(student.branch) === currentBranch
+        ? { ...student, section: sectionCode }
+        : student,
+    );
+
+    writeStoredStudents(nextStudents);
+  };
+
   // Handle assign to section
   const handleAssignToSection = (enrolleeId: string, sectionId: string) => {
     const enrollee = enrollees.find((e) => e.id === enrolleeId);
@@ -1576,6 +1654,7 @@ export default function AdminEnrollees({
     };
     setSectionAssignments((prev) => [...prev, newAssignment]);
     setPendingAssignments((prev) => prev.filter((e) => e.id !== enrolleeId));
+    syncStudentSection(enrollee, section.code);
 
     addToast(`${enrollee.fullName} assigned to ${section.code}`, "success");
   };
@@ -1588,14 +1667,12 @@ export default function AdminEnrollees({
       isNewSection: boolean;
     }[] = [];
     const updatedSections = [...classSections];
-    let newSectionsCreated: ClassSection[] = [];
+    const newSectionsCreated: ClassSection[] = [];
 
     for (const enrollee of pendingAssignments) {
       const matchingSections = updatedSections
         .filter(
-          (section) =>
-            section.program === enrollee.program &&
-            section.yearLevel === enrollee.yearLevel,
+          (section) => sectionMatchesEnrollee(section, enrollee),
         )
         .sort((a, b) => a.section.localeCompare(b.section));
 
@@ -1611,10 +1688,13 @@ export default function AdminEnrollees({
         );
         const newSection: ClassSection = {
           id: `new_${Date.now()}_${nextSectionLetter}`,
-          code: `${enrollee.program}1${nextSectionLetter}A`,
+          code:
+            enrollee.program === "SHS"
+              ? `${(enrollee.strandOrCourse || "SHS").split(" ")[0].replace(/[^A-Z]/gi, "").slice(0, 4).toUpperCase() || "SHS"}${enrollee.yearLevel === "Grade 12" ? "2" : "1"}${nextSectionLetter}`
+              : `BSE1${nextSectionLetter}`,
           program: enrollee.program,
           yearLevel: enrollee.yearLevel,
-          strand: enrollee.program === "SHS" ? enrollee.yearLevel : undefined,
+          strand: enrollee.strandOrCourse,
           section: nextSectionLetter,
           currentEnrollees: 1,
           maxCapacity: 30,
@@ -1649,6 +1729,9 @@ export default function AdminEnrollees({
     }));
     setSectionAssignments((prev) => [...prev, ...newAssignments]);
     setPendingAssignments([]);
+    assignments.forEach(({ enrollee, section }) =>
+      syncStudentSection(enrollee, section.code),
+    );
 
     addToast(`Assigned ${assignments.length} students to sections`, "success");
   };
@@ -1662,6 +1745,16 @@ export default function AdminEnrollees({
   const loadEnrollmentRequests = async () => {
     setIsLoading(true);
     try {
+      const storedRequests = readBranchScopedData<EnrollmentRequest[]>(
+        storageScopes.enrollmentRequests,
+        currentBranch,
+      );
+
+      if (storedRequests?.length) {
+        setEnrollmentRequests(storedRequests);
+        return;
+      }
+
       const mockEnrollmentRequests: EnrollmentRequest[] = [
         {
           id: "ER001",
@@ -1773,109 +1866,129 @@ export default function AdminEnrollees({
     }
   };
 
-  const mapApiEnrolleeToUi = (apiEnrollee: ApiEnrollee): Enrollee => ({
-    recordId: apiEnrollee.id,
-    id: apiEnrollee.enrollee_code,
-    trackingNumber: apiEnrollee.tracking_number,
-    fullName: apiEnrollee.full_name,
-    program: apiEnrollee.program,
-    yearLevel: apiEnrollee.year_level,
-    applicationDate: apiEnrollee.application_date,
-    documentsSubmitted: apiEnrollee.documents_submitted,
-    totalDocuments: apiEnrollee.total_documents,
-    status: apiEnrollee.status,
-    personalInfo: apiEnrollee.personalInfo || {
-      fullName: apiEnrollee.full_name,
-      birthDate: apiEnrollee.birth_date || "",
-      contactNumber: apiEnrollee.contact_number || "",
-      program: apiEnrollee.program,
-      guardianName: apiEnrollee.guardian_name || "",
-      email: apiEnrollee.email || "",
-      address: apiEnrollee.address || "",
-      yearLevel: apiEnrollee.year_level,
-      guardianContact: apiEnrollee.guardian_contact || "",
-    },
-    attachments: Array.isArray(apiEnrollee.attachments)
-      ? apiEnrollee.attachments
-      : [],
-  });
-
   const loadEnrollees = async () => {
     setIsLoading(true);
-    try {
-      const fetchedEnrollees: ApiEnrollee[] = [];
-      let nextPageUrl: string | null = ENROLLEES_API_URL;
+    const storedEnrollees =
+      readBranchScopedData<Enrollee[]>(storageScopes.enrollees, currentBranch) ??
+      [];
+    const defaultEnrollees = getDefaultBranchEnrollees(currentBranch) as Enrollee[];
 
-      while (nextPageUrl) {
-        const response = await fetch(nextPageUrl);
-        if (!response.ok)
-          throw new Error("Failed to load enrollees from backend.");
-        const payload = await response.json();
-        if (Array.isArray(payload)) {
-          fetchedEnrollees.push(...payload);
-          nextPageUrl = null;
-        } else {
-          const results = Array.isArray(payload.results) ? payload.results : [];
-          fetchedEnrollees.push(...results);
-          nextPageUrl =
-            typeof payload.next === "string" && payload.next
-              ? payload.next
-              : null;
-        }
-      }
-      setEnrollees(fetchedEnrollees.map(mapApiEnrolleeToUi));
+    try {
+      const supabaseApplicants = (await fetchSupabaseAdmissionApplicants(
+        currentBranch,
+      )) as Enrollee[];
+
+      setEnrollees(
+        mergeAdminEnrolleeRecords(
+          [...defaultEnrollees, ...supabaseApplicants],
+          storedEnrollees,
+        ) as Enrollee[],
+      );
     } catch (error) {
-      const stored = sessionStorage.getItem("enrollees_session");
-      if (stored) {
-        setEnrollees(JSON.parse(stored));
-        return;
-      }
       console.error("Failed to fetch enrollees", error);
-      addToast("Unable to load enrollees from backend.", "error");
-      setEnrollees([]);
+      setEnrollees(
+        mergeAdminEnrolleeRecords(defaultEnrollees, storedEnrollees) as Enrollee[],
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Effect to handle session storage persistence
   useEffect(() => {
-    if (enrollees.length > 0) {
-      sessionStorage.setItem("enrollees_session", JSON.stringify(enrollees));
-    }
-  }, [enrollees]);
-
-  useEffect(() => {
-    if (enrollmentRequests.length > 0) {
-      sessionStorage.setItem(
-        "requests_session",
-        JSON.stringify(enrollmentRequests),
-      );
-    }
-  }, [enrollmentRequests]);
-
-  useEffect(() => {
-    const storedRequests = sessionStorage.getItem("requests_session");
-    if (storedRequests) {
-      setEnrollmentRequests(JSON.parse(storedRequests));
-    } else {
-      loadEnrollmentRequests();
+    if (!hasInitializedBranchData) {
+      return;
     }
 
-    loadEnrollees();
-    loadClassSections();
-    loadSubjects();
-    loadInstructors();
-    loadSubjectAssignments();
-  }, []);
+    writeBranchScopedData(storageScopes.enrollees, currentBranch, enrollees);
+  }, [currentBranch, enrollees, hasInitializedBranchData]);
+
+  useEffect(() => {
+    if (!hasInitializedBranchData) {
+      return;
+    }
+
+    writeBranchScopedData(
+      storageScopes.enrollmentRequests,
+      currentBranch,
+      enrollmentRequests,
+    );
+  }, [currentBranch, enrollmentRequests, hasInitializedBranchData]);
+
+  useEffect(() => {
+    const initializeBranchData = async () => {
+      const storedSectionAssignments = readBranchScopedData<
+        SectionAssignment[]
+      >(storageScopes.sectionAssignments, currentBranch);
+
+      setSectionAssignments(storedSectionAssignments ?? []);
+      await loadEnrollmentRequests();
+      await loadEnrollees();
+      loadClassSections();
+      loadSubjects();
+      loadInstructors();
+      loadSubjectAssignments();
+      setHasInitializedBranchData(true);
+    };
+
+    setHasInitializedBranchData(false);
+    void initializeBranchData();
+  }, [currentBranch]);
+
+  useEffect(() => {
+    if (!hasInitializedBranchData) {
+      return;
+    }
+
+    writeBranchScopedData(
+      storageScopes.classSections,
+      currentBranch,
+      classSections,
+    );
+  }, [classSections, currentBranch, hasInitializedBranchData]);
+
+  useEffect(() => {
+    if (!hasInitializedBranchData) {
+      return;
+    }
+
+    writeBranchScopedData(
+      storageScopes.sectionAssignments,
+      currentBranch,
+      sectionAssignments,
+    );
+  }, [currentBranch, sectionAssignments, hasInitializedBranchData]);
+
+  useEffect(() => {
+    if (!hasInitializedBranchData) {
+      return;
+    }
+
+    writeBranchScopedData(storageScopes.subjects, currentBranch, subjects);
+  }, [currentBranch, subjects, hasInitializedBranchData]);
+
+  useEffect(() => {
+    if (!hasInitializedBranchData) {
+      return;
+    }
+
+    writeBranchScopedData(storageScopes.instructors, currentBranch, instructors);
+  }, [currentBranch, instructors, hasInitializedBranchData]);
+
+  useEffect(() => {
+    if (!hasInitializedBranchData) {
+      return;
+    }
+
+    writeBranchScopedData(
+      storageScopes.subjectAssignments,
+      currentBranch,
+      subjectAssignments,
+    );
+  }, [currentBranch, subjectAssignments, hasInitializedBranchData]);
 
   useEffect(() => {
     updatePendingAssignments();
   }, [enrollees, sectionAssignments]);
-
-  const selectedEnrollee = selectedEnrolleeId
-    ? (enrollees.find((enrollee) => enrollee.id === selectedEnrolleeId) ?? null)
-    : null;
 
   const handleAttachmentStatusUpdate = (
     requestId: string,
@@ -1885,21 +1998,24 @@ export default function AdminEnrollees({
     if (!status) return;
 
     const request = enrollmentRequests.find((r) => r.id === requestId);
-    if (!request?.attachments) {
+    const enrollee = enrollees.find((record) => record.id === requestId);
+    const sourceAttachments = request?.attachments || enrollee?.attachments;
+
+    if (!sourceAttachments) {
       addToast("Unable to update attachment status.", "error");
       return;
     }
 
-    const updatedAttachments = request.attachments.map((attachment, index) =>
+    const updatedAttachments = sourceAttachments.map((attachment, index) =>
       index === attachmentIndex
         ? { ...attachment, reviewStatus: status }
         : attachment,
     );
 
     const requirementItems = getEnrollmentRequirementItems(
-      request.currentYearLevel,
-      request.requestedYearLevel,
-      request.program,
+      request?.currentYearLevel || "",
+      request?.requestedYearLevel || "",
+      request?.program || enrollee?.program || "",
     );
 
     const allRequirementsApproved =
@@ -1911,25 +2027,40 @@ export default function AdminEnrollees({
     const nextStatus: EnrollmentRequest["enrollmentStatus"] =
       allRequirementsApproved ? "Approved" : "Pending";
 
-    setEnrollmentRequests((prevRequests) =>
-      prevRequests.map((r) =>
-        r.id === requestId
-          ? {
-              ...r,
-              attachments: updatedAttachments,
-              enrollmentStatus: nextStatus,
-            }
-          : r,
-      ),
-    );
+    if (request) {
+      setEnrollmentRequests((prevRequests) =>
+        prevRequests.map((record) =>
+          record.id === requestId
+            ? {
+                ...record,
+                attachments: updatedAttachments,
+                enrollmentStatus: nextStatus,
+              }
+            : record,
+        ),
+      );
+    }
+
+    if (enrollee) {
+      setEnrollees((prevEnrollees) =>
+        prevEnrollees.map((record) =>
+          record.id === requestId
+            ? {
+                ...record,
+                attachments: updatedAttachments,
+              }
+            : record,
+        ),
+      );
+    }
 
     if (selectedRequest?.id === requestId) {
       setSelectedRequest((prev) =>
         prev
           ? {
-              ...prev,
+            ...prev,
               attachments: updatedAttachments,
-              enrollmentStatus: nextStatus,
+              ...(request ? { enrollmentStatus: nextStatus } : {}),
             }
           : null,
       );
@@ -1976,29 +2107,43 @@ export default function AdminEnrollees({
       if (!requestToUpdate) {
         if (enrolleeToUpdate) {
           const isApprove = selectedAction.action === "approve";
-          const updatedEnrollee: Enrollee = {
-            ...enrolleeToUpdate,
-            status: isApprove ? "Approved" : "Pending", // Admission status change
-            id:
-              isApprove && !/^\d{6}$/.test(enrolleeToUpdate.id)
-                ? getNextStudentId()
-                : enrolleeToUpdate.id,
-            // Transition logic for new students
-            yearLevel: isApprove
-              ? enrolleeToUpdate.yearLevel === "Junior High Completer"
-                ? "Grade 11"
-                : enrolleeToUpdate.yearLevel === "Senior High Completer"
-                  ? "1st Year"
-                  : enrolleeToUpdate.yearLevel
-              : enrolleeToUpdate.yearLevel,
-          };
+          try {
+            await updateAdmissionProgress({
+              trackingNumber: enrolleeToUpdate.trackingNumber,
+              currentStep: 4,
+              applicationStatus: isApprove ? "accepted" : "rejected",
+            });
+          } catch (syncError) {
+            console.warn(
+              "Unable to sync admission decision to Supabase, keeping local admin state.",
+              syncError,
+            );
+          }
+
+          const updatedEnrollee: Enrollee = isApprove
+            ? {
+                ...promoteApplicantToStoredStudent({
+                  ...enrolleeToUpdate,
+                  branch: currentBranch,
+                  strandOrCourse: enrolleeToUpdate.strandOrCourse || "",
+                  studentStatus: enrolleeToUpdate.studentStatus || "",
+                }).applicant,
+              }
+            : {
+                ...enrolleeToUpdate,
+                status: "Rejected",
+              };
 
           setEnrollees((prev) =>
             prev.map((e) => (e.id === selectedAction.id ? updatedEnrollee : e)),
           );
           addToast(
-            `Admission ${isApprove ? "approved" : "rejected"} successfully! Student ID: ${updatedEnrollee.id}`,
-            "success",
+            isApprove
+              ? updatedEnrollee.documentsSubmitted < updatedEnrollee.totalDocuments
+                ? `Admission approved. Student number ${updatedEnrollee.studentNumber} is now active with ${updatedEnrollee.documentsSubmitted}/${updatedEnrollee.totalDocuments} credentials submitted.`
+                : `Admission approved successfully. Student number ${updatedEnrollee.studentNumber} is now active.`
+              : "Admission rejected successfully.",
+            isApprove ? "success" : "warning",
           );
         } else {
           addToast("Record not found.", "error");
@@ -2045,7 +2190,13 @@ export default function AdminEnrollees({
     const matchesSearch =
       enrollee.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       enrollee.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      enrollee.trackingNumber.toLowerCase().includes(searchTerm.toLowerCase());
+      enrollee.trackingNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (enrollee.studentNumber || "")
+        .toLowerCase()
+        .includes(searchTerm.toLowerCase()) ||
+      (enrollee.strandOrCourse || "")
+        .toLowerCase()
+        .includes(searchTerm.toLowerCase());
     const matchesStatus =
       statusFilter === "All" || enrollee.status === statusFilter;
     return matchesSearch && matchesStatus;
@@ -2060,6 +2211,13 @@ export default function AdminEnrollees({
       request.enrollmentStatus === enrollmentStatusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  const selectedAdmissionActionRecord = selectedAction
+    ? enrollees.find((enrollee) => enrollee.id === selectedAction.id) ?? null
+    : null;
+  const selectedEnrollmentActionRecord = selectedAction
+    ? enrollmentRequests.find((request) => request.id === selectedAction.id) ?? null
+    : null;
 
   const filteredInstructors = instructors.filter(
     (instructor) =>
@@ -2296,15 +2454,6 @@ export default function AdminEnrollees({
 
   const { shsData, collegeData } = organizeSubjectsForTable();
 
-  // Get unique strands for filter
-  const strands = [
-    ...new Set(
-      subjects
-        .filter((s) => s.strand && s.strand !== "All")
-        .map((s) => s.strand),
-    ),
-  ];
-
   return (
     <div className="dashboard-layout">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
@@ -2436,7 +2585,7 @@ export default function AdminEnrollees({
             <div className="controls">
               <input
                 type="text"
-                placeholder="Search by Name, ID, or Tracking Number..."
+                placeholder="Search by name, tracking number, or student number..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="search-input"
@@ -2451,6 +2600,7 @@ export default function AdminEnrollees({
                 <option value="All">All status</option>
                 <option value="Pending">Pending</option>
                 <option value="Approved">Approved</option>
+                <option value="Rejected">Rejected</option>
               </select>
             </div>
             <div className="table-container">
@@ -2473,7 +2623,7 @@ export default function AdminEnrollees({
                         <td>{enrollee.trackingNumber}</td>
                         <td>{enrollee.fullName}</td>
                         <td>{enrollee.program}</td>
-                        <td>{enrollee.yearLevel}</td>
+                        <td>{enrollee.strandOrCourse || enrollee.yearLevel}</td>
                         <td>
                           {enrollee.documentsSubmitted}/
                           {enrollee.totalDocuments}
@@ -2493,6 +2643,22 @@ export default function AdminEnrollees({
                             >
                               Review
                             </button>
+                            {enrollee.status === "Pending" && (
+                              <>
+                                <button
+                                  className="action-btn approve"
+                                  onClick={() => handleApproveRequest(enrollee.id)}
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  className="action-btn reject"
+                                  onClick={() => handleRejectRequest(enrollee.id)}
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -3224,7 +3390,7 @@ export default function AdminEnrollees({
                   {selectedRequest.fullName} •{" "}
                   {isEnrollmentRequest(selectedRequest)
                     ? selectedRequest.studentNumber
-                    : selectedRequest.id}
+                    : selectedRequest.studentNumber || selectedRequest.trackingNumber}
                 </p>
               </div>
               <button className="review-modal-close" onClick={closeReviewModal}>
@@ -3244,8 +3410,8 @@ export default function AdminEnrollees({
                         </>
                       ) : (
                         <>
-                          <span>Tracking ID</span>
-                          <strong>{selectedRequest.id}</strong>
+                          <span>Tracking Number</span>
+                          <strong>{selectedRequest.trackingNumber}</strong>
                         </>
                       )}
                     </div>
@@ -3255,6 +3421,12 @@ export default function AdminEnrollees({
                     </div>
                     {!isEnrollmentRequest(selectedRequest) && (
                       <>
+                        {selectedRequest.studentNumber && (
+                          <div className="personal-info-item">
+                            <span>Student Number</span>
+                            <strong>{selectedRequest.studentNumber}</strong>
+                          </div>
+                        )}
                         <div className="personal-info-item">
                           <span>Email</span>
                           <strong>{selectedRequest.personalInfo.email}</strong>
@@ -3296,10 +3468,19 @@ export default function AdminEnrollees({
                         </div>
                       </>
                     ) : (
-                      <div className="personal-info-item">
-                        <span>Year Level</span>
-                        <strong>{selectedRequest.yearLevel}</strong>
-                      </div>
+                      <>
+                        <div className="personal-info-item">
+                          <span>Course / Strand</span>
+                          <strong>
+                            {selectedRequest.strandOrCourse ||
+                              selectedRequest.yearLevel}
+                          </strong>
+                        </div>
+                        <div className="personal-info-item">
+                          <span>Year Level</span>
+                          <strong>{selectedRequest.yearLevel}</strong>
+                        </div>
+                      </>
                     )}
                     <div className="personal-info-item">
                       <span>
@@ -3365,7 +3546,13 @@ export default function AdminEnrollees({
                             selectedRequest.attachments?.[index];
                           const reviewStatus =
                             attachment?.reviewStatus ?? "Pending";
-                          const isSubmitted = !!attachment;
+                          const isMockSubmitted =
+                            !isEnrollmentRequest(selectedRequest) &&
+                            (selectedRequest.attachments?.length ?? 0) ===
+                              selectedRequest.documentsSubmitted;
+                          const isSubmitted =
+                            !!attachment &&
+                            (attachment.url !== "#" || isMockSubmitted);
                           return (
                             <li
                               key={item.key || item.name}
@@ -3385,7 +3572,7 @@ export default function AdminEnrollees({
                                 </div>
                               </div>
                               <div className="document-requirement-actions">
-                                {attachment ? (
+                                {isSubmitted && attachment?.url !== "#" ? (
                                   <button
                                     className="view-document-btn"
                                     onClick={() =>
@@ -3394,6 +3581,10 @@ export default function AdminEnrollees({
                                   >
                                     <FaEye /> View document
                                   </button>
+                                ) : isSubmitted ? (
+                                  <span className="document-missing-label">
+                                    <FaFileAlt /> Reference only
+                                  </span>
                                 ) : (
                                   <span className="document-missing-label">
                                     <FaFileAlt /> No file submitted yet
@@ -3455,7 +3646,9 @@ export default function AdminEnrollees({
                       handleApproveRequest(selectedRequest.id);
                     }}
                   >
-                    Approve Request
+                    {isEnrollmentRequest(selectedRequest)
+                      ? "Approve Request"
+                      : "Approve Admission"}
                   </button>
                   <button
                     className="action-btn reject"
@@ -3464,7 +3657,9 @@ export default function AdminEnrollees({
                       handleRejectRequest(selectedRequest.id);
                     }}
                   >
-                    Reject Request
+                    {isEnrollmentRequest(selectedRequest)
+                      ? "Reject Request"
+                      : "Reject Admission"}
                   </button>
                 </>
               )}
@@ -3496,13 +3691,20 @@ export default function AdminEnrollees({
             </div>
             <div className="review-modal-body">
               <p>
-                Are you sure you want to {selectedAction.action} this enrollment
-                request?
+                Are you sure you want to {selectedAction.action} this{" "}
+                {selectedAdmissionActionRecord && !selectedEnrollmentActionRecord
+                  ? "admission application"
+                  : "enrollment request"}
+                ?
               </p>
               {selectedAction.action === "approve" && (
                 <p className="confirmation-note">
-                  This will progress the student to the next academic level and
-                  generate new enrollment records.
+                  {selectedAdmissionActionRecord && !selectedEnrollmentActionRecord
+                    ? selectedAdmissionActionRecord.documentsSubmitted <
+                      selectedAdmissionActionRecord.totalDocuments
+                      ? "Approval is allowed even with pending admission credentials. The student account will be activated and the remaining credential status will still appear in the student portal."
+                      : "This will activate the student account and make the approved admission visible in the student portal."
+                    : "This will progress the student to the next academic level and generate new enrollment records."}
                 </p>
               )}
               {selectedAction.action === "reject" && (
@@ -3805,8 +4007,8 @@ export default function AdminEnrollees({
                     </option>
                     {pendingAssignments.map((student) => (
                       <option key={student.id} value={student.id}>
-                        {student.fullName} - {student.program}{" "}
-                        {student.yearLevel}
+                        {student.fullName} -{" "}
+                        {student.studentNumber || student.trackingNumber}
                       </option>
                     ))}
                   </select>
@@ -3889,7 +4091,7 @@ export default function AdminEnrollees({
                       return student ? (
                         <tr key={id}>
                           <td>{student.fullName}</td>
-                          <td>{student.id}</td>
+                          <td>{student.studentNumber || "Pending"}</td>
                           <td>{student.program}</td>
                         </tr>
                       ) : null;

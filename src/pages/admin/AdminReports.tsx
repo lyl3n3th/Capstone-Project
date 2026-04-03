@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { NavLink } from "react-router-dom";
-import { FaPaperPlane, FaTrash, FaFileAlt, FaPaperclip } from "react-icons/fa";
+import { FaPaperPlane, FaTrash, FaPaperclip } from "react-icons/fa";
 import { ToastContainer } from "../../components/common/Toast";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import "../../styles/admin/admin-reports.css";
@@ -31,7 +30,6 @@ export default function AdminReports({
   canAccessBackup = true,
 }: ReportProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const displayName = loggedInUsername.trim() || "Administrator";
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [formData, setFormData] = useState<ReportFormData>({
     subject: "",
