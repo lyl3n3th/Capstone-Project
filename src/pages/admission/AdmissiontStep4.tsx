@@ -255,7 +255,9 @@ function AdmissionStep4() {
   const downPayment = 300;
 
   if (isLoading) {
-    return <div className="confirmation-page-wrapper">Loading application...</div>;
+    return (
+      <div className="confirmation-page-wrapper">Loading application...</div>
+    );
   }
 
   if (pageError || !applicationData) {
@@ -264,7 +266,9 @@ function AdmissionStep4() {
         <ToastContainer toasts={toasts} removeToast={removeToast} />
         <div className="confirmation-container">
           <div className="confirmation-card">
-            <p className="conf-status-text">{pageError || "No record found."}</p>
+            <p className="conf-status-text">
+              {pageError || "No record found."}
+            </p>
             <div className="conf-actions">
               <button
                 className="conf-btn-continue"
@@ -320,7 +324,7 @@ function AdmissionStep4() {
           {!canEdit && (
             <div className="conf-notice conf-notice-success">
               <strong>Application Submitted:</strong> Your admission record is
-              already in Supabase and is waiting for the next registrar update.
+              already in Submitted and is waiting for the next registrar update.
             </div>
           )}
 
@@ -329,7 +333,11 @@ function AdmissionStep4() {
               <strong>Student Portal Ready:</strong> Your application has been
               accepted.
               {linkedStudentRecord?.id ? (
-                <> Your student number is <strong>{linkedStudentRecord.id}</strong>.</>
+                <>
+                  {" "}
+                  Your student number is{" "}
+                  <strong>{linkedStudentRecord.id}</strong>.
+                </>
               ) : (
                 <> You may now proceed to the student portal.</>
               )}

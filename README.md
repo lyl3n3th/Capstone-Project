@@ -96,6 +96,18 @@ export default defineConfig([
 
 // python manage.py runserver (/)
 
+// github process
+
+// git checkout -b branch-name
+
+//git add .
+
+//git branch
+
+//git commit -m "describe"
+
+//git push -u origin branch-name
+
 // just in case set up...
 
 // npm install axios @supabase/supabase-js react-icons

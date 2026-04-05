@@ -21,7 +21,7 @@ export const DEFAULT_ROUTE_BY_ROLE: Record<AppRole, string> = {
   student: "/student/home",
   admin: "/admin/dashboard",
   registrar: "/admin/dashboard",
-  manager: "/admin/dashboard",
+  manager: "/manager/dashboard",
 };
 
 export const STAFF_PORTAL_ROLES: StaffRole[] = [
@@ -33,7 +33,7 @@ export const STAFF_PORTAL_ROLES: StaffRole[] = [
 export const STAFF_ROLE_LABELS: Record<StaffRole, string> = {
   admin: "Administrator",
   registrar: "Registrar",
-  manager: "Manager",
+  manager: "Area Manager",
 };
 
 export const getLoginRouteForRoles = (roles: AppRole[]) => {

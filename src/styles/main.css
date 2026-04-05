@@ -31,6 +31,10 @@
 @import "./admin/admin-trash.css";
 @import "./staff/staff-login.css";
 
+@import "./manager/area-manager.css";
+@import "./manager/area-managerDashboard.css";
+@import "./manager/area-managerReports.css";
+
 
 /* Toast Animation */
 @keyframes slideIn {

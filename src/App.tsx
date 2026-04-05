@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+} from "react-router-dom";
 import AdmissionHome from "./pages/admission/AdmissionHome";
 import AdmissionStep1 from "./pages/admission/AdmissionStep1";
 import AdmissionStep2 from "./pages/admission/AdmissionStep2";
@@ -25,12 +31,20 @@ import AdminReports from "./pages/admin/AdminReports.tsx";
 import AdminBackup from "./pages/admin/AdminBackup.tsx";
 import AdminTrash from "./pages/admin/AdminTrash.tsx";
 
+import AreaManagerDashboard from "./pages/manager/AreaManagerDashboard.tsx";
+import AreaManagerStudents from "./pages/manager/AreaManagerStudents.tsx";
+import AreaManagerStaffAccounts from "./pages/manager/AreaManagerStaffAccounts.tsx";
+import AreaManagerReports from "./pages/manager/AreaManagerReports.tsx";
+
 import StaffLogin from "./pages/staff/StaffLogin.tsx";
 import TestSupabase from "./components/TestSupabase";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import PublicOnlyRoute from "./components/auth/PublicOnlyRoute";
 import { useAuth } from "./hooks/useAuth";
 import { STAFF_PORTAL_ROLES } from "./types/user";
+
+// Import Layouts
+import ManagerLayout from "./components/manager/ManagerLayout";
 
 function StudentPortalRoute({ children }: { children: ReactNode }) {
   return (
@@ -54,19 +68,43 @@ function StaffPortalRoute({
   );
 }
 
+function AdminPortalRoute({ children }: { children: ReactNode }) {
+  return (
+    <ProtectedRoute
+      allowedRoles={["admin", "registrar"]}
+      loginPath="/staff/login"
+    >
+      {children}
+    </ProtectedRoute>
+  );
+}
+
 function AppRoutes() {
   const { currentUser, logout } = useAuth();
 
-  const appProps = {
+  // Admin props
+  const adminProps = {
     onLogout: logout,
     loggedInUsername: currentUser?.displayName || "Administrator",
-    loggedInRole: currentUser?.role === "registrar" ? ("Registrar" as const) : ("Admin" as const),
+    loggedInRole:
+      currentUser?.role === "registrar"
+        ? ("Registrar" as const)
+        : ("Admin" as const),
     canAccessBackup:
       currentUser?.role === "admin" || currentUser?.role === "manager",
   };
 
+  // Area Manager props
+  const areaManagerProps = {
+    onLogout: logout,
+    loggedInUsername: currentUser?.displayName || "Area Manager",
+    loggedInRole: "Area Manager" as const,
+    canAccessBackup: currentUser?.role === "manager",
+  };
+
   return (
     <Routes>
+      {/* Public Admission Routes */}
       <Route path="/" element={<AdmissionHome />} />
       <Route path="/admission" element={<AdmissionHome />} />
       <Route path="/enroll" element={<AdmissionStep1 />} />
@@ -75,6 +113,7 @@ function AppRoutes() {
       <Route path="/confirmation" element={<AdmissionStep4 />} />
       <Route path="/scholarship-exam" element={<AdmissionStep5 />} />
 
+      {/* Student Routes */}
       <Route
         path="/student/login"
         element={
@@ -132,71 +171,50 @@ function AppRoutes() {
         }
       />
 
+      {/* Admin Routes with Layout */}
       <Route
-        path="/admin/students"
+        path="/admin"
         element={
-          <StaffPortalRoute>
-            <AdminStudents {...appProps} />
-          </StaffPortalRoute>
+          <AdminPortalRoute>
+            <Outlet />
+          </AdminPortalRoute>
         }
-      />
-      <Route
-        path="/admin/dashboard"
-        element={
-          <StaffPortalRoute>
-            <AdminDashboard {...appProps} />
-          </StaffPortalRoute>
-        }
-      />
-      <Route
-        path="/admin/enrollees"
-        element={
-          <StaffPortalRoute>
-            <AdminEnrollees {...appProps} />
-          </StaffPortalRoute>
-        }
-      />
-      <Route
-        path="/admin/grades"
-        element={
-          <StaffPortalRoute>
-            <AdminGrades {...appProps} />
-          </StaffPortalRoute>
-        }
-      />
-      <Route
-        path="/admin/alumni"
-        element={
-          <StaffPortalRoute>
-            <AdminAlumni {...appProps} />
-          </StaffPortalRoute>
-        }
-      />
-      <Route
-        path="/admin/reports"
-        element={
-          <StaffPortalRoute>
-            <AdminReports {...appProps} />
-          </StaffPortalRoute>
-        }
-      />
-      <Route
-        path="/admin/backup"
-        element={
-          <StaffPortalRoute allowedRoles={["admin", "manager"]}>
-            <AdminBackup {...appProps} />
-          </StaffPortalRoute>
-        }
-      />
-      <Route
-        path="/admin/trash"
-        element={
-          <StaffPortalRoute>
-            <AdminTrash {...appProps} />
-          </StaffPortalRoute>
-        }
-      />
+      >
+        <Route index element={<Navigate to="/admin/dashboard" replace />} />
+        <Route path="dashboard" element={<AdminDashboard {...adminProps} />} />
+        <Route path="students" element={<AdminStudents {...adminProps} />} />
+        <Route path="enrollees" element={<AdminEnrollees {...adminProps} />} />
+        <Route path="grades" element={<AdminGrades {...adminProps} />} />
+        <Route path="alumni" element={<AdminAlumni {...adminProps} />} />
+        <Route path="reports" element={<AdminReports {...adminProps} />} />
+        <Route path="backup" element={<AdminBackup {...adminProps} />} />
+        <Route path="trash" element={<AdminTrash {...adminProps} />} />
+      </Route>
 
+      {/* Area Manager Routes with Layout */}
+      <Route
+        path="/manager"
+        element={
+          <StaffPortalRoute allowedRoles={["manager"]}>
+            <ManagerLayout {...areaManagerProps} />
+          </StaffPortalRoute>
+        }
+      >
+        <Route index element={<Navigate to="/manager/dashboard" replace />} />
+        <Route
+          path="dashboard"
+          element={<AreaManagerDashboard {...areaManagerProps} />}
+        />
+        <Route path="students" element={<AreaManagerStudents />} />
+        <Route path="staff-accounts" element={<AreaManagerStaffAccounts />} />
+
+        <Route
+          path="reports"
+          element={<AreaManagerReports {...areaManagerProps} />}
+        />
+      </Route>
+
+      {/* Staff Login */}
       <Route
         path="/staff/login"
         element={
@@ -206,10 +224,17 @@ function AppRoutes() {
         }
       />
 
-      <Route path="/student" element={<Navigate to="/student/home" replace />} />
-      <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
-      <Route path="/staff" element={<Navigate to="/staff/login" replace />} />
+      {/* Test Routes */}
       <Route path="/test-supabase" element={<TestSupabase />} />
+
+      {/* Redirects */}
+      <Route
+        path="/student"
+        element={<Navigate to="/student/home" replace />}
+      />
+      <Route path="/staff" element={<Navigate to="/staff/login" replace />} />
+
+      {/* Catch-all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

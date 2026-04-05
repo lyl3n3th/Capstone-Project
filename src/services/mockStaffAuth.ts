@@ -25,6 +25,30 @@ export const mockStaffAccounts: MockStaffAccount[] = [
     password: "admin123",
     role: "admin",
   },
+  {
+    branch: "All Branches",
+    fullName: "Area Manager",
+    password: "manager123",
+    role: "manager",
+  },
+  {
+    branch: "Bacoor",
+    fullName: "Bacoor Area Manager",
+    password: "manager123",
+    role: "manager",
+  },
+  {
+    branch: "Taytay",
+    fullName: "Taytay Area Manager",
+    password: "manager123",
+    role: "manager",
+  },
+  {
+    branch: "GMA",
+    fullName: "GMA Area Manager",
+    password: "manager123",
+    role: "manager",
+  },
 ];
 
 export const authenticateStaff = (
@@ -32,11 +56,17 @@ export const authenticateStaff = (
   password: string,
   role: string,
 ): MockStaffAccount | null => {
+  const normalizedBranch = branch.trim();
+
   const account = mockStaffAccounts.find(
     (account) =>
-      account.branch === branch &&
       account.password === password &&
-      account.role === role,
+      account.role === role &&
+      (role === "manager"
+        ? !normalizedBranch ||
+          account.branch === normalizedBranch ||
+          account.branch === "All Branches"
+        : account.branch === normalizedBranch),
   );
   return account || null;
 };

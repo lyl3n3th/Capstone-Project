@@ -4,10 +4,12 @@ import { useAuth } from "../../hooks/useAuth";
 
 interface PublicOnlyRouteProps {
   children?: ReactNode;
+  allowAuthenticated?: boolean;
 }
 
 export default function PublicOnlyRoute({
   children,
+  allowAuthenticated = false,
 }: PublicOnlyRouteProps) {
   const { currentUser, isReady, getDefaultRouteForRole } = useAuth();
 
@@ -15,7 +17,7 @@ export default function PublicOnlyRoute({
     return null;
   }
 
-  if (currentUser) {
+  if (currentUser && !allowAuthenticated) {
     return (
       <Navigate to={getDefaultRouteForRole(currentUser.role)} replace />
     );
