@@ -22,6 +22,7 @@ import {
   FaChevronDown,
   FaChevronUp,
   FaFilter,
+  FaTrash,
 } from "react-icons/fa";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
@@ -37,7 +38,11 @@ import {
   writeBranchScopedData,
   writeStoredStudents,
 } from "../../services/adminStorage";
-import { updateAdmissionProgress } from "../../services/admission";
+import {
+  getAdmissionRequirements,
+  updateAdmissionProgress,
+} from "../../services/admission";
+import { activateApprovedStudent } from "../../services/auth";
 import "../../styles/admin/admin-enrolles.css";
 
 interface EnrolleesProps {
@@ -82,6 +87,8 @@ interface Enrollee {
   branch: string;
   studentStatus: string;
   honorLabel?: string | null;
+  appliedForScholarship?: boolean;
+  scholarshipExamScore?: number | null;
   convertedAt?: string;
   personalInfo: PersonalInformation;
   attachments?: Attachment[];
@@ -171,6 +178,32 @@ interface Toast {
   type: "success" | "error" | "info" | "warning";
 }
 
+interface AssignmentFormState {
+  sectionId: string;
+  instructorId: string;
+  subjectIds: string[];
+  academicYear: string;
+  semester: string;
+  scheduleDay: string;
+  startTime: string;
+  endTime: string;
+  room: string;
+}
+
+const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
+
+const createDefaultAssignmentForm = (sectionId = ""): AssignmentFormState => ({
+  sectionId,
+  instructorId: "",
+  subjectIds: [],
+  academicYear: "2026-2027",
+  semester: "1st Semester",
+  scheduleDay: "",
+  startTime: "",
+  endTime: "",
+  room: "",
+});
+
 // Get requirement items for enrollment requests based on current and requested level
 const getEnrollmentRequirementItems = (
   currentYearLevel: string,
@@ -248,17 +281,179 @@ const getEnrollmentRequirementItems = (
   return requirements;
 };
 
-const normalizeAcademicDescriptor = (value?: string) =>
-  (value || "")
+const mapAdminProgramToAdmissionProgram = (program: string) =>
+  program === "SHS" ? "Senior High School" : "College";
+
+const COLLEGE_TUITION_PER_UNIT = 600;
+const DEFAULT_COLLEGE_TUITION_UNITS = 15;
+const COLLEGE_ON_SITE_PAYMENT = 300;
+
+const getHonorDiscountPercentage = (honorLabel?: string | null) => {
+  if (!honorLabel) return 0;
+  if (honorLabel.includes("Highest Honor")) return 80;
+  if (honorLabel.includes("High Honor")) return 60;
+  if (honorLabel.includes("With Honor")) return 50;
+  return 0;
+};
+
+const formatCurrency = (amount: number) =>
+  new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 2,
+  }).format(amount);
+
+const hasAttachmentNamed = (
+  attachments: Pick<Attachment, "name">[] | undefined,
+  attachmentName: string,
+) =>
+  Boolean(
+    attachments?.some(
+      (attachment) =>
+        attachment.name.trim().toLowerCase() ===
+        attachmentName.trim().toLowerCase(),
+    ),
+  );
+
+const getEstimatedCollegeTuition = (honorLabel?: string | null) => {
+  const baseTuition = DEFAULT_COLLEGE_TUITION_UNITS * COLLEGE_TUITION_PER_UNIT;
+  const honorDiscountPercentage = getHonorDiscountPercentage(honorLabel);
+  const honorDiscountAmount = baseTuition * (honorDiscountPercentage / 100);
+  const tuitionAfterHonorDiscount = baseTuition - honorDiscountAmount;
+  const remainingBalance = Math.max(
+    tuitionAfterHonorDiscount - COLLEGE_ON_SITE_PAYMENT,
+    0,
+  );
+
+  return {
+    baseTuition,
+    honorDiscountPercentage,
+    honorDiscountAmount,
+    tuitionAfterHonorDiscount,
+    onSitePayment: COLLEGE_ON_SITE_PAYMENT,
+    remainingBalance,
+  };
+};
+
+const isEnrollmentRequestRecord = (
+  item: EnrollmentRequest | Enrollee,
+): item is EnrollmentRequest =>
+  "currentYearLevel" in item && "requestedYearLevel" in item;
+
+const getReviewRequirementItems = (item: EnrollmentRequest | Enrollee) => {
+  if (isEnrollmentRequestRecord(item)) {
+    return getEnrollmentRequirementItems(
+      item.currentYearLevel,
+      item.requestedYearLevel,
+      item.program,
+    );
+  }
+
+  return getAdmissionRequirements(
+    item.studentStatus,
+    mapAdminProgramToAdmissionProgram(item.program),
+    item.honorLabel || "No Honor",
+  ).map((requirement) => ({
+    name: requirement.name,
+    required: !requirement.optional,
+    key: requirement.code,
+  }));
+};
+
+const normalizeAcademicDescriptor = (value?: string) => {
+  const normalized = (value || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+
+  if (!normalized || normalized === "all") {
+    return normalized;
+  }
+
+  if (normalized.includes("entrepreneur")) {
+    return "entrepreneurship";
+  }
+
+  if (
+    /\bict\b/.test(normalized) ||
+    normalized.includes("information communications technology")
+  ) {
+    return "ict";
+  }
+
+  if (/\bgas\b/.test(normalized) || normalized.includes("general academic")) {
+    return "gas";
+  }
+
+  if (
+    normalized.includes("humss") ||
+    normalized.includes("humanities and social sciences")
+  ) {
+    return "humss";
+  }
+
+  if (
+    /\babm\b/.test(normalized) ||
+    normalized.includes("accountancy business and management")
+  ) {
+    return "abm";
+  }
+
+  if (/\bstem\b/.test(normalized)) {
+    return "stem";
+  }
+
+  if (normalized.includes("industrial arts")) {
+    return "ia";
+  }
+
+  if (normalized.includes("computer science") || normalized.includes("bscs")) {
+    return "computer science";
+  }
+
+  if (
+    normalized.includes("information technology") ||
+    normalized.includes("bsit")
+  ) {
+    return "information technology";
+  }
+
+  return normalized;
+};
+
+const matchesAcademicDescriptor = (leftValue?: string, rightValue?: string) => {
+  const left = normalizeAcademicDescriptor(leftValue);
+  const right = normalizeAcademicDescriptor(rightValue);
+
+  if (!left || !right || left === "all" || right === "all") {
+    return true;
+  }
+
+  return left === right || left.includes(right) || right.includes(left);
+};
+
+const resolveSubjectStrandOrCourse = (
+  subject: Pick<Subject, "program" | "strand">,
+) =>
+  subject.program === "College"
+    ? subject.strand || DEFAULT_COLLEGE_COURSE
+    : subject.strand || "All";
+
+const normalizeSubjectCatalog = (catalog: Subject[]) =>
+  catalog.map((subject) =>
+    subject.program === "College" && !subject.strand
+      ? { ...subject, strand: DEFAULT_COLLEGE_COURSE }
+      : subject,
+  );
 
 const sectionMatchesEnrollee = (
   section: ClassSection,
   enrollee: Pick<Enrollee, "program" | "yearLevel" | "strandOrCourse">,
 ) => {
-  if (section.program !== enrollee.program || section.yearLevel !== enrollee.yearLevel) {
+  if (
+    section.program !== enrollee.program ||
+    section.yearLevel !== enrollee.yearLevel
+  ) {
     return false;
   }
 
@@ -266,16 +461,7 @@ const sectionMatchesEnrollee = (
     return true;
   }
 
-  const sectionStrand = normalizeAcademicDescriptor(section.strand);
-  const enrolleeStrand = normalizeAcademicDescriptor(enrollee.strandOrCourse);
-
-  if (!sectionStrand || !enrolleeStrand) {
-    return true;
-  }
-
-  return (
-    enrolleeStrand.includes(sectionStrand) || sectionStrand.includes(enrolleeStrand)
-  );
+  return matchesAcademicDescriptor(section.strand, enrollee.strandOrCourse);
 };
 
 export default function AdminEnrollees({
@@ -312,16 +498,46 @@ export default function AdminEnrollees({
   const [selectedAction, setSelectedAction] = useState<{
     id: string;
     action: "approve" | "reject";
+    scholarshipExamScore?: number | null;
   } | null>(null);
   const [enrollees, setEnrollees] = useState<Enrollee[]>([]);
+  const [pendingScholarshipScore, setPendingScholarshipScore] = useState("");
+  const selectedAdmissionRequest =
+    selectedRequest && !isEnrollmentRequestRecord(selectedRequest)
+      ? selectedRequest
+      : null;
+  const selectedAdmissionHonorLabel =
+    selectedAdmissionRequest?.honorLabel || "No Honor";
+  const selectedAdmissionHonorCertificateStatus = !selectedAdmissionRequest
+    ? "Not available"
+    : selectedAdmissionHonorLabel !== "No Honor"
+      ? hasAttachmentNamed(
+          selectedAdmissionRequest.attachments,
+          "Honor Certificate",
+        )
+        ? "Submitted"
+        : "Pending"
+      : "Not required";
+  const selectedAdmissionScholarshipStatus = !selectedAdmissionRequest
+    ? "Not available"
+    : selectedAdmissionRequest.appliedForScholarship
+      ? "Applied"
+      : "Not applied";
+  const selectedAdmissionTuition =
+    selectedAdmissionRequest?.program === "College"
+      ? getEstimatedCollegeTuition(selectedAdmissionRequest.honorLabel)
+      : null;
+  const selectedAdmissionScholarshipTuitionStatus = !selectedAdmissionRequest
+    ? "Not available"
+    : !selectedAdmissionRequest.appliedForScholarship
+      ? "Not applied"
+      : typeof selectedAdmissionRequest.scholarshipExamScore === "number"
+        ? `For evaluation (${selectedAdmissionRequest.scholarshipExamScore})`
+        : "Awaiting exam result";
 
   // Section Manager States
 
-  const isEnrollmentRequest = (
-    item: EnrollmentRequest | Enrollee,
-  ): item is EnrollmentRequest => {
-    return "studentNumber" in item;
-  };
+  const isEnrollmentRequest = isEnrollmentRequestRecord;
 
   const [showSectionManager, setShowSectionManager] = useState(false);
   const [classSections, setClassSections] = useState<ClassSection[]>([]);
@@ -336,7 +552,7 @@ export default function AdminEnrollees({
   const [newSection, setNewSection] = useState({
     program: "College",
     yearLevel: "1st Year",
-    strand: "BS Entrepreneurship",
+    strand: DEFAULT_COLLEGE_COURSE,
     section: "A",
     maxCapacity: 30,
   });
@@ -359,6 +575,17 @@ export default function AdminEnrollees({
   );
   const [editingAssignment, setEditingAssignment] =
     useState<SubjectAssignment | null>(null);
+  const [selectedAssignmentIds, setSelectedAssignmentIds] = useState<string[]>(
+    [],
+  );
+  const [pendingAssignmentDeleteIds, setPendingAssignmentDeleteIds] = useState<
+    string[]
+  >([]);
+  const [showAssignmentDeleteModal, setShowAssignmentDeleteModal] =
+    useState(false);
+  const [assignmentForm, setAssignmentForm] = useState<AssignmentFormState>(
+    createDefaultAssignmentForm(),
+  );
   const [subjectFilter, setSubjectFilter] = useState({
     program: "All",
     yearLevel: "All",
@@ -388,7 +615,8 @@ export default function AdminEnrollees({
   const [expandedAssignmentSections, setExpandedAssignmentSections] = useState<
     Record<string, boolean>
   >({});
-  const [hasInitializedBranchData, setHasInitializedBranchData] = useState(false);
+  const [hasInitializedBranchData, setHasInitializedBranchData] =
+    useState(false);
 
   // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {
@@ -493,7 +721,7 @@ export default function AdminEnrollees({
     );
 
     if (storedSubjects?.length) {
-      setSubjects(storedSubjects);
+      setSubjects(normalizeSubjectCatalog(storedSubjects));
       return;
     }
 
@@ -1418,7 +1646,7 @@ export default function AdminEnrollees({
         isMinor: false,
       },
     ];
-    setSubjects(mockSubjects);
+    setSubjects(normalizeSubjectCatalog(mockSubjects));
   };
 
   // Load instructors with updated names
@@ -1541,9 +1769,9 @@ export default function AdminEnrollees({
     const mockAssignments: SubjectAssignment[] = [
       {
         id: "1",
-        subjectId: "46",
-        subjectCode: "GE101",
-        subjectName: "Understanding the Self",
+        subjectId: "1",
+        subjectCode: "MIN101",
+        subjectName: "Oral Communication",
         instructorId: "1",
         instructorName: "Kenneth Lyle Sohot",
         sectionId: "1",
@@ -1567,9 +1795,9 @@ export default function AdminEnrollees({
       },
       {
         id: "2",
-        subjectId: "50",
-        subjectCode: "CS101",
-        subjectName: "Introduction to Computing",
+        subjectId: "6",
+        subjectCode: "MAJ101",
+        subjectName: "Computer Systems Servicing",
         instructorId: "7",
         instructorName: "Mark Kervin Toledo",
         sectionId: "1",
@@ -1593,6 +1821,342 @@ export default function AdminEnrollees({
       },
     ];
     setSubjectAssignments(mockAssignments);
+  };
+
+  const getEligibleSubjectsForSection = (
+    sectionId: string,
+    semester: string,
+    assignmentIdToIgnore?: string,
+  ) => {
+    const section = classSections.find((item) => item.id === sectionId);
+
+    if (!section) {
+      return [];
+    }
+
+    const takenSubjectIds = new Set(
+      subjectAssignments
+        .filter(
+          (assignment) =>
+            assignment.sectionId === sectionId &&
+            assignment.semester === semester &&
+            assignment.id !== assignmentIdToIgnore,
+        )
+        .map((assignment) => assignment.subjectId),
+    );
+
+    return subjects.filter(
+      (subject) =>
+        subject.program === section.program &&
+        subject.yearLevel === section.yearLevel &&
+        subject.semester === semester &&
+        matchesAcademicDescriptor(
+          resolveSubjectStrandOrCourse(subject),
+          section.strand,
+        ) &&
+        !takenSubjectIds.has(subject.id),
+    );
+  };
+
+  const buildAssignmentFormFromAssignment = (
+    assignment: SubjectAssignment,
+  ): AssignmentFormState => {
+    const firstSchedule = assignment.schedule[0];
+
+    return {
+      sectionId: assignment.sectionId,
+      instructorId: assignment.instructorId,
+      subjectIds: [assignment.subjectId],
+      academicYear: assignment.academicYear,
+      semester: assignment.semester,
+      scheduleDay: firstSchedule?.day || "",
+      startTime: firstSchedule?.startTime || "",
+      endTime: firstSchedule?.endTime || "",
+      room: firstSchedule?.room || "",
+    };
+  };
+
+  const closeAssignmentModal = () => {
+    setShowAssignmentModal(false);
+    setEditingAssignment(null);
+    setAssignmentForm(createDefaultAssignmentForm());
+  };
+
+  const openCreateAssignmentModal = (sectionId = "") => {
+    const resolvedSectionId = sectionId || classSections[0]?.id || "";
+    setEditingAssignment(null);
+    setAssignmentForm(createDefaultAssignmentForm(resolvedSectionId));
+    setShowAssignmentModal(true);
+  };
+
+  const openEditAssignmentModal = (assignment: SubjectAssignment) => {
+    const nextForm = buildAssignmentFormFromAssignment(assignment);
+    const availableSubjects = getEligibleSubjectsForSection(
+      nextForm.sectionId,
+      nextForm.semester,
+      assignment.id,
+    );
+    const selectedSubjectId = availableSubjects.some(
+      (subject) => subject.id === assignment.subjectId,
+    )
+      ? assignment.subjectId
+      : availableSubjects[0]?.id;
+
+    setEditingAssignment(assignment);
+    setAssignmentForm({
+      ...nextForm,
+      subjectIds: selectedSubjectId ? [selectedSubjectId] : [],
+    });
+    setShowAssignmentModal(true);
+  };
+
+  const updateAssignmentFormContext = (
+    field: "sectionId" | "semester",
+    value: string,
+  ) => {
+    setAssignmentForm((prev) => {
+      const nextForm = { ...prev, [field]: value };
+      const availableSubjects = getEligibleSubjectsForSection(
+        nextForm.sectionId,
+        nextForm.semester,
+        editingAssignment?.id,
+      );
+      const availableSubjectIds = new Set(
+        availableSubjects.map((subject) => subject.id),
+      );
+      const filteredSubjectIds = prev.subjectIds.filter((subjectId) =>
+        availableSubjectIds.has(subjectId),
+      );
+
+      if (editingAssignment) {
+        return {
+          ...nextForm,
+          subjectIds:
+            filteredSubjectIds.length > 0
+              ? [filteredSubjectIds[0]]
+              : availableSubjects[0]
+                ? [availableSubjects[0].id]
+                : [],
+        };
+      }
+
+      return {
+        ...nextForm,
+        subjectIds: filteredSubjectIds,
+      };
+    });
+  };
+
+  const toggleAssignmentSubjectSelection = (subjectId: string) => {
+    setAssignmentForm((prev) => {
+      if (editingAssignment) {
+        return {
+          ...prev,
+          subjectIds: prev.subjectIds[0] === subjectId ? [] : [subjectId],
+        };
+      }
+
+      return prev.subjectIds.includes(subjectId)
+        ? {
+            ...prev,
+            subjectIds: prev.subjectIds.filter((item) => item !== subjectId),
+          }
+        : {
+            ...prev,
+            subjectIds: [...prev.subjectIds, subjectId],
+          };
+    });
+  };
+
+  const selectAllAssignmentSubjects = () => {
+    const availableSubjects = getEligibleSubjectsForSection(
+      assignmentForm.sectionId,
+      assignmentForm.semester,
+      editingAssignment?.id,
+    );
+
+    setAssignmentForm((prev) => ({
+      ...prev,
+      subjectIds: availableSubjects.map((subject) => subject.id),
+    }));
+  };
+
+  const clearAssignmentSubjects = () => {
+    setAssignmentForm((prev) => ({
+      ...prev,
+      subjectIds: [],
+    }));
+  };
+
+  const toggleAssignmentSelection = (assignmentId: string) => {
+    setSelectedAssignmentIds((prev) =>
+      prev.includes(assignmentId)
+        ? prev.filter((id) => id !== assignmentId)
+        : [...prev, assignmentId],
+    );
+  };
+
+  const toggleSectionAssignmentSelection = (sectionCode: string) => {
+    const sectionAssignmentIds = filteredAssignments
+      .filter((assignment) => assignment.sectionCode === sectionCode)
+      .map((assignment) => assignment.id);
+
+    if (sectionAssignmentIds.length === 0) {
+      return;
+    }
+
+    setSelectedAssignmentIds((prev) => {
+      const allSelected = sectionAssignmentIds.every((id) => prev.includes(id));
+
+      if (allSelected) {
+        return prev.filter((id) => !sectionAssignmentIds.includes(id));
+      }
+
+      return Array.from(new Set([...prev, ...sectionAssignmentIds]));
+    });
+  };
+
+  const selectVisibleAssignments = () => {
+    setSelectedAssignmentIds(
+      filteredAssignments.map((assignment) => assignment.id),
+    );
+  };
+
+  const clearAssignmentSelection = () => {
+    setSelectedAssignmentIds([]);
+  };
+
+  const closeAssignmentDeleteModal = () => {
+    setShowAssignmentDeleteModal(false);
+    setPendingAssignmentDeleteIds([]);
+  };
+
+  const openAssignmentDeleteModal = (assignmentIds: string[]) => {
+    if (assignmentIds.length === 0) {
+      addToast("Select at least one assignment to delete.", "warning");
+      return;
+    }
+
+    setPendingAssignmentDeleteIds(Array.from(new Set(assignmentIds)));
+    setShowAssignmentDeleteModal(true);
+  };
+
+  const handleSaveAssignment = () => {
+    const selectedSubjects = subjects.filter((subject) =>
+      assignmentForm.subjectIds.includes(subject.id),
+    );
+    const section = classSections.find(
+      (item) => item.id === assignmentForm.sectionId,
+    );
+    const instructor = instructors.find(
+      (item) => item.id === assignmentForm.instructorId,
+    );
+
+    if (!section) {
+      addToast("Please select a section first.", "warning");
+      return;
+    }
+
+    if (selectedSubjects.length === 0) {
+      addToast("Select at least one subject to assign.", "warning");
+      return;
+    }
+
+    if (editingAssignment && selectedSubjects.length !== 1) {
+      addToast("Editing an assignment only supports one subject.", "warning");
+      return;
+    }
+
+    const shouldIncludeSchedule =
+      assignmentForm.scheduleDay &&
+      assignmentForm.startTime &&
+      assignmentForm.endTime;
+    const schedule = shouldIncludeSchedule
+      ? [
+          {
+            day: assignmentForm.scheduleDay,
+            startTime: assignmentForm.startTime,
+            endTime: assignmentForm.endTime,
+            room: assignmentForm.room.trim() || "TBA",
+          },
+        ]
+      : [];
+
+    if (editingAssignment) {
+      const subject = selectedSubjects[0];
+
+      setSubjectAssignments((prev) =>
+        prev.map((assignment) =>
+          assignment.id === editingAssignment.id
+            ? {
+                ...assignment,
+                subjectId: subject.id,
+                subjectCode: subject.code,
+                subjectName: subject.name,
+                instructorId: instructor?.id || "",
+                instructorName: instructor?.name || "To be assigned",
+                sectionId: section.id,
+                sectionCode: section.code,
+                academicYear: assignmentForm.academicYear.trim() || "2026-2027",
+                semester: assignmentForm.semester,
+                schedule,
+              }
+            : assignment,
+        ),
+      );
+
+      addToast("Assignment updated successfully.", "success");
+      closeAssignmentModal();
+      return;
+    }
+
+    const newAssignments: SubjectAssignment[] = selectedSubjects.map(
+      (subject, index) => ({
+        id: `assignment_${Date.now()}_${subject.id}_${index}`,
+        subjectId: subject.id,
+        subjectCode: subject.code,
+        subjectName: subject.name,
+        instructorId: instructor?.id || "",
+        instructorName: instructor?.name || "To be assigned",
+        sectionId: section.id,
+        sectionCode: section.code,
+        schedule,
+        academicYear: assignmentForm.academicYear.trim() || "2026-2027",
+        semester: assignmentForm.semester,
+      }),
+    );
+
+    setSubjectAssignments((prev) => [...prev, ...newAssignments]);
+    addToast(
+      `${newAssignments.length} subject${newAssignments.length > 1 ? "s" : ""} assigned to ${section.code}.`,
+      "success",
+    );
+    closeAssignmentModal();
+  };
+
+  const handleRemoveAssignment = (assignmentId: string) => {
+    openAssignmentDeleteModal([assignmentId]);
+  };
+
+  const handleConfirmAssignmentDelete = () => {
+    if (pendingAssignmentDeleteIds.length === 0) {
+      return;
+    }
+
+    setSubjectAssignments((prev) =>
+      prev.filter(
+        (assignment) => !pendingAssignmentDeleteIds.includes(assignment.id),
+      ),
+    );
+    setSelectedAssignmentIds((prev) =>
+      prev.filter((id) => !pendingAssignmentDeleteIds.includes(id)),
+    );
+
+    addToast(
+      `${pendingAssignmentDeleteIds.length} assignment${pendingAssignmentDeleteIds.length === 1 ? "" : "s"} removed.`,
+      "info",
+    );
+    closeAssignmentDeleteModal();
   };
 
   // Update pending assignments
@@ -1671,9 +2235,7 @@ export default function AdminEnrollees({
 
     for (const enrollee of pendingAssignments) {
       const matchingSections = updatedSections
-        .filter(
-          (section) => sectionMatchesEnrollee(section, enrollee),
-        )
+        .filter((section) => sectionMatchesEnrollee(section, enrollee))
         .sort((a, b) => a.section.localeCompare(b.section));
 
       let assignedSection = matchingSections.find(
@@ -1690,7 +2252,13 @@ export default function AdminEnrollees({
           id: `new_${Date.now()}_${nextSectionLetter}`,
           code:
             enrollee.program === "SHS"
-              ? `${(enrollee.strandOrCourse || "SHS").split(" ")[0].replace(/[^A-Z]/gi, "").slice(0, 4).toUpperCase() || "SHS"}${enrollee.yearLevel === "Grade 12" ? "2" : "1"}${nextSectionLetter}`
+              ? `${
+                  (enrollee.strandOrCourse || "SHS")
+                    .split(" ")[0]
+                    .replace(/[^A-Z]/gi, "")
+                    .slice(0, 4)
+                    .toUpperCase() || "SHS"
+                }${enrollee.yearLevel === "Grade 12" ? "2" : "1"}${nextSectionLetter}`
               : `BSE1${nextSectionLetter}`,
           program: enrollee.program,
           yearLevel: enrollee.yearLevel,
@@ -1869,25 +2437,58 @@ export default function AdminEnrollees({
   const loadEnrollees = async () => {
     setIsLoading(true);
     const storedEnrollees =
-      readBranchScopedData<Enrollee[]>(storageScopes.enrollees, currentBranch) ??
-      [];
-    const defaultEnrollees = getDefaultBranchEnrollees(currentBranch) as Enrollee[];
+      readBranchScopedData<Enrollee[]>(
+        storageScopes.enrollees,
+        currentBranch,
+      ) ?? [];
+    const defaultEnrollees = getDefaultBranchEnrollees(
+      currentBranch,
+    ) as Enrollee[];
 
     try {
       const supabaseApplicants = (await fetchSupabaseAdmissionApplicants(
         currentBranch,
       )) as Enrollee[];
+      const mergedEnrollees = mergeAdminEnrolleeRecords(
+        [...defaultEnrollees, ...supabaseApplicants],
+        storedEnrollees,
+      ) as Enrollee[];
 
-      setEnrollees(
-        mergeAdminEnrolleeRecords(
-          [...defaultEnrollees, ...supabaseApplicants],
-          storedEnrollees,
-        ) as Enrollee[],
+      const syncedApprovedEnrollees = await Promise.all(
+        mergedEnrollees.map(async (enrollee) => {
+          if (enrollee.status !== "Approved" || !enrollee.trackingNumber) {
+            return enrollee;
+          }
+
+          try {
+            const activatedStudent = await activateApprovedStudent(
+              enrollee.trackingNumber,
+              enrollee.studentNumber,
+            );
+
+            return {
+              ...enrollee,
+              studentNumber:
+                activatedStudent.studentNumber || enrollee.studentNumber,
+            };
+          } catch (error) {
+            console.warn(
+              "Unable to sync approved enrollee to Supabase student portal record.",
+              error,
+            );
+            return enrollee;
+          }
+        }),
       );
+
+      setEnrollees(syncedApprovedEnrollees);
     } catch (error) {
       console.error("Failed to fetch enrollees", error);
       setEnrollees(
-        mergeAdminEnrolleeRecords(defaultEnrollees, storedEnrollees) as Enrollee[],
+        mergeAdminEnrolleeRecords(
+          defaultEnrollees,
+          storedEnrollees,
+        ) as Enrollee[],
       );
     } finally {
       setIsLoading(false);
@@ -1971,7 +2572,11 @@ export default function AdminEnrollees({
       return;
     }
 
-    writeBranchScopedData(storageScopes.instructors, currentBranch, instructors);
+    writeBranchScopedData(
+      storageScopes.instructors,
+      currentBranch,
+      instructors,
+    );
   }, [currentBranch, instructors, hasInitializedBranchData]);
 
   useEffect(() => {
@@ -2058,7 +2663,7 @@ export default function AdminEnrollees({
       setSelectedRequest((prev) =>
         prev
           ? {
-            ...prev,
+              ...prev,
               attachments: updatedAttachments,
               ...(request ? { enrollmentStatus: nextStatus } : {}),
             }
@@ -2074,16 +2679,56 @@ export default function AdminEnrollees({
 
   const handleReviewRequirements = (request: EnrollmentRequest | Enrollee) => {
     setSelectedRequest(request);
+    if (!isEnrollmentRequest(request) && request.program === "College") {
+      setPendingScholarshipScore(
+        typeof request.scholarshipExamScore === "number"
+          ? String(request.scholarshipExamScore)
+          : "",
+      );
+      return;
+    }
+
+    setPendingScholarshipScore("");
   };
 
   const closeReviewModal = () => {
     setSelectedRequest(null);
     setViewingAttachment(null);
+    setPendingScholarshipScore("");
   };
 
-  const handleApproveRequest = (requestId: string) => {
-    setSelectedAction({ id: requestId, action: "approve" });
+  const handleApproveRequest = (request: EnrollmentRequest | Enrollee) => {
+    let scholarshipExamScore: number | null = null;
+
+    if (!isEnrollmentRequest(request) && request.program === "College") {
+      const trimmedScore = pendingScholarshipScore.trim();
+
+      if (trimmedScore !== "") {
+        const parsedScore = Number(trimmedScore);
+
+        if (
+          !Number.isFinite(parsedScore) ||
+          parsedScore < 0 ||
+          parsedScore > 100
+        ) {
+          addToast(
+            "Scholarship exam score must be a number from 0 to 100.",
+            "warning",
+          );
+          return false;
+        }
+
+        scholarshipExamScore = parsedScore;
+      }
+    }
+
+    setSelectedAction({
+      id: request.id,
+      action: "approve",
+      scholarshipExamScore,
+    });
     setIsConfirmModalOpen(true);
+    return true;
   };
 
   const handleRejectRequest = (requestId: string) => {
@@ -2107,26 +2752,56 @@ export default function AdminEnrollees({
       if (!requestToUpdate) {
         if (enrolleeToUpdate) {
           const isApprove = selectedAction.action === "approve";
+
+          let syncedStudentNumber = enrolleeToUpdate.studentNumber;
+
           try {
-            await updateAdmissionProgress({
-              trackingNumber: enrolleeToUpdate.trackingNumber,
-              currentStep: 4,
-              applicationStatus: isApprove ? "accepted" : "rejected",
-            });
+            if (isApprove) {
+              const activatedStudent = await activateApprovedStudent(
+                enrolleeToUpdate.trackingNumber,
+              );
+              syncedStudentNumber = activatedStudent.studentNumber;
+            } else {
+              await updateAdmissionProgress({
+                trackingNumber: enrolleeToUpdate.trackingNumber,
+                currentStep: 4,
+                applicationStatus: "rejected",
+              });
+            }
           } catch (syncError) {
             console.warn(
               "Unable to sync admission decision to Supabase, keeping local admin state.",
               syncError,
             );
+
+            if (isApprove) {
+              try {
+                await updateAdmissionProgress({
+                  trackingNumber: enrolleeToUpdate.trackingNumber,
+                  currentStep: 4,
+                  applicationStatus: "accepted",
+                });
+              } catch (fallbackError) {
+                console.warn(
+                  "Unable to mark admission as accepted in Supabase after activation failed.",
+                  fallbackError,
+                );
+              }
+            }
           }
 
           const updatedEnrollee: Enrollee = isApprove
             ? {
                 ...promoteApplicantToStoredStudent({
                   ...enrolleeToUpdate,
+                  studentNumber: syncedStudentNumber,
                   branch: currentBranch,
                   strandOrCourse: enrolleeToUpdate.strandOrCourse || "",
                   studentStatus: enrolleeToUpdate.studentStatus || "",
+                  scholarshipExamScore:
+                    selectedAction.scholarshipExamScore ??
+                    enrolleeToUpdate.scholarshipExamScore ??
+                    null,
                 }).applicant,
               }
             : {
@@ -2139,7 +2814,8 @@ export default function AdminEnrollees({
           );
           addToast(
             isApprove
-              ? updatedEnrollee.documentsSubmitted < updatedEnrollee.totalDocuments
+              ? updatedEnrollee.documentsSubmitted <
+                updatedEnrollee.totalDocuments
                 ? `Admission approved. Student number ${updatedEnrollee.studentNumber} is now active with ${updatedEnrollee.documentsSubmitted}/${updatedEnrollee.totalDocuments} credentials submitted.`
                 : `Admission approved successfully. Student number ${updatedEnrollee.studentNumber} is now active.`
               : "Admission rejected successfully.",
@@ -2190,7 +2866,9 @@ export default function AdminEnrollees({
     const matchesSearch =
       enrollee.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       enrollee.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      enrollee.trackingNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      enrollee.trackingNumber
+        .toLowerCase()
+        .includes(searchTerm.toLowerCase()) ||
       (enrollee.studentNumber || "")
         .toLowerCase()
         .includes(searchTerm.toLowerCase()) ||
@@ -2213,10 +2891,11 @@ export default function AdminEnrollees({
   });
 
   const selectedAdmissionActionRecord = selectedAction
-    ? enrollees.find((enrollee) => enrollee.id === selectedAction.id) ?? null
+    ? (enrollees.find((enrollee) => enrollee.id === selectedAction.id) ?? null)
     : null;
   const selectedEnrollmentActionRecord = selectedAction
-    ? enrollmentRequests.find((request) => request.id === selectedAction.id) ?? null
+    ? (enrollmentRequests.find((request) => request.id === selectedAction.id) ??
+      null)
     : null;
 
   const filteredInstructors = instructors.filter(
@@ -2250,6 +2929,39 @@ export default function AdminEnrollees({
       return false;
     return true;
   });
+  const availableAssignmentSubjects = getEligibleSubjectsForSection(
+    assignmentForm.sectionId,
+    assignmentForm.semester,
+    editingAssignment?.id,
+  );
+  const selectedAssignmentSection = classSections.find(
+    (section) => section.id === assignmentForm.sectionId,
+  );
+  const selectedAssignments = subjectAssignments.filter((assignment) =>
+    selectedAssignmentIds.includes(assignment.id),
+  );
+  const selectedVisibleAssignmentCount = filteredAssignments.filter(
+    (assignment) => selectedAssignmentIds.includes(assignment.id),
+  ).length;
+  const pendingAssignmentDeleteTargets = subjectAssignments.filter(
+    (assignment) => pendingAssignmentDeleteIds.includes(assignment.id),
+  );
+
+  useEffect(() => {
+    const existingAssignmentIds = new Set(
+      subjectAssignments.map((assignment) => assignment.id),
+    );
+
+    setSelectedAssignmentIds((prev) => {
+      const next = prev.filter((id) => existingAssignmentIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+
+    setPendingAssignmentDeleteIds((prev) => {
+      const next = prev.filter((id) => existingAssignmentIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [subjectAssignments]);
 
   const pendingCount = enrollees.filter((e) => e.status === "Pending").length;
   const approvedCount = enrollees.filter((e) => e.status === "Approved").length;
@@ -2259,6 +2971,14 @@ export default function AdminEnrollees({
   const approvedRequestsCount = enrollmentRequests.filter(
     (r) => r.enrollmentStatus === "Approved",
   ).length;
+  const reflectedAcademicYear =
+    enrollmentRequests[0]?.academicYear ||
+    subjectAssignments[0]?.academicYear ||
+    "2026-2027";
+  const reflectedSemester =
+    enrollmentRequests[0]?.semester ||
+    subjectAssignments[0]?.semester ||
+    "1st Semester";
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -2307,9 +3027,11 @@ export default function AdminEnrollees({
     const sectionSubjects = subjects.filter(
       (s) =>
         s.yearLevel === section.yearLevel &&
-        (s.program === section.program ||
-          (section.program === "SHS" && s.strand === section.strand) ||
-          s.strand === "All"),
+        s.program === section.program &&
+        matchesAcademicDescriptor(
+          resolveSubjectStrandOrCourse(s),
+          section.strand,
+        ),
     );
 
     if (sectionSubjects.length === 0) {
@@ -2385,6 +3107,8 @@ export default function AdminEnrollees({
   // Filter subjects based on filters
   const getFilteredSubjects = () => {
     return subjects.filter((subject) => {
+      const subjectDescriptor = resolveSubjectStrandOrCourse(subject);
+
       if (
         subjectFilter.program !== "All" &&
         subject.program !== subjectFilter.program
@@ -2397,17 +3121,17 @@ export default function AdminEnrollees({
         return false;
       if (
         subjectFilter.strand !== "All" &&
-        subject.strand !== subjectFilter.strand &&
-        subject.strand !== "All"
+        !matchesAcademicDescriptor(subjectDescriptor, subjectFilter.strand)
       )
         return false;
       if (subjectFilter.strandOrCourse !== "All") {
-        const filterValue = subjectFilter.strandOrCourse;
-        if (subject.program === "SHS") {
-          if (subject.strand !== filterValue && subject.strand !== "All")
-            return false;
-        } else {
-          if (subject.program !== filterValue) return false;
+        if (
+          !matchesAcademicDescriptor(
+            subjectDescriptor,
+            subjectFilter.strandOrCourse,
+          )
+        ) {
+          return false;
         }
       }
       if (!subjectFilter.showMinor && subject.isMinor) return false;
@@ -2643,22 +3367,6 @@ export default function AdminEnrollees({
                             >
                               Review
                             </button>
-                            {enrollee.status === "Pending" && (
-                              <>
-                                <button
-                                  className="action-btn approve"
-                                  onClick={() => handleApproveRequest(enrollee.id)}
-                                >
-                                  Approve
-                                </button>
-                                <button
-                                  className="action-btn reject"
-                                  onClick={() => handleRejectRequest(enrollee.id)}
-                                >
-                                  Reject
-                                </button>
-                              </>
-                            )}
                           </div>
                         </td>
                       </tr>
@@ -2869,18 +3577,12 @@ export default function AdminEnrollees({
                         <option value="ABM">ABM</option>
                         <option value="STEM">STEM</option>
                       </>
+                    ) : subjectFilter.program === "College" ? (
+                      <option value={DEFAULT_COLLEGE_COURSE}>
+                        BS Entrepreneurship
+                      </option>
                     ) : (
-                      <>
-                        <option value="BS Entrepreneurship">
-                          BS Entrepreneurship
-                        </option>
-                        <option value="BS Information Technology">
-                          BS Information Technology
-                        </option>
-                        <option value="BS Computer Science">
-                          BS Computer Science
-                        </option>
-                      </>
+                      <></>
                     )}
                   </select>
                   <label className="filter-checkbox">
@@ -3224,7 +3926,7 @@ export default function AdminEnrollees({
                   <h3>Class Schedule & Assignments</h3>
                   <button
                     className="action-btn add"
-                    onClick={() => setShowAssignmentModal(true)}
+                    onClick={() => openCreateAssignmentModal()}
                   >
                     <FaPlus /> Create Assignment
                   </button>
@@ -3277,12 +3979,73 @@ export default function AdminEnrollees({
                   </select>
                 </div>
 
+                <div className="assignment-bulk-toolbar">
+                  <div className="assignment-bulk-summary">
+                    <span className="assignment-toolbar-pill">
+                      {filteredAssignments.length} visible
+                    </span>
+                    <span
+                      className={`assignment-toolbar-pill ${selectedAssignments.length > 0 ? "active" : ""}`}
+                    >
+                      {selectedAssignments.length} selected
+                    </span>
+                    {selectedVisibleAssignmentCount > 0 &&
+                      selectedVisibleAssignmentCount !==
+                        selectedAssignments.length && (
+                        <span className="assignment-toolbar-caption">
+                          {selectedVisibleAssignmentCount} selected in current
+                          view
+                        </span>
+                      )}
+                  </div>
+                  <div className="assignment-bulk-actions">
+                    <button
+                      type="button"
+                      className="assignment-selection-btn"
+                      onClick={selectVisibleAssignments}
+                      disabled={filteredAssignments.length === 0}
+                    >
+                      Select Visible
+                    </button>
+                    <button
+                      type="button"
+                      className="assignment-selection-btn secondary"
+                      onClick={clearAssignmentSelection}
+                      disabled={selectedAssignments.length === 0}
+                    >
+                      Clear Selection
+                    </button>
+                    <button
+                      type="button"
+                      className="action-btn delete assignment-delete-trigger"
+                      onClick={() =>
+                        openAssignmentDeleteModal(
+                          selectedAssignments.map(
+                            (assignment) => assignment.id,
+                          ),
+                        )
+                      }
+                      disabled={selectedAssignments.length === 0}
+                    >
+                      <FaTrash /> Delete Selected
+                    </button>
+                  </div>
+                </div>
+
                 <div className="assignments-list">
                   {classSections.map((section) => {
                     const sectionAssignments = filteredAssignments.filter(
                       (a) => a.sectionCode === section.code,
                     );
                     const isExpanded = expandedAssignmentSections[section.code];
+                    const selectedSectionAssignmentCount =
+                      sectionAssignments.filter((assignment) =>
+                        selectedAssignmentIds.includes(assignment.id),
+                      ).length;
+                    const allSectionAssignmentsSelected =
+                      sectionAssignments.length > 0 &&
+                      selectedSectionAssignmentCount ===
+                        sectionAssignments.length;
 
                     return (
                       <div
@@ -3299,9 +4062,38 @@ export default function AdminEnrollees({
                             <span className="count-tag">
                               {sectionAssignments.length} Assignments
                             </span>
+                            {selectedSectionAssignmentCount > 0 && (
+                              <span className="count-tag selected">
+                                {selectedSectionAssignmentCount} Selected
+                              </span>
+                            )}
                           </div>
                           <div className="group-actions">
                             <button
+                              type="button"
+                              className="assignment-selection-btn secondary"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSectionAssignmentSelection(section.code);
+                              }}
+                              disabled={sectionAssignments.length === 0}
+                            >
+                              {allSectionAssignmentsSelected
+                                ? "Clear Section"
+                                : "Select Section"}
+                            </button>
+                            <button
+                              type="button"
+                              className="action-btn add"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openCreateAssignmentModal(section.id);
+                              }}
+                            >
+                              Assign Subjects
+                            </button>
+                            <button
+                              type="button"
                               className="action-btn auto-assign"
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -3320,28 +4112,45 @@ export default function AdminEnrollees({
                               sectionAssignments.map((assignment) => (
                                 <div
                                   key={assignment.id}
-                                  className="assignment-card mini"
+                                  className={`assignment-card mini ${selectedAssignmentIds.includes(assignment.id) ? "selected" : ""}`}
                                 >
                                   <div className="assignment-header">
-                                    <h5>
-                                      {assignment.subjectCode} -{" "}
-                                      {assignment.subjectName}
-                                    </h5>
+                                    <div className="assignment-header-main">
+                                      <label className="assignment-card-check">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedAssignmentIds.includes(
+                                            assignment.id,
+                                          )}
+                                          onChange={() =>
+                                            toggleAssignmentSelection(
+                                              assignment.id,
+                                            )
+                                          }
+                                        />
+                                        <span>Select</span>
+                                      </label>
+                                      <h5>
+                                        {assignment.subjectCode} -{" "}
+                                        {assignment.subjectName}
+                                      </h5>
+                                    </div>
                                     <div className="mini-actions">
                                       <button
-                                        onClick={() => {
-                                          setEditingAssignment(assignment);
-                                          setShowAssignmentModal(true);
-                                        }}
+                                        type="button"
+                                        onClick={() =>
+                                          openEditAssignmentModal(assignment)
+                                        }
                                       >
                                         Edit
                                       </button>
                                       <button
+                                        type="button"
                                         onClick={() =>
-                                          addToast("Removed", "info")
+                                          handleRemoveAssignment(assignment.id)
                                         }
                                       >
-                                        ✕
+                                        <FaTrash /> Delete
                                       </button>
                                     </div>
                                   </div>
@@ -3352,12 +4161,14 @@ export default function AdminEnrollees({
                                     </p>
                                     <p>
                                       <strong>Schedule:</strong>{" "}
-                                      {assignment.schedule
-                                        .map(
-                                          (s) =>
-                                            `${s.day} ${s.startTime}-${s.endTime} (${s.room})`,
-                                        )
-                                        .join(", ")}
+                                      {assignment.schedule.length > 0
+                                        ? assignment.schedule
+                                            .map(
+                                              (s) =>
+                                                `${s.day} ${s.startTime}-${s.endTime} (${s.room})`,
+                                            )
+                                            .join(", ")
+                                        : "To be announced"}
                                     </p>
                                   </div>
                                 </div>
@@ -3390,7 +4201,8 @@ export default function AdminEnrollees({
                   {selectedRequest.fullName} •{" "}
                   {isEnrollmentRequest(selectedRequest)
                     ? selectedRequest.studentNumber
-                    : selectedRequest.studentNumber || selectedRequest.trackingNumber}
+                    : selectedRequest.studentNumber ||
+                      selectedRequest.trackingNumber}
                 </p>
               </div>
               <button className="review-modal-close" onClick={closeReviewModal}>
@@ -3402,49 +4214,20 @@ export default function AdminEnrollees({
                 <h3>Request Information</h3>
                 <div className="personal-information-card">
                   <div className="personal-info-grid">
-                    <div className="personal-info-item">
-                      {isEnrollmentRequest(selectedRequest) ? (
-                        <>
-                          <span>Student Number</span>
-                          <strong>{selectedRequest.studentNumber}</strong>
-                        </>
-                      ) : (
-                        <>
-                          <span>Tracking Number</span>
-                          <strong>{selectedRequest.trackingNumber}</strong>
-                        </>
-                      )}
-                    </div>
-                    <div className="personal-info-item">
-                      <span>Full Name</span>
-                      <strong>{selectedRequest.fullName}</strong>
-                    </div>
-                    {!isEnrollmentRequest(selectedRequest) && (
-                      <>
-                        {selectedRequest.studentNumber && (
-                          <div className="personal-info-item">
-                            <span>Student Number</span>
-                            <strong>{selectedRequest.studentNumber}</strong>
-                          </div>
-                        )}
-                        <div className="personal-info-item">
-                          <span>Email</span>
-                          <strong>{selectedRequest.personalInfo.email}</strong>
-                        </div>
-                        <div className="personal-info-item">
-                          <span>Contact</span>
-                          <strong>
-                            {selectedRequest.personalInfo.contactNumber}
-                          </strong>
-                        </div>
-                      </>
-                    )}
-                    <div className="personal-info-item">
-                      <span>Program</span>
-                      <strong>{selectedRequest.program}</strong>
-                    </div>
                     {isEnrollmentRequest(selectedRequest) ? (
                       <>
+                        <div className="personal-info-item">
+                          <span>Student Number</span>
+                          <strong>{selectedRequest.studentNumber}</strong>
+                        </div>
+                        <div className="personal-info-item">
+                          <span>Program</span>
+                          <strong>{selectedRequest.program}</strong>
+                        </div>
+                        <div className="personal-info-item">
+                          <span>Full Name</span>
+                          <strong>{selectedRequest.fullName}</strong>
+                        </div>
                         <div className="personal-info-item">
                           <span>Current Level</span>
                           <strong>{selectedRequest.currentYearLevel}</strong>
@@ -3466,66 +4249,219 @@ export default function AdminEnrollees({
                           <span>Semester</span>
                           <strong>{selectedRequest.semester}</strong>
                         </div>
+                        <div className="personal-info-item">
+                          <span>Request Date</span>
+                          <strong>{selectedRequest.requestDate}</strong>
+                        </div>
                       </>
                     ) : (
                       <>
                         <div className="personal-info-item">
-                          <span>Course / Strand</span>
+                          <span>Student Number</span>
                           <strong>
-                            {selectedRequest.strandOrCourse ||
-                              selectedRequest.yearLevel}
+                            {selectedRequest.studentNumber ||
+                              "Pending upon approval"}
                           </strong>
                         </div>
                         <div className="personal-info-item">
-                          <span>Year Level</span>
-                          <strong>{selectedRequest.yearLevel}</strong>
+                          <span>Program</span>
+                          <strong>{selectedRequest.program}</strong>
                         </div>
+                        <div className="personal-info-item">
+                          <span>Full Name</span>
+                          <strong>{selectedRequest.fullName}</strong>
+                        </div>
+                        <div className="personal-info-item">
+                          <span>Semester</span>
+                          <strong>{reflectedSemester}</strong>
+                        </div>
+                        <div className="personal-info-item">
+                          <span>Submitted Date</span>
+                          <strong>{selectedRequest.applicationDate}</strong>
+                        </div>
+                        <div className="personal-info-item">
+                          <span>Academic Year</span>
+                          <strong>{reflectedAcademicYear}</strong>
+                        </div>
+                        {selectedRequest.program === "College" && (
+                          <>
+                            <div className="personal-info-item">
+                              <span>Academic Honor</span>
+                              <strong>{selectedAdmissionHonorLabel}</strong>
+                            </div>
+                            <div className="personal-info-item">
+                              <span>Honor Certificate</span>
+                              <strong>
+                                {selectedAdmissionHonorCertificateStatus}
+                              </strong>
+                            </div>
+                            <div className="personal-info-item">
+                              <span>Scholarship Applied</span>
+                              <strong>
+                                {selectedAdmissionScholarshipStatus}
+                              </strong>
+                            </div>
+                            <div className="personal-info-item">
+                              <span>Scholarship Exam Score</span>
+                              {selectedRequest.status === "Pending" ? (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  step="1"
+                                  value={pendingScholarshipScore}
+                                  onChange={(event) =>
+                                    setPendingScholarshipScore(
+                                      event.target.value,
+                                    )
+                                  }
+                                  placeholder={
+                                    selectedRequest.appliedForScholarship
+                                      ? "Enter exam score"
+                                      : "Optional"
+                                  }
+                                />
+                              ) : (
+                                <strong>
+                                  {typeof selectedRequest.scholarshipExamScore ===
+                                  "number"
+                                    ? selectedRequest.scholarshipExamScore
+                                    : "Awaiting result"}
+                                </strong>
+                              )}
+                            </div>
+                            {selectedAdmissionTuition && (
+                              <>
+                                <div className="personal-info-item">
+                                  <span>Estimated Tuition</span>
+                                  <strong>
+                                    {formatCurrency(
+                                      selectedAdmissionTuition.baseTuition,
+                                    )}
+                                  </strong>
+                                </div>
+                                <div className="personal-info-item">
+                                  <span>Honor Discount</span>
+                                  <strong>
+                                    {
+                                      selectedAdmissionTuition.honorDiscountPercentage
+                                    }
+                                    % (
+                                    {formatCurrency(
+                                      selectedAdmissionTuition.honorDiscountAmount,
+                                    )}
+                                    )
+                                  </strong>
+                                </div>
+                                <div className="personal-info-item">
+                                  <span>Tuition After Discount</span>
+                                  <strong>
+                                    {formatCurrency(
+                                      selectedAdmissionTuition.tuitionAfterHonorDiscount,
+                                    )}
+                                  </strong>
+                                </div>
+                                <div className="personal-info-item">
+                                  <span>On-Site Payment</span>
+                                  <strong>
+                                    {formatCurrency(
+                                      selectedAdmissionTuition.onSitePayment,
+                                    )}
+                                  </strong>
+                                </div>
+                                <div className="personal-info-item">
+                                  <span>Estimated Remaining Balance</span>
+                                  <strong>
+                                    {formatCurrency(
+                                      selectedAdmissionTuition.remainingBalance,
+                                    )}
+                                  </strong>
+                                </div>
+                                <div className="personal-info-item">
+                                  <span>Scholarship Tuition Status</span>
+                                  <strong>
+                                    {selectedAdmissionScholarshipTuitionStatus}
+                                  </strong>
+                                </div>
+                              </>
+                            )}
+                          </>
+                        )}
                       </>
                     )}
-                    <div className="personal-info-item">
-                      <span>
-                        {isEnrollmentRequest(selectedRequest)
-                          ? "Request Date"
-                          : "Application Date"}
-                      </span>
-                      <strong>
-                        {isEnrollmentRequest(selectedRequest)
-                          ? selectedRequest.requestDate
-                          : selectedRequest.applicationDate}
-                      </strong>
-                    </div>
                   </div>
                 </div>
               </div>
               <div className="requirements-section">
                 <h3>Document Requirements</h3>
                 {(() => {
-                  const requirementItems = getEnrollmentRequirementItems(
-                    isEnrollmentRequest(selectedRequest)
-                      ? selectedRequest.currentYearLevel
-                      : "",
-                    isEnrollmentRequest(selectedRequest)
-                      ? selectedRequest.requestedYearLevel
-                      : "",
-                    selectedRequest.program,
+                  const enrollmentRequest =
+                    isEnrollmentRequest(selectedRequest);
+                  const requirementItems =
+                    getReviewRequirementItems(selectedRequest);
+                  const admissionAttachmentsByName = enrollmentRequest
+                    ? null
+                    : new Map(
+                        (selectedRequest.attachments ?? []).map(
+                          (attachment) => [
+                            attachment.name.trim().toLowerCase(),
+                            attachment,
+                          ],
+                        ),
+                      );
+                  const requirementReviewItems = requirementItems.map(
+                    (item, index) => {
+                      const attachment = enrollmentRequest
+                        ? selectedRequest.attachments?.[index]
+                        : admissionAttachmentsByName?.get(
+                            item.name.trim().toLowerCase(),
+                          );
+                      const reviewStatus =
+                        attachment?.reviewStatus ?? "Pending";
+                      const isMockSubmitted =
+                        !enrollmentRequest &&
+                        !!attachment &&
+                        selectedRequest.documentsSubmitted > 0 &&
+                        (selectedRequest.attachments?.length ?? 0) ===
+                          selectedRequest.documentsSubmitted;
+                      const isSubmitted =
+                        !!attachment &&
+                        (attachment.url !== "#" || isMockSubmitted);
+
+                      return {
+                        item,
+                        index,
+                        attachment,
+                        reviewStatus,
+                        isSubmitted,
+                      };
+                    },
                   );
-                  const pendingCount = requirementItems.filter(
-                    (_, idx) =>
-                      selectedRequest.attachments?.[idx]?.reviewStatus ===
-                      "Pending",
+                  const pendingCount = requirementReviewItems.filter(
+                    (reviewItem) =>
+                      reviewItem.isSubmitted &&
+                      reviewItem.reviewStatus === "Pending",
                   ).length;
-                  const approvedCount = requirementItems.filter(
-                    (_, idx) =>
-                      selectedRequest.attachments?.[idx]?.reviewStatus ===
-                      "Approved",
+                  const approvedCount = requirementReviewItems.filter(
+                    (reviewItem) =>
+                      reviewItem.isSubmitted &&
+                      reviewItem.reviewStatus === "Approved",
                   ).length;
-                  const redoCount = requirementItems.filter(
-                    (_, idx) =>
-                      selectedRequest.attachments?.[idx]?.reviewStatus ===
-                      "Rejected",
+                  const redoCount = requirementReviewItems.filter(
+                    (reviewItem) =>
+                      reviewItem.isSubmitted &&
+                      reviewItem.reviewStatus === "Rejected",
                   ).length;
                   return (
                     <>
+                      {!enrollmentRequest &&
+                        selectedRequest.documentsSubmitted === 0 && (
+                          <div className="admission-review-note">
+                            No requirements have been uploaded yet for this
+                            applicant. You can still approve or reject the
+                            admission below.
+                          </div>
+                        )}
                       <div className="requirement-stats-row">
                         <div className="requirement-stat pending">
                           <span>Pending review</span>
@@ -3541,93 +4477,92 @@ export default function AdminEnrollees({
                         </div>
                       </div>
                       <ul className="document-requirements-list">
-                        {requirementItems.map((item, index) => {
-                          const attachment =
-                            selectedRequest.attachments?.[index];
-                          const reviewStatus =
-                            attachment?.reviewStatus ?? "Pending";
-                          const isMockSubmitted =
-                            !isEnrollmentRequest(selectedRequest) &&
-                            (selectedRequest.attachments?.length ?? 0) ===
-                              selectedRequest.documentsSubmitted;
-                          const isSubmitted =
-                            !!attachment &&
-                            (attachment.url !== "#" || isMockSubmitted);
-                          return (
-                            <li
-                              key={item.key || item.name}
-                              className={`document-requirement-card ${reviewStatus.toLowerCase()}`}
-                            >
-                              <div className="document-requirement-top">
-                                <div className="requirement-title">
-                                  <p>{item.name}</p>
+                        {requirementReviewItems.map(
+                          ({
+                            item,
+                            index,
+                            attachment,
+                            reviewStatus,
+                            isSubmitted,
+                          }) => {
+                            return (
+                              <li
+                                key={item.key || item.name}
+                                className={`document-requirement-card ${reviewStatus.toLowerCase()}`}
+                              >
+                                <div className="document-requirement-top">
+                                  <div className="requirement-title">
+                                    <p>{item.name}</p>
+                                  </div>
+                                  <div className="requirement-status-badge">
+                                    {getStatusIcon(reviewStatus)}
+                                    <span
+                                      className={`status-text ${reviewStatus.toLowerCase()}`}
+                                    >
+                                      {reviewStatus}
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="requirement-status-badge">
-                                  {getStatusIcon(reviewStatus)}
-                                  <span
-                                    className={`status-text ${reviewStatus.toLowerCase()}`}
-                                  >
-                                    {reviewStatus}
-                                  </span>
+                                <div className="document-requirement-actions">
+                                  {isSubmitted && attachment?.url !== "#" ? (
+                                    <button
+                                      className="view-document-btn"
+                                      onClick={() => {
+                                        if (attachment) {
+                                          setViewingAttachment(attachment);
+                                        }
+                                      }}
+                                    >
+                                      <FaEye /> View document
+                                    </button>
+                                  ) : isSubmitted ? (
+                                    <span className="document-missing-label">
+                                      <FaFileAlt /> Reference only
+                                    </span>
+                                  ) : (
+                                    <span className="document-missing-label">
+                                      <FaFileAlt /> No file submitted yet
+                                    </span>
+                                  )}
+                                  <div className="requirement-action-buttons">
+                                    <button
+                                      className="requirement-action pass"
+                                      onClick={() =>
+                                        handleAttachmentStatusUpdate(
+                                          selectedRequest.id,
+                                          index,
+                                          "Approved",
+                                        )
+                                      }
+                                      disabled={
+                                        !isSubmitted ||
+                                        reviewStatus === "Approved"
+                                      }
+                                    >
+                                      <FaThumbsUp /> Pass
+                                    </button>
+                                    <button
+                                      className="requirement-action redo"
+                                      onClick={() =>
+                                        handleAttachmentStatusUpdate(
+                                          selectedRequest.id,
+                                          index,
+                                          "Rejected",
+                                        )
+                                      }
+                                      disabled={
+                                        !isSubmitted ||
+                                        reviewStatus === "Rejected"
+                                      }
+                                    >
+                                      <FaRedoAlt /> Need Redo
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
-                              <div className="document-requirement-actions">
-                                {isSubmitted && attachment?.url !== "#" ? (
-                                  <button
-                                    className="view-document-btn"
-                                    onClick={() =>
-                                      setViewingAttachment(attachment)
-                                    }
-                                  >
-                                    <FaEye /> View document
-                                  </button>
-                                ) : isSubmitted ? (
-                                  <span className="document-missing-label">
-                                    <FaFileAlt /> Reference only
-                                  </span>
-                                ) : (
-                                  <span className="document-missing-label">
-                                    <FaFileAlt /> No file submitted yet
-                                  </span>
-                                )}
-                                <div className="requirement-action-buttons">
-                                  <button
-                                    className="requirement-action pass"
-                                    onClick={() =>
-                                      handleAttachmentStatusUpdate(
-                                        selectedRequest.id,
-                                        index,
-                                        "Approved",
-                                      )
-                                    }
-                                    disabled={
-                                      !isSubmitted ||
-                                      reviewStatus === "Approved"
-                                    }
-                                  >
-                                    <FaThumbsUp /> Pass
-                                  </button>
-                                  <button
-                                    className="requirement-action redo"
-                                    onClick={() =>
-                                      handleAttachmentStatusUpdate(
-                                        selectedRequest.id,
-                                        index,
-                                        "Rejected",
-                                      )
-                                    }
-                                    disabled={
-                                      !isSubmitted ||
-                                      reviewStatus === "Rejected"
-                                    }
-                                  >
-                                    <FaRedoAlt /> Need Redo
-                                  </button>
-                                </div>
-                              </div>
-                            </li>
-                          );
-                        })}
+                              </li>
+                            );
+                          },
+                        )}
                       </ul>
                     </>
                   );
@@ -3635,15 +4570,17 @@ export default function AdminEnrollees({
               </div>
             </div>
             <div className="review-modal-footer">
-              {(isEnrollmentRequest(selectedRequest)
-                ? selectedRequest.enrollmentStatus === "Pending"
-                : selectedRequest.status === "Pending") && (
+              {((isEnrollmentRequest(selectedRequest) &&
+                selectedRequest.enrollmentStatus === "Pending") ||
+                (!isEnrollmentRequest(selectedRequest) &&
+                  selectedRequest.status === "Pending")) && (
                 <>
                   <button
                     className="action-btn approve"
                     onClick={() => {
-                      closeReviewModal();
-                      handleApproveRequest(selectedRequest.id);
+                      if (handleApproveRequest(selectedRequest)) {
+                        closeReviewModal();
+                      }
                     }}
                   >
                     {isEnrollmentRequest(selectedRequest)
@@ -3692,14 +4629,16 @@ export default function AdminEnrollees({
             <div className="review-modal-body">
               <p>
                 Are you sure you want to {selectedAction.action} this{" "}
-                {selectedAdmissionActionRecord && !selectedEnrollmentActionRecord
+                {selectedAdmissionActionRecord &&
+                !selectedEnrollmentActionRecord
                   ? "admission application"
                   : "enrollment request"}
                 ?
               </p>
               {selectedAction.action === "approve" && (
                 <p className="confirmation-note">
-                  {selectedAdmissionActionRecord && !selectedEnrollmentActionRecord
+                  {selectedAdmissionActionRecord &&
+                  !selectedEnrollmentActionRecord
                     ? selectedAdmissionActionRecord.documentsSubmitted <
                       selectedAdmissionActionRecord.totalDocuments
                       ? "Approval is allowed even with pending admission credentials. The student account will be activated and the remaining credential status will still appear in the student portal."
@@ -3818,7 +4757,7 @@ export default function AdminEnrollees({
                         program,
                         yearLevel: program === "SHS" ? "Grade 11" : "1st Year",
                         strand:
-                          program === "SHS" ? "ICT" : "BS Entrepreneurship",
+                          program === "SHS" ? "ICT" : DEFAULT_COLLEGE_COURSE,
                       });
                     }}
                   >
@@ -3869,7 +4808,7 @@ export default function AdminEnrollees({
                         setNewSection({ ...newSection, strand: e.target.value })
                       }
                     >
-                      <option value="BS Entrepreneurship">
+                      <option value={DEFAULT_COLLEGE_COURSE}>
                         BS Entrepreneurship
                       </option>
                     </select>
@@ -3899,16 +4838,7 @@ export default function AdminEnrollees({
                       const courseAbbrev =
                         newSection.program === "SHS"
                           ? newSection.strand
-                          : newSection.strand === "BS Entrepreneurship"
-                            ? "BSE"
-                            : newSection.strand === "BS Information Technology"
-                              ? "BSIT"
-                              : newSection.strand ===
-                                  "BS Business Administration"
-                                ? "BSBA"
-                                : newSection.strand === "BS Accountancy"
-                                  ? "BSA"
-                                  : "BSE";
+                          : "BSE";
                       const code = `${courseAbbrev}${newSection.yearLevel.replace(" ", "").slice(0, 1)}${newSection.section}`;
                       const newSec: ClassSection = {
                         id: `new_${Date.now()}`,
@@ -3925,7 +4855,7 @@ export default function AdminEnrollees({
                       setNewSection({
                         program: "College",
                         yearLevel: "1st Year",
-                        strand: "BS Entrepreneurship",
+                        strand: DEFAULT_COLLEGE_COURSE,
                         section: "A",
                         maxCapacity: 30,
                       });
@@ -4297,100 +5227,338 @@ export default function AdminEnrollees({
 
       {/* Assignment Modal */}
       {showAssignmentModal && (
-        <div className="review-modal-overlay" role="dialog">
-          <div className="review-modal">
+        <div
+          className="review-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="assignment-modal-title"
+        >
+          <div className="review-modal assignment-config-modal">
             <div className="review-modal-header">
-              <h2>
-                {editingAssignment
-                  ? "Edit Assignment"
-                  : "Create New Assignment"}
-              </h2>
+              <div className="assignment-modal-heading">
+                <h2 id="assignment-modal-title">
+                  {editingAssignment
+                    ? "Edit Assignment"
+                    : "Assign Subjects to Section"}
+                </h2>
+                <p>
+                  Review the section, choose the subjects that should appear in
+                  the class assignment list, and add instructor or schedule
+                  details when they are ready.
+                </p>
+              </div>
               <button
+                type="button"
                 className="review-modal-close"
-                onClick={() => {
-                  setShowAssignmentModal(false);
-                  setEditingAssignment(null);
-                }}
+                onClick={closeAssignmentModal}
               >
-                ✕
+                x
               </button>
             </div>
             <div className="review-modal-body">
-              <form>
-                <div className="form-group">
-                  <label>Subject</label>
-                  <select defaultValue={editingAssignment?.subjectId || ""}>
-                    {subjects.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.code} - {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Instructor</label>
-                  <select defaultValue={editingAssignment?.instructorId || ""}>
-                    {instructors.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Section</label>
-                  <select defaultValue={editingAssignment?.sectionId || ""}>
-                    {classSections.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.code}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Academic Year</label>
-                  <input
-                    type="text"
-                    defaultValue={
-                      editingAssignment?.academicYear || "2026-2027"
-                    }
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Semester</label>
-                  <select
-                    defaultValue={editingAssignment?.semester || "1st Semester"}
+              <form
+                id="assignment-config-form"
+                className="assignment-config-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleSaveAssignment();
+                }}
+              >
+                <div className="assignment-modal-summary">
+                  <div className="assignment-summary-card">
+                    <span>Section</span>
+                    <strong>
+                      {selectedAssignmentSection
+                        ? selectedAssignmentSection.code
+                        : "Choose a section"}
+                    </strong>
+                  </div>
+                  <div className="assignment-summary-card">
+                    <span>Available</span>
+                    <strong>
+                      {availableAssignmentSubjects.length} subject
+                      {availableAssignmentSubjects.length === 1 ? "" : "s"}
+                    </strong>
+                  </div>
+                  <div
+                    className={`assignment-summary-card ${assignmentForm.subjectIds.length === 0 ? "danger" : ""}`}
                   >
-                    <option value="1st Semester">1st Semester</option>
-                    <option value="2nd Semester">2nd Semester</option>
-                  </select>
+                    <span>Selected</span>
+                    <strong>
+                      {assignmentForm.subjectIds.length} subject
+                      {assignmentForm.subjectIds.length === 1 ? "" : "s"}
+                    </strong>
+                  </div>
+                  <div className="assignment-summary-card">
+                    <span>Semester</span>
+                    <strong>{assignmentForm.semester}</strong>
+                  </div>
+                </div>
+
+                <div className="assignment-form-grid">
+                  <div className="form-group">
+                    <label>Section</label>
+                    <select
+                      value={assignmentForm.sectionId}
+                      onChange={(e) =>
+                        updateAssignmentFormContext("sectionId", e.target.value)
+                      }
+                    >
+                      <option value="">Select section</option>
+                      {classSections.map((section) => (
+                        <option key={section.id} value={section.id}>
+                          {section.code} - {section.program} {section.yearLevel}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Semester</label>
+                    <select
+                      value={assignmentForm.semester}
+                      onChange={(e) =>
+                        updateAssignmentFormContext("semester", e.target.value)
+                      }
+                    >
+                      <option value="1st Semester">1st Semester</option>
+                      <option value="2nd Semester">2nd Semester</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Instructor</label>
+                    <select
+                      value={assignmentForm.instructorId}
+                      onChange={(e) =>
+                        setAssignmentForm((prev) => ({
+                          ...prev,
+                          instructorId: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">To be assigned later</option>
+                      {instructors.map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Academic Year</label>
+                    <input
+                      type="text"
+                      value={assignmentForm.academicYear}
+                      onChange={(e) =>
+                        setAssignmentForm((prev) => ({
+                          ...prev,
+                          academicYear: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
                 </div>
                 <div className="form-group">
-                  <label>Schedule</label>
+                  <div className="assignment-subject-picker-header">
+                    <div>
+                      <label>Subjects</label>
+                      <p className="assignment-helper-text">
+                        {selectedAssignmentSection
+                          ? `${selectedAssignmentSection.code} has ${availableAssignmentSubjects.length} available subject${availableAssignmentSubjects.length === 1 ? "" : "s"} for ${assignmentForm.semester}.`
+                          : "Choose a section first to load the matching strand/course subjects."}
+                      </p>
+                    </div>
+                    {!editingAssignment &&
+                      availableAssignmentSubjects.length > 0 && (
+                        <div className="assignment-selection-actions">
+                          <button
+                            type="button"
+                            className="assignment-selection-btn"
+                            onClick={selectAllAssignmentSubjects}
+                          >
+                            Select All
+                          </button>
+                          <button
+                            type="button"
+                            className="assignment-selection-btn secondary"
+                            onClick={clearAssignmentSubjects}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      )}
+                  </div>
+                  <div className="assignment-subject-selector">
+                    {availableAssignmentSubjects.length > 0 ? (
+                      availableAssignmentSubjects.map((subject) => {
+                        const isSelected = assignmentForm.subjectIds.includes(
+                          subject.id,
+                        );
+
+                        return (
+                          <label
+                            key={subject.id}
+                            className={`assignment-subject-option ${isSelected ? "selected" : ""}`}
+                          >
+                            <input
+                              type={editingAssignment ? "radio" : "checkbox"}
+                              name="assignment-subjects"
+                              checked={isSelected}
+                              onChange={() =>
+                                toggleAssignmentSubjectSelection(subject.id)
+                              }
+                            />
+                            <div>
+                              <strong>
+                                {subject.code} - {subject.name}
+                              </strong>
+                              <span>
+                                {subject.isMinor ? "Minor" : "Major"}
+                                {subject.units
+                                  ? ` | ${subject.units} units`
+                                  : ""}
+                              </span>
+                            </div>
+                          </label>
+                        );
+                      })
+                    ) : (
+                      <div className="assignment-subject-empty">
+                        No unassigned subjects are available for this
+                        section/semester yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="assignment-schedule-panel">
+                  <div className="assignment-schedule-heading">
+                    <label>Schedule (Optional)</label>
+                    <span></span>
+                  </div>
                   <div className="schedule-inputs">
-                    <input type="text" placeholder="Day" />
-                    <input type="time" placeholder="Start Time" />
-                    <input type="time" placeholder="End Time" />
-                    <input type="text" placeholder="Room" />
+                    <input
+                      type="text"
+                      placeholder="Day"
+                      value={assignmentForm.scheduleDay}
+                      onChange={(e) =>
+                        setAssignmentForm((prev) => ({
+                          ...prev,
+                          scheduleDay: e.target.value,
+                        }))
+                      }
+                    />
+                    <input
+                      type="time"
+                      placeholder="Start Time"
+                      value={assignmentForm.startTime}
+                      onChange={(e) =>
+                        setAssignmentForm((prev) => ({
+                          ...prev,
+                          startTime: e.target.value,
+                        }))
+                      }
+                    />
+                    <input
+                      type="time"
+                      placeholder="End Time"
+                      value={assignmentForm.endTime}
+                      onChange={(e) =>
+                        setAssignmentForm((prev) => ({
+                          ...prev,
+                          endTime: e.target.value,
+                        }))
+                      }
+                    />
+                    <input
+                      type="text"
+                      placeholder="Room"
+                      value={assignmentForm.room}
+                      onChange={(e) =>
+                        setAssignmentForm((prev) => ({
+                          ...prev,
+                          room: e.target.value,
+                        }))
+                      }
+                    />
                   </div>
                 </div>
               </form>
             </div>
             <div className="review-modal-footer">
               <button
+                type="button"
                 className="action-btn cancel"
-                onClick={() => {
-                  setShowAssignmentModal(false);
-                  setEditingAssignment(null);
-                }}
+                onClick={closeAssignmentModal}
               >
                 Cancel
               </button>
               <button
+                type="submit"
+                form="assignment-config-form"
                 className="action-btn approve"
-                onClick={() => addToast("Assignment saved", "success")}
               >
-                Save
+                {editingAssignment ? "Save Changes" : "Save Assignment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAssignmentDeleteModal && (
+        <div
+          className="review-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="assignment-delete-title"
+        >
+          <div className="review-modal confirmation-modal assignment-delete-modal">
+            <div className="review-modal-header">
+              <h2 id="assignment-delete-title">Delete Assignments</h2>
+              <button
+                type="button"
+                className="review-modal-close"
+                onClick={closeAssignmentDeleteModal}
+              >
+                x
+              </button>
+            </div>
+            <div className="review-modal-body">
+              <div className="assignment-delete-summary">
+                <strong>
+                  {pendingAssignmentDeleteTargets.length} assignment
+                  {pendingAssignmentDeleteTargets.length === 1 ? "" : "s"} ready
+                  for deletion
+                </strong>
+                <p>Remove the selected class assignments from this list.</p>
+              </div>
+
+              <div className="assignment-delete-list">
+                {pendingAssignmentDeleteTargets.map((assignment) => (
+                  <div key={assignment.id} className="assignment-delete-item">
+                    <strong>
+                      {assignment.subjectCode} - {assignment.subjectName}
+                    </strong>
+                    <span>
+                      {assignment.sectionCode} | {assignment.semester} |{" "}
+                      {assignment.instructorName}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="review-modal-footer">
+              <button
+                type="button"
+                className="action-btn cancel"
+                onClick={closeAssignmentDeleteModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="action-btn delete"
+                onClick={handleConfirmAssignmentDelete}
+              >
+                <FaTrash /> Delete Selected
               </button>
             </div>
           </div>

@@ -7,7 +7,9 @@ import {
   getStudentsForBranch,
   normalizeBranchName,
   readStoredStudents,
+  updateStudentRequirementReviewStatus,
   writeStoredStudents,
+  type AdminAttachment,
 } from "../../services/adminStorage";
 import "../../styles/admin/admin-students.css";
 
@@ -54,6 +56,16 @@ interface ApiStudent {
   document_submitted_date?: string | null;
 }
 
+interface StudentRequirementNotification {
+  student: Student;
+  pendingReviewCount: number;
+  submittedCount: number;
+  pendingRequirementCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  submittedAttachments: AdminAttachment[];
+}
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
@@ -87,6 +99,27 @@ const mapUiStatusToApiStatus = (status: Student["status"]): string => {
   if (status === "Archived") return "Inactive";
   return status;
 };
+
+const getAttachmentReviewRank = (reviewStatus?: AdminAttachment["reviewStatus"]) => {
+  if (reviewStatus === "Pending") return 0;
+  if (reviewStatus === "Rejected") return 1;
+  return 2;
+};
+
+const hasViewableAttachmentUrl = (attachment: Pick<AdminAttachment, "url">) =>
+  !!attachment.url && attachment.url !== "#";
+
+const hasSubmittedAttachmentNamed = (
+  attachments: Pick<AdminAttachment, "name">[] | undefined,
+  attachmentName: string,
+) =>
+  Boolean(
+    attachments?.some(
+      (attachment) =>
+        attachment.name.trim().toLowerCase() ===
+        attachmentName.trim().toLowerCase(),
+    ),
+  );
 
 const mapApiStudentToStudent = (apiStudent: ApiStudent): Student => {
   const fullName = (
@@ -157,6 +190,7 @@ export default function AdminStudents({
   const [programSpecialization, setProgramSpecialization] = useState("");
   const [sortField, setSortField] = useState<"id">("id");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
 
   // Form state for add/edit
   const [formData, setFormData] = useState<Student>({
@@ -686,6 +720,12 @@ export default function AdminStudents({
     setViewingStudent(null);
   };
 
+  const getStudentStatusClassName = (status: Student["status"]) => {
+    if (status === "Complete") return "students-status-complete";
+    if (status === "Archived") return "students-status-archived";
+    return "students-status-incomplete";
+  };
+
   const viewingStudentRequirements = viewingStudent
     ? getStudentRequirementSnapshot({
         branch: viewingStudent.branch || currentBranch,
@@ -693,12 +733,183 @@ export default function AdminStudents({
         trackingNumber: viewingStudent.trackingNumber,
       })
     : null;
+  const viewingStudentCredentialStatus = viewingStudentRequirements
+    ? viewingStudentRequirements.summary.rejected > 0
+      ? {
+          label: "Needs Reupload",
+          className: "students-credential-status-alert",
+        }
+      : viewingStudentRequirements.summary.pending === 0
+        ? {
+            label: "Completed",
+            className: "students-credential-status-complete",
+          }
+        : viewingStudentRequirements.summary.submitted === 0
+          ? {
+              label: "Pending",
+              className: "students-credential-status-pending",
+            }
+          : {
+              label: "Partially Submitted",
+              className: "students-credential-status-partial",
+            }
+    : {
+        label: "No linked admission record",
+        className: "students-credential-status-empty",
+      };
+  const viewingStudentProgram = viewingStudent?.program || "";
+  const isViewingCollegeStudent = viewingStudentProgram === "College";
+  const viewingStudentApplicantRecord =
+    viewingStudentRequirements?.applicantRecord ?? null;
+  const viewingStudentHonorLabel =
+    !viewingStudentRequirements
+      ? "No linked admission record"
+      : !isViewingCollegeStudent
+        ? "Not applicable"
+        : viewingStudentApplicantRecord?.honorLabel || "No Honor";
+  const viewingStudentHonorCertificateStatus =
+    !viewingStudentRequirements
+      ? "No linked admission record"
+      : !isViewingCollegeStudent
+        ? "Not applicable"
+        : viewingStudentApplicantRecord?.honorLabel &&
+            viewingStudentApplicantRecord.honorLabel !== "No Honor"
+          ? hasSubmittedAttachmentNamed(
+              viewingStudentRequirements.submittedAttachments,
+              "Honor Certificate",
+            )
+            ? "Submitted"
+            : "Pending"
+          : "Not required";
+  const viewingStudentScholarshipStatus =
+    !viewingStudentRequirements
+      ? "No linked admission record"
+      : !isViewingCollegeStudent
+        ? "Not applicable"
+        : viewingStudentApplicantRecord?.appliedForScholarship
+          ? "Applied"
+          : "Not applied";
+  const viewingStudentScholarshipScore =
+    !viewingStudentRequirements
+      ? "No linked admission record"
+      : !isViewingCollegeStudent
+        ? "Not applicable"
+        : typeof viewingStudentApplicantRecord?.scholarshipExamScore === "number"
+          ? String(viewingStudentApplicantRecord.scholarshipExamScore)
+          : viewingStudentApplicantRecord?.appliedForScholarship
+            ? "Awaiting result"
+            : "Not applicable";
+
+  const requirementNotifications: StudentRequirementNotification[] = students
+    .filter((student) => student.status !== "Archived")
+    .map((student) => {
+      const requirementSnapshot = getStudentRequirementSnapshot({
+        branch: student.branch || currentBranch,
+        studentNumber: student.id,
+        trackingNumber: student.trackingNumber,
+      });
+
+      if (!requirementSnapshot) {
+        return null;
+      }
+
+      const pendingReviewCount = requirementSnapshot.submittedAttachments.filter(
+        (attachment) => attachment.reviewStatus === "Pending",
+      ).length;
+
+      if (pendingReviewCount === 0) {
+        return null;
+      }
+
+      return {
+        student,
+        pendingReviewCount,
+        submittedCount: requirementSnapshot.summary.submitted,
+        pendingRequirementCount: requirementSnapshot.summary.pending,
+        approvedCount: requirementSnapshot.summary.approved,
+        rejectedCount: requirementSnapshot.summary.rejected,
+        submittedAttachments: [...requirementSnapshot.submittedAttachments].sort(
+          (left, right) =>
+            getAttachmentReviewRank(left.reviewStatus) -
+              getAttachmentReviewRank(right.reviewStatus) ||
+            left.name.localeCompare(right.name),
+        ),
+      };
+    })
+    .filter(
+      (
+        notification,
+      ): notification is StudentRequirementNotification => notification !== null,
+    )
+    .sort((left, right) => {
+      if (right.pendingReviewCount !== left.pendingReviewCount) {
+        return right.pendingReviewCount - left.pendingReviewCount;
+      }
+
+      return left.student.name.localeCompare(right.student.name);
+    });
+  const pendingNotificationCount = requirementNotifications.reduce(
+    (total, notification) => total + notification.pendingReviewCount,
+    0,
+  );
 
   const handleEditFromView = () => {
     if (!viewingStudent) return;
     const selectedStudent = viewingStudent;
     closeViewModal();
     openAddEditModal(selectedStudent);
+  };
+
+  const handleOpenNotifications = () => {
+    setIsNotificationModalOpen(true);
+  };
+
+  const handleCloseNotifications = () => {
+    setIsNotificationModalOpen(false);
+  };
+
+  const handleOpenStudentFromNotification = (student: Student) => {
+    handleCloseNotifications();
+    openViewModal(student);
+  };
+
+  const handleNotificationRequirementDecision = ({
+    student,
+    requirementName,
+    status,
+  }: {
+    student: Student;
+    requirementName: string;
+    status: NonNullable<AdminAttachment["reviewStatus"]>;
+  }) => {
+    const updatedRecord = updateStudentRequirementReviewStatus({
+      branch: student.branch || currentBranch,
+      trackingNumber: student.trackingNumber,
+      studentNumber: student.id,
+      requirementName,
+      status,
+    });
+
+    if (!updatedRecord) {
+      alert("Unable to update requirement review status.");
+      return;
+    }
+
+    setStudents((prev) => [...prev]);
+  };
+
+  const getNotificationReviewStatusLabel = (
+    reviewStatus?: AdminAttachment["reviewStatus"],
+  ) => {
+    if (reviewStatus === "Approved") {
+      return "Approved";
+    }
+
+    if (reviewStatus === "Rejected") {
+      return "Need Redo";
+    }
+
+    return "Pending Review";
   };
 
   const getShsTrackAndSpecialization = (student: Student) => {
@@ -797,10 +1008,14 @@ export default function AdminStudents({
             className="students-search-input"
           />
           <button
-            className="students-add-btn"
-            onClick={() => openAddEditModal()}
+            type="button"
+            className="students-notification-btn"
+            onClick={handleOpenNotifications}
           >
-            {isLoading ? "Loading..." : "+ Add New Student"}
+            <span>Requirement Notifications</span>
+            <span className="students-notification-badge">
+              {pendingNotificationCount}
+            </span>
           </button>
         </div>
 
@@ -914,21 +1129,23 @@ export default function AdminStudents({
                         {student.status}
                       </span>
                     </td>
-                    <td>
-                      <button
-                        className="students-action-btn students-view-btn"
-                        onClick={() => openViewModal(student)}
-                      >
-                        View Details
-                      </button>
-                      {student.status !== "Archived" ? (
+                    <td className="students-action-cell">
+                      <div className="students-action-group">
                         <button
-                          className="students-action-btn students-archive-btn"
-                          onClick={() => openArchiveConfirm(student.id)}
+                          className="students-action-btn students-view-btn"
+                          onClick={() => openViewModal(student)}
                         >
-                          Trash
+                          View Details
                         </button>
-                      ) : null}
+                        {student.status !== "Archived" ? (
+                          <button
+                            className="students-action-btn students-archive-btn"
+                            onClick={() => openArchiveConfirm(student.id)}
+                          >
+                            Trash
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -1266,169 +1483,214 @@ export default function AdminStudents({
 
         {/* View Details Modal */}
         {viewingStudent && (
-          <div className="students-modal-overlay">
-            <div className="students-modal students-view-modal">
-              <div className="students-modal-header">
-                <h2>Student Details</h2>
+          <div className="students-modal-overlay" onClick={closeViewModal}>
+            <div
+              className="students-modal students-view-modal students-profile-modal"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="students-modal-header students-profile-header">
+                <div>
+                  <h2>Student Details</h2>
+                  <p className="students-profile-subtitle students-profile-subtitle-hidden">
+                    {viewingStudent.name} • {viewingStudent.id}
+                  </p>
+                  <p className="students-profile-subtitle">
+                    {viewingStudent.name} - {viewingStudent.id}
+                  </p>
+                </div>
                 <button
-                  className="students-modal-close"
+                  className="students-modal-close students-modal-close-text"
                   onClick={closeViewModal}
+                  aria-label="Close student details"
                 >
                   ×
                 </button>
               </div>
 
-              <div className="students-modal-body">
-                <div className="students-detail-item">
-                  <span className="students-detail-label">Student ID:</span>
-                  <span className="students-detail-value">
-                    {viewingStudent.id}
-                  </span>
-                </div>
-                <div className="students-detail-item">
-                  <span className="students-detail-label">Full Name:</span>
-                  <span className="students-detail-value">
-                    {viewingStudent.name}
-                  </span>
-                </div>
-                <div className="students-detail-item">
-                  <span className="students-detail-label">Program:</span>
-                  <span className="students-detail-value">
-                    {viewingStudent.program}
-                  </span>
-                </div>
-                <div className="students-detail-item">
-                  <span className="students-detail-label">Year Level:</span>
-                  <span className="students-detail-value">
-                    {viewingStudent.yearLevel}
-                  </span>
-                </div>
-                <div className="students-detail-item">
-                  <span className="students-detail-label">
-                    Document Submitted:
-                  </span>
-                  <span className="students-detail-value">
-                    {viewingStudent.documentSubmitted || "Not submitted"}
-                  </span>
-                </div>
-                <div className="students-detail-item">
-                  <span className="students-detail-label">Contact Number:</span>
-                  <span className="students-detail-value">
-                    {viewingStudent.contact || "Not provided"}
-                  </span>
-                </div>
-                <div className="students-detail-item">
-                  <span className="students-detail-label">Email:</span>
-                  <span className="students-detail-value">
-                    {viewingStudent.email || "Not provided"}
-                  </span>
-                </div>
-                <div className="students-detail-item">
-                  <span className="students-detail-label">Address:</span>
-                  <span className="students-detail-value">
-                    {viewingStudent.address || "Not provided"}
-                  </span>
-                </div>
-                <div className="students-detail-item">
-                  <span className="students-detail-label">Status:</span>
-                  <span
-                    className={
-                      viewingStudent.status === "Complete"
-                        ? "students-status-complete"
-                        : viewingStudent.status === "Archived"
-                          ? "students-status-archived"
-                          : "students-status-incomplete"
-                    }
-                  >
-                    {viewingStudent.status}
-                  </span>
-                </div>
-
-                <div className="students-detail-item">
-                  <span className="students-detail-label">Requirements:</span>
-                  <span className="students-detail-value">
-                    {viewingStudentRequirements
-                      ? `${viewingStudentRequirements.summary.submitted}/${viewingStudentRequirements.summary.total} submitted`
-                      : "No linked admission record"}
-                  </span>
-                </div>
-
-                {viewingStudentRequirements && (
-                  <>
-                    <div className="students-detail-item">
-                      <span className="students-detail-label">
-                        Submitted Files:
-                      </span>
-                      <span className="students-detail-value">
-                        {viewingStudentRequirements.summary.submitted}
-                      </span>
+              <div className="students-modal-body students-profile-body">
+                <div className="students-profile-grid">
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Full Name</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.name}
                     </div>
-                    <div className="students-detail-item">
-                      <span className="students-detail-label">
-                        Pending Requirements:
-                      </span>
-                      <span className="students-detail-value">
-                        {viewingStudentRequirements.summary.pending}
-                      </span>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Student ID</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.id}
                     </div>
-
-                    <div className="students-detail-item">
-                      <span className="students-detail-label">
-                        Submitted List:
-                      </span>
-                      <span className="students-detail-value">
-                        {viewingStudentRequirements.submittedAttachments.length >
-                        0 ? (
-                          <div>
-                            {viewingStudentRequirements.submittedAttachments.map(
-                              (attachment) => (
-                                <div key={attachment.name}>
-                                  <strong>{attachment.name}</strong>{" "}
-                                  ({attachment.reviewStatus || "Pending"}){" "}
-                                  {attachment.url && attachment.url !== "#" ? (
-                                    <a
-                                      href={attachment.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                    >
-                                      View
-                                    </a>
-                                  ) : (
-                                    <span>Reference only</span>
-                                  )}
-                                </div>
-                              ),
-                            )}
-                          </div>
-                        ) : (
-                          "No submitted files"
-                        )}
-                      </span>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Status</label>
+                    <div
+                      className={`students-profile-value students-profile-value-highlight ${getStudentStatusClassName(viewingStudent.status)}`}
+                    >
+                      {viewingStudent.status}
                     </div>
-
-                    <div className="students-detail-item">
-                      <span className="students-detail-label">
-                        Pending List:
-                      </span>
-                      <span className="students-detail-value">
-                        {viewingStudentRequirements.pendingRequirements.length >
-                        0 ? (
-                          <div>
-                            {viewingStudentRequirements.pendingRequirements.map(
-                              (requirement) => (
-                                <div key={requirement.code}>
-                                  {requirement.name}
-                                </div>
-                              ),
-                            )}
-                          </div>
-                        ) : (
-                          "No pending requirements"
-                        )}
-                      </span>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Credential Status</label>
+                    <div
+                      className={`students-profile-value students-profile-value-highlight ${viewingStudentCredentialStatus.className}`}
+                    >
+                      {viewingStudentCredentialStatus.label}
                     </div>
-                  </>
-                )}
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Branch</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.branch || currentBranch}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Program</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.program}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>{viewingStudent.program === "SHS" ? "Strand" : "Course"}</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.strandOrCourse || "Not assigned"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Year Level</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.yearLevel}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Section</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.section || "N/A"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Submitted Date</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.documentSubmitted || "Not submitted"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Email Address</label>
+                    <div className="students-profile-value students-profile-email">
+                      {viewingStudent.email || "Not provided"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Contact Number</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.contact || "Not provided"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Home Address</label>
+                    <div className="students-profile-value students-profile-address">
+                      {viewingStudent.address || "No address provided"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Requirements</label>
+                    <div className="students-profile-value">
+                      {viewingStudentRequirements
+                        ? `${viewingStudentRequirements.summary.submitted}/${viewingStudentRequirements.summary.total} submitted`
+                        : "No linked admission record"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Pending Requirements</label>
+                    <div className="students-profile-value">
+                      {viewingStudentRequirements
+                        ? viewingStudentRequirements.summary.pending
+                        : "N/A"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Academic Honor</label>
+                    <div className="students-profile-value">
+                      {viewingStudentHonorLabel}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Honor Certificate</label>
+                    <div className="students-profile-value">
+                      {viewingStudentHonorCertificateStatus}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Scholarship Application</label>
+                    <div className="students-profile-value">
+                      {viewingStudentScholarshipStatus}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Scholarship Exam Score</label>
+                    <div className="students-profile-value">
+                      {viewingStudentScholarshipScore}
+                    </div>
+                  </div>
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Submitted Files</label>
+                    <div className="students-profile-value students-profile-list-box">
+                      {viewingStudentRequirements &&
+                      viewingStudentRequirements.submittedAttachments.length > 0 ? (
+                        <div className="students-profile-list">
+                          {viewingStudentRequirements.submittedAttachments.map(
+                            (attachment) => (
+                              <div
+                                key={attachment.name}
+                                className="students-profile-list-item"
+                              >
+                                <span>
+                                  <strong>{attachment.name}</strong>
+                                  {" "}
+                                  ({attachment.reviewStatus || "Pending"})
+                                </span>
+                                {attachment.url && attachment.url !== "#" ? (
+                                  <a
+                                    href={attachment.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    View
+                                  </a>
+                                ) : (
+                                  <span>Reference only</span>
+                                )}
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      ) : (
+                        "No submitted files"
+                      )}
+                    </div>
+                  </div>
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Pending List</label>
+                    <div className="students-profile-value students-profile-list-box">
+                      {viewingStudentRequirements &&
+                      viewingStudentRequirements.pendingRequirements.length > 0 ? (
+                        <div className="students-profile-list">
+                          {viewingStudentRequirements.pendingRequirements.map(
+                            (requirement) => (
+                              <div
+                                key={requirement.code}
+                                className="students-profile-list-item"
+                              >
+                                <span>{requirement.name}</span>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      ) : (
+                        "No pending requirements"
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="students-modal-actions">
@@ -1443,6 +1705,194 @@ export default function AdminStudents({
                   type="button"
                   className="students-cancel-btn"
                   onClick={closeViewModal}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isNotificationModalOpen && (
+          <div
+            className="students-modal-overlay"
+            onClick={handleCloseNotifications}
+          >
+            <div
+              className="students-modal students-notification-modal"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="students-modal-header">
+                <div className="students-notification-header-copy">
+                  <h2>Portal Requirement Notifications</h2>
+                  <p>
+                    Students with portal uploads waiting for admin or registrar
+                    review.
+                  </p>
+                </div>
+                <button
+                  className="students-modal-close"
+                  onClick={handleCloseNotifications}
+                >
+                  x
+                </button>
+              </div>
+
+              <div className="students-modal-body">
+                {requirementNotifications.length > 0 ? (
+                  <div className="students-notification-list">
+                    {requirementNotifications.map((notification) => (
+                      <div
+                        key={notification.student.id}
+                        className="students-notification-card"
+                      >
+                        <div className="students-notification-card-head">
+                          <div>
+                            <h3>{notification.student.name}</h3>
+                            <p>
+                              {notification.student.id} -{" "}
+                              {notification.student.program === "SHS"
+                                ? getShsTrackDisplay(notification.student)
+                                : notification.student.strandOrCourse ||
+                                  notification.student.program}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="students-notification-open-btn"
+                            onClick={() =>
+                              handleOpenStudentFromNotification(
+                                notification.student,
+                              )
+                            }
+                          >
+                            View Student
+                          </button>
+                        </div>
+
+                        <div className="students-notification-stats">
+                          <div className="students-notification-stat">
+                            <span className="students-notification-stat-label">
+                              Waiting review
+                            </span>
+                            <strong>{notification.pendingReviewCount}</strong>
+                          </div>
+                          <div className="students-notification-stat">
+                            <span className="students-notification-stat-label">
+                              Submitted
+                            </span>
+                            <strong>{notification.submittedCount}</strong>
+                          </div>
+                          <div className="students-notification-stat">
+                            <span className="students-notification-stat-label">
+                              Approved
+                            </span>
+                            <strong>{notification.approvedCount}</strong>
+                          </div>
+                          <div className="students-notification-stat">
+                            <span className="students-notification-stat-label">
+                              Need redo
+                            </span>
+                            <strong>{notification.rejectedCount}</strong>
+                          </div>
+                          <div className="students-notification-stat">
+                            <span className="students-notification-stat-label">
+                              Missing upload
+                            </span>
+                            <strong>
+                              {notification.pendingRequirementCount}
+                            </strong>
+                          </div>
+                        </div>
+
+                        <div className="students-notification-documents">
+                          {notification.submittedAttachments.map((attachment) => (
+                            <div
+                              key={`${notification.student.id}-${attachment.name}`}
+                              className="students-notification-document"
+                            >
+                              <div className="students-notification-document-top">
+                                <div className="students-notification-document-copy">
+                                  <h4>{attachment.name}</h4>
+                                  <p>
+                                    Status:{" "}
+                                    <span
+                                      className={`students-notification-status ${String(attachment.reviewStatus || "Pending").toLowerCase()}`}
+                                    >
+                                      {getNotificationReviewStatusLabel(
+                                        attachment.reviewStatus,
+                                      )}
+                                    </span>
+                                  </p>
+                                </div>
+                                {hasViewableAttachmentUrl(attachment) ? (
+                                  <a
+                                    className="students-notification-view-btn"
+                                    href={attachment.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    View Document
+                                  </a>
+                                ) : (
+                                  <span className="students-notification-reference">
+                                    Reference only
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="students-notification-actions">
+                                <button
+                                  type="button"
+                                  className="students-notification-review-btn approve"
+                                  onClick={() =>
+                                    handleNotificationRequirementDecision({
+                                      student: notification.student,
+                                      requirementName: attachment.name,
+                                      status: "Approved",
+                                    })
+                                  }
+                                  disabled={attachment.reviewStatus === "Approved"}
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  type="button"
+                                  className="students-notification-review-btn redo"
+                                  onClick={() =>
+                                    handleNotificationRequirementDecision({
+                                      student: notification.student,
+                                      requirementName: attachment.name,
+                                      status: "Rejected",
+                                    })
+                                  }
+                                  disabled={attachment.reviewStatus === "Rejected"}
+                                >
+                                  Need Redo
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="students-notification-empty">
+                    <h3>No requirement notifications yet</h3>
+                    <p>
+                      Once enrolled students upload pending portal
+                      requirements, they will appear here for review.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="students-modal-actions">
+                <button
+                  type="button"
+                  className="students-cancel-btn"
+                  onClick={handleCloseNotifications}
                 >
                   Close
                 </button>

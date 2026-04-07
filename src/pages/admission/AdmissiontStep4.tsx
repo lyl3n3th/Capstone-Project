@@ -14,6 +14,7 @@ import {
   normalizeBranchName,
   upsertSubmittedApplicant,
 } from "../../services/adminStorage";
+import { getStudentActivationStatus } from "../../services/auth";
 import type { AdmissionApplicationSummary } from "../../types/application";
 
 function getQueryParam(name: string): string | null {
@@ -43,6 +44,7 @@ function AdmissionStep4() {
   const [applyScholarship, setApplyScholarship] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [pageError, setPageError] = useState("");
+  const [activatedStudentNumber, setActivatedStudentNumber] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = (message: string, type: Toast["type"]) => {
@@ -209,6 +211,30 @@ function AdmissionStep4() {
     });
   }, [applicationData]);
 
+  useEffect(() => {
+    const loadActivationStatus = async () => {
+      if (!applicationData || applicationData.applicationStatus !== "accepted") {
+        setActivatedStudentNumber("");
+        return;
+      }
+
+      try {
+        const activationStatus = await getStudentActivationStatus(
+          applicationData.trackingNumber,
+        );
+        setActivatedStudentNumber(activationStatus?.studentNumber || "");
+      } catch (error) {
+        console.warn("Unable to load activated student number", error);
+        setActivatedStudentNumber("");
+      }
+    };
+
+    void loadActivationStatus();
+  }, [applicationData]);
+
+  const resolvedStudentNumber =
+    activatedStudentNumber || linkedStudentRecord?.id || "";
+
   const statusCircleClass = useMemo(() => {
     switch (applicationData?.applicationStatus) {
       case "accepted":
@@ -229,12 +255,12 @@ function AdmissionStep4() {
       branch: normalizeBranchName(applicationData.branchName),
     });
 
-    if (linkedStudentRecord?.id) {
-      params.set("studentNumber", linkedStudentRecord.id);
+    if (resolvedStudentNumber) {
+      params.set("studentNumber", resolvedStudentNumber);
     }
 
     return `/student/login?${params.toString()}`;
-  }, [applicationData, linkedStudentRecord]);
+  }, [applicationData, resolvedStudentNumber]);
 
   const isCollege = applicationData?.programLevel === "college";
   const canEdit = applicationData?.applicationStatus === "draft";
@@ -332,11 +358,11 @@ function AdmissionStep4() {
             <div className="conf-notice conf-notice-success">
               <strong>Student Portal Ready:</strong> Your application has been
               accepted.
-              {linkedStudentRecord?.id ? (
+              {resolvedStudentNumber ? (
                 <>
                   {" "}
                   Your student number is{" "}
-                  <strong>{linkedStudentRecord.id}</strong>.
+                  <strong>{resolvedStudentNumber}</strong>.
                 </>
               ) : (
                 <> You may now proceed to the student portal.</>
@@ -416,11 +442,11 @@ function AdmissionStep4() {
                   {formatDate(applicationData.submittedAt)}
                 </span>
               </div>
-              {linkedStudentRecord?.id && (
+              {resolvedStudentNumber && (
                 <div className="conf-summary-item">
                   <span className="conf-summary-label">Student Number:</span>
                   <span className="conf-summary-value">
-                    {linkedStudentRecord.id}
+                    {resolvedStudentNumber}
                   </span>
                 </div>
               )}
@@ -445,8 +471,8 @@ function AdmissionStep4() {
               Keep your tracking number for status updates and recovery.
             </p>
             <p className="conf-notes-text">
-              Uploaded requirements and admission details are now stored in
-              Supabase under this tracking number.
+              Uploaded requirements and admission details are now submitted in
+              registrar's records.
             </p>
           </div>
 

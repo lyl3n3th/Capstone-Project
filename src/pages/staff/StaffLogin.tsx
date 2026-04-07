@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 import { useAuth } from "../../hooks/useAuth";
-import { authenticateStaff } from "../../services/mockStaffAuth";
+import { authenticateManager } from "../../services/mockStaffAuth";
+import {
+  authenticateStaffLogin,
+  type StaffBranch,
+} from "../../services/staffApi";
 import type { StaffRole } from "../../types/user";
 import "../../styles/staff/staff-login.css";
 
@@ -11,9 +15,7 @@ function StaffLogin() {
   const location = useLocation();
   const { loginStaff, getDefaultRouteForRole } = useAuth();
   const [selectedBranch, setSelectedBranch] = useState("");
-  const [isMenuOpenBranch, setIsMenuOpenBranch] = useState(false);
   const [isAreaManager, setIsAreaManager] = useState(false);
-  const wrapperRefBranch = useRef<HTMLDivElement>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -23,23 +25,8 @@ function StaffLogin() {
     role: "admin" as StaffRole,
   });
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        wrapperRefBranch.current &&
-        !wrapperRefBranch.current.contains(event.target as Node)
-      ) {
-        setIsMenuOpenBranch(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   const handleAreaManagerToggle = (checked: boolean) => {
     setIsAreaManager(checked);
-    setIsMenuOpenBranch(false);
     setLoginData((current) => ({
       ...current,
       branch: checked ? "" : current.branch,
@@ -63,6 +50,11 @@ function StaffLogin() {
       return;
     }
 
+    if (!isAreaManager && !["admin", "registrar"].includes(loginData.role)) {
+      alert("Please select a valid role.");
+      return;
+    }
+
     if (!loginData.password) {
       alert("Please enter your password!");
       return;
@@ -71,26 +63,44 @@ function StaffLogin() {
     const redirectPath = (
       location.state as { from?: { pathname?: string } } | null
     )?.from?.pathname;
-    const selectedRole = isAreaManager ? "manager" : loginData.role;
 
     try {
       setIsSubmitting(true);
 
-      const staffAccount = authenticateStaff(
-        loginData.branch,
-        loginData.password,
-        selectedRole,
-      );
+      if (isAreaManager) {
+        const managerAccount = authenticateManager(loginData.password);
 
-      if (!staffAccount) {
-        alert("Invalid login credentials. Please try again.");
+        if (!managerAccount) {
+          alert("Invalid login credentials. Please try again.");
+          return;
+        }
+
+        await loginStaff({
+          branch: managerAccount.branch,
+          fullName: managerAccount.fullName,
+          employeeId: "AICS-MANAGER-ACCESS",
+          role: managerAccount.role,
+        });
+
+        const nextPath =
+          redirectPath && redirectPath !== "/staff/login"
+            ? redirectPath
+            : getDefaultRouteForRole(managerAccount.role);
+
+        navigate(nextPath, { replace: true });
         return;
       }
+
+      const staffAccount = await authenticateStaffLogin(
+        loginData.branch as StaffBranch,
+        loginData.role as Extract<StaffRole, "admin" | "registrar">,
+        loginData.password,
+      );
 
       await loginStaff({
         branch: staffAccount.branch,
         fullName: staffAccount.fullName,
-        password: loginData.password,
+        employeeId: staffAccount.employeeId,
         role: staffAccount.role,
       });
 
@@ -102,7 +112,11 @@ function StaffLogin() {
       navigate(nextPath, { replace: true });
     } catch (error) {
       console.error("Staff login failed", error);
-      alert("Unable to sign in right now. Please try again.");
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to sign in right now. Please try again.";
+      alert(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -128,11 +142,6 @@ function StaffLogin() {
                     ? "Area Manager"
                     : selectedBranch || "Not selected"}
                 </strong>
-                {isAreaManager && (
-                  <span className="manager-badge">
-                    Branches (bacoor, gma, taytay)
-                  </span>
-                )}
               </p>
             </div>
 
@@ -155,73 +164,53 @@ function StaffLogin() {
                   <span className="manager-mode-label">Access Mode</span>
                   <strong>Area Manager</strong>
                   <p className="manager-mode-copy">
-                    Branch selection is skipped in this mode. Continue directly
-                    with your password to sign in across all branches.
+                    Branch and staff role selection are skipped in this mode.
+                    Continue directly with your manager password.
                   </p>
                 </div>
               ) : (
-                <div className="dropdownlog" ref={wrapperRefBranch}>
-                  <div className="branch-label-row">
-                    <label className="lbel">Select Branch</label>
+                <>
+                  <div className="form-groups">
+                    <label htmlFor="branch">Select Branch</label>
+                    <select
+                      id="branch"
+                      name="branch"
+                      value={loginData.branch}
+                      onChange={(e) => {
+                        const branch = e.target.value;
+                        setSelectedBranch(branch);
+                        setLoginData((current) => ({ ...current, branch }));
+                      }}
+                      required
+                    >
+                      <option value="">Select Branch</option>
+                      <option value="Bacoor">Bacoor</option>
+                      <option value="GMA">GMA</option>
+                      <option value="Taytay">Taytay</option>
+                    </select>
                   </div>
-                  <button
-                    type="button"
-                    className={`selectlog ${isMenuOpenBranch ? "select-clicked" : ""}`}
-                    onClick={() => setIsMenuOpenBranch((previous) => !previous)}
-                    aria-expanded={isMenuOpenBranch}
-                    aria-haspopup="listbox"
-                  >
-                    <span className="selectedlog">
-                      {selectedBranch || "Select Branch"}
-                    </span>
-                    <div
-                      className={`cart ${isMenuOpenBranch ? "cart-rotate" : ""}`}
-                    ></div>
-                  </button>
-                  <ul
-                    className={`menulog ${isMenuOpenBranch ? "show" : ""}`}
-                    role="listbox"
-                  >
-                    {["Taytay", "Bacoor", "GMA"].map((branch) => (
-                      <li
-                        key={branch}
-                        role="option"
-                        onClick={() => {
-                          setSelectedBranch(branch);
-                          setLoginData((current) => ({ ...current, branch }));
-                          setIsMenuOpenBranch(false);
-                        }}
-                      >
-                        {branch}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+
+                  <div className="form-groups">
+                    <label htmlFor="role">Access Role</label>
+                    <select
+                      id="role"
+                      name="role"
+                      value={loginData.role}
+                      onChange={(e) =>
+                        setLoginData((current) => ({
+                          ...current,
+                          role: e.target.value as StaffRole,
+                        }))
+                      }
+                    >
+                      <option value="admin">Administrator</option>
+                      <option value="registrar">Registrar</option>
+                    </select>
+                  </div>
+                </>
               )}
 
               <div className="divider"></div>
-
-              {!isAreaManager && (
-                <div className="form-groups">
-                  <label htmlFor="role">Access Role</label>
-                  <select
-                    id="role"
-                    name="role"
-                    value={loginData.role}
-                    onChange={(e) =>
-                      setLoginData((current) => ({
-                        ...current,
-                        role: e.target.value as StaffRole,
-                      }))
-                    }
-                  >
-                    <option value="admin">Administrator</option>
-                    <option value="registrar">Registrar</option>
-                  </select>
-                </div>
-              )}
-
-              <p className="login-mode-hint"></p>
 
               <div className="form-groups">
                 <div className="password-wrapper">
@@ -237,6 +226,7 @@ function StaffLogin() {
                         password: e.target.value,
                       }))
                     }
+                    autoComplete="current-password"
                     required
                   />
                   <button

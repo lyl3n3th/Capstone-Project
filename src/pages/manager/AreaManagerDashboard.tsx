@@ -323,7 +323,10 @@ const AreaManagerDashboard = ({
       <div className="dashboard-inner-flat">
         <div className="welcome-header">
           <h1>Dashboard</h1>
-          <p>Asian Institute of Computer Studies (Bacoor, Taytay, GMA)</p>
+          <p>
+            Asian Institute of Computer Studies (Bacoor, Taytay, GMA) | Signed
+            in as {loggedInUsername}
+          </p>
         </div>
 
         <div className="kpi-row-flat">

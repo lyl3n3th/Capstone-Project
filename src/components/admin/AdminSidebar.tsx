@@ -34,6 +34,7 @@ export default function AdminSidebar({
   canAccessBackup = true,
 }: AdminSidebarProps) {
   const { currentUser } = useAuth();
+  const isRegistrarView = loggedInRole === "Registrar";
   const displayName = loggedInUsername.trim() || "Administrator";
   const branchName = currentUser?.branch?.trim() || "Bacoor";
   const userInitials = displayName
@@ -47,7 +48,7 @@ export default function AdminSidebar({
     {
       icon: <MdDashboard />,
       label: "Dashboard",
-      path: "/admin/dashboard",
+      path: isRegistrarView ? "/registrar/dashboard" : "/admin/dashboard",
     },
     {
       icon: <IoPeopleSharp />,
@@ -74,6 +75,7 @@ export default function AdminSidebar({
       icon: <MdOutlineAssessment />,
       label: "Report",
       path: "/admin/reports",
+      show: !isRegistrarView,
     },
     {
       icon: <FaDatabase />,

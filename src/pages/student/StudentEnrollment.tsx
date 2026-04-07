@@ -1,27 +1,428 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FaCheckCircle, FaSpinner } from "react-icons/fa";
-import { MdDownload, MdFileUpload } from "react-icons/md";
 import { IoDocumentText } from "react-icons/io5";
+import { MdDownload, MdFileUpload } from "react-icons/md";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
-import { useStudent } from "../../hooks/useStudent";
 import { ToastContainer } from "../../components/common/Toast";
+import { useStudent } from "../../hooks/useStudent";
+import {
+  getStudentCredentialOverview,
+  getStudentPortalSubjectsForTerm,
+  type StudentPortalSubject,
+} from "../../services/adminStorage";
+import type { Student } from "../../types/student";
 import "../../styles/main.css";
+
+type Toast = {
+  id: string;
+  message: string;
+  type: "success" | "error" | "info" | "warning";
+};
+
+type UploadedEnrollmentFile = {
+  name: string;
+  url?: string;
+};
+
+type EnrollmentRequirementItem = {
+  key: string;
+  label: string;
+  allowsDownload?: boolean;
+};
+
+type NextAcademicPlacement = {
+  yearLevel: string;
+  semester: string;
+  academicYear: string;
+  hasNextTerm: boolean;
+};
+
+type EnrollmentFallbackSubject = {
+  id: string;
+  code: string;
+  title: string;
+  units?: number;
+  program: "SHS" | "College";
+  yearLevel: string;
+  semester: string;
+  strand?: string;
+};
+
+const FALLBACK_ENROLLMENT_SUBJECTS: EnrollmentFallbackSubject[] = [
+  {
+    id: "shs-g11-s2-1",
+    code: "MIN106",
+    title: "21st Century Literature from the Philippines and the World",
+    program: "SHS",
+    yearLevel: "Grade 11",
+    semester: "2nd Semester",
+  },
+  {
+    id: "shs-g11-s2-2",
+    code: "MIN107",
+    title: "Statistics and Probability",
+    program: "SHS",
+    yearLevel: "Grade 11",
+    semester: "2nd Semester",
+  },
+  {
+    id: "shs-g11-s2-3",
+    code: "MIN108",
+    title: "Physical Science",
+    program: "SHS",
+    yearLevel: "Grade 11",
+    semester: "2nd Semester",
+  },
+  {
+    id: "shs-g11-s2-4",
+    code: "MIN109",
+    title: "Empowerment Technologies",
+    program: "SHS",
+    yearLevel: "Grade 11",
+    semester: "2nd Semester",
+  },
+  {
+    id: "shs-g11-s2-ict-1",
+    code: "MAJ106",
+    title: "Programming Fundamentals",
+    program: "SHS",
+    yearLevel: "Grade 11",
+    semester: "2nd Semester",
+    strand: "ICT",
+  },
+  {
+    id: "shs-g11-s2-ict-2",
+    code: "MAJ107",
+    title: "Web Development Basics",
+    program: "SHS",
+    yearLevel: "Grade 11",
+    semester: "2nd Semester",
+    strand: "ICT",
+  },
+  {
+    id: "shs-g12-s1-1",
+    code: "MIN201",
+    title: "English for Academic and Professional Purposes",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "1st Semester",
+  },
+  {
+    id: "shs-g12-s1-2",
+    code: "MIN202",
+    title: "Media and Information Literacy",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "1st Semester",
+  },
+  {
+    id: "shs-g12-s1-3",
+    code: "MIN203",
+    title: "Contemporary Philippine Arts from the Regions",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "1st Semester",
+  },
+  {
+    id: "shs-g12-s1-4",
+    code: "MIN204",
+    title: "Research in Daily Life 1",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "1st Semester",
+  },
+  {
+    id: "shs-g12-s1-ict-1",
+    code: "MAJ201",
+    title: "Animation and Multimedia",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "1st Semester",
+    strand: "ICT",
+  },
+  {
+    id: "shs-g12-s1-ict-2",
+    code: "MAJ202",
+    title: "Mobile Application Fundamentals",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "1st Semester",
+    strand: "ICT",
+  },
+  {
+    id: "shs-g12-s2-1",
+    code: "MIN205",
+    title: "Inquiries, Investigations and Immersion",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "2nd Semester",
+  },
+  {
+    id: "shs-g12-s2-2",
+    code: "MIN206",
+    title: "Understanding Culture, Society and Politics",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "2nd Semester",
+  },
+  {
+    id: "shs-g12-s2-3",
+    code: "MIN207",
+    title: "Introduction to the Philosophy of the Human Person",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "2nd Semester",
+  },
+  {
+    id: "shs-g12-s2-4",
+    code: "MIN208",
+    title: "Research in Daily Life 2",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "2nd Semester",
+  },
+  {
+    id: "shs-g12-s2-ict-1",
+    code: "MAJ203",
+    title: "Systems Integration and Architecture",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "2nd Semester",
+    strand: "ICT",
+  },
+  {
+    id: "shs-g12-s2-ict-2",
+    code: "MAJ204",
+    title: "Work Immersion",
+    program: "SHS",
+    yearLevel: "Grade 12",
+    semester: "2nd Semester",
+    strand: "ICT",
+  },
+  {
+    id: "col-1y-2s-1",
+    code: "GE102",
+    title: "Purposive Communication",
+    units: 3,
+    program: "College",
+    yearLevel: "1st Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-1y-2s-2",
+    code: "MATH102",
+    title: "Mathematics in the Modern World",
+    units: 3,
+    program: "College",
+    yearLevel: "1st Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-1y-2s-3",
+    code: "CC102",
+    title: "Computer Programming 1",
+    units: 3,
+    program: "College",
+    yearLevel: "1st Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-1y-2s-4",
+    code: "NSTP102",
+    title: "NSTP 2",
+    units: 3,
+    program: "College",
+    yearLevel: "1st Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-2y-1s-1",
+    code: "GE201",
+    title: "Readings in Philippine History",
+    units: 3,
+    program: "College",
+    yearLevel: "2nd Year",
+    semester: "1st Semester",
+  },
+  {
+    id: "col-2y-1s-2",
+    code: "IT201",
+    title: "Data Structures and Algorithms",
+    units: 3,
+    program: "College",
+    yearLevel: "2nd Year",
+    semester: "1st Semester",
+  },
+  {
+    id: "col-2y-1s-3",
+    code: "IT202",
+    title: "Object-Oriented Programming",
+    units: 3,
+    program: "College",
+    yearLevel: "2nd Year",
+    semester: "1st Semester",
+  },
+  {
+    id: "col-2y-1s-4",
+    code: "IT203",
+    title: "Discrete Mathematics",
+    units: 3,
+    program: "College",
+    yearLevel: "2nd Year",
+    semester: "1st Semester",
+  },
+  {
+    id: "col-2y-2s-1",
+    code: "GE202",
+    title: "Ethics",
+    units: 3,
+    program: "College",
+    yearLevel: "2nd Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-2y-2s-2",
+    code: "IT204",
+    title: "Database Management Systems",
+    units: 3,
+    program: "College",
+    yearLevel: "2nd Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-2y-2s-3",
+    code: "IT205",
+    title: "Networking 1",
+    units: 3,
+    program: "College",
+    yearLevel: "2nd Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-2y-2s-4",
+    code: "IT206",
+    title: "Human-Computer Interaction",
+    units: 3,
+    program: "College",
+    yearLevel: "2nd Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-3y-1s-1",
+    code: "IT301",
+    title: "Web Development",
+    units: 3,
+    program: "College",
+    yearLevel: "3rd Year",
+    semester: "1st Semester",
+  },
+  {
+    id: "col-3y-1s-2",
+    code: "IT302",
+    title: "Systems Analysis and Design",
+    units: 3,
+    program: "College",
+    yearLevel: "3rd Year",
+    semester: "1st Semester",
+  },
+  {
+    id: "col-3y-1s-3",
+    code: "IT303",
+    title: "Integrative Programming",
+    units: 3,
+    program: "College",
+    yearLevel: "3rd Year",
+    semester: "1st Semester",
+  },
+  {
+    id: "col-3y-2s-1",
+    code: "IT304",
+    title: "Mobile Application Development",
+    units: 3,
+    program: "College",
+    yearLevel: "3rd Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-3y-2s-2",
+    code: "IT305",
+    title: "Information Assurance",
+    units: 3,
+    program: "College",
+    yearLevel: "3rd Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-3y-2s-3",
+    code: "IT306",
+    title: "Cloud Computing",
+    units: 3,
+    program: "College",
+    yearLevel: "3rd Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-4y-1s-1",
+    code: "IT401",
+    title: "Capstone Project 1",
+    units: 3,
+    program: "College",
+    yearLevel: "4th Year",
+    semester: "1st Semester",
+  },
+  {
+    id: "col-4y-1s-2",
+    code: "IT402",
+    title: "Data Analytics",
+    units: 3,
+    program: "College",
+    yearLevel: "4th Year",
+    semester: "1st Semester",
+  },
+  {
+    id: "col-4y-1s-3",
+    code: "IT403",
+    title: "IT Project Management",
+    units: 3,
+    program: "College",
+    yearLevel: "4th Year",
+    semester: "1st Semester",
+  },
+  {
+    id: "col-4y-2s-1",
+    code: "IT405",
+    title: "Capstone Project 2",
+    units: 3,
+    program: "College",
+    yearLevel: "4th Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-4y-2s-2",
+    code: "IT406",
+    title: "Internship / Practicum",
+    units: 6,
+    program: "College",
+    yearLevel: "4th Year",
+    semester: "2nd Semester",
+  },
+  {
+    id: "col-4y-2s-3",
+    code: "IT407",
+    title: "Professional Ethics",
+    units: 3,
+    program: "College",
+    yearLevel: "4th Year",
+    semester: "2nd Semester",
+  },
+];
 
 const useToast = () => {
   const toastCounterRef = useRef(0);
-  const [toasts, setToasts] = useState<
-    Array<{
-      id: string;
-      message: string;
-      type: "success" | "error" | "info" | "warning";
-    }>
-  >([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const addToast = (
-    message: string,
-    type: "success" | "error" | "info" | "warning",
-  ) => {
+  const addToast = (message: string, type: Toast["type"]) => {
     toastCounterRef.current += 1;
     const id = `student-enrollment-toast-${toastCounterRef.current}`;
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -38,20 +439,196 @@ const useToast = () => {
   return { toasts, addToast, removeToast };
 };
 
+const normalizeAcademicToken = (value?: string) =>
+  (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+const getNormalizedSemester = (semester?: string) =>
+  normalizeAcademicToken(semester).includes("2nd")
+    ? "2nd Semester"
+    : "1st Semester";
+
+const incrementAcademicYear = (academicYear: string) => {
+  const match = academicYear.match(/^(\d{4})-(\d{4})$/);
+
+  if (!match) {
+    return academicYear;
+  }
+
+  return `${Number(match[1]) + 1}-${Number(match[2]) + 1}`;
+};
+
+const getNextAcademicPlacement = (
+  student: Student | null,
+  currentSemester: string,
+  currentAcademicYear: string,
+): NextAcademicPlacement => {
+  if (!student) {
+    return {
+      yearLevel: "",
+      semester: "1st Semester",
+      academicYear: currentAcademicYear,
+      hasNextTerm: false,
+    };
+  }
+
+  const progression =
+    student.programType === "SHS"
+      ? ["Grade 11", "Grade 12"]
+      : ["1st Year", "2nd Year", "3rd Year", "4th Year"];
+  const normalizedSemester = getNormalizedSemester(currentSemester);
+
+  if (normalizedSemester === "1st Semester") {
+    return {
+      yearLevel: student.yearLevel,
+      semester: "2nd Semester",
+      academicYear: currentAcademicYear,
+      hasNextTerm: true,
+    };
+  }
+
+  const currentIndex = progression.indexOf(student.yearLevel);
+
+  if (currentIndex >= 0 && currentIndex < progression.length - 1) {
+    return {
+      yearLevel: progression[currentIndex + 1],
+      semester: "1st Semester",
+      academicYear: incrementAcademicYear(currentAcademicYear),
+      hasNextTerm: true,
+    };
+  }
+
+  return {
+    yearLevel: student.yearLevel,
+    semester: normalizedSemester,
+    academicYear: currentAcademicYear,
+    hasNextTerm: false,
+  };
+};
+
+const getEnrollmentRequirementItems = (
+  student: Student | null,
+): EnrollmentRequirementItem[] => {
+  if (!student) {
+    return [];
+  }
+
+  const levelCredentialLabel =
+    student.programType === "SHS" && student.yearLevel === "Grade 12"
+      ? "Grade 12 Certificate of Grades"
+      : `${student.yearLevel} Certificate of Grades`;
+
+  return [
+    {
+      key: "level_certificate",
+      label: levelCredentialLabel,
+    },
+    {
+      key: "clearance",
+      label: "Clearance",
+      allowsDownload: true,
+    },
+  ];
+};
+
+const getFallbackEnrollmentSubjects = ({
+  program,
+  yearLevel,
+  semester,
+  strandOrCourse,
+  academicYear,
+}: {
+  program: "SHS" | "College";
+  yearLevel: string;
+  semester: string;
+  strandOrCourse?: string;
+  academicYear: string;
+}): StudentPortalSubject[] => {
+  const normalizedTrack = normalizeAcademicToken(strandOrCourse);
+
+  return FALLBACK_ENROLLMENT_SUBJECTS.filter((subject) => {
+    if (
+      subject.program !== program ||
+      subject.yearLevel !== yearLevel ||
+      subject.semester !== semester
+    ) {
+      return false;
+    }
+
+    if (!subject.strand) {
+      return true;
+    }
+
+    return normalizedTrack.includes(normalizeAcademicToken(subject.strand));
+  })
+    .sort((left, right) => left.code.localeCompare(right.code))
+    .map((subject) => ({
+      id: subject.id,
+      code: subject.code,
+      title: subject.title,
+      units: subject.units,
+      schedule: "To be announced",
+      room: "TBA",
+      professor: "To be assigned",
+      days: "TBA",
+      time: "To be announced",
+      semester: subject.semester,
+      academicYear,
+    }));
+};
+
+const getHonorDiscount = (honor: string | null | undefined): number => {
+  if (!honor) return 0;
+  if (honor.includes("Highest Honor")) return 80;
+  if (honor.includes("High Honor")) return 60;
+  if (honor.includes("With Honor")) return 50;
+  return 0;
+};
+
+const formatCurrency = (amount: number) =>
+  new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 2,
+  }).format(amount);
+
+const getStatusToneClass = (label: string) => {
+  const normalized = normalizeAcademicToken(label);
+
+  if (
+    normalized.includes("approved") ||
+    normalized.includes("complete") ||
+    normalized.includes("ready")
+  ) {
+    return "s-status-completed";
+  }
+
+  if (
+    normalized.includes("reupload") ||
+    normalized.includes("rejected") ||
+    normalized.includes("redo")
+  ) {
+    return "s-status-warning";
+  }
+
+  return "s-status-pending";
+};
+
 function StudentEnrollment() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { student, subjects, credentialSummary, isLoading } = useStudent();
   const [uploadedFiles, setUploadedFiles] = useState<
-    Record<string, { name: string; url?: string }>
+    Record<string, UploadedEnrollmentFile>
   >({});
+  const uploadedFilesRef = useRef<Record<string, UploadedEnrollmentFile>>({});
   const [uploadingId, setUploadingId] = useState<string | null>(null);
-  const [eligibilityStatus] = useState({
-    grade11Completed: true,
-    academicYear: "2025-2026",
-    passed: true,
-    strand: "TVL - ICT",
-  });
-  const [enrollmentStatus] = useState({
+  const [enrollmentStatus, setEnrollmentStatus] = useState<{
+    status: "Pending" | "Approved" | "Rejected";
+    enrollmentDate: string;
+    semester: string;
+    gradeLevel: string;
+  }>({
     status: "Pending",
     enrollmentDate: "-",
     semester: "-",
@@ -59,6 +636,88 @@ function StudentEnrollment() {
   });
   const sidebarRef = useRef<HTMLDivElement>(null);
   const { toasts, addToast, removeToast } = useToast();
+  const { student, subjects, credentialSummary, isLoading } = useStudent();
+
+  const currentDate = new Date().toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "long",
+  });
+
+  const studentName = student
+    ? `${student.firstName} ${student.lastName}`.trim()
+    : "Loading...";
+  const currentAcademicYear = subjects[0]?.academicYear || "2026-2027";
+  const currentSemester = getNormalizedSemester(subjects[0]?.semester);
+  const nextPlacement = getNextAcademicPlacement(
+    student,
+    currentSemester,
+    currentAcademicYear,
+  );
+  const storageProgram: "SHS" | "College" =
+    student?.programType === "SHS" ? "SHS" : "College";
+  const programLabel =
+    student?.programType === "SHS" ? "Senior High School" : "College";
+  const credentialOverview = student
+    ? getStudentCredentialOverview({
+        branch: student.branch,
+        studentNumber: student.studentNumber,
+        trackingNumber: student.trackingNumber,
+      })
+    : null;
+  const storedAssignedSubjects =
+    student && nextPlacement.hasNextTerm
+      ? getStudentPortalSubjectsForTerm({
+          branch: student.branch,
+          program: storageProgram,
+          yearLevel: nextPlacement.yearLevel,
+          strandOrCourse: student.program,
+          semester: nextPlacement.semester,
+          academicYear: nextPlacement.academicYear,
+        })
+      : [];
+  const assignedSubjects =
+    storedAssignedSubjects.length > 0
+      ? storedAssignedSubjects
+      : nextPlacement.hasNextTerm
+        ? getFallbackEnrollmentSubjects({
+            program: storageProgram,
+            yearLevel: nextPlacement.yearLevel,
+            semester: nextPlacement.semester,
+            strandOrCourse: student?.program,
+            academicYear: nextPlacement.academicYear,
+          })
+        : [];
+  const enrollmentRequirements = getEnrollmentRequirementItems(student);
+  const isCollegeStudent = Boolean(student && student.programType !== "SHS");
+  const totalUnits = assignedSubjects.reduce(
+    (sum, subject) => sum + (subject.units ?? 0),
+    0,
+  );
+  const tuitionPerUnit = 600;
+  const estimatedTuition = totalUnits * tuitionPerUnit;
+  const honorLabel = credentialOverview?.applicantRecord.honorLabel || "No Honor";
+  const honorDiscount = getHonorDiscount(honorLabel);
+  const discountedTuition =
+    honorDiscount > 0
+      ? estimatedTuition * (1 - honorDiscount / 100)
+      : estimatedTuition;
+  const scholarshipApplied = Boolean(
+    credentialOverview?.applicantRecord.appliedForScholarship,
+  );
+  const scholarshipExamScore =
+    credentialOverview?.applicantRecord.scholarshipExamScore;
+  const portalRequirementStatus =
+    credentialSummary?.overallStatus || "Pending Documents";
+
+  const studentData = {
+    name: studentName,
+    id: student?.studentNumber || "",
+    progrm: student?.programType || "",
+    strand: student?.program || "Program TBA",
+    section: student?.section || "TBA",
+  };
 
   const handleMenuClick = () => {
     setSidebarOpen(!sidebarOpen);
@@ -73,24 +732,37 @@ function StudentEnrollment() {
     addToast("Logging out...", "info");
   };
 
-  const handleFileUpload = async (docType: string) => {
+  const handleFileUpload = async (requirement: EnrollmentRequirementItem) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
 
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
+    input.onchange = async (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
 
-      setUploadingId(docType);
+      if (!file) {
+        return;
+      }
+
+      setUploadingId(requirement.key);
 
       try {
         await new Promise((resolve) => setTimeout(resolve, 1500));
-        setUploadedFiles((prev) => ({
-          ...prev,
-          [docType]: { name: file.name, url: URL.createObjectURL(file) },
-        }));
-        addToast(`${docType} uploaded successfully!`, "success");
+        const previewUrl = URL.createObjectURL(file);
+
+        setUploadedFiles((prev) => {
+          const previousUrl = prev[requirement.key]?.url;
+
+          if (previousUrl) {
+            URL.revokeObjectURL(previousUrl);
+          }
+
+          return {
+            ...prev,
+            [requirement.key]: { name: file.name, url: previewUrl },
+          };
+        });
+        addToast(`${requirement.label} uploaded successfully.`, "success");
       } catch (error) {
         console.error("Upload failed:", error);
         addToast("Upload failed. Please try again.", "error");
@@ -104,67 +776,80 @@ function StudentEnrollment() {
 
   const handleDownloadClearance = () => {
     const clearanceText = `STUDENT CLEARANCE FORM
-    ${"=".repeat(50)}
-    
-    Student Name: ${student?.firstName} ${student?.lastName}
-    Student Number: ${student?.studentNumber}
-    Strand: ${eligibilityStatus.strand}
-    Academic Year: ${eligibilityStatus.academicYear}
-    
-    ${"=".repeat(50)}
-    
-    CLEARANCE STATUS:
-    
-    ☐ Instructor Clearance
-    ☐ Faculty Clearance  
-    ☐ Registrar Clearance
-    ☐ Department Clearance
-    
-    ${"=".repeat(50)}
-    
-    Note: This clearance requires physical signatures from authorized personnel.
-    Downloaded clearance is not valid without complete signatures.
-    
-    Generated on: ${new Date().toLocaleDateString()}
-    `;
+${"=".repeat(50)}
+
+Student Name: ${studentName}
+Student Number: ${student?.studentNumber || "-"}
+Program: ${programLabel}
+Strand/Course: ${student?.program || "-"}
+Current Level: ${student?.yearLevel || "-"}
+Academic Year: ${currentAcademicYear}
+
+${"=".repeat(50)}
+
+CLEARANCE STATUS:
+
+[ ] Instructor Clearance
+[ ] Faculty Clearance
+[ ] Registrar Clearance
+[ ] Department Clearance
+
+${"=".repeat(50)}
+
+Note: This clearance requires physical signatures from authorized personnel.
+Downloaded clearance is not valid without complete signatures.
+
+Generated on: ${new Date().toLocaleDateString()}
+`;
 
     const blob = new Blob([clearanceText], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `clearance_${student?.studentNumber}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `clearance_${student?.studentNumber || "student"}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    addToast("Clearance downloaded successfully!", "success");
+    addToast("Clearance downloaded successfully.", "success");
   };
 
   const handleEnroll = () => {
-    if (!eligibilityStatus.grade11Completed) {
+    if (!nextPlacement.hasNextTerm) {
       addToast(
-        "You are not eligible to enroll. Please complete Grade 11 first.",
+        "A next enrollment term is not available yet for this student record.",
         "warning",
       );
       return;
     }
 
-    if (!uploadedFiles["grade11_certificate"]) {
+    if (assignedSubjects.length === 0) {
       addToast(
-        "Please upload your Grade 11 Certificate of Grades before enrolling.",
+        "No subject set is available yet for the next enrollment term.",
         "warning",
       );
       return;
     }
 
-    if (!uploadedFiles["clearance"]) {
-      addToast("Please upload your clearance before enrolling.", "warning");
+    const missingRequirement = enrollmentRequirements.find(
+      (requirement) => !uploadedFiles[requirement.key],
+    );
+
+    if (missingRequirement) {
+      addToast(`Please upload ${missingRequirement.label} before enrolling.`, "warning");
       return;
     }
+
+    setEnrollmentStatus({
+      status: "Pending",
+      enrollmentDate: new Date().toLocaleDateString(),
+      semester: nextPlacement.semester,
+      gradeLevel: nextPlacement.yearLevel,
+    });
 
     addToast(
-      "Enrollment submitted successfully! Waiting for registrar approval.",
+      `Enrollment submitted for ${nextPlacement.yearLevel} ${nextPlacement.semester}. Waiting for registrar approval.`,
       "success",
     );
   };
@@ -179,58 +864,72 @@ function StudentEnrollment() {
     }
 
     const confirmationText = `ENROLLMENT CONFIRMATION
-    ${"=".repeat(50)}
-    
-    Asian Institute of Computer Studies
-    Bacoor Branch
-    
-    ${"=".repeat(50)}
-    
-    Student Name: ${student?.firstName} ${student?.lastName}
-    Student Number: ${student?.studentNumber}
-    Strand: ${eligibilityStatus.strand}
-    Grade Level: Grade 12
-    Semester: 1st Semester
-    Academic Year: ${eligibilityStatus.academicYear}
-    
-    ${"=".repeat(50)}
-    
-    ASSIGNED SUBJECTS:
-    
-    ${assignedSubjects.length > 0
-      ? assignedSubjects
-          .map(
-            (subject, index) =>
-              `${index + 1}. ${subject.code} - ${subject.title}`,
-          )
-          .join("\n")
-      : "No subjects assigned yet."}
-    
-    ${"=".repeat(50)}
-    
-    Enrollment Status: ${enrollmentStatus.status}
-    Enrollment Date: ${new Date().toLocaleDateString()}
-    
-    This confirms that the student is officially enrolled for the upcoming semester.
-    
-    Registrar's Signature: ___________________
-    Date: ${new Date().toLocaleDateString()}
-    `;
+${"=".repeat(50)}
+
+Asian Institute of Computer Studies
+${student?.branch || "Bacoor"} Branch
+
+${"=".repeat(50)}
+
+Student Name: ${studentName}
+Student Number: ${student?.studentNumber || "-"}
+Program: ${programLabel}
+Strand/Course: ${student?.program || "-"}
+Grade Level: ${enrollmentStatus.gradeLevel}
+Semester: ${enrollmentStatus.semester}
+Academic Year: ${nextPlacement.academicYear}
+
+${"=".repeat(50)}
+
+ASSIGNED SUBJECTS:
+
+${assignedSubjects.length > 0
+  ? assignedSubjects
+      .map(
+        (subject, index) =>
+          `${index + 1}. ${subject.code} - ${subject.title}${subject.units ? ` (${subject.units} units)` : ""}`,
+      )
+      .join("\n")
+  : "No subjects assigned yet."}
+
+${"=".repeat(50)}
+
+Enrollment Status: ${enrollmentStatus.status}
+Enrollment Date: ${enrollmentStatus.enrollmentDate}
+
+This confirms that the student is officially enrolled for the upcoming term.
+
+Registrar's Signature: ___________________
+Date: ${new Date().toLocaleDateString()}
+`;
 
     const blob = new Blob([confirmationText], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `enrollment_confirmation_${student?.studentNumber}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `enrollment_confirmation_${student?.studentNumber || "student"}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    addToast("Enrollment confirmation downloaded!", "success");
+    addToast("Enrollment confirmation downloaded.", "success");
   };
 
-  // Close sidebar when clicking outside on mobile
+  useEffect(() => {
+    uploadedFilesRef.current = uploadedFiles;
+  }, [uploadedFiles]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(uploadedFilesRef.current).forEach((file) => {
+        if (file.url) {
+          URL.revokeObjectURL(file.url);
+        }
+      });
+    };
+  }, []);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -241,35 +940,21 @@ function StudentEnrollment() {
         setSidebarOpen(false);
       }
     };
+
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [sidebarOpen]);
 
-  // Check if mobile on resize
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth > 768 && sidebarOpen) {
         setSidebarOpen(false);
       }
     };
+
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, [sidebarOpen]);
-
-  const currentDate = new Date().toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    weekday: "long",
-  });
-
-  const studentData = {
-    name: student?.firstName + " " + student?.lastName || "Hener C. Verdida",
-    id: student?.studentNumber || "20221131",
-    progrm: student?.programType || "SHS",
-    strand: student?.program || "TVL - ICT",
-    section: student?.section || "TBA",
-  };
 
   if (isLoading && !student) {
     return (
@@ -279,18 +964,8 @@ function StudentEnrollment() {
     );
   }
 
-  const assignedSubjects =
-    subjects.length > 0
-      ? subjects.filter(
-          (subject) =>
-            subject.academicYear === subjects[0].academicYear &&
-            subject.semester === subjects[0].semester,
-        )
-      : [];
-
   return (
     <div className="s-portal">
-      {/* Toast Container */}
       <ToastContainer toasts={toasts} removeToast={removeToast} />
 
       <div ref={sidebarRef}>
@@ -315,160 +990,147 @@ function StudentEnrollment() {
         />
 
         <main className="s-content">
-          {/* Welcome Banner */}
           <div className="s-welcome-banner">
             <h1>Enrollment</h1>
           </div>
 
-          {/* Enrollment Eligibility & Student Information Row */}
           <div className="s-enrollment-row">
-            {/* Enrollment Eligibility Card */}
             <div className="s-enrollment-card s-eligibility-card">
               <h3>Enrollment Eligibility</h3>
               <div className="s-eligibility-item">
-                <span className="s-eligibility-label">
-                  Grade 11 Completion Status:
-                </span>
-                <span
-                  className={`s-eligibility-value ${eligibilityStatus.grade11Completed ? "s-status-completed" : "s-status-pending"}`}
-                >
-                  {eligibilityStatus.grade11Completed
-                    ? "Completed"
-                    : "Not Completed"}
-                </span>
-              </div>
-              <div className="s-eligibility-item">
-                <span className="s-eligibility-label">Academic Year:</span>
+                <span className="s-eligibility-label">Current Level:</span>
                 <span className="s-eligibility-value">
-                  {eligibilityStatus.academicYear}
+                  {student?.yearLevel || "-"}
                 </span>
               </div>
               <div className="s-eligibility-item">
-                <span className="s-eligibility-label">
-                  Eligibility for Grade 12:
-                </span>
+                <span className="s-eligibility-label">Current Semester:</span>
+                <span className="s-eligibility-value">{currentSemester}</span>
+              </div>
+              <div className="s-eligibility-item">
+                <span className="s-eligibility-label">Next Enrollment Term:</span>
                 <span
-                  className={`s-eligibility-value ${eligibilityStatus.passed ? "s-status-completed" : "s-status-pending"}`}
+                  className={`s-eligibility-value ${nextPlacement.hasNextTerm ? "s-status-completed" : "s-status-warning"}`}
                 >
-                  {eligibilityStatus.passed ? "Passed" : "Not Eligible"}
+                  {nextPlacement.hasNextTerm
+                    ? `${nextPlacement.yearLevel} - ${nextPlacement.semester}`
+                    : "No next term available"}
                 </span>
               </div>
               <div className="s-eligibility-item">
-                <span className="s-eligibility-label">Strand:</span>
-                <span className="s-eligibility-value">
-                  {eligibilityStatus.strand}
+                <span className="s-eligibility-label">Portal Requirement Status:</span>
+                <span
+                  className={`s-eligibility-value ${getStatusToneClass(portalRequirementStatus)}`}
+                >
+                  {portalRequirementStatus}
                 </span>
               </div>
             </div>
 
-            {/* Student Information Card */}
             <div className="s-enrollment-card s-student-info-card">
               <h3>Student Information</h3>
               <div className="s-student-info-item">
                 <span className="s-info-label">Student Number:</span>
-                <span className="s-info-value">{studentData.id}</span>
+                <span className="s-info-value">{studentData.id || "-"}</span>
               </div>
               <div className="s-student-info-item">
                 <span className="s-info-label">Student Name:</span>
                 <span className="s-info-value">{studentData.name}</span>
               </div>
               <div className="s-student-info-item">
-                <span className="s-info-label">Year & Section:</span>
-                <span className="s-info-value">{studentData.section}</span>
+                <span className="s-info-label">Program:</span>
+                <span className="s-info-value">{programLabel}</span>
               </div>
               <div className="s-student-info-item">
-                <span className="s-info-label">Strand:</span>
+                <span className="s-info-label">Strand / Course:</span>
                 <span className="s-info-value">{studentData.strand}</span>
+              </div>
+              <div className="s-student-info-item">
+                <span className="s-info-label">Section:</span>
+                <span className="s-info-value">{studentData.section}</span>
               </div>
             </div>
           </div>
 
-          {/* Note Card */}
           <div className="s-note-card">
             <div className="s-note-icon">
               <IoDocumentText />
             </div>
             <div className="s-note-content">
               <p>
-                The clearance may be downloaded through the system; however,
-                students are still required to personally visit the school to
-                obtain the necessary physical signatures from authorized
-                personnel. The downloaded clearance is not considered valid
-                without complete signatures.
+                Assigned subjects now follow the next enrollment term based on
+                the student&apos;s current year level and semester.
               </p>
-              {credentialSummary && (
-                <p className="s-notice-text">
-                  Admission credentials: {credentialSummary.submitted}/
-                  {credentialSummary.total} submitted
-                </p>
-              )}
+              <p className="s-notice-text">
+                Upcoming term:{" "}
+                {nextPlacement.hasNextTerm
+                  ? `${nextPlacement.yearLevel} - ${nextPlacement.semester} (${nextPlacement.academicYear})`
+                  : "No next enrollment term is available yet."}
+              </p>
             </div>
           </div>
 
-          {/* Requirements Upload Section */}
           <div className="s-requirements-section">
             <h3>Enrollment & Requirements</h3>
             <div className="s-requirements-grid">
-              <div className="s-requirement-item">
-                <span className="s-requirement-label">
-                  Grade 11 Certificate of Grades
-                </span>
-                <div className="s-requirement-actions">
-                  {uploadedFiles["grade11_certificate"] && (
-                    <span className="s-file-name">
-                      📎 {uploadedFiles["grade11_certificate"].name}
-                    </span>
-                  )}
-                  <button
-                    className="s-upload-btn"
-                    onClick={() => handleFileUpload("grade11_certificate")}
-                    disabled={uploadingId === "grade11_certificate"}
-                  >
-                    {uploadingId === "grade11_certificate" ? (
-                      <FaSpinner className="s-spin" />
-                    ) : (
-                      <MdFileUpload />
+              {enrollmentRequirements.map((requirement) => (
+                <div className="s-requirement-item" key={requirement.key}>
+                  <span className="s-requirement-label">{requirement.label}</span>
+                  <div className="s-requirement-actions">
+                    {requirement.allowsDownload && (
+                      <button
+                        className="s-download-btn-small"
+                        onClick={handleDownloadClearance}
+                      >
+                        <MdDownload /> Download
+                      </button>
                     )}
-                    {uploadingId === "grade11_certificate"
-                      ? " Uploading..."
-                      : " Upload"}
-                  </button>
-                </div>
-              </div>
-              <div className="s-requirement-item">
-                <span className="s-requirement-label">Clearance</span>
-                <div className="s-requirement-actions">
-                  <button
-                    className="s-download-btn-small"
-                    onClick={handleDownloadClearance}
-                  >
-                    <MdDownload /> Download
-                  </button>
-                  {uploadedFiles["clearance"] && (
-                    <span className="s-file-name">
-                      📎 {uploadedFiles["clearance"].name}
-                    </span>
-                  )}
-                  <button
-                    className="s-upload-btn"
-                    onClick={() => handleFileUpload("clearance")}
-                    disabled={uploadingId === "clearance"}
-                  >
-                    {uploadingId === "clearance" ? (
-                      <FaSpinner className="s-spin" />
-                    ) : (
-                      <MdFileUpload />
+                    {uploadedFiles[requirement.key]?.url && (
+                      <a
+                        className="s-requirement-view"
+                        href={uploadedFiles[requirement.key]?.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View File
+                      </a>
                     )}
-                    {uploadingId === "clearance" ? " Uploading..." : " Upload"}
-                  </button>
+                    {uploadedFiles[requirement.key] && (
+                      <span className="s-file-name">
+                        {uploadedFiles[requirement.key].name}
+                      </span>
+                    )}
+                    <button
+                      className="s-upload-btn"
+                      onClick={() => void handleFileUpload(requirement)}
+                      disabled={uploadingId === requirement.key}
+                    >
+                      {uploadingId === requirement.key ? (
+                        <FaSpinner className="s-spin" />
+                      ) : (
+                        <MdFileUpload />
+                      )}
+                      {uploadingId === requirement.key ? " Uploading..." : " Upload"}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
 
-          {/* Assigned Subjects Table */}
           <div className="s-subjects-section">
-            <h3>Assigned Subjects ({student?.yearLevel || "Current Level"})</h3>
+            <h3>Assigned Subjects for Enrollment</h3>
+            <div className="s-subject-summary">
+              <span className="s-subject-chip">
+                {nextPlacement.hasNextTerm
+                  ? `${nextPlacement.yearLevel} - ${nextPlacement.semester}`
+                  : "No next term available"}
+              </span>
+              <span className="s-subject-chip">{nextPlacement.academicYear}</span>
+              {totalUnits > 0 && (
+                <span className="s-subject-chip">{totalUnits} total units</span>
+              )}
+            </div>
             <div className="s-table-wrapper">
               <table className="s-enrollment-table">
                 <thead>
@@ -476,6 +1138,7 @@ function StudentEnrollment() {
                     <th>Subject Code</th>
                     <th>Subject Title</th>
                     <th>Semester</th>
+                    <th>Units</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -485,11 +1148,16 @@ function StudentEnrollment() {
                         <td className="s-subject-code">{subject.code}</td>
                         <td className="s-subject-title">{subject.title}</td>
                         <td className="s-subject-semester">{subject.semester}</td>
+                        <td>{subject.units ?? "-"}</td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={3}>No subjects assigned yet.</td>
+                      <td colSpan={4}>
+                        {nextPlacement.hasNextTerm
+                          ? "No subject setup is available yet for this next term."
+                          : "No next-term subject schedule is available for this student record."}
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -497,25 +1165,83 @@ function StudentEnrollment() {
             </div>
           </div>
 
-          {/* Note Card for Approval */}
+          {isCollegeStudent && (
+            <div className="s-college-summary-grid">
+              <div className="s-enrollment-card">
+                <h3>Tuition Estimate</h3>
+                <div className="s-finance-stat">
+                  <span className="s-finance-label">Per Unit Rate</span>
+                  <span className="s-finance-value">
+                    {formatCurrency(tuitionPerUnit)}
+                  </span>
+                </div>
+                <div className="s-finance-stat">
+                  <span className="s-finance-label">Total Units</span>
+                  <span className="s-finance-value">{totalUnits}</span>
+                </div>
+                <div className="s-finance-stat">
+                  <span className="s-finance-label">Estimated Tuition</span>
+                  <span className="s-finance-value">
+                    {formatCurrency(estimatedTuition)}
+                  </span>
+                </div>
+                <div className="s-finance-stat">
+                  <span className="s-finance-label">Estimated After Honor Discount</span>
+                  <span className="s-finance-value">
+                    {formatCurrency(discountedTuition)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="s-enrollment-card">
+                <h3>Scholarship & Discounts</h3>
+                <div className="s-finance-stat">
+                  <span className="s-finance-label">Honor Category</span>
+                  <span className="s-finance-value">{honorLabel}</span>
+                </div>
+                <div className="s-finance-stat">
+                  <span className="s-finance-label">Honor Discount</span>
+                  <span className="s-finance-value">{honorDiscount}%</span>
+                </div>
+                <div className="s-finance-stat">
+                  <span className="s-finance-label">Scholarship Exam</span>
+                  <span className="s-finance-value">
+                    {scholarshipApplied ? "Applied" : "Not Applied"}
+                  </span>
+                </div>
+                <div className="s-finance-stat">
+                  <span className="s-finance-label">Exam Score</span>
+                  <span className="s-finance-value">
+                    {typeof scholarshipExamScore === "number"
+                      ? scholarshipExamScore
+                      : "Awaiting result"}
+                  </span>
+                </div>
+                <p className="s-finance-note">
+                  Maintain your honor standing and required scholarship criteria each
+                  term to keep the discount active.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="s-note-card s-warning-note">
             <div className="s-note-icon">
               <FaCheckCircle />
             </div>
             <div className="s-note-content">
               <p>
-                The pending approval status ensures that enrollment is validated
-                by the registrar before granting academic access, preventing
-                errors and unauthorized enrollment.
+                Submitted enrollment stays in pending approval until the registrar
+                reviews the uploaded requirements and confirms the next-term
+                subject set.
               </p>
               <p className="s-notice-text">
-                Notice: Pending Approval - Cannot Download Enrollment
-                Confirmation
+                Notice: Pending approval means enrollment confirmation is still
+                locked.
               </p>
             </div>
           </div>
 
-          {/* Enrollment Status Table */}
           <div className="s-status-section">
             <h3>Enrollment Status</h3>
             <div className="s-table-wrapper">
@@ -531,11 +1257,23 @@ function StudentEnrollment() {
                 <tbody>
                   <tr>
                     <td>{enrollmentStatus.enrollmentDate}</td>
-                    <td>{enrollmentStatus.semester}</td>
-                    <td>Grade 12</td>
+                    <td>
+                      {enrollmentStatus.semester !== "-"
+                        ? enrollmentStatus.semester
+                        : nextPlacement.hasNextTerm
+                          ? nextPlacement.semester
+                          : "-"}
+                    </td>
+                    <td>
+                      {enrollmentStatus.gradeLevel !== "-"
+                        ? enrollmentStatus.gradeLevel
+                        : nextPlacement.hasNextTerm
+                          ? nextPlacement.yearLevel
+                          : "-"}
+                    </td>
                     <td>
                       <span
-                        className={`s-status-badge ${enrollmentStatus.status === "Approved" ? "s-status-approved" : "s-status-pending"}`}
+                        className={`s-status-badge ${enrollmentStatus.status === "Approved" ? "s-status-approved" : enrollmentStatus.status === "Rejected" ? "s-status-warning" : "s-status-pending"}`}
                       >
                         {enrollmentStatus.status}
                       </span>
@@ -546,7 +1284,6 @@ function StudentEnrollment() {
             </div>
           </div>
 
-          {/* Action Buttons */}
           <div className="s-enrollment-actions">
             <button className="s-enroll-btn" onClick={handleEnroll}>
               Enroll

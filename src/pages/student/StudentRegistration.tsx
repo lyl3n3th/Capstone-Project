@@ -1,14 +1,21 @@
 import { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import aicslogst from "../../assets/images/aicslogst-2.png";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
+import {
+  activateApprovedStudent,
+  registerStudentPortalAccount,
+} from "../../services/auth";
+import { findApprovedEnrolleeByStudentNumber } from "../../services/adminStorage";
 import "../../styles/student/student-regis.css";
 
 function StudentRegistration() {
+  const navigate = useNavigate();
   const [selectedBranch, setSelectedBranch] = useState("");
   const [isMenuOpenBranch, setIsMenuOpenBranch] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const wrapperRefBranch = useRef<HTMLDivElement>(null);
 
@@ -37,6 +44,13 @@ function StudentRegistration() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleStudentNumberChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 6);
+    setFormData((prev) => ({ ...prev, studentNumber: digitsOnly }));
   };
 
   // Phone number formatting function
@@ -72,6 +86,11 @@ function StudentRegistration() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (formData.studentNumber.length !== 6) {
+      alert("Please enter a valid 6-digit student number.");
+      return;
+    }
+
     if (!selectedBranch) {
       alert("Please select a branch before registering!");
       return;
@@ -105,38 +124,63 @@ function StudentRegistration() {
       return;
     }
 
-    // TODO: Connect to actual backend after normalization
-    console.log("Registration attempt:", {
-      ...formData,
-      mobile: rawPhone, // Send raw digits to backend
-      branch: selectedBranch,
-    });
-    alert(`Registration attempted for branch: ${selectedBranch}`);
+    try {
+      setIsSubmitting(true);
+      const attemptRegistration = () =>
+        registerStudentPortalAccount({
+          branch: selectedBranch,
+          studentNumber: formData.studentNumber,
+          email: formData.email,
+          mobile: rawPhone,
+          birthDate: formData.birthDate,
+          password: formData.password,
+        });
 
-    // Uncomment when backend is ready:
-    // const response = await fetch("http://127.0.0.1:8000/api/admissions/register/", {
-    //   method: "POST",
-    //   headers: { "Content-Type": "application/json" },
-    //   body: JSON.stringify({
-    //     ...formData,
-    //     mobile: rawPhone, // Send raw digits
-    //     branch: selectedBranch
-    //   }),
-    // });
-    // const result = await response.json();
-    // alert(result.message);
-    //
-    // if (response.ok) {
-    //   setFormData({
-    //     studentNumber: "",
-    //     email: "",
-    //     mobile: "",
-    //     birthDate: "",
-    //     password: "",
-    //     confirmPassword: "",
-    //   });
-    //   setSelectedBranch("");
-    // }
+      try {
+        await attemptRegistration();
+      } catch (error) {
+        const shouldTryLocalBackfill =
+          error instanceof Error &&
+          /was not found for the .* branch|admission has not been approved yet/i.test(
+            error.message,
+          );
+
+        if (!shouldTryLocalBackfill) {
+          throw error;
+        }
+
+        const approvedEnrollee = findApprovedEnrolleeByStudentNumber({
+          branch: selectedBranch,
+          studentNumber: formData.studentNumber,
+        });
+
+        if (!approvedEnrollee?.trackingNumber) {
+          throw error;
+        }
+
+        await activateApprovedStudent(
+          approvedEnrollee.trackingNumber,
+          approvedEnrollee.studentNumber || formData.studentNumber,
+        );
+
+        await attemptRegistration();
+      }
+
+      alert("Registration successful. You can now sign in to the student portal.");
+      navigate(
+        `/student/login?branch=${encodeURIComponent(selectedBranch)}&studentNumber=${encodeURIComponent(formData.studentNumber)}`,
+        { replace: true },
+      );
+    } catch (error) {
+      console.error("Student registration failed", error);
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to register right now. Please try again.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -204,7 +248,7 @@ function StudentRegistration() {
                       type="text"
                       name="studentNumber"
                       value={formData.studentNumber}
-                      onChange={handleChange}
+                      onChange={handleStudentNumberChange}
                       placeholder="261001"
                       maxLength={6}
                       pattern="[0-9]{6}"
@@ -306,8 +350,12 @@ function StudentRegistration() {
                 </div>
               </div>
 
-              <button type="submit" className="registration-submit-btn">
-                Register
+              <button
+                type="submit"
+                className="registration-submit-btn"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Registering..." : "Register"}
               </button>
             </form>
 

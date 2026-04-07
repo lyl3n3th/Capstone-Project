@@ -159,11 +159,38 @@ const getStudentSessionOverrides = (): Partial<Student> => {
       return {};
     }
 
+    const derivedFirstName =
+      parsedSession.user.firstName ||
+      parsedSession.user.displayName.split(" ")[0] ||
+      mockStudent.firstName;
+    const derivedLastName =
+      parsedSession.user.lastName ||
+      parsedSession.user.displayName
+        .split(" ")
+        .slice(1)
+        .join(" ") ||
+      mockStudent.lastName;
+
     return {
       id: parsedSession.user.id,
       studentNumber:
         parsedSession.user.studentNumber || mockStudent.studentNumber,
+      trackingNumber: parsedSession.user.trackingNumber,
+      firstName: derivedFirstName,
+      lastName: derivedLastName,
+      middleName: parsedSession.user.middleName,
+      email: parsedSession.user.email || mockStudent.email,
+      contactNumber:
+        parsedSession.user.contactNumber || mockStudent.contactNumber,
+      address: parsedSession.user.address || mockStudent.address,
+      program: parsedSession.user.program || mockStudent.program,
+      yearLevel: parsedSession.user.yearLevel || mockStudent.yearLevel,
       branch: parsedSession.user.branch || mockStudent.branch,
+      section: parsedSession.user.section,
+      programType: parsedSession.user.programType || mockStudent.programType,
+      gender: parsedSession.user.gender || mockStudent.gender,
+      birthday: parsedSession.user.birthDate || mockStudent.birthday,
+      civilStatus: parsedSession.user.civilStatus || mockStudent.civilStatus,
     };
   } catch (error) {
     console.error("Failed to read student session overrides", error);
@@ -275,8 +302,7 @@ const getStudentPortalDataForCurrentSession = async (): Promise<StudentPortalDat
 
     return {
       student,
-      subjects:
-        subjects.length > 0 ? subjects : getFallbackSubjects(student.programType),
+      subjects,
       credentialItems: credentialOverview?.items ?? [],
       credentialSummary: credentialOverview?.summary ?? null,
     };

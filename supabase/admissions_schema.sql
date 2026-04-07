@@ -814,7 +814,9 @@ as $$
   order by app.created_at desc;
 $$;
 
-create or replace function public.get_admin_admission_queue(
+drop function if exists public.get_admin_admission_queue(text);
+
+create function public.get_admin_admission_queue(
   p_branch_code text default null
 )
 returns table (
@@ -1063,6 +1065,13 @@ on conflict (id) do update
 set public = excluded.public,
     file_size_limit = excluded.file_size_limit,
     allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "Admission requirement bucket metadata is viewable by everyone" on storage.buckets;
+create policy "Admission requirement bucket metadata is viewable by everyone"
+on storage.buckets
+for select
+to anon, authenticated
+using (id = 'admission-requirements');
 
 drop policy if exists "Admission requirement files can be uploaded by anyone" on storage.objects;
 create policy "Admission requirement files can be uploaded by anyone"

@@ -389,6 +389,13 @@
   box-sizing: border-box;
 }
 
+.am-students-value-box-highlight {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  border-color: transparent;
+}
+
 .am-students-address-box {
   min-height: 50px;
   height: auto;
@@ -406,6 +413,36 @@
 
 .am-students-status-active { color: #10b981 !important; background: #dcfce7; }
 .am-students-status-inactive { color: #ef4444 !important; background: #fee2e2; }
+
+.am-students-value-box-highlight.am-students-status-active {
+  color: #047857 !important;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.am-students-value-box-highlight.am-students-status-inactive {
+  color: #b91c1c !important;
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.am-students-value-box-highlight.am-students-credential-completed {
+  color: #047857;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.am-students-value-box-highlight.am-students-credential-partial {
+  color: #a16207;
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+
+.am-students-value-box-highlight.am-students-credential-pending {
+  color: #92400e;
+  background: #ffedd5;
+  border-color: #fdba74;
+}
 
 /* Mobile Card List */
 .am-students-card-list { display: none !important; }

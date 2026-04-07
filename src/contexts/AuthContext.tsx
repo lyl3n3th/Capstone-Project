@@ -14,6 +14,10 @@ import {
   type StaffLoginPayload,
   type StudentLoginPayload,
 } from "./auth-context";
+import {
+  loginStudentPortal,
+  mapStudentIdentityToAuthUser,
+} from "../services/auth";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -59,15 +63,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loginStudent = useCallback(
-    async ({ branch, studentNumber }: StudentLoginPayload) => {
-      const normalizedStudentNumber = studentNumber.trim();
-      const user: AuthUser = {
-        id: `student-${normalizedStudentNumber}`,
-        role: "student",
-        displayName: `Student ${normalizedStudentNumber}`,
-        branch: branch.trim(),
-        studentNumber: normalizedStudentNumber,
-      };
+    async ({ branch, studentNumber, password }: StudentLoginPayload) => {
+      const identity = await loginStudentPortal({
+        branch,
+        studentNumber,
+        password,
+      });
+      const user: AuthUser = mapStudentIdentityToAuthUser(identity);
       const nextSession: AuthSession = {
         user,
         authenticatedAt: new Date().toISOString(),
@@ -80,15 +82,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const loginStaff = useCallback(
-    async ({ branch, fullName, role }: StaffLoginPayload) => {
+    async ({ branch, fullName, employeeId, role }: StaffLoginPayload) => {
       const normalizedFullName = fullName.trim();
       const displayName = normalizedFullName || STAFF_ROLE_LABELS[role];
+      const normalizedEmployeeId = employeeId.trim().toUpperCase();
       const user: AuthUser = {
-        id: `${role}-${normalizedFullName.toLowerCase()}`,
+        id: normalizedEmployeeId || `${role}-${normalizedFullName.toLowerCase()}`,
         role,
         displayName,
         branch: branch.trim(),
-        username: normalizedFullName,
+        employeeId: normalizedEmployeeId,
       };
       const nextSession: AuthSession = {
         user,

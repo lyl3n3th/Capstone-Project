@@ -1,5 +1,5 @@
 import { IoPersonSharp } from "react-icons/io5";
-import { FaCalendarAlt } from "react-icons/fa";
+import { FaCalendarAlt, FaEye } from "react-icons/fa";
 import { MdFormatListBulleted } from "react-icons/md";
 import { useState, useEffect, useRef } from "react";
 import { IoDocumentText } from "react-icons/io5";
@@ -44,6 +44,11 @@ const useToast = () => {
   return { toasts, addToast, removeToast };
 };
 
+type SelectedCredentialFile = {
+  file: File;
+  previewUrl: string;
+};
+
 function StudentHome() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -57,8 +62,11 @@ function StudentHome() {
   } = useStudent();
   const { toasts, addToast, removeToast } = useToast();
   const [selectedCredentialFiles, setSelectedCredentialFiles] = useState<
-    Record<string, File>
+    Record<string, SelectedCredentialFile>
   >({});
+  const selectedCredentialFilesRef = useRef<Record<string, SelectedCredentialFile>>(
+    {},
+  );
   const [isSubmittingCredentials, setIsSubmittingCredentials] = useState(false);
   const [selectingCredentialCode, setSelectingCredentialCode] = useState<
     string | null
@@ -98,10 +106,22 @@ function StudentHome() {
       }
 
       setSelectingCredentialCode(requirementCode);
-      setSelectedCredentialFiles((prev) => ({
-        ...prev,
-        [requirementCode]: file,
-      }));
+      const previewUrl = URL.createObjectURL(file);
+      setSelectedCredentialFiles((prev) => {
+        const previousPreviewUrl = prev[requirementCode]?.previewUrl;
+
+        if (previousPreviewUrl) {
+          URL.revokeObjectURL(previousPreviewUrl);
+        }
+
+        return {
+          ...prev,
+          [requirementCode]: {
+            file,
+            previewUrl,
+          },
+        };
+      });
       addToast(`${item.name} selected: ${file.name}`, "info");
       setSelectingCredentialCode(null);
     };
@@ -134,10 +154,11 @@ function StudentHome() {
       setIsSubmittingCredentials(true);
 
       for (const item of stagedItems) {
-        const file = selectedCredentialFiles[item.code];
-        if (!file) {
+        const selectedFile = selectedCredentialFiles[item.code];
+        if (!selectedFile) {
           continue;
         }
+        const file = selectedFile.file;
 
         const uploadResult = await uploadAdmissionRequirementFile({
           trackingNumber: student.trackingNumber,
@@ -156,6 +177,9 @@ function StudentHome() {
         });
       }
 
+      Object.values(selectedCredentialFiles).forEach((entry) => {
+        URL.revokeObjectURL(entry.previewUrl);
+      });
       setSelectedCredentialFiles({});
       await refreshStudent();
       addToast("Credential files submitted successfully.", "success");
@@ -172,6 +196,18 @@ function StudentHome() {
       setSelectingCredentialCode(null);
     }
   };
+
+  useEffect(() => {
+    selectedCredentialFilesRef.current = selectedCredentialFiles;
+  }, [selectedCredentialFiles]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(selectedCredentialFilesRef.current).forEach((entry) => {
+        URL.revokeObjectURL(entry.previewUrl);
+      });
+    };
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -263,7 +299,7 @@ function StudentHome() {
       return "completed";
     }
 
-    if (statusLabel === "Needs Reupload" || statusLabel === "Pending Submission") {
+    if (statusLabel === "Needs Reupload") {
       return "warning";
     }
 
@@ -434,14 +470,13 @@ function StudentHome() {
                   <div className="s-activity-details">
                     <div className="s-activity-title">{item.name}</div>
                     <div className="s-uploaded-file-info">
-                      {item.url ? (
-                        <a href={item.url} target="_blank" rel="noreferrer">
-                          View submitted file
-                        </a>
-                      ) : selectedCredentialFiles[item.code] ? (
+                      {selectedCredentialFiles[item.code] ? (
                         <span className="s-file-name">
-                          Ready to submit: {selectedCredentialFiles[item.code].name}
+                          Ready to submit:{" "}
+                          {selectedCredentialFiles[item.code].file.name}
                         </span>
+                      ) : item.url ? (
+                        <span className="s-file-name">Document is ready to view</span>
                       ) : (
                         <span className="s-file-name">
                           {item.isSubmitted
@@ -450,28 +485,54 @@ function StudentHome() {
                         </span>
                       )}
                     </div>
-                    {canUploadCredential(item.statusLabel) && (
-                      <div style={{ marginTop: "8px" }}>
+                  </div>
+                  {(canUploadCredential(item.statusLabel) ||
+                    selectedCredentialFiles[item.code]?.previewUrl ||
+                    item.url) && (
+                    <div className="s-activity-actions">
+                      {canUploadCredential(item.statusLabel) && (
                         <button
                           type="button"
-                          className="s-submit-docs-btn"
-                          style={{ padding: "8px 14px", fontSize: "13px" }}
+                          className="s-activity-action-btn"
                           onClick={() => handleSelectCredentialFile(item.code)}
                           disabled={
                             isSubmittingCredentials ||
                             selectingCredentialCode === item.code
                           }
+                          title={
+                            item.statusLabel === "Needs Reupload"
+                              ? "Replace file"
+                              : "Choose file"
+                          }
+                          aria-label={
+                            item.statusLabel === "Needs Reupload"
+                              ? `Replace ${item.name}`
+                              : `Choose file for ${item.name}`
+                          }
                         >
-                          <MdFileUpload />{" "}
-                          {selectingCredentialCode === item.code
-                            ? "Choosing..."
-                            : item.statusLabel === "Needs Reupload"
-                              ? "Replace File"
-                              : "Choose File"}
+                          {selectingCredentialCode === item.code ? (
+                            <span className="s-upload-spinner">
+                              <MdRefresh />
+                            </span>
+                          ) : (
+                            <MdFileUpload />
+                          )}
                         </button>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                      {(selectedCredentialFiles[item.code]?.previewUrl || item.url) && (
+                        <a
+                          className="s-activity-action-btn s-activity-action-link"
+                          href={selectedCredentialFiles[item.code]?.previewUrl || item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={`View ${item.name}`}
+                          aria-label={`View ${item.name}`}
+                        >
+                          <FaEye />
+                        </a>
+                      )}
+                    </div>
+                  )}
                   <span
                     className={`s-activity-status ${getStatusClass(getCredentialVisualStatus(item.statusLabel))}`}
                   >

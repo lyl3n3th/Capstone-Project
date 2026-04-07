@@ -8,6 +8,28 @@ import type { StudentPortalSubject } from "../../services/adminStorage";
 import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
 
+const semesterSortOrder = ["1st Semester", "2nd Semester", "Summer"];
+
+const sortSemesters = (semesters: string[]) =>
+  [...semesters].sort((left, right) => {
+    const leftIndex = semesterSortOrder.indexOf(left);
+    const rightIndex = semesterSortOrder.indexOf(right);
+
+    if (leftIndex === -1 && rightIndex === -1) {
+      return left.localeCompare(right);
+    }
+
+    if (leftIndex === -1) {
+      return 1;
+    }
+
+    if (rightIndex === -1) {
+      return -1;
+    }
+
+    return leftIndex - rightIndex;
+  });
+
 const useToast = () => {
   const toastCounterRef = useRef(0);
   const [toasts, setToasts] = useState<
@@ -62,12 +84,14 @@ function StudentSubjects() {
       : availableAcademicYears[0] || "2026-2027";
   const availableSemesters = useMemo(
     () =>
-      Array.from(
-        new Set(
-          allSubjects
-            .filter((subject) => subject.academicYear === effectiveAcademicYear)
-            .map((subject) => subject.semester)
-            .filter(Boolean),
+      sortSemesters(
+        Array.from(
+          new Set(
+            allSubjects
+              .filter((subject) => subject.academicYear === effectiveAcademicYear)
+              .map((subject) => subject.semester)
+              .filter(Boolean),
+          ),
         ),
       ),
     [allSubjects, effectiveAcademicYear],
@@ -79,7 +103,7 @@ function StudentSubjects() {
   const filteredSubjects: StudentPortalSubject[] = useMemo(
     () =>
       allSubjects.filter(
-      (subject) =>
+        (subject) =>
           subject.academicYear === effectiveAcademicYear &&
           subject.semester === effectiveSemester,
       ),

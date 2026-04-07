@@ -45,6 +45,8 @@ export interface AdminEnrolleeRecord {
   branch: string;
   studentStatus: string;
   honorLabel?: string | null;
+  appliedForScholarship?: boolean;
+  scholarshipExamScore?: number | null;
   personalInfo: AdminPersonalInformation;
   attachments?: AdminAttachment[];
   convertedAt?: string;
@@ -141,6 +143,7 @@ type StoredSubjectAssignment = {
 const STUDENT_STORAGE_KEY = "aics-students";
 const BRANCH_STORAGE_PREFIX = "aics-admin";
 const DEFAULT_BRANCH: AdminBranchName = "Bacoor";
+const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
 const STUDENT_NUMBER_FLOOR = 261000;
 const REQUIREMENTS_BUCKET = "admission-requirements";
 
@@ -181,6 +184,8 @@ type SupabaseAdminAdmissionQueueRow = {
   tracking_number: string;
   updated_at: string;
   year_completion: number;
+  student_number: string | null;
+  portal_account_registered: boolean | null;
 };
 
 const readStorageItem = <T,>(key: string): T | null => {
@@ -320,11 +325,74 @@ export const getStudentsForBranch = (branch?: string | null) => {
   );
 };
 
-const normalizeAcademicDescriptor = (value?: string | null) =>
-  (value || "")
+const normalizeAcademicDescriptor = (value?: string | null) => {
+  const normalized = (value || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+
+  if (!normalized || normalized === "all") {
+    return normalized;
+  }
+
+  if (normalized.includes("entrepreneur")) {
+    return "entrepreneurship";
+  }
+
+  if (
+    /\bict\b/.test(normalized) ||
+    normalized.includes("information communications technology")
+  ) {
+    return "ict";
+  }
+
+  if (/\bgas\b/.test(normalized) || normalized.includes("general academic")) {
+    return "gas";
+  }
+
+  if (
+    normalized.includes("humss") ||
+    normalized.includes("humanities and social sciences")
+  ) {
+    return "humss";
+  }
+
+  if (
+    /\babm\b/.test(normalized) ||
+    normalized.includes("accountancy business and management")
+  ) {
+    return "abm";
+  }
+
+  if (/\bstem\b/.test(normalized)) {
+    return "stem";
+  }
+
+  if (normalized.includes("industrial arts")) {
+    return "ia";
+  }
+
+  if (
+    normalized.includes("computer science") ||
+    normalized.includes("bscs")
+  ) {
+    return "computer science";
+  }
+
+  if (
+    normalized.includes("information technology") ||
+    normalized.includes("bsit")
+  ) {
+    return "information technology";
+  }
+
+  return normalized;
+};
+
+const resolveStoredSubjectStrandOrCourse = (subject: StoredAcademicSubject) =>
+  subject.program === "College"
+    ? subject.strand || DEFAULT_COLLEGE_COURSE
+    : subject.strand || "All";
 
 const matchesStrandOrCourse = (
   leftValue?: string | null,
@@ -334,6 +402,10 @@ const matchesStrandOrCourse = (
   const right = normalizeAcademicDescriptor(rightValue);
 
   if (!left || !right) {
+    return true;
+  }
+
+  if (left === "all" || right === "all") {
     return true;
   }
 
@@ -381,6 +453,26 @@ const formatScheduleRooms = (schedule: StoredSchedule[] = []) =>
     ? Array.from(new Set(schedule.map((slot) => slot.room || "TBA"))).join(", ")
     : "TBA";
 
+const mapStoredSubjectsToPortalSubjects = (
+  subjects: StoredAcademicSubject[],
+  academicYear = "2026-2027",
+): StudentPortalSubject[] =>
+  subjects
+    .map((subject) => ({
+      id: subject.id,
+      code: subject.code,
+      title: subject.name,
+      units: subject.units,
+      schedule: "To be announced",
+      room: "TBA",
+      professor: "To be assigned",
+      days: "TBA",
+      time: "To be announced",
+      semester: subject.semester,
+      academicYear,
+    }))
+    .sort((left, right) => left.code.localeCompare(right.code));
+
 export const findStoredStudent = ({
   branch,
   studentNumber,
@@ -407,6 +499,31 @@ export const findStoredStudent = ({
 
     return false;
   });
+};
+
+export const findApprovedEnrolleeByStudentNumber = ({
+  branch,
+  studentNumber,
+}: {
+  branch?: string | null;
+  studentNumber?: string | null;
+}) => {
+  if (!studentNumber) {
+    return null;
+  }
+
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedEnrollees =
+    readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ?? [];
+
+  return (
+    storedEnrollees.find(
+      (record) =>
+        record.status === "Approved" &&
+        record.studentNumber === studentNumber &&
+        normalizeBranchName(record.branch) === resolvedBranch,
+    ) || null
+  );
 };
 
 export const getNextStudentNumber = (
@@ -660,11 +777,17 @@ export const getStudentCredentialOverview = ({
   const summary: StudentPortalCredentialSummary = {
     ...snapshot.summary,
     overallStatus:
-      snapshot.summary.pending === 0
-        ? "Complete"
-        : snapshot.summary.submitted === 0
-          ? "Pending Documents"
-          : "Partially Submitted",
+      snapshot.summary.rejected > 0
+        ? "Needs Reupload"
+        : snapshot.summary.pending === 0 &&
+            snapshot.summary.approved === snapshot.summary.total &&
+            snapshot.summary.total > 0
+          ? "Complete"
+          : snapshot.summary.submitted === 0
+            ? "Pending Documents"
+            : snapshot.summary.pending === 0
+              ? "Under Review"
+              : "Partially Submitted",
   };
 
   return {
@@ -741,6 +864,65 @@ export const syncStudentCredentialUpload = async ({
   return nextEnrollees;
 };
 
+export const updateStudentRequirementReviewStatus = ({
+  branch,
+  trackingNumber,
+  studentNumber,
+  requirementName,
+  status,
+}: {
+  branch?: string | null;
+  trackingNumber?: string | null;
+  studentNumber?: string | null;
+  requirementName: string;
+  status: NonNullable<AdminAttachment["reviewStatus"]>;
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedEnrollees =
+    readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ?? [];
+  const requirementKey = requirementName.trim().toLowerCase();
+  let updatedRecord: AdminEnrolleeRecord | null = null;
+
+  const nextEnrollees = storedEnrollees.map((record) => {
+    const isTargetRecord =
+      (trackingNumber && record.trackingNumber === trackingNumber) ||
+      (studentNumber && record.studentNumber === studentNumber);
+
+    if (!isTargetRecord) {
+      return record;
+    }
+
+    const existingAttachments = record.attachments ?? [];
+    const matchingAttachmentIndex = existingAttachments.findIndex(
+      (attachment) => getAttachmentKey(attachment) === requirementKey,
+    );
+
+    if (matchingAttachmentIndex < 0) {
+      return record;
+    }
+
+    const nextAttachments = existingAttachments.map((attachment, index) =>
+      index === matchingAttachmentIndex
+        ? { ...attachment, reviewStatus: status }
+        : attachment,
+    );
+
+    updatedRecord = {
+      ...record,
+      attachments: nextAttachments,
+    };
+
+    return updatedRecord;
+  });
+
+  if (!updatedRecord) {
+    return null;
+  }
+
+  writeBranchScopedData("enrollees", resolvedBranch, nextEnrollees);
+  return updatedRecord;
+};
+
 export const getStudentPortalSubjects = (
   student: Pick<
     StudentStorageRecord,
@@ -753,19 +935,44 @@ export const getStudentPortalSubjects = (
   const storedAssignments =
     readBranchScopedData<StoredSubjectAssignment[]>("subject-assignments", branch) ??
     [];
+  const defaultAcademicYear =
+    storedAssignments[0]?.academicYear || "2026-2027";
+  const matchedSubjects = storedSubjects.filter(
+    (subject) =>
+      subject.program === student.program &&
+      subject.yearLevel === student.yearLevel &&
+      matchesStrandOrCourse(
+        resolveStoredSubjectStrandOrCourse(subject),
+        student.strandOrCourse,
+      ),
+  );
 
   if (student.section) {
     const sectionAssignments = storedAssignments.filter(
-      (assignment) => assignment.sectionCode === student.section,
+      (assignment) =>
+        assignment.sectionCode === student.section &&
+        (storedSubjects.length === 0 ||
+          matchedSubjects.some(
+            (subject) =>
+              (subject.id === assignment.subjectId ||
+                subject.code === assignment.subjectCode) &&
+              subject.semester === assignment.semester,
+          )),
     );
 
     if (sectionAssignments.length > 0) {
-      return sectionAssignments
+      const assignedSemesters = new Set(
+        sectionAssignments.map((assignment) => assignment.semester),
+      );
+      const assignedAcademicYear =
+        sectionAssignments[0]?.academicYear || defaultAcademicYear;
+      const assignedPortalSubjects = sectionAssignments
         .map((assignment) => {
           const subjectDetails = storedSubjects.find(
             (subject) =>
-              subject.id === assignment.subjectId ||
-              subject.code === assignment.subjectCode,
+              (subject.id === assignment.subjectId ||
+                subject.code === assignment.subjectCode) &&
+              subject.semester === assignment.semester,
           );
 
           return {
@@ -783,6 +990,27 @@ export const getStudentPortalSubjects = (
           };
         })
         .sort((left, right) => left.code.localeCompare(right.code));
+      const assignedSubjectKeys = new Set(
+        sectionAssignments.map(
+          (assignment) =>
+            `${assignment.subjectId}:${assignment.subjectCode}:${assignment.semester}`,
+        ),
+      );
+      const remainingCatalogSubjects = matchedSubjects.filter(
+        (subject) =>
+          assignedSemesters.has(subject.semester) &&
+          !assignedSubjectKeys.has(
+            `${subject.id}:${subject.code}:${subject.semester}`,
+          ),
+      );
+
+      return [
+        ...assignedPortalSubjects,
+        ...mapStoredSubjectsToPortalSubjects(
+          remainingCatalogSubjects,
+          assignedAcademicYear,
+        ),
+      ].sort((left, right) => left.code.localeCompare(right.code));
     }
   }
 
@@ -790,28 +1018,51 @@ export const getStudentPortalSubjects = (
     return [];
   }
 
-  const defaultAcademicYear = storedAssignments[0]?.academicYear || "2026-2027";
-  return storedSubjects
-    .filter(
+  return mapStoredSubjectsToPortalSubjects(
+    matchedSubjects,
+    defaultAcademicYear,
+  );
+};
+
+export const getStudentPortalSubjectsForTerm = ({
+  branch,
+  program,
+  yearLevel,
+  strandOrCourse,
+  semester,
+  academicYear,
+}: {
+  branch?: string | null;
+  program: string;
+  yearLevel: string;
+  strandOrCourse?: string;
+  semester: string;
+  academicYear?: string;
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedSubjects =
+    readBranchScopedData<StoredAcademicSubject[]>("subjects", resolvedBranch) ?? [];
+  const storedAssignments =
+    readBranchScopedData<StoredSubjectAssignment[]>(
+      "subject-assignments",
+      resolvedBranch,
+    ) ?? [];
+  const resolvedAcademicYear =
+    academicYear || storedAssignments[0]?.academicYear || "2026-2027";
+
+  return mapStoredSubjectsToPortalSubjects(
+    storedSubjects.filter(
       (subject) =>
-        subject.program === student.program &&
-        subject.yearLevel === student.yearLevel &&
-        matchesStrandOrCourse(subject.strand, student.strandOrCourse),
-    )
-    .map((subject) => ({
-      id: subject.id,
-      code: subject.code,
-      title: subject.name,
-      units: subject.units,
-      schedule: "To be announced",
-      room: "TBA",
-      professor: "To be assigned",
-      days: "TBA",
-      time: "To be announced",
-      semester: subject.semester,
-      academicYear: defaultAcademicYear,
-    }))
-    .sort((left, right) => left.code.localeCompare(right.code));
+        subject.program === program &&
+        subject.yearLevel === yearLevel &&
+        subject.semester === semester &&
+        matchesStrandOrCourse(
+          resolveStoredSubjectStrandOrCourse(subject),
+          strandOrCourse,
+        ),
+    ),
+    resolvedAcademicYear,
+  );
 };
 
 export const getDefaultBranchEnrollees = (
@@ -1085,6 +1336,7 @@ const mapSupabaseApplicantToAdminRecord = async (
   return {
     id: row.tracking_number,
     trackingNumber: row.tracking_number,
+    studentNumber: row.student_number || undefined,
     fullName,
     program,
     yearLevel,
@@ -1101,6 +1353,8 @@ const mapSupabaseApplicantToAdminRecord = async (
     branch: normalizeBranchName(row.branch_name || row.branch_code),
     studentStatus: row.student_status_label,
     honorLabel: row.honor_label || "No Honor",
+    appliedForScholarship: row.applied_for_scholarship,
+    scholarshipExamScore: null,
     personalInfo: {
       fullName,
       birthDate: "",
@@ -1172,6 +1426,10 @@ export const upsertSubmittedApplicant = ({
     branch,
     studentStatus: application.studentStatus,
     honorLabel,
+    appliedForScholarship: Boolean(
+      draft?.apply_scholarship ?? application.appliedForScholarship,
+    ),
+    scholarshipExamScore: null,
     personalInfo: {
       fullName: fullName || `${application.firstName} ${application.lastName}`.trim(),
       birthDate: "",

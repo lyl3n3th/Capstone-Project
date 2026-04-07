@@ -74,23 +74,31 @@ export default defineConfig([
 
 // Github Repo - Capstone Project
 
-// 1. Clone the Repo
-// git clone https://github.com/lyl3n3th/Capstone-Project.git
+// Clone the Repo 
+// (1) git clone --branch initial-progress https://github.com/lyl3n3th/Capstone-Project.git
 // cd Capstone-Project
 
-// install dependencies
+// install dependencies 
 
-// npm install (just this)
+// -------------------------FRONT END----------
 
-//npm run dev (just this)
+// (2) npm install (just this)
 
-// cp .env.example .env
+// (3) npm run dev (just this)
+
+// (4) copy .env.example .env (chat me for API keys)
+
+//----------------BACKEND--------------------
+
+// cd backend
 
 // python -m venv .venv (/)
 
 // .venv\Scripts\activate.bat (/)
 
 // pip install -r requirements.txt (/)
+
+// mkdir logs (/)
 
 // python manage.py migrate (/)
 

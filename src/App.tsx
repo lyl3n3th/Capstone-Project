@@ -31,6 +31,8 @@ import AdminReports from "./pages/admin/AdminReports.tsx";
 import AdminBackup from "./pages/admin/AdminBackup.tsx";
 import AdminTrash from "./pages/admin/AdminTrash.tsx";
 
+import RegistrarDashboard from "./pages/registrar/RegistrarDashboard.tsx";
+
 import AreaManagerDashboard from "./pages/manager/AreaManagerDashboard.tsx";
 import AreaManagerStudents from "./pages/manager/AreaManagerStudents.tsx";
 import AreaManagerStaffAccounts from "./pages/manager/AreaManagerStaffAccounts.tsx";
@@ -186,9 +188,32 @@ function AppRoutes() {
         <Route path="enrollees" element={<AdminEnrollees {...adminProps} />} />
         <Route path="grades" element={<AdminGrades {...adminProps} />} />
         <Route path="alumni" element={<AdminAlumni {...adminProps} />} />
-        <Route path="reports" element={<AdminReports {...adminProps} />} />
+        <Route
+          path="reports"
+          element={
+            <ProtectedRoute allowedRoles={["admin"]} loginPath="/staff/login">
+              <AdminReports {...adminProps} />
+            </ProtectedRoute>
+          }
+        />
         <Route path="backup" element={<AdminBackup {...adminProps} />} />
         <Route path="trash" element={<AdminTrash {...adminProps} />} />
+      </Route>
+
+      {/* Registrar Routes with Layout */}
+      <Route
+        path="/registrar"
+        element={
+          <AdminPortalRoute>
+            <Outlet />
+          </AdminPortalRoute>
+        }
+      >
+        <Route index element={<Navigate to="/registrar/dashboard" replace />} />
+        <Route
+          path="dashboard"
+          element={<RegistrarDashboard {...adminProps} />}
+        />
       </Route>
 
       {/* Area Manager Routes with Layout */}

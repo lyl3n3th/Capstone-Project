@@ -15,7 +15,7 @@ export interface StudentLoginPayload {
 export interface StaffLoginPayload {
   branch: string;
   fullName: string;
-  password: string;
+  employeeId: string;
   role: StaffRole;
 }
 

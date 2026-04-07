@@ -12,7 +12,6 @@ import {
 } from "react-icons/md";
 import { FiLogOut } from "react-icons/fi";
 import { BsEye, BsEyeSlash } from "react-icons/bs";
-import { useAuth } from "../../hooks/useAuth";
 
 interface AreaManagerSidebarProps {
   isOpen: boolean;
@@ -101,7 +100,6 @@ export default function AreaManagerSidebar({
   loggedInUsername,
   isMobile = false,
 }: AreaManagerSidebarProps) {
-  const { currentUser } = useAuth();
   const [showEditModal, setShowEditModal] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -273,11 +271,6 @@ export default function AreaManagerSidebar({
       .slice(0, 2)
       .map((namePart) => namePart[0]?.toUpperCase() || "")
       .join("") || "AM";
-  const accessLabel =
-    currentUser?.branch?.trim() &&
-    currentUser.branch.trim().toLowerCase() !== "all branches"
-      ? `${currentUser.branch.trim()} Branch`
-      : "All Branches Access";
   const menuItems: SidebarMenuItem[] = [
     {
       icon: <MdDashboard />,

@@ -9,7 +9,22 @@ export interface AuthUser {
   displayName: string;
   branch: string;
   studentNumber?: string;
+  employeeId?: string;
   username?: string;
+  trackingNumber?: string;
+  firstName?: string;
+  lastName?: string;
+  middleName?: string;
+  email?: string;
+  contactNumber?: string;
+  address?: string;
+  program?: string;
+  yearLevel?: string;
+  section?: string;
+  programType?: "SHS" | "BS" | "Short Course";
+  gender?: "Male" | "Female";
+  civilStatus?: string;
+  birthDate?: string;
 }
 
 export interface AuthSession {
@@ -20,7 +35,7 @@ export interface AuthSession {
 export const DEFAULT_ROUTE_BY_ROLE: Record<AppRole, string> = {
   student: "/student/home",
   admin: "/admin/dashboard",
-  registrar: "/admin/dashboard",
+  registrar: "/registrar/dashboard",
   manager: "/manager/dashboard",
 };
 

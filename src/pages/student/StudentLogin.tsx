@@ -119,7 +119,11 @@ function StudentLogin() {
       navigate(redirectPath, { replace: true });
     } catch (error) {
       console.error("Student login failed", error);
-      alert("Unable to sign in right now. Please try again.");
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to sign in right now. Please try again.",
+      );
     } finally {
       setIsSubmitting(false);
     }

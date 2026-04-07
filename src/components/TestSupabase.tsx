@@ -60,12 +60,61 @@ function TestSupabase() {
     );
   };
 
+  const testStaffSchema = async () => {
+    setStatus("Checking staff schema...");
+    setDetails("");
+
+    const { error } = await supabase
+      .rpc("list_staff_accounts", { p_trash_mode: "active" });
+
+    if (error) {
+      setStatus("Staff schema check failed");
+      setDetails(
+        `${error.message} Run supabase/staff_accounts_schema.sql in the Supabase SQL editor after admissions_schema.sql.`,
+      );
+      return;
+    }
+
+    setStatus("Staff schema is ready");
+    setDetails(
+      "The Supabase staff account functions are available for the area manager and staff login flows.",
+    );
+  };
+
+  const testStudentSchema = async () => {
+    setStatus("Checking student schema...");
+    setDetails("");
+
+    const { error } = await supabase.rpc("get_student_activation_status", {
+      p_tracking_number: "AICS-TEST-000000",
+    });
+
+    if (error) {
+      setStatus("Student schema check failed");
+      setDetails(
+        `${error.message} Run supabase/student_portal_schema.sql in the Supabase SQL editor after admissions_schema.sql.`,
+      );
+      return;
+    }
+
+    setStatus("Student schema is ready");
+    setDetails(
+      "The Supabase student approval, registration, and login functions are available.",
+    );
+  };
+
   return (
     <div style={boxStyle}>
       <h3>Supabase Connection Test</h3>
       <button onClick={testConnection}>Test Tables</button>
       <button onClick={testStorage} style={{ marginLeft: "10px" }}>
         Test Storage
+      </button>
+      <button onClick={testStaffSchema} style={{ marginLeft: "10px" }}>
+        Test Staff Schema
+      </button>
+      <button onClick={testStudentSchema} style={{ marginLeft: "10px" }}>
+        Test Student Schema
       </button>
       <p>Status: {status}</p>
       {details && <p>{details}</p>}

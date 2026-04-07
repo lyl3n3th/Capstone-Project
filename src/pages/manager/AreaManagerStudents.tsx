@@ -1,10 +1,15 @@
-import React, { useState, useEffect, useMemo } from "react";
-import axios from "axios";
+import React, { useEffect, useMemo, useState } from "react";
 import { BsSearch, BsCaretDownFill, BsCaretUpFill } from "react-icons/bs";
+import {
+  getStudentCredentialOverview,
+  normalizeBranchName,
+  readStoredStudents,
+  type StudentStorageRecord,
+} from "../../services/adminStorage";
 import "../../styles/manager/area-manageStudents.css";
 
 interface Student {
-  id: number;
+  id: string;
   first_name: string;
   last_name: string;
   student_id: string;
@@ -29,171 +34,88 @@ type SortKeys =
   | "year_level"
   | "email";
 
-// Mock data for testing
-const MOCK_STUDENTS: Student[] = [
-  {
-    id: 1,
-    first_name: "Kenneth Lyle",
-    last_name: "Sohot",
-    student_id: "20240001",
-    status: "active",
-    credential_status: "Completed",
-    course: "BSE",
-    year_level: "3rd Year",
-    branch: "Taytay Branch",
-    strand: "BS Entrepreneurship",
-    email: "kenneth.sohot@student.edu",
-    contact_no: "09123456789",
-    section: "IC3DA",
-    address: "Blk 1 Lot 2, Taytay, Rizal",
-  },
-  {
-    id: 2,
-    first_name: "Neil John",
-    last_name: "Velasco",
-    student_id: "20240002",
-    status: "active",
-    credential_status: "Partial Submitted",
-    course: "BSE",
-    year_level: "2nd Year",
-    branch: "Bacoor Branch",
-    strand: "BS Entrepreneurship",
-    email: "neil.velasco@student.edu",
-    contact_no: "09123456790",
-    section: "IC2MB",
-    address: "Molino Blvd, Bacoor, Cavite",
-  },
-  {
-    id: 3,
-    first_name: "Hener",
-    last_name: "Verdida",
-    student_id: "20240003",
-    status: "active",
-    credential_status: "Pending",
-    course: "BSE",
-    year_level: "4th Year",
-    branch: "GMA Branch",
-    strand: "BS Entrepreneurship",
-    email: "hener.verdida@student.edu",
-    contact_no: "09123456791",
-    section: "IC4DA",
-    address: "San Jose, GMA, Cavite",
-  },
-  {
-    id: 4,
-    first_name: "Queenie Mier",
-    last_name: "Senantes",
-    student_id: "20240004",
-    status: "active",
-    credential_status: "Completed",
-    course: "SHS",
-    year_level: "Grade 11",
-    branch: "Taytay Branch",
-    strand: "ICT",
-    email: "queenie.senantes@student.edu",
-    contact_no: "09123456792",
-    section: "IC1DA",
-    address: "Dolores, Taytay, Rizal",
-  },
-  {
-    id: 5,
-    first_name: "Dean Paul",
-    last_name: "Quioyo",
-    student_id: "20240005",
-    status: "inactive",
-    credential_status: "Partial Submitted",
-    course: "SHS",
-    year_level: "Grade 12",
-    branch: "Bacoor Branch",
-    strand: "ICT",
-    email: "dean.quioyo@student.edu",
-    contact_no: "09123456793",
-    section: "IC2DA",
-    address: "Queens Row, Bacoor, Cavite",
-  },
-  {
-    id: 6,
-    first_name: "Mark Kervin",
-    last_name: "Toledo",
-    student_id: "20240006",
-    status: "active",
-    credential_status: "Pending",
-    course: "SHS",
-    year_level: "Grade 11",
-    branch: "GMA Branch",
-    strand: "GAS",
-    email: "mark.toledo@student.edu",
-    contact_no: "09123456794",
-    section: "GA1DA",
-    address: "San Gabriel, GMA, Cavite",
-  },
-  {
-    id: 7,
-    first_name: "Don Rich",
-    last_name: "Ulanday",
-    student_id: "20240007",
-    status: "active",
-    credential_status: "Completed",
-    course: "SHS",
-    year_level: "Grade 12",
-    branch: "Taytay Branch",
-    strand: "HUMSS",
-    email: "don.ulanday@student.edu",
-    contact_no: "09123456795",
-    section: "HU1MB",
-    address: "Muzon, Taytay, Rizal",
-  },
-  {
-    id: 8,
-    first_name: "Gilbert",
-    last_name: "Torres",
-    student_id: "20240008",
-    status: "inactive",
-    credential_status: "Partial Submitted",
-    course: "SHS",
-    year_level: "Grade 11",
-    branch: "Bacoor Branch",
-    strand: "ABM",
-    email: "gilbert.torres@student.edu",
-    contact_no: "09123456796",
-    section: "AB1DA",
-    address: "Niog, Bacoor, Cavite",
-  },
-  {
-    id: 9,
-    first_name: "Jay Iverson",
-    last_name: "Dela Cruz",
-    student_id: "20240009",
-    status: "active",
-    credential_status: "Pending",
-    course: "SHS",
-    year_level: "Grade 12",
-    branch: "GMA Branch",
-    strand: "STEM",
-    email: "jay.delacruz@student.edu",
-    contact_no: "09123456797",
-    section: "ST1MB",
-    address: "Lubigan, GMA, Cavite",
-  },
-  {
-    id: 10,
-    first_name: "Christian Dave",
-    last_name: "Vargas",
-    student_id: "20240010",
-    status: "active",
-    credential_status: "Completed",
-    course: "BSE",
-    year_level: "1st Year",
-    branch: "Taytay Branch",
-    strand: "BS Entrepreneurship",
-    email: "christian.vargas@student.edu",
-    contact_no: "09123456798",
-    section: "IC1MB",
-    address: "San Juan, Taytay, Rizal",
-  },
-];
+const splitStoredStudentName = (fullName: string) => {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
 
-const USE_MOCK_DATA = true;
+  if (parts.length === 0) {
+    return {
+      firstName: "Student",
+      lastName: "",
+    };
+  }
+
+  if (parts.length === 1) {
+    return {
+      firstName: parts[0],
+      lastName: "",
+    };
+  }
+
+  return {
+    firstName: parts[0],
+    lastName: parts[parts.length - 1],
+  };
+};
+
+const getCredentialStatusLabel = (student: StudentStorageRecord) => {
+  const credentialOverview = getStudentCredentialOverview({
+    branch: student.branch,
+    studentNumber: student.id,
+    trackingNumber: student.trackingNumber,
+  });
+
+  if (credentialOverview) {
+    if (credentialOverview.summary.rejected > 0) {
+      return "Needs Reupload";
+    }
+
+    if (
+      credentialOverview.summary.total > 0 &&
+      credentialOverview.summary.approved === credentialOverview.summary.total
+    ) {
+      return "Completed";
+    }
+
+    if (credentialOverview.summary.submitted > 0) {
+      return "Partial Submitted";
+    }
+
+    return "Pending";
+  }
+
+  if (student.status === "Complete") {
+    return "Completed";
+  }
+
+  return "Pending";
+};
+
+const mapStoredStudentToDirectoryRow = (
+  student: StudentStorageRecord,
+): Student => {
+  const { firstName, lastName } = splitStoredStudentName(student.name);
+  const normalizedBranch = normalizeBranchName(student.branch);
+  const isShsStudent = student.program === "SHS";
+
+  return {
+    id: student.id,
+    first_name: firstName,
+    last_name: lastName,
+    student_id: student.id,
+    status: student.status === "Archived" ? "inactive" : "active",
+    credential_status: getCredentialStatusLabel(student),
+    course: isShsStudent
+      ? "SHS"
+      : student.strandOrCourse || "College",
+    year_level: student.yearLevel,
+    branch: `${normalizedBranch} Branch`,
+    strand: isShsStudent ? student.strandOrCourse || "" : undefined,
+    email: student.email,
+    contact_no: student.contact,
+    section: student.section,
+    address: student.address,
+  };
+};
 
 const AreaManagerStudents: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
@@ -216,27 +138,33 @@ const AreaManagerStudents: React.FC = () => {
   const studentsPerPage = 10;
 
   useEffect(() => {
-    fetchStudents();
-  }, []);
+    const loadStudents = () => {
+      setLoading(true);
 
-  const fetchStudents = async () => {
-    if (USE_MOCK_DATA) {
-      setTimeout(() => {
-        setStudents(MOCK_STUDENTS);
+      try {
+        const storedStudents = readStoredStudents()
+          .filter((student) => student.status !== "Archived")
+          .map(mapStoredStudentToDirectoryRow);
+
+        setStudents(storedStudents);
+      } catch (error) {
+        console.error("Error loading stored students:", error);
+        setStudents([]);
+      } finally {
         setLoading(false);
-      }, 500);
-      return;
-    }
+      }
+    };
 
-    try {
-      const response = await axios.get("http://127.0.0.1:8000/api/students/");
-      setStudents(response.data);
-    } catch (error) {
-      console.error("Error fetching students:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    loadStudents();
+
+    window.addEventListener("storage", loadStudents);
+    window.addEventListener("focus", loadStudents);
+
+    return () => {
+      window.removeEventListener("storage", loadStudents);
+      window.removeEventListener("focus", loadStudents);
+    };
+  }, []);
 
   const uniqueCourses = Array.from(
     new Set(students.map((s) => s.course)),
@@ -254,7 +182,6 @@ const AreaManagerStudents: React.FC = () => {
     new Set(students.map((s) => s.strand).filter(Boolean)),
   ).sort();
 
-  // Stats for the header
   const totalStudents = students.length;
   const activeStudents = students.filter((s) => s.status === "active").length;
   const completedCredentials = students.filter(
@@ -262,16 +189,20 @@ const AreaManagerStudents: React.FC = () => {
   ).length;
 
   const processedStudents = useMemo(() => {
-    let filtered = students.filter((s) => {
-      const fullName = `${s.first_name} ${s.last_name}`.toLowerCase();
+    const filtered = students.filter((student) => {
+      const fullName =
+        `${student.first_name} ${student.last_name}`.toLowerCase();
       const matchesSearch =
         fullName.includes(searchTerm.toLowerCase()) ||
-        s.student_id.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesCourse = filterCourse ? s.course === filterCourse : true;
-      const matchesSection = filterSection ? s.section === filterSection : true;
-      const matchesBranch = filterBranch ? s.branch === filterBranch : true;
-      const matchesYear = filterYear ? s.year_level === filterYear : true;
-      const matchesStrand = filterStrand ? s.strand === filterStrand : true;
+        student.student_id.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCourse = filterCourse ? student.course === filterCourse : true;
+      const matchesSection = filterSection
+        ? student.section === filterSection
+        : true;
+      const matchesBranch = filterBranch ? student.branch === filterBranch : true;
+      const matchesYear = filterYear ? student.year_level === filterYear : true;
+      const matchesStrand = filterStrand ? student.strand === filterStrand : true;
+
       return (
         matchesSearch &&
         matchesCourse &&
@@ -282,36 +213,46 @@ const AreaManagerStudents: React.FC = () => {
       );
     });
 
-    if (sortConfig !== null) {
-      filtered.sort((a, b) => {
-        let aVal: any;
-        let bVal: any;
-        if (sortConfig.key === "full_name") {
-          aVal = `${a.first_name} ${a.last_name}`.toLowerCase();
-          bVal = `${b.first_name} ${b.last_name}`.toLowerCase();
-        } else {
-          aVal = (a[sortConfig.key as keyof Student] || "")
-            .toString()
-            .toLowerCase();
-          bVal = (b[sortConfig.key as keyof Student] || "")
-            .toString()
-            .toLowerCase();
-        }
-        if (
-          sortConfig.key === "student_id" &&
-          !isNaN(Number(aVal)) &&
-          !isNaN(Number(bVal))
-        ) {
-          return sortConfig.direction === "asc"
-            ? Number(aVal) - Number(bVal)
-            : Number(bVal) - Number(aVal);
-        }
-        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
-        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
-        return 0;
-      });
+    if (!sortConfig) {
+      return filtered;
     }
-    return filtered;
+
+    return [...filtered].sort((left, right) => {
+      let leftValue: string;
+      let rightValue: string;
+
+      if (sortConfig.key === "full_name") {
+        leftValue = `${left.first_name} ${left.last_name}`.toLowerCase();
+        rightValue = `${right.first_name} ${right.last_name}`.toLowerCase();
+      } else {
+        leftValue = (left[sortConfig.key as keyof Student] || "")
+          .toString()
+          .toLowerCase();
+        rightValue = (right[sortConfig.key as keyof Student] || "")
+          .toString()
+          .toLowerCase();
+      }
+
+      if (
+        sortConfig.key === "student_id" &&
+        !Number.isNaN(Number(leftValue)) &&
+        !Number.isNaN(Number(rightValue))
+      ) {
+        return sortConfig.direction === "asc"
+          ? Number(leftValue) - Number(rightValue)
+          : Number(rightValue) - Number(leftValue);
+      }
+
+      if (leftValue < rightValue) {
+        return sortConfig.direction === "asc" ? -1 : 1;
+      }
+
+      if (leftValue > rightValue) {
+        return sortConfig.direction === "asc" ? 1 : -1;
+      }
+
+      return 0;
+    });
   }, [
     students,
     searchTerm,
@@ -325,6 +266,7 @@ const AreaManagerStudents: React.FC = () => {
 
   const requestSort = (key: SortKeys) => {
     let direction: "asc" | "desc" = "asc";
+
     if (
       sortConfig &&
       sortConfig.key === key &&
@@ -332,6 +274,7 @@ const AreaManagerStudents: React.FC = () => {
     ) {
       direction = "desc";
     }
+
     setSortConfig({ key, direction });
   };
 
@@ -350,6 +293,8 @@ const AreaManagerStudents: React.FC = () => {
         return "am-students-credential-completed";
       case "partial submitted":
         return "am-students-credential-partial";
+      case "needs reupload":
+        return "am-students-credential-pending";
       case "pending":
         return "am-students-credential-pending";
       default:
@@ -370,23 +315,22 @@ const AreaManagerStudents: React.FC = () => {
     window.scrollTo(0, 0);
   };
 
-  if (loading)
+  if (loading) {
     return <div className="am-students-loading">Loading Students...</div>;
+  }
 
   return (
     <div className="am-students-root">
-      {/* Page Header - Outside Container */}
       <div className="am-students-page-header">
         <div className="am-students-header-title-group">
           <h1 className="am-students-page-title">Student Management</h1>
           <p className="am-students-page-description">
-            Manage and monitor all student records, track credential status, and
-            oversee academic progress across all branches.
+            Review the actual enrolled student records, track credential status,
+            and monitor academic progress across all branches.
           </p>
         </div>
       </div>
 
-      {/* Stats Badges - Below Title */}
       <div className="am-students-stats-badges">
         <div className="am-students-stat-badge">
           <span className="am-students-stat-label">Total Students</span>
@@ -402,7 +346,6 @@ const AreaManagerStudents: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Container */}
       <div className="am-students-container">
         <div className="am-students-controls-grid">
           <div className="am-students-search-wrapper">
@@ -411,8 +354,8 @@ const AreaManagerStudents: React.FC = () => {
               type="text"
               placeholder="Search by name or student ID..."
               value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
+              onChange={(event) => {
+                setSearchTerm(event.target.value);
                 setCurrentPage(1);
               }}
             />
@@ -420,71 +363,71 @@ const AreaManagerStudents: React.FC = () => {
           <div className="am-students-filters-row">
             <select
               value={filterCourse}
-              onChange={(e) => {
-                setFilterCourse(e.target.value);
+              onChange={(event) => {
+                setFilterCourse(event.target.value);
                 setCurrentPage(1);
               }}
             >
               <option value="">All Courses</option>
-              {uniqueCourses.map((c) => (
-                <option key={c} value={c}>
-                  {c === "BSE" ? "BSE - Bachelor of Entrepreneurship" : c}
+              {uniqueCourses.map((course) => (
+                <option key={course} value={course}>
+                  {course}
                 </option>
               ))}
             </select>
             <select
               value={filterStrand}
-              onChange={(e) => {
-                setFilterStrand(e.target.value);
+              onChange={(event) => {
+                setFilterStrand(event.target.value);
                 setCurrentPage(1);
               }}
             >
               <option value="">All Strands</option>
-              {uniqueStrands.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+              {uniqueStrands.map((strand) => (
+                <option key={strand} value={strand}>
+                  {strand}
                 </option>
               ))}
             </select>
             <select
               value={filterSection}
-              onChange={(e) => {
-                setFilterSection(e.target.value);
+              onChange={(event) => {
+                setFilterSection(event.target.value);
                 setCurrentPage(1);
               }}
             >
               <option value="">All Sections</option>
-              {uniqueSections.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+              {uniqueSections.map((section) => (
+                <option key={section} value={section}>
+                  {section}
                 </option>
               ))}
             </select>
             <select
               value={filterBranch}
-              onChange={(e) => {
-                setFilterBranch(e.target.value);
+              onChange={(event) => {
+                setFilterBranch(event.target.value);
                 setCurrentPage(1);
               }}
             >
               <option value="">All Branches</option>
-              {uniqueBranches.map((b) => (
-                <option key={b} value={b}>
-                  {b}
+              {uniqueBranches.map((branch) => (
+                <option key={branch} value={branch}>
+                  {branch}
                 </option>
               ))}
             </select>
             <select
               value={filterYear}
-              onChange={(e) => {
-                setFilterYear(e.target.value);
+              onChange={(event) => {
+                setFilterYear(event.target.value);
                 setCurrentPage(1);
               }}
             >
               <option value="">Year Level</option>
-              {uniqueYears.map((y) => (
-                <option key={y} value={y}>
-                  {y}
+              {uniqueYears.map((yearLevel) => (
+                <option key={yearLevel} value={yearLevel}>
+                  {yearLevel}
                 </option>
               ))}
             </select>
@@ -496,7 +439,6 @@ const AreaManagerStudents: React.FC = () => {
           <strong>{processedStudents.length}</strong> students
         </p>
 
-        {/* Desktop Table */}
         <div className="am-students-table-wrapper">
           <table className="am-students-table">
             <thead>
@@ -549,10 +491,8 @@ const AreaManagerStudents: React.FC = () => {
                     {student.first_name} {student.last_name}
                   </td>
                   <td className="am-students-course-col">
-                    {student.course === "BSE"
-                      ? "BSE - Bachelor of Entrepreneurship"
-                      : student.course}
-                    {student.strand && ` (${student.strand})`}
+                    {student.course}
+                    {student.strand ? ` (${student.strand})` : ""}
                   </td>
                   <td className="am-students-section-col">
                     {student.section || "N/A"}
@@ -576,11 +516,17 @@ const AreaManagerStudents: React.FC = () => {
                   </td>
                 </tr>
               ))}
+              {currentStudents.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="am-students-empty-state">
+                    No enrolled students found.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
 
-        {/* Mobile Card List */}
         <div className="am-students-card-list">
           {currentStudents.map((student) => (
             <div
@@ -603,10 +549,8 @@ const AreaManagerStudents: React.FC = () => {
               </div>
               <div className="am-students-card-meta">
                 <span className="am-students-card-badge">
-                  {student.course === "BSE"
-                    ? "BSE - Entrepreneurship"
-                    : student.course}
-                  {student.strand && ` (${student.strand})`}
+                  {student.course}
+                  {student.strand ? ` (${student.strand})` : ""}
                 </span>
                 <span className="am-students-card-badge">{student.branch}</span>
                 <span className="am-students-card-badge">
@@ -656,7 +600,6 @@ const AreaManagerStudents: React.FC = () => {
         )}
       </div>
 
-      {/* Student Profile Modal */}
       {selectedStudent && (
         <div
           className="am-students-modal-overlay"
@@ -664,7 +607,7 @@ const AreaManagerStudents: React.FC = () => {
         >
           <div
             className="am-students-modal-card"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
           >
             <div className="am-students-modal-header">
               <h3 className="am-students-modal-title">Student Profile</h3>
@@ -692,7 +635,7 @@ const AreaManagerStudents: React.FC = () => {
                 <div className="am-students-field">
                   <label>Status</label>
                   <div
-                    className={`am-students-value-box am-students-status-${selectedStudent.status?.toLowerCase()}`}
+                    className={`am-students-value-box am-students-value-box-highlight am-students-status-${selectedStudent.status?.toLowerCase()}`}
                   >
                     {selectedStudent.status}
                   </div>
@@ -700,7 +643,7 @@ const AreaManagerStudents: React.FC = () => {
                 <div className="am-students-field">
                   <label>Credential Status</label>
                   <div
-                    className={`am-students-value-box ${getCredentialStatusClass(selectedStudent.credential_status)}`}
+                    className={`am-students-value-box am-students-value-box-highlight ${getCredentialStatusClass(selectedStudent.credential_status)}`}
                   >
                     {selectedStudent.credential_status || "Pending"}
                   </div>
@@ -714,9 +657,7 @@ const AreaManagerStudents: React.FC = () => {
                 <div className="am-students-field">
                   <label>Course</label>
                   <div className="am-students-value-box">
-                    {selectedStudent.course === "BSE"
-                      ? "Bachelor of Entrepreneurship"
-                      : selectedStudent.course}
+                    {selectedStudent.course}
                   </div>
                 </div>
                 {selectedStudent.strand && (

@@ -34,6 +34,8 @@
 @import "./manager/area-manager.css";
 @import "./manager/area-managerDashboard.css";
 @import "./manager/area-managerReports.css";
+@import "./manager/area-managerStaff.css";
+@import "./manager/area-manageStudents.css";
 
 
 /* Toast Animation */
