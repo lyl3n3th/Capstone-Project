@@ -7,6 +7,10 @@ import {
 } from "react-icons/fa";
 import { ToastContainer } from "../../components/common/Toast";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import {
+  BACKUP_RESTORE_APPLIED_EVENT,
+  persistAlumniBackupCache,
+} from "../../services/backupApi";
 import "../../styles/admin/admin-alumni.css";
 
 interface AlumniProps {
@@ -165,12 +169,15 @@ export default function AdminAlumni({
         loadPaginated<ApiStudent>(STUDENTS_API_URL),
       ]);
 
-      setAlumni(apiAlumni.map(mapApiAlumniToUi));
+      const mappedAlumni = apiAlumni.map(mapApiAlumniToUi);
+      setAlumni(mappedAlumni);
+      persistAlumniBackupCache(mappedAlumni);
       setStudents(apiStudents.map(mapApiStudentToUi));
     } catch (error) {
       console.error("Failed to load alumni data", error);
       addToast("Unable to load alumni from backend.", "error");
       setAlumni([]);
+      persistAlumniBackupCache([]);
       setStudents([]);
     } finally {
       setIsLoading(false);
@@ -179,6 +186,24 @@ export default function AdminAlumni({
 
   useEffect(() => {
     loadAlumniAndStudents();
+  }, []);
+
+  useEffect(() => {
+    const handleBackupRestoreApplied = () => {
+      void loadAlumniAndStudents();
+    };
+
+    window.addEventListener(
+      BACKUP_RESTORE_APPLIED_EVENT,
+      handleBackupRestoreApplied as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener(
+        BACKUP_RESTORE_APPLIED_EVENT,
+        handleBackupRestoreApplied as EventListener,
+      );
+    };
   }, []);
 
   const handleSidebarToggle = () => {

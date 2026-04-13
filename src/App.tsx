@@ -37,6 +37,7 @@ import AreaManagerDashboard from "./pages/manager/AreaManagerDashboard.tsx";
 import AreaManagerStudents from "./pages/manager/AreaManagerStudents.tsx";
 import AreaManagerStaffAccounts from "./pages/manager/AreaManagerStaffAccounts.tsx";
 import AreaManagerReports from "./pages/manager/AreaManagerReports.tsx";
+import BackupScheduler from "./components/admin/BackupScheduler";
 
 import StaffLogin from "./pages/staff/StaffLogin.tsx";
 import TestSupabase from "./components/TestSupabase";
@@ -269,6 +270,7 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <BackupScheduler />
         <AppRoutes />
       </AuthProvider>
     </BrowserRouter>

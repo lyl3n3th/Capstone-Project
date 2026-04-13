@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from "react";
-import axios from "axios";
 import {
   BsEnvelopePaperFill,
   BsTrash3,
@@ -13,10 +12,18 @@ import {
 } from "react-icons/bs";
 import { MdOutlineMarkEmailUnread, MdDeleteSweep } from "react-icons/md";
 import { ToastContainer } from "../../components/common/Toast";
+import {
+  fetchInboxReports,
+  fetchTrashReports,
+  moveReportToTrash,
+  permanentlyDeleteReport,
+  restoreReport,
+  type ReportRecord,
+} from "../../services/reportApi";
 import "../../styles/manager/area-managerReports.css";
 
 interface Report {
-  id: number;
+  id: string;
   user: string;
   branch: string;
   time: string;
@@ -39,135 +46,42 @@ interface Toast {
   type: "success" | "error" | "info" | "warning";
 }
 
-// Mock reports with "Kenneth Pogi" as the text content
-const MOCK_REPORTS: Report[] = [
-  // Payroll Reports
-  {
-    id: 1,
-    user: "Kenneth Lyle Sohot",
-    branch: "Taytay Branch",
-    time: new Date().toISOString(),
-    title: "March 2025 Payroll Summary Report",
-    text: "Kenneth Pogi",
-    file_name: "march_2025_payroll_summary.pdf",
-  },
-  {
-    id: 2,
-    user: "Neil John Velasco",
-    branch: "Bacoor Branch",
-    time: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    title: "February 2025 Payroll Report",
-    text: "Kenneth Pogi",
-    file_name: "feb_2025_payroll_bacoor.pdf",
-  },
-  {
-    id: 3,
-    user: "Hener Verdida",
-    branch: "GMA Branch",
-    time: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
-    title: "Q1 2025 Payroll Audit Report",
-    text: "Kenneth Pogi",
-    file_name: "q1_2025_payroll_audit.pdf",
-  },
+const getFileNameFromUrl = (url?: string) => {
+  if (!url) {
+    return "";
+  }
 
-  // Marketing Reports
-  {
-    id: 4,
-    user: "Kenneth Lyle Sohot",
-    branch: "Taytay Branch",
-    time: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    title: "Digital Marketing Campaign Performance - March 2025",
-    text: "Kenneth Pogi",
-    file_name: "digital_marketing_march_2025.pdf",
-  },
-  {
-    id: 5,
-    user: "Neil John Velasco",
-    branch: "Bacoor Branch",
-    time: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
-    title: "Social Media Engagement Report Q1 2025",
-    text: "Kenneth Pogi",
-    file_name: "social_media_q1_2025.pdf",
-  },
-  {
-    id: 6,
-    user: "Hener Verdida",
-    branch: "GMA Branch",
-    time: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000).toISOString(),
-    title: "Marketing Budget Utilization Report",
-    text: "Kenneth Pogi",
-    file_name: "marketing_budget_2025.pdf",
-  },
+  const path = url.split("?")[0];
+  const parts = path.split("/");
+  return decodeURIComponent(parts[parts.length - 1] || "");
+};
 
-  // Enrollment Reports
-  {
-    id: 7,
-    user: "Kenneth Lyle Sohot",
-    branch: "Taytay Branch",
-    time: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    title: "First Semester Enrollment Summary 2025",
-    text: "Kenneth Pogi",
-    file_name: "enrollment_summary_2025.pdf",
-  },
-  {
-    id: 8,
-    user: "Neil John Velasco",
-    branch: "Bacoor Branch",
-    time: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    title: "New Student Registration Report",
-    text: "Kenneth Pogi",
-    file_name: "new_students_registration.pdf",
-  },
-  {
-    id: 9,
-    user: "Hener Verdida",
-    branch: "GMA Branch",
-    time: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-    title: "Enrollment Projections for 2nd Semester",
-    text: "Kenneth Pogi",
-    file_name: "enrollment_projections.pdf",
-  },
-];
-
-// Mock trash data
-const MOCK_TRASH: Report[] = [
-  {
-    id: 101,
-    user: "Kenneth Lyle Sohot",
-    branch: "Taytay Branch",
-    time: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-    title: "Old Payroll Report - December 2024",
-    text: "Kenneth Pogi",
-    file_name: "old_payroll_dec2024.pdf",
-  },
-  {
-    id: 102,
-    user: "Neil John Velasco",
-    branch: "Bacoor Branch",
-    time: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
-    title: "Old Marketing Report - Q4 2024",
-    text: "Kenneth Pogi",
-    file_name: "old_marketing_q4_2024.pdf",
-  },
-];
-
-const USE_MOCK_DATA = true;
+const mapApiReport = (report: ReportRecord): Report => ({
+  id: report.id,
+  user: report.sender_name,
+  branch: report.branch_name,
+  time: report.created_at,
+  title: report.subject,
+  text: report.message,
+  file_url: report.attachment_url || undefined,
+  file_name: getFileNameFromUrl(report.attachment_url) || undefined,
+});
 
 // Helper: format any date/time string → MM/DD/YYYY
-const formatDate = (value: string): string => {
+const formatDateTime = (value: string): string => {
   if (!value) return "—";
   const d = new Date(value);
   if (!isNaN(d.getTime())) {
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
     const yyyy = d.getFullYear();
-    return `${mm}/${dd}/${yyyy}`;
+    const hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const suffix = hours >= 12 ? "PM" : "AM";
+    const twelveHour = hours % 12 || 12;
+    return `${mm}/${dd}/${yyyy} ${twelveHour}:${minutes} ${suffix}`;
   }
-  const today = new Date();
-  const mm = String(today.getMonth() + 1).padStart(2, "0");
-  const dd = String(today.getDate()).padStart(2, "0");
-  const yyyy = today.getFullYear();
-  return `${mm}/${dd}/${yyyy}`;
+  return "â€”";
 };
 
 const AreaManagerReports: React.FC<ReportsPageProps> = () => {
@@ -176,7 +90,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showDetail, setShowDetail] = useState(false);
   const [showTrashModal, setShowTrashModal] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -195,18 +109,27 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
   };
 
   const fetchReports = async () => {
-    if (USE_MOCK_DATA) {
-      setTimeout(() => {
-        setReports(MOCK_REPORTS);
-        setTrash(MOCK_TRASH);
-        setLoading(false);
-      }, 500);
-      return;
-    }
-
     try {
-      const res = await axios.get("http://127.0.0.1:8000/api/dashboard-stats/");
-      setReports(res.data.reports || []);
+      const [inboxReports, trashReports] = await Promise.all([
+        fetchInboxReports(),
+        fetchTrashReports(),
+      ]);
+      const nextReports = inboxReports.map(mapApiReport);
+      const nextTrash = trashReports.map(mapApiReport);
+
+      setReports(nextReports);
+      setTrash(nextTrash);
+      setSelectedReport((current) => {
+        if (!current) {
+          return nextReports[0] || null;
+        }
+
+        return (
+          nextReports.find((report) => report.id === current.id) ||
+          nextTrash.find((report) => report.id === current.id) ||
+          null
+        );
+      });
     } catch (e) {
       console.error(e);
       addToast("Failed to load reports", "error");
@@ -243,71 +166,90 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
     }
   };
 
-  const toggleSelectOne = (e: React.MouseEvent, id: number) => {
+  const toggleSelectOne = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
     );
   };
 
-  const handleMoveToTrash = (ids: number[]) => {
+  const handleMoveToTrash = async (ids: string[]) => {
     const message =
       ids.length === 1
         ? "Move this report to trash?"
         : `Move ${ids.length} reports to trash?`;
-    if (window.confirm(message)) {
-      const itemsToMove = reports.filter((r) => ids.includes(r.id));
-      setTrash((prev) => [...prev, ...itemsToMove]);
-      setReports((prev) => prev.filter((r) => !ids.includes(r.id)));
+    if (!window.confirm(message)) {
+      return;
+    }
+
+    try {
+      await Promise.all(ids.map((id) => moveReportToTrash(id)));
+      await fetchReports();
       setSelectedIds([]);
       if (selectedReport && ids.includes(selectedReport.id)) {
-        setSelectedReport(null);
         setShowDetail(false);
       }
       addToast(`Moved ${ids.length} report(s) to trash`, "success");
+    } catch (error) {
+      console.error("Failed to move reports to trash", error);
+      addToast("Failed to move report(s) to trash", "error");
     }
   };
 
-  const handleRestoreFromTrash = (id: number) => {
-    if (window.confirm("Restore this report to your inbox?")) {
-      const item = trash.find((r) => r.id === id);
-      if (item) {
-        setReports((prev) => [item, ...prev]);
-        setTrash((prev) => prev.filter((r) => r.id !== id));
-        addToast("Report restored successfully", "success");
-      }
+  const handleRestoreFromTrash = async (id: string) => {
+    if (!window.confirm("Restore this report to your inbox?")) {
+      return;
+    }
+
+    try {
+      await restoreReport(id);
+      await fetchReports();
+      addToast("Report restored successfully", "success");
+    } catch (error) {
+      console.error("Failed to restore report", error);
+      addToast("Failed to restore report", "error");
     }
   };
 
-  const handlePermanentDelete = async (id: number) => {
+  const handlePermanentDelete = async (id: string) => {
     if (
       window.confirm(
         "This action cannot be undone. Permanently delete this report?",
       )
     ) {
-      if (USE_MOCK_DATA) {
-        setTrash((prev) => prev.filter((r) => r.id !== id));
-        addToast("Report permanently deleted", "success");
-      } else {
-        try {
-          await axios.delete(`http://127.0.0.1:8000/api/delete-report/${id}/`);
-          setTrash((prev) => prev.filter((r) => r.id !== id));
-          addToast("Report permanently deleted", "success");
-        } catch (e) {
-          addToast("Failed to delete from server", "error");
+      try {
+        await permanentlyDeleteReport(id);
+        await fetchReports();
+        if (selectedReport?.id === id) {
+          setSelectedReport(null);
+          setShowDetail(false);
         }
+        addToast("Report permanently deleted", "success");
+      } catch (e) {
+        console.error("Failed to permanently delete report", e);
+        addToast("Failed to delete from server", "error");
       }
     }
   };
 
-  const handleEmptyTrash = () => {
+  const handleEmptyTrash = async () => {
     if (
       window.confirm(
         "Are you sure you want to permanently delete all items in trash?",
       )
     ) {
-      setTrash([]);
-      addToast("Trash emptied successfully", "success");
+      try {
+        await Promise.all(trash.map((item) => permanentlyDeleteReport(item.id)));
+        await fetchReports();
+        if (selectedReport && trash.some((item) => item.id === selectedReport.id)) {
+          setSelectedReport(null);
+          setShowDetail(false);
+        }
+        addToast("Trash emptied successfully", "success");
+      } catch (error) {
+        console.error("Failed to empty trash", error);
+        addToast("Failed to empty trash", "error");
+      }
     }
   };
 
@@ -412,7 +354,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
                       <div className="am-reports-card-top">
                         <span className="am-reports-sender">{report.user}</span>
                         <span className="am-reports-time">
-                          {formatDate(report.time)}
+                          {formatDateTime(report.time)}
                         </span>
                       </div>
                       <div className="am-reports-card-title">
@@ -455,7 +397,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
                     <strong>Branch:</strong> {selectedReport.branch}
                   </div>
                   <div className="am-reports-info-chip">
-                    <strong>Date:</strong> {formatDate(selectedReport.time)}
+                    <strong>Date:</strong> {formatDateTime(selectedReport.time)}
                   </div>
                 </div>
                 <div className="am-reports-text-body">
@@ -475,7 +417,9 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
                     <button
                       className="am-reports-download-btn"
                       onClick={() => {
-                        addToast("Download started", "success");
+                        if (selectedReport.file_url) {
+                          window.open(selectedReport.file_url, "_blank", "noopener,noreferrer");
+                        }
                       }}
                     >
                       Download
@@ -570,7 +514,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
                             </td>
                             <td className="col-date">
                               <span className="am-reports-trash-date">
-                                {formatDate(item.time)}
+                                {formatDateTime(item.time)}
                               </span>
                             </td>
                             <td>
