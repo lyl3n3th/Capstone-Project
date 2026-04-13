@@ -277,12 +277,23 @@ const resolveShsTrackType = (strandOrCourse: string) => {
 export const normalizeBranchName = (branch?: string | null): AdminBranchName => {
   const normalizedBranch = branch?.trim().toLowerCase();
 
-  if (normalizedBranch === "taytay") {
+  if (!normalizedBranch) {
+    return DEFAULT_BRANCH;
+  }
+
+  if (normalizedBranch.includes("taytay")) {
     return "Taytay";
   }
 
-  if (normalizedBranch === "gma") {
+  if (
+    normalizedBranch === "gma" ||
+    normalizedBranch.includes("general mariano alvarez")
+  ) {
     return "GMA";
+  }
+
+  if (normalizedBranch.includes("bacoor")) {
+    return "Bacoor";
   }
 
   return DEFAULT_BRANCH;
@@ -532,7 +543,9 @@ export const getNextStudentNumber = (
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
   const studentNumbers = students
-    .filter((student) => normalizeBranchName(student.branch) === resolvedBranch)
+    .filter(
+      (student) => normalizeBranchName(student.branch) === resolvedBranch,
+    )
     .map((student) => Number.parseInt(student.id, 10))
     .filter((studentNumber) => Number.isFinite(studentNumber))
     .filter((studentNumber) => studentNumber >= STUDENT_NUMBER_FLOOR);
@@ -543,6 +556,77 @@ export const getNextStudentNumber = (
       : STUDENT_NUMBER_FLOOR + 1;
 
   return String(nextStudentNumber).padStart(6, "0");
+};
+
+export const syncApprovedStudentNumber = ({
+  branch,
+  trackingNumber,
+  previousStudentNumber,
+  nextStudentNumber,
+}: {
+  branch?: string | null;
+  trackingNumber?: string | null;
+  previousStudentNumber?: string | null;
+  nextStudentNumber: string;
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const normalizedNextStudentNumber = nextStudentNumber.trim();
+
+  if (!normalizedNextStudentNumber) {
+    return null;
+  }
+
+  const storedEnrollees =
+    readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ?? [];
+  let updatedEnrollee: AdminEnrolleeRecord | null = null;
+
+  const nextEnrollees = storedEnrollees.map((record) => {
+    const isTargetRecord =
+      (trackingNumber && record.trackingNumber === trackingNumber) ||
+      (previousStudentNumber && record.studentNumber === previousStudentNumber);
+
+    if (!isTargetRecord) {
+      return record;
+    }
+
+    updatedEnrollee = {
+      ...record,
+      studentNumber: normalizedNextStudentNumber,
+      branch: resolvedBranch,
+    };
+    return updatedEnrollee;
+  });
+
+  if (updatedEnrollee) {
+    writeBranchScopedData("enrollees", resolvedBranch, nextEnrollees);
+  }
+
+  const storedStudents = readStoredStudents();
+  let hasUpdatedStoredStudent = false;
+  const nextStudents = storedStudents.map((student) => {
+    const matchesBranch = normalizeBranchName(student.branch) === resolvedBranch;
+    const isTargetRecord =
+      matchesBranch &&
+      ((trackingNumber && student.trackingNumber === trackingNumber) ||
+        (previousStudentNumber && student.id === previousStudentNumber));
+
+    if (!isTargetRecord) {
+      return student;
+    }
+
+    hasUpdatedStoredStudent = true;
+    return {
+      ...student,
+      id: normalizedNextStudentNumber,
+      branch: resolvedBranch,
+    };
+  });
+
+  if (hasUpdatedStoredStudent) {
+    writeStoredStudents(nextStudents);
+  }
+
+  return updatedEnrollee;
 };
 
 const getAttachmentKey = (attachment: Pick<AdminAttachment, "name">) =>

@@ -958,6 +958,7 @@
 .view-document-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   background: none;
   border: none;
@@ -967,6 +968,7 @@
   cursor: pointer;
   padding: 6px 12px;
   border-radius: 6px;
+  text-decoration: none;
   transition: all 0.2s ease;
 }
 
@@ -975,82 +977,7 @@
 }
 
 /* ==========================================================================
-   13. ATTACHMENT VIEWER
-   ========================================================================== */
-.attachment-viewer-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  z-index: 2100;
-}
-
-.attachment-viewer {
-  width: 100%;
-  max-width: 800px;
-  background: #ffffff;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
-}
-
-.attachment-viewer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.attachment-viewer-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1A3D5C;
-}
-
-.attachment-viewer-content {
-  padding: 20px;
-  max-height: 70vh;
-  overflow: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.attachment-viewer-content img {
-  max-width: 100%;
-  max-height: 60vh;
-  object-fit: contain;
-}
-
-.attachment-placeholder {
-  text-align: center;
-  padding: 40px;
-}
-
-.download-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  padding: 8px 16px;
-  background: #066287;
-  color: white;
-  text-decoration: none;
-  border-radius: 8px;
-  font-weight: 600;
-}
-
-.download-link:hover {
-  background: #1A3D5C;
-}
-
-/* ==========================================================================
-   14. SECTION MANAGER MODAL
+   13. SECTION MANAGER MODAL
    ========================================================================== */
 .section-manager-overlay,
 .section-students-overlay {
@@ -2196,7 +2123,7 @@
 
 .assignment-subject-option {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   padding: 12px 14px;
   border: 1px solid #dbe4ee;
@@ -2217,14 +2144,31 @@
   box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.12);
 }
 
+.assignment-subject-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  min-height: 20px;
+}
+
 .assignment-subject-option input {
-  margin-top: 4px;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #1d4ed8;
+}
+
+.assignment-subject-details {
+  min-width: 0;
 }
 
 .assignment-subject-option strong {
   display: block;
   color: #0f172a;
   font-size: 13px;
+  line-height: 1.45;
 }
 
 .assignment-subject-option span {
@@ -2232,6 +2176,7 @@
   margin-top: 4px;
   color: #64748b;
   font-size: 12px;
+  line-height: 1.45;
 }
 
 .assignment-subject-empty {
@@ -2369,6 +2314,10 @@
 
   .assignment-subject-picker-header {
     flex-direction: column;
+  }
+
+  .assignment-subject-option {
+    align-items: flex-start;
   }
 
   .assignment-card.mini .assignment-header,

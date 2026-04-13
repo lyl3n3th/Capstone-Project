@@ -2,6 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { FaTrash, FaUndo, FaSearch } from "react-icons/fa";
 import { ToastContainer } from "../../components/common/Toast";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import { useAuth } from "../../hooks/useAuth";
+import {
+  getStudentsForBranch,
+  normalizeBranchName,
+  readStoredStudents,
+  writeStoredStudents,
+} from "../../services/adminStorage";
 import "../../styles/admin/admin-trash.css";
 
 interface ArchiveProps {
@@ -22,23 +29,7 @@ interface Student {
   email: string;
   address: string;
   status: "Complete" | "Incomplete" | "Archived";
-}
-
-interface ApiStudent {
-  id: number;
-  student_id: string;
-  first_name: string;
-  middle_name?: string | null;
-  last_name: string;
-  full_name?: string;
-  email: string;
-  program: string;
-  year_level: string;
-  contact?: string | null;
-  phone?: string | null;
-  address?: string | null;
-  status: string;
-  document_submitted_date?: string | null;
+  branch: string;
 }
 
 interface Toast {
@@ -59,8 +50,12 @@ export default function AdminTrash({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: ArchiveProps) {
+  const { currentUser } = useAuth();
+  const currentBranch = normalizeBranchName(currentUser?.branch);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [students, setStudents] = useState<Student[]>([]);
+  const [students, setStudents] = useState<Student[]>(
+    () => getStudentsForBranch(currentBranch) as Student[],
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [filterProgram, setFilterProgram] = useState("All Programs");
   const [filterYearLevel, setFilterYearLevel] = useState("All Year Levels");
@@ -90,76 +85,27 @@ export default function AdminTrash({
     setIsSidebarOpen(false);
   };
 
-  const mapApiStatusToUiStatus = (status: string): Student["status"] => {
-    if (status === "Inactive") return "Archived";
-    if (status === "Complete") return "Complete";
-    return "Incomplete";
-  };
-
-  const mapApiStudentToStudent = (apiStudent: ApiStudent): Student => {
-    const fullName = (
-      apiStudent.full_name ||
-      `${apiStudent.first_name || ""} ${apiStudent.middle_name || ""} ${apiStudent.last_name || ""}`
-    )
-      .trim()
-      .replace(/\s+/g, " ");
-
-    return {
-      recordId: apiStudent.id,
-      id: apiStudent.student_id,
-      name: fullName,
-      program: apiStudent.program || "",
-      yearLevel: apiStudent.year_level || "",
-      documentSubmitted: apiStudent.document_submitted_date || "",
-      contact: apiStudent.contact || apiStudent.phone || "",
-      email: apiStudent.email || "",
-      address: apiStudent.address || "",
-      status: mapApiStatusToUiStatus(apiStudent.status),
-    };
-  };
-
-  const loadArchivedStudents = async () => {
+  useEffect(() => {
     setIsLoading(true);
 
     try {
-      const fetchedStudents: ApiStudent[] = [];
-      let nextPageUrl: string | null = `${STUDENTS_API_URL}?status=Inactive`;
-
-      while (nextPageUrl) {
-        const response = await fetch(nextPageUrl);
-
-        if (!response.ok) {
-          throw new Error("Failed to load archived students from backend.");
-        }
-
-        const payload = await response.json();
-
-        if (Array.isArray(payload)) {
-          fetchedStudents.push(...payload);
-          nextPageUrl = null;
-        } else {
-          const results = Array.isArray(payload.results) ? payload.results : [];
-          fetchedStudents.push(...results);
-          nextPageUrl =
-            typeof payload.next === "string" && payload.next
-              ? payload.next
-              : null;
-        }
-      }
-
-      setStudents(fetchedStudents.map(mapApiStudentToStudent));
+      setStudents(getStudentsForBranch(currentBranch) as Student[]);
     } catch (error) {
       console.error("Failed to load archived students", error);
-      addToast("Unable to load Trash records from backend.", "error");
-      setStudents([]);
+      addToast("Unable to load Trash records for this branch.", "error");
+      setStudents(getStudentsForBranch(currentBranch) as Student[]);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentBranch]);
 
   useEffect(() => {
-    loadArchivedStudents();
-  }, []);
+    const studentsFromOtherBranches = readStoredStudents().filter(
+      (student) => normalizeBranchName(student.branch) !== currentBranch,
+    );
+
+    writeStoredStudents([...studentsFromOtherBranches, ...students]);
+  }, [students, currentBranch]);
 
   const archivedStudents = students.filter(
     (student) => student.status === "Archived",
@@ -243,11 +189,19 @@ export default function AdminTrash({
   };
 
   const handleUnarchive = async (student: Student) => {
-    if (!student.recordId) {
-      addToast(
-        "Unable to restore this record because it is not linked to backend.",
-        "error",
+    const restoreStudentLocally = () => {
+      setStudents((prev) =>
+        prev.map((record) =>
+          record.id === student.id
+            ? { ...record, status: "Incomplete" }
+            : record,
+        ),
       );
+    };
+
+    if (!student.recordId) {
+      restoreStudentLocally();
+      addToast(`${student.name} has been restored successfully.`, "success");
       return;
     }
 
@@ -265,7 +219,7 @@ export default function AdminTrash({
         throw new Error(errorData?.detail || "Failed to restore student.");
       }
 
-      await loadArchivedStudents();
+      restoreStudentLocally();
       addToast(`${student.name} has been restored successfully.`, "success");
     } catch (error) {
       console.error("Failed to restore student", error);
@@ -282,11 +236,13 @@ export default function AdminTrash({
     );
     if (!confirmed) return;
 
+    const deleteStudentLocally = () => {
+      setStudents((prev) => prev.filter((record) => record.id !== student.id));
+    };
+
     if (!student.recordId) {
-      addToast(
-        "Unable to delete this record because it is not linked to backend.",
-        "error",
-      );
+      deleteStudentLocally();
+      addToast(`${student.name} has been permanently deleted.`, "success");
       return;
     }
 
@@ -300,7 +256,7 @@ export default function AdminTrash({
         throw new Error(errorData?.detail || "Failed to delete student.");
       }
 
-      await loadArchivedStudents();
+      deleteStudentLocally();
       addToast(`${student.name} has been permanently deleted.`, "success");
     } catch (error) {
       console.error("Failed to delete student", error);

@@ -18,7 +18,7 @@ create table if not exists public.student_profiles (
   student_status_id uuid not null references public.admission_student_statuses(id) on delete restrict,
   program_offering_id uuid not null references public.program_offerings(id) on delete restrict,
   track_id uuid not null references public.program_tracks(id) on delete restrict,
-  student_number text not null unique,
+  student_number text not null,
   first_name text not null,
   last_name text not null,
   middle_name text,
@@ -40,6 +40,12 @@ create table if not exists public.student_profiles (
 
 alter table public.student_profiles
 alter column id set default extensions.gen_random_uuid();
+
+alter table public.student_profiles
+drop constraint if exists student_profiles_student_number_key;
+
+create unique index if not exists student_profiles_branch_student_number_key
+  on public.student_profiles (branch_id, student_number);
 
 create table if not exists public.student_contact_details (
   student_id uuid primary key references public.student_profiles(id) on delete cascade,
@@ -161,8 +167,52 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_student_number text;
 begin
-  return lpad(nextval('public.student_number_seq')::text, 6, '0');
+  loop
+    v_student_number := lpad(nextval('public.student_number_seq')::text, 6, '0');
+
+    exit when not exists (
+      select 1
+      from public.student_profiles student
+      where student.student_number = v_student_number
+    );
+  end loop;
+
+  return v_student_number;
+end;
+$$;
+
+create or replace function public.generate_student_number(
+  p_branch_id uuid
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_student_number bigint;
+begin
+  perform pg_advisory_xact_lock(2610, coalesce(hashtext(p_branch_id::text), 0));
+
+  select greatest(
+    coalesce(
+      max(student.student_number::bigint),
+      261000
+    ),
+    261000
+  ) + 1
+  into v_student_number
+  from public.student_profiles student
+  where student.student_number ~ '^[0-9]+$'
+    and (
+      p_branch_id is null
+      or student.branch_id = p_branch_id
+    );
+
+  return lpad(v_student_number::text, 6, '0');
 end;
 $$;
 
@@ -258,8 +308,9 @@ as $$
 $$;
 
 drop function if exists public.activate_approved_student(text);
+drop function if exists public.activate_approved_student(text, text);
 
-create function public.activate_approved_student(
+create or replace function public.activate_approved_student(
   p_tracking_number text,
   p_preferred_student_number text default null
 )
@@ -291,14 +342,15 @@ as $$
 #variable_conflict use_column
 declare
   v_application_id uuid;
+  v_branch_id uuid;
   v_student_id uuid;
   v_student_number text;
   v_preferred_student_number text;
 begin
   v_preferred_student_number := nullif(trim(coalesce(p_preferred_student_number, '')), '');
 
-  select app.id
-  into v_application_id
+  select app.id, app.branch_id
+  into v_application_id, v_branch_id
   from public.admission_applications app
   where app.tracking_number = upper(trim(coalesce(p_tracking_number, '')))
     and app.application_status <> 'cancelled'
@@ -326,13 +378,14 @@ begin
         select 1
         from public.student_profiles student
         where student.student_number = v_preferred_student_number
+          and student.branch_id = v_branch_id
       ) then
-        raise exception 'Student number "%" is already assigned to another student.', v_preferred_student_number;
+        raise exception 'Student number "%" is already assigned to another student in this branch.', v_preferred_student_number;
       end if;
 
       v_student_number := v_preferred_student_number;
     else
-      v_student_number := public.generate_student_number();
+      v_student_number := public.generate_student_number(v_branch_id);
     end if;
 
     insert into public.student_profiles (
@@ -633,7 +686,7 @@ $$;
 
 drop function if exists public.get_admin_admission_queue(text);
 
-create function public.get_admin_admission_queue(
+create or replace function public.get_admin_admission_queue(
   p_branch_code text default null
 )
 returns table (
@@ -776,6 +829,7 @@ alter table public.student_contact_details enable row level security;
 alter table public.student_portal_accounts enable row level security;
 
 grant execute on function public.generate_student_number() to anon, authenticated;
+grant execute on function public.generate_student_number(uuid) to anon, authenticated;
 grant execute on function public.get_student_activation_status(text) to anon, authenticated;
 grant execute on function public.activate_approved_student(text, text) to anon, authenticated;
 grant execute on function public.register_student_portal_account(

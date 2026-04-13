@@ -6,7 +6,10 @@ import {
   activateApprovedStudent,
   registerStudentPortalAccount,
 } from "../../services/auth";
-import { findApprovedEnrolleeByStudentNumber } from "../../services/adminStorage";
+import {
+  findApprovedEnrolleeByStudentNumber,
+  syncApprovedStudentNumber,
+} from "../../services/adminStorage";
 import "../../styles/student/student-regis.css";
 
 function StudentRegistration() {
@@ -126,18 +129,22 @@ function StudentRegistration() {
 
     try {
       setIsSubmitting(true);
-      const attemptRegistration = () =>
+      let resolvedStudentNumber = formData.studentNumber;
+      const attemptRegistration = (studentNumber: string) =>
         registerStudentPortalAccount({
           branch: selectedBranch,
-          studentNumber: formData.studentNumber,
+          studentNumber,
           email: formData.email,
           mobile: rawPhone,
           birthDate: formData.birthDate,
           password: formData.password,
         });
+      let registeredIdentity;
 
       try {
-        await attemptRegistration();
+        registeredIdentity = await attemptRegistration(resolvedStudentNumber);
+        resolvedStudentNumber =
+          registeredIdentity.studentNumber || resolvedStudentNumber;
       } catch (error) {
         const shouldTryLocalBackfill =
           error instanceof Error &&
@@ -158,17 +165,33 @@ function StudentRegistration() {
           throw error;
         }
 
-        await activateApprovedStudent(
+        const activatedIdentity = await activateApprovedStudent(
           approvedEnrollee.trackingNumber,
-          approvedEnrollee.studentNumber || formData.studentNumber,
+          approvedEnrollee.studentNumber || resolvedStudentNumber,
         );
+        resolvedStudentNumber =
+          activatedIdentity.studentNumber || resolvedStudentNumber;
 
-        await attemptRegistration();
+        syncApprovedStudentNumber({
+          branch: selectedBranch,
+          trackingNumber: approvedEnrollee.trackingNumber,
+          previousStudentNumber:
+            approvedEnrollee.studentNumber || formData.studentNumber,
+          nextStudentNumber: resolvedStudentNumber,
+        });
+
+        registeredIdentity = await attemptRegistration(resolvedStudentNumber);
+        resolvedStudentNumber =
+          registeredIdentity.studentNumber || resolvedStudentNumber;
       }
 
-      alert("Registration successful. You can now sign in to the student portal.");
+      const successMessage =
+        resolvedStudentNumber !== formData.studentNumber
+          ? `Registration successful. Your student number is ${resolvedStudentNumber}. You can now sign in to the student portal.`
+          : "Registration successful. You can now sign in to the student portal.";
+      alert(successMessage);
       navigate(
-        `/student/login?branch=${encodeURIComponent(selectedBranch)}&studentNumber=${encodeURIComponent(formData.studentNumber)}`,
+        `/student/login?branch=${encodeURIComponent(selectedBranch)}&studentNumber=${encodeURIComponent(resolvedStudentNumber)}`,
         { replace: true },
       );
     } catch (error) {

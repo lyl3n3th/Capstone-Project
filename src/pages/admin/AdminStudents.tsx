@@ -2,14 +2,18 @@ import { useState, useEffect } from "react";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { useAuth } from "../../hooks/useAuth";
 import {
+  fetchSupabaseAdmissionApplicants,
   getNextStudentNumber,
   getStudentRequirementSnapshot,
   getStudentsForBranch,
   normalizeBranchName,
+  promoteApplicantToStoredStudent,
+  readBranchScopedData,
   readStoredStudents,
   updateStudentRequirementReviewStatus,
   writeStoredStudents,
   type AdminAttachment,
+  type AdminEnrolleeRecord,
 } from "../../services/adminStorage";
 import "../../styles/admin/admin-students.css";
 
@@ -38,24 +42,6 @@ interface Student {
   trackingNumber?: string;
 }
 
-interface ApiStudent {
-  id: number;
-  student_id: string;
-  first_name: string;
-  middle_name?: string | null;
-  last_name: string;
-  full_name?: string;
-  email: string;
-  phone?: string | null;
-  program: string;
-  year_level: string;
-  strand_or_course?: string | null;
-  address?: string | null;
-  contact?: string | null;
-  status: string;
-  document_submitted_date?: string | null;
-}
-
 interface StudentRequirementNotification {
   student: Student;
   pendingReviewCount: number;
@@ -69,6 +55,8 @@ interface StudentRequirementNotification {
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
+const ENROLLEE_STORAGE_SCOPE = "enrollees";
+const RECOVERABLE_BRANCHES = ["Bacoor", "Taytay", "GMA"] as const;
 
 const splitFullName = (fullName: string) => {
   const normalizedName = fullName.trim().replace(/\s+/g, " ");
@@ -87,12 +75,6 @@ const splitFullName = (fullName: string) => {
   const middleName = parts.slice(1, -1).join(" ");
 
   return { firstName, middleName, lastName };
-};
-
-const mapApiStatusToUiStatus = (status: string): Student["status"] => {
-  if (status === "Inactive") return "Archived";
-  if (status === "Complete") return "Complete";
-  return "Incomplete";
 };
 
 const mapUiStatusToApiStatus = (status: Student["status"]): string => {
@@ -121,31 +103,6 @@ const hasSubmittedAttachmentNamed = (
     ),
   );
 
-const mapApiStudentToStudent = (apiStudent: ApiStudent): Student => {
-  const fullName = (
-    apiStudent.full_name ||
-    `${apiStudent.first_name || ""} ${apiStudent.middle_name || ""} ${apiStudent.last_name || ""}`
-  )
-    .trim()
-    .replace(/\s+/g, " ");
-
-  return {
-    recordId: apiStudent.id,
-    id: apiStudent.student_id,
-    name: fullName,
-    program: apiStudent.program || "",
-    yearLevel: apiStudent.year_level || "",
-    shsTrackType: "",
-    strandOrCourse: apiStudent.strand_or_course || "",
-    documentSubmitted: apiStudent.document_submitted_date || "",
-    contact: apiStudent.contact || apiStudent.phone || "",
-    email: apiStudent.email || "",
-    address: apiStudent.address || "",
-    status: mapApiStatusToUiStatus(apiStudent.status),
-    branch: "Bacoor",
-  };
-};
-
 const mapStudentToApiPayload = (student: Student) => {
   const { firstName, middleName, lastName } = splitFullName(student.name);
 
@@ -164,6 +121,79 @@ const mapStudentToApiPayload = (student: Student) => {
     status: mapUiStatusToApiStatus(student.status),
     document_submitted_date: student.documentSubmitted || null,
   };
+};
+
+const mergeApprovedEnrollees = (records: AdminEnrolleeRecord[]) => {
+  const mergedRecords = new Map<string, AdminEnrolleeRecord>();
+
+  records
+    .filter((record) => record.status === "Approved")
+    .forEach((record) => {
+      const resolvedBranch = normalizeBranchName(record.branch);
+      const key =
+        record.trackingNumber ||
+        record.studentNumber ||
+        `${resolvedBranch}:${record.fullName}`;
+      const existingRecord = mergedRecords.get(key);
+
+      mergedRecords.set(
+        key,
+        existingRecord
+          ? {
+              ...existingRecord,
+              ...record,
+              branch: resolvedBranch,
+              personalInfo: {
+                ...existingRecord.personalInfo,
+                ...record.personalInfo,
+              },
+              attachments: record.attachments ?? existingRecord.attachments,
+            }
+          : {
+              ...record,
+              branch: resolvedBranch,
+            },
+      );
+    });
+
+  return Array.from(mergedRecords.values());
+};
+
+const recoverApprovedStudentsForBranch = async (
+  branch: string,
+): Promise<number> => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedApprovedEnrollees =
+    readBranchScopedData<AdminEnrolleeRecord[]>(
+      ENROLLEE_STORAGE_SCOPE,
+      resolvedBranch,
+    ) ?? [];
+
+  let supabaseApprovedEnrollees: AdminEnrolleeRecord[] = [];
+  try {
+    supabaseApprovedEnrollees = await fetchSupabaseAdmissionApplicants(
+      resolvedBranch,
+    );
+  } catch (error) {
+    console.warn(
+      `Unable to load approved enrollees from Supabase for ${resolvedBranch}.`,
+      error,
+    );
+  }
+
+  const recoverableEnrollees = mergeApprovedEnrollees([
+    ...storedApprovedEnrollees,
+    ...supabaseApprovedEnrollees,
+  ]);
+
+  recoverableEnrollees.forEach((enrollee) => {
+    promoteApplicantToStoredStudent({
+      ...enrollee,
+      branch: resolvedBranch,
+    });
+  });
+
+  return recoverableEnrollees.length;
 };
 
 export default function AdminStudents({
@@ -191,6 +221,9 @@ export default function AdminStudents({
   const [sortField, setSortField] = useState<"id">("id");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
+  const [studentRecoveryMessage, setStudentRecoveryMessage] = useState<
+    string | null
+  >(null);
 
   // Form state for add/edit
   const [formData, setFormData] = useState<Student>({
@@ -218,50 +251,78 @@ export default function AdminStudents({
     getStudentsForBranch(currentBranch) as Student[],
   );
 
-  const loadStudents = async () => {
-    setIsLoading(true);
+  useEffect(() => {
+    let isCancelled = false;
 
-    try {
-      const fetchedStudents: ApiStudent[] = [];
-      let nextPageUrl: string | null = STUDENTS_API_URL;
+    const loadStudentsForBranch = async () => {
+      setIsLoading(true);
+      setStudentRecoveryMessage(null);
 
-      while (nextPageUrl) {
-        const response = await fetch(nextPageUrl);
-        if (!response.ok) {
-          throw new Error("Failed to load students from backend.");
+      try {
+        let branchStudents = getStudentsForBranch(currentBranch) as Student[];
+
+        if (branchStudents.length === 0) {
+          const storedStudentCount = readStoredStudents().length;
+          const branchesToRecover =
+            storedStudentCount === 0
+              ? [...RECOVERABLE_BRANCHES]
+              : [currentBranch];
+
+          let recoveredBranches = 0;
+
+          for (const branch of branchesToRecover) {
+            const existingBranchStudents = getStudentsForBranch(branch);
+
+            if (existingBranchStudents.length > 0) {
+              continue;
+            }
+
+            const recoveredCount = await recoverApprovedStudentsForBranch(
+              branch,
+            );
+
+            if (recoveredCount > 0) {
+              recoveredBranches += 1;
+            }
+          }
+
+          branchStudents = getStudentsForBranch(currentBranch) as Student[];
+
+          if (!isCancelled) {
+            if (branchStudents.length > 0) {
+              setStudentRecoveryMessage(
+                storedStudentCount === 0
+                  ? `Recovered approved students for ${recoveredBranches} branch${recoveredBranches === 1 ? "" : "es"}.`
+                  : `Recovered ${branchStudents.length} approved student${branchStudents.length === 1 ? "" : "s"} for ${currentBranch}.`,
+              );
+            } else if (recoveredBranches === 0) {
+              setStudentRecoveryMessage(
+                `No approved students were found to restore for ${currentBranch}.`,
+              );
+            }
+          }
         }
 
-        const payload = await response.json();
-
-        if (Array.isArray(payload)) {
-          fetchedStudents.push(...payload);
-          nextPageUrl = null;
-        } else {
-          const results = Array.isArray(payload.results) ? payload.results : [];
-          fetchedStudents.push(...results);
-          nextPageUrl =
-            typeof payload.next === "string" && payload.next
-              ? payload.next
-              : null;
+        if (!isCancelled) {
+          setStudents(branchStudents);
+        }
+      } catch (error) {
+        console.error("Failed to load branch students", error);
+        if (!isCancelled) {
+          setStudents(getStudentsForBranch(currentBranch) as Student[]);
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
         }
       }
+    };
 
-      setStudents(
-        fetchedStudents.map((student) => ({
-          ...mapApiStudentToStudent(student),
-          branch: currentBranch,
-        })),
-      );
-    } catch (error) {
-      console.error("Failed to fetch students", error);
-      setStudents(getStudentsForBranch(currentBranch) as Student[]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    void loadStudentsForBranch();
 
-  useEffect(() => {
-    loadStudents();
+    return () => {
+      isCancelled = true;
+    };
   }, [currentBranch]);
 
   useEffect(() => {
@@ -664,8 +725,7 @@ export default function AdminStudents({
     }
 
     const student = students.find((record) => record.id === studentToArchive);
-
-    if (!student?.recordId) {
+    const archiveStudentLocally = () => {
       setStudents((prev) =>
         prev.map((record) =>
           record.id === studentToArchive
@@ -675,6 +735,10 @@ export default function AdminStudents({
       );
       setIsArchiveModalOpen(false);
       setStudentToArchive(null);
+    };
+
+    if (!student?.recordId) {
+      archiveStudentLocally();
       return;
     }
 
@@ -694,9 +758,7 @@ export default function AdminStudents({
         );
       }
 
-      await loadStudents();
-      setIsArchiveModalOpen(false);
-      setStudentToArchive(null);
+      archiveStudentLocally();
     } catch (error) {
       console.error("Failed to archive student", error);
       const message =
@@ -994,8 +1056,9 @@ export default function AdminStudents({
           <h1>Students</h1>
           <p>
             {isLoading
-              ? "Loading students from backend..."
-              : "Manage and view all enrolled students."}
+              ? "Loading and restoring students..."
+              : studentRecoveryMessage ||
+                "Manage and view all enrolled students."}
           </p>
         </header>
 

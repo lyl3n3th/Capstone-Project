@@ -9,7 +9,6 @@ import {
   FaThumbsUp,
   FaRedoAlt,
   FaFileAlt,
-  FaDownload,
   FaUsers,
   FaMagic,
   FaLayerGroup,
@@ -29,6 +28,7 @@ import { ToastContainer } from "../../components/common/Toast";
 import { useAuth } from "../../hooks/useAuth";
 import {
   fetchSupabaseAdmissionApplicants,
+  getNextStudentNumber,
   getDefaultBranchEnrollees,
   mergeAdminEnrolleeRecords,
   normalizeBranchName,
@@ -464,6 +464,79 @@ const sectionMatchesEnrollee = (
   return matchesAcademicDescriptor(section.strand, enrollee.strandOrCourse);
 };
 
+const LEGACY_MOCK_SECTION_IDS = new Set(["1", "2", "3", "4", "5"]);
+const LEGACY_MOCK_SECTION_CODES = new Set([
+  "IC1DA",
+  "IC1MB",
+  "GA1DA",
+  "HUM1MB",
+  "BSE1A",
+]);
+
+const isLegacyMockSection = (section: ClassSection) =>
+  LEGACY_MOCK_SECTION_IDS.has(section.id) &&
+  LEGACY_MOCK_SECTION_CODES.has(section.code) &&
+  section.enrolleeIds.every((enrolleeId) => /^E\d+$/i.test(enrolleeId));
+
+const getSectionYearCode = (yearLevel: string) => {
+  const normalized = yearLevel.trim().toLowerCase();
+
+  if (normalized.includes("grade 12") || normalized.includes("2nd")) {
+    return "2";
+  }
+
+  if (normalized.includes("grade 11") || normalized.includes("1st")) {
+    return "1";
+  }
+
+  const yearMatch = normalized.match(/\b([1-4])(st|nd|rd|th)?\b/);
+  return yearMatch?.[1] || "1";
+};
+
+const getAutoSectionPrefix = (
+  enrollee: Pick<Enrollee, "program" | "strandOrCourse">,
+) => {
+  if (enrollee.program === "College") {
+    return "BSE";
+  }
+
+  const descriptor = normalizeAcademicDescriptor(enrollee.strandOrCourse);
+
+  if (descriptor === "humss") {
+    return "HUM";
+  }
+
+  if (descriptor) {
+    return descriptor.replace(/[^a-z0-9]/gi, "").slice(0, 4).toUpperCase();
+  }
+
+  return "SHS";
+};
+
+const createAutoSectionForEnrollee = (
+  enrollee: Pick<Enrollee, "id" | "program" | "yearLevel" | "strandOrCourse">,
+  matchingSections: ClassSection[],
+): ClassSection => {
+  const lastSection = matchingSections[matchingSections.length - 1];
+  const lastSectionLetter = lastSection?.section?.trim().toUpperCase();
+  const nextSectionLetter =
+    lastSectionLetter && /^[A-Z]$/.test(lastSectionLetter)
+      ? String.fromCharCode(lastSectionLetter.charCodeAt(0) + 1)
+      : "A";
+
+  return {
+    id: `auto_${enrollee.id}_${Date.now()}_${nextSectionLetter}`,
+    code: `${getAutoSectionPrefix(enrollee)}${getSectionYearCode(enrollee.yearLevel)}${nextSectionLetter}`,
+    program: enrollee.program,
+    yearLevel: enrollee.yearLevel,
+    strand: enrollee.strandOrCourse,
+    section: nextSectionLetter,
+    currentEnrollees: 1,
+    maxCapacity: 30,
+    enrolleeIds: [enrollee.id],
+  };
+};
+
 export default function AdminEnrollees({
   onLogout,
   loggedInUsername,
@@ -479,9 +552,6 @@ export default function AdminEnrollees({
   const [selectedRequest, setSelectedRequest] = useState<
     EnrollmentRequest | Enrollee | null
   >(null);
-  const [viewingAttachment, setViewingAttachment] = useState<Attachment | null>(
-    null,
-  );
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"All" | Enrollee["status"]>(
@@ -648,69 +718,9 @@ export default function AdminEnrollees({
       currentBranch,
     );
 
-    if (storedSections?.length) {
-      setClassSections(storedSections);
-      return;
-    }
-
-    const mockSections: ClassSection[] = [
-      {
-        id: "1",
-        code: "IC1DA",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        strand: "ICT",
-        section: "A",
-        currentEnrollees: 28,
-        maxCapacity: 30,
-        enrolleeIds: ["E001", "E002"],
-      },
-      {
-        id: "2",
-        code: "IC1MB",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        strand: "ICT",
-        section: "B",
-        currentEnrollees: 15,
-        maxCapacity: 30,
-        enrolleeIds: [],
-      },
-      {
-        id: "3",
-        code: "GA1DA",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        strand: "GAS",
-        section: "A",
-        currentEnrollees: 30,
-        maxCapacity: 30,
-        enrolleeIds: [],
-      },
-      {
-        id: "4",
-        code: "HUM1MB",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        strand: "HUMSS",
-        section: "B",
-        currentEnrollees: 12,
-        maxCapacity: 30,
-        enrolleeIds: [],
-      },
-      {
-        id: "5",
-        code: "BSE1A",
-        program: "College",
-        yearLevel: "1st Year",
-        strand: "BSE - Bachelor of Entrepreneurship",
-        section: "A",
-        currentEnrollees: 8,
-        maxCapacity: 30,
-        enrolleeIds: [],
-      },
-    ];
-    setClassSections(mockSections);
+    setClassSections(
+      (storedSections ?? []).filter((section) => !isLegacyMockSection(section)),
+    );
   };
 
   // Load subjects - Updated with full SHS and College structure (Semester-based for SHS)
@@ -2192,6 +2202,14 @@ export default function AdminEnrollees({
 
     if (!enrollee || !section) return;
 
+    if (!sectionMatchesEnrollee(section, enrollee)) {
+      addToast(
+        `${section.code} does not match ${enrollee.fullName}'s program or strand/course.`,
+        "error",
+      );
+      return;
+    }
+
     if (section.currentEnrollees >= section.maxCapacity) {
       addToast(`${section.code} is already full!`, "error");
       return;
@@ -2228,10 +2246,12 @@ export default function AdminEnrollees({
     const assignments: {
       enrollee: Enrollee;
       section: ClassSection;
-      isNewSection: boolean;
     }[] = [];
-    const updatedSections = [...classSections];
-    const newSectionsCreated: ClassSection[] = [];
+    const updatedSections = classSections.map((section) => ({
+      ...section,
+      enrolleeIds: [...section.enrolleeIds],
+    }));
+    const unassignedStudents: Enrollee[] = [];
 
     for (const enrollee of pendingAssignments) {
       const matchingSections = updatedSections
@@ -2241,39 +2261,17 @@ export default function AdminEnrollees({
       let assignedSection = matchingSections.find(
         (section) => section.currentEnrollees < section.maxCapacity,
       );
-      let isNewSection = false;
 
-      if (!assignedSection && matchingSections.length > 0) {
-        const lastSection = matchingSections[matchingSections.length - 1];
-        const nextSectionLetter = String.fromCharCode(
-          lastSection.section.charCodeAt(0) + 1,
+      if (!assignedSection) {
+        assignedSection = createAutoSectionForEnrollee(
+          enrollee,
+          matchingSections,
         );
-        const newSection: ClassSection = {
-          id: `new_${Date.now()}_${nextSectionLetter}`,
-          code:
-            enrollee.program === "SHS"
-              ? `${
-                  (enrollee.strandOrCourse || "SHS")
-                    .split(" ")[0]
-                    .replace(/[^A-Z]/gi, "")
-                    .slice(0, 4)
-                    .toUpperCase() || "SHS"
-                }${enrollee.yearLevel === "Grade 12" ? "2" : "1"}${nextSectionLetter}`
-              : `BSE1${nextSectionLetter}`,
-          program: enrollee.program,
-          yearLevel: enrollee.yearLevel,
-          strand: enrollee.strandOrCourse,
-          section: nextSectionLetter,
-          currentEnrollees: 1,
-          maxCapacity: 30,
-          enrolleeIds: [enrollee.id],
-        };
-        assignedSection = newSection;
-        newSectionsCreated.push(newSection);
-        isNewSection = true;
-      } else if (assignedSection) {
+        updatedSections.push(assignedSection);
+      } else {
+        const existingSection = assignedSection;
         const sectionIndex = updatedSections.findIndex(
-          (s) => s.id === assignedSection!.id,
+          (s) => s.id === existingSection.id,
         );
         if (sectionIndex !== -1) {
           updatedSections[sectionIndex].currentEnrollees++;
@@ -2282,11 +2280,18 @@ export default function AdminEnrollees({
       }
 
       if (assignedSection) {
-        assignments.push({ enrollee, section: assignedSection, isNewSection });
+        assignments.push({ enrollee, section: assignedSection });
+      } else {
+        unassignedStudents.push(enrollee);
       }
     }
 
-    setClassSections([...updatedSections, ...newSectionsCreated]);
+    if (assignments.length === 0) {
+      addToast("No students were assigned to sections.", "warning");
+      return;
+    }
+
+    setClassSections(updatedSections);
 
     const newAssignments = assignments.map((a) => ({
       enrolleeId: a.enrollee.id,
@@ -2296,12 +2301,17 @@ export default function AdminEnrollees({
       isManualOverride: false,
     }));
     setSectionAssignments((prev) => [...prev, ...newAssignments]);
-    setPendingAssignments([]);
-    assignments.forEach(({ enrollee, section }) =>
-      syncStudentSection(enrollee, section.code),
-    );
+    setPendingAssignments(unassignedStudents);
+    assignments.forEach(({ enrollee, section }) => {
+      syncStudentSection(enrollee, section.code);
+    });
 
-    addToast(`Assigned ${assignments.length} students to sections`, "success");
+    addToast(
+      unassignedStudents.length > 0
+        ? `Assigned ${assignments.length} students. ${unassignedStudents.length} still need review.`
+        : `Assigned ${assignments.length} students to sections`,
+      unassignedStudents.length > 0 ? "warning" : "success",
+    );
   };
 
   const viewSectionStudents = (section: ClassSection) => {
@@ -2693,7 +2703,6 @@ export default function AdminEnrollees({
 
   const closeReviewModal = () => {
     setSelectedRequest(null);
-    setViewingAttachment(null);
     setPendingScholarshipScore("");
   };
 
@@ -2757,10 +2766,21 @@ export default function AdminEnrollees({
 
           try {
             if (isApprove) {
+              const storedStudents = readStoredStudents();
+              const preferredStudentNumber =
+                syncedStudentNumber ||
+                storedStudents.find(
+                  (student) =>
+                    normalizeBranchName(student.branch) === currentBranch &&
+                    student.trackingNumber === enrolleeToUpdate.trackingNumber,
+                )?.id ||
+                getNextStudentNumber(currentBranch, storedStudents);
               const activatedStudent = await activateApprovedStudent(
                 enrolleeToUpdate.trackingNumber,
+                preferredStudentNumber,
               );
-              syncedStudentNumber = activatedStudent.studentNumber;
+              syncedStudentNumber =
+                activatedStudent.studentNumber || preferredStudentNumber;
             } else {
               await updateAdmissionProgress({
                 trackingNumber: enrolleeToUpdate.trackingNumber,
@@ -4504,17 +4524,17 @@ export default function AdminEnrollees({
                                   </div>
                                 </div>
                                 <div className="document-requirement-actions">
-                                  {isSubmitted && attachment?.url !== "#" ? (
-                                    <button
+                                  {isSubmitted &&
+                                  attachment &&
+                                  attachment.url !== "#" ? (
+                                    <a
                                       className="view-document-btn"
-                                      onClick={() => {
-                                        if (attachment) {
-                                          setViewingAttachment(attachment);
-                                        }
-                                      }}
+                                      href={attachment.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
                                     >
                                       <FaEye /> View document
-                                    </button>
+                                    </a>
                                   ) : isSubmitted ? (
                                     <span className="document-missing-label">
                                       <FaFileAlt /> Reference only
@@ -4670,41 +4690,6 @@ export default function AdminEnrollees({
                 Yes,{" "}
                 {selectedAction.action === "approve" ? "Approve" : "Reject"}
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {viewingAttachment && (
-        <div className="attachment-viewer-overlay">
-          <div className="attachment-viewer">
-            <div className="attachment-viewer-header">
-              <h3>{viewingAttachment.name}</h3>
-              <button
-                className="attachment-viewer-close"
-                onClick={() => setViewingAttachment(null)}
-              >
-                ✕
-              </button>
-            </div>
-            <div className="attachment-viewer-content">
-              {viewingAttachment.type === "image" ||
-              viewingAttachment.url?.includes("placeholder") ? (
-                <img src={viewingAttachment.url} alt={viewingAttachment.name} />
-              ) : (
-                <div className="attachment-placeholder">
-                  <FaFileAlt size={48} />
-                  <p>{viewingAttachment.name}</p>
-                  <a
-                    href={viewingAttachment.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="download-link"
-                  >
-                    <FaDownload /> Download Document
-                  </a>
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -5399,15 +5384,17 @@ export default function AdminEnrollees({
                             key={subject.id}
                             className={`assignment-subject-option ${isSelected ? "selected" : ""}`}
                           >
-                            <input
-                              type={editingAssignment ? "radio" : "checkbox"}
-                              name="assignment-subjects"
-                              checked={isSelected}
-                              onChange={() =>
-                                toggleAssignmentSubjectSelection(subject.id)
-                              }
-                            />
-                            <div>
+                            <span className="assignment-subject-control">
+                              <input
+                                type={editingAssignment ? "radio" : "checkbox"}
+                                name="assignment-subjects"
+                                checked={isSelected}
+                                onChange={() =>
+                                  toggleAssignmentSubjectSelection(subject.id)
+                                }
+                              />
+                            </span>
+                            <div className="assignment-subject-details">
                               <strong>
                                 {subject.code} - {subject.name}
                               </strong>

@@ -116,7 +116,7 @@ export default defineConfig([
 
 //git push -u origin branch-name
 
-// just in case set up...
+// just in case set up... 
 
 // npm install axios @supabase/supabase-js react-icons
 

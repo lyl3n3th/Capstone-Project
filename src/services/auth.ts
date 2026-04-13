@@ -78,6 +78,11 @@ const getErrorMessage = (error: SupabaseErrorLike) =>
       ? `${error.message} ${error.hint}`.trim()
       : error.message;
 
+const isStudentNumberConflictError = (message: string) =>
+  /student_profiles_branch_student_number_key/i.test(message) ||
+  /student_profiles_student_number_key/i.test(message) ||
+  /duplicate key value violates unique constraint/i.test(message);
+
 const getSingleRow = <T,>(data: unknown): T | null => {
   if (Array.isArray(data)) {
     return data.length > 0 ? (data[0] as T) : null;
@@ -170,14 +175,35 @@ export const activateApprovedStudent = async (
   trackingNumber: string,
   preferredStudentNumber?: string,
 ) => {
-  const { data, error } = await supabase
-    .rpc("activate_approved_student", {
-      p_tracking_number: trackingNumber.trim().toUpperCase(),
-      p_preferred_student_number: preferredStudentNumber?.trim() || null,
-    })
-    .returns<StudentPortalSnapshotRow[]>();
+  const resolvedPreferredStudentNumber = preferredStudentNumber?.trim() || null;
+  let lastRetriableError: string | null = null;
 
-  return ensureStudentSnapshot(data, error);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { data, error } = await supabase
+      .rpc("activate_approved_student", {
+        p_tracking_number: trackingNumber.trim().toUpperCase(),
+        p_preferred_student_number: resolvedPreferredStudentNumber,
+      })
+      .returns<StudentPortalSnapshotRow[]>();
+
+    if (!error) {
+      return ensureStudentSnapshot(data, null);
+    }
+
+    const message = getErrorMessage(error);
+
+    if (!resolvedPreferredStudentNumber && isStudentNumberConflictError(message)) {
+      lastRetriableError = message;
+      continue;
+    }
+
+    throw new Error(message);
+  }
+
+  throw new Error(
+    lastRetriableError ||
+      "Unable to generate a unique student number right now. Please try again.",
+  );
 };
 
 export const registerStudentPortalAccount = async (
