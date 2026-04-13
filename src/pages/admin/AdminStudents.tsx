@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { useAuth } from "../../hooks/useAuth";
+import { BACKUP_RESTORE_APPLIED_EVENT } from "../../services/backupApi";
 import {
   fetchSupabaseAdmissionApplicants,
   getNextStudentNumber,
@@ -322,6 +323,24 @@ export default function AdminStudents({
 
     return () => {
       isCancelled = true;
+    };
+  }, [currentBranch]);
+
+  useEffect(() => {
+    const handleBackupRestoreApplied = () => {
+      setStudents(getStudentsForBranch(currentBranch) as Student[]);
+    };
+
+    window.addEventListener(
+      BACKUP_RESTORE_APPLIED_EVENT,
+      handleBackupRestoreApplied as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener(
+        BACKUP_RESTORE_APPLIED_EVENT,
+        handleBackupRestoreApplied as EventListener,
+      );
     };
   }, [currentBranch]);
 

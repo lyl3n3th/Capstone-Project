@@ -2,6 +2,8 @@ import { useState } from "react";
 import { FaPaperPlane, FaTrash, FaPaperclip } from "react-icons/fa";
 import { ToastContainer } from "../../components/common/Toast";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import { useAuth } from "../../hooks/useAuth";
+import { createReport } from "../../services/reportApi";
 import "../../styles/admin/admin-reports.css";
 
 interface ReportProps {
@@ -15,6 +17,7 @@ interface ReportFormData {
   subject: string;
   message: string;
   attachmentName: string;
+  attachmentFile: File | null;
 }
 
 interface Toast {
@@ -29,12 +32,15 @@ export default function AdminReports({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: ReportProps) {
+  const { currentUser } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<ReportFormData>({
     subject: "",
     message: "",
     attachmentName: "",
+    attachmentFile: null,
   });
 
   // Toast functions
@@ -73,6 +79,7 @@ export default function AdminReports({
     setFormData((prev) => ({
       ...prev,
       attachmentName: file ? file.name : "",
+      attachmentFile: file || null,
     }));
   };
 
@@ -81,6 +88,7 @@ export default function AdminReports({
       subject: "",
       message: "",
       attachmentName: "",
+      attachmentFile: null,
     });
 
     const fileInput = document.getElementById(
@@ -91,7 +99,7 @@ export default function AdminReports({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.subject.trim() || !formData.message.trim()) {
@@ -99,9 +107,30 @@ export default function AdminReports({
       return;
     }
 
-    addToast("Report submitted successfully!", "success");
+    if (!currentUser?.branch) {
+      addToast("Unable to determine the logged-in branch.", "error");
+      return;
+    }
 
-    handleClear();
+    try {
+      setIsSubmitting(true);
+      await createReport({
+        branch: currentUser.branch,
+        subject: formData.subject.trim(),
+        message: formData.message.trim(),
+        attachment: formData.attachmentFile,
+      });
+      addToast("Report submitted successfully!", "success");
+      handleClear();
+    } catch (error) {
+      console.error("Failed to submit report", error);
+      addToast(
+        error instanceof Error ? error.message : "Failed to submit report.",
+        "error",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -194,8 +223,9 @@ export default function AdminReports({
             </div>
 
             <div className="report-form-actions">
-              <button type="submit" className="send-btn">
-                <FaPaperPlane /> Send Report
+              <button type="submit" className="send-btn" disabled={isSubmitting}>
+                <FaPaperPlane />{" "}
+                {isSubmitting ? "Sending Report..." : "Send Report"}
               </button>
               <button type="button" className="clear-btn" onClick={handleClear}>
                 <FaTrash /> Clear

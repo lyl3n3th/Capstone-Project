@@ -12,7 +12,9 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 import os
+from importlib.util import find_spec
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
 
 # Load environment variables
 load_dotenv()
@@ -49,7 +51,6 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'django_filters',
-
     'apps.core.apps.CoreConfig',
     'apps.admission.apps.AdmissionConfig',
     'apps.student.apps.StudentConfig',
@@ -57,6 +58,9 @@ INSTALLED_APPS = [
     'apps.manager.apps.ManagerConfig',
     'apps.registrar.apps.RegistrarConfig',
 ]
+
+if find_spec('django_celery_beat'):
+    INSTALLED_APPS.append('django_celery_beat')
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -87,6 +91,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'aicsync.wsgi.application'
+ASGI_APPLICATION = 'aicsync.asgi.application'
 
 
 # Database
@@ -94,8 +99,12 @@ WSGI_APPLICATION = 'aicsync.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': os.getenv('DB_ENGINE', 'django.db.backends.sqlite3'),
+        'NAME': os.getenv('DB_NAME', BASE_DIR / 'db.sqlite3'),
+        'USER': os.getenv('DB_USER', ''),
+        'PASSWORD': os.getenv('DB_PASSWORD', ''),
+        'HOST': os.getenv('DB_HOST', ''),
+        'PORT': os.getenv('DB_PORT', ''),
     }
 }
 
@@ -144,6 +153,30 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+SITE_URL = os.getenv("SITE_URL", "http://127.0.0.1:8000")
+
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "reports")
+SUPABASE_BACKUP_BUCKET = os.getenv("SUPABASE_BACKUP_BUCKET", "branch-backups")
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_BEAT_SCHEDULE = {
+    "dispatch-scheduled-backups": {
+        "task": "apps.admin_panel.tasks.dispatch_scheduled_backups",
+        "schedule": 300.0,
+    },
+    "cleanup-expired-backups": {
+        "task": "apps.admin_panel.tasks.cleanup_expired_backups",
+        "schedule": 3600.0,
+    },
+}
 
 
 # Default primary key field type
@@ -158,6 +191,12 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-employee-id",
+    "x-user-role",
+    "x-user-branch",
+    "x-user-name",
+]
 
 # REST Framework settings
 REST_FRAMEWORK = {
@@ -223,3 +262,5 @@ LOGGING = {
         },
     },
 }
+
+(BASE_DIR / 'logs').mkdir(parents=True, exist_ok=True)
