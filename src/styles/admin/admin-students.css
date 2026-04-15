@@ -203,7 +203,7 @@
 
 .students-table {
   width: 100%;
-  min-width: 1100px;
+  min-width: 1240px;
   border-collapse: collapse;
 }
 
@@ -270,6 +270,19 @@
 .students-status-archived {
   background: #e9ecef;
   color: #6c757d;
+}
+
+.students-admission-type-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #075985;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 /* Action Buttons */
@@ -433,8 +446,14 @@
   gap: 12px;
   justify-content: flex-end;
   margin-top: 8px;
+  padding: 16px 24px 24px;
+  box-sizing: border-box;
   padding-top: 16px;
   border-top: 1px solid #e0e0e0;
+}
+
+.students-modal-form .students-modal-actions {
+  padding: 16px 0 0;
 }
 
 .students-cancel-btn,
@@ -622,6 +641,12 @@
   background: #e0f2fe;
   border-color: #93c5fd;
   color: #0369a1;
+}
+
+.students-profile-admission-type {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+  color: #075985;
 }
 
 .students-profile-email {

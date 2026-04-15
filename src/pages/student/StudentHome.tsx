@@ -394,7 +394,7 @@ function StudentHome() {
               </div>
               <div className="s-card-value1">Student Number:</div>
               <div className="s-card-label1">
-                {student?.studentNumber || "20221131"}
+                {student?.studentNumber || "BAC-261001"}
               </div>
               <div className="s-card-value1">Section:</div>
               <div className="s-card-label1">{student?.section || "TBA"}</div>

@@ -19,7 +19,7 @@ function Header({
   onMenuClick,
   studentData = {
     name: "Hener C. Verdida",
-    id: "20221131",
+    id: "BAC-261001",
     progrm: "SHS",
   },
   currentDate,

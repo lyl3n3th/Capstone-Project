@@ -27,6 +27,8 @@ export type AdmissionApplicationStatus =
   | "rejected"
   | "cancelled";
 
+export type AdmissionDiscountSource = "none" | "honor" | "scholarship_exam";
+
 export interface AdmissionDraft {
   trackingNumber?: string;
   branch?: string;
@@ -97,7 +99,11 @@ export interface AdmissionApplicationSummary {
   programLevel: AdmissionProgramLevel;
   trackName: string;
   honorLabel: string | null;
+  honorDiscountPercentage: number;
   appliedForScholarship: boolean;
+  scholarshipExamScore: number | null;
+  effectiveDiscountPercentage: number;
+  effectiveDiscountSource: AdmissionDiscountSource;
   applicationStatus: AdmissionApplicationStatus;
   currentStep: number;
   firstName: string;

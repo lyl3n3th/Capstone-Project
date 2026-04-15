@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { FaTrash, FaUndo, FaSearch } from "react-icons/fa";
-import { ToastContainer } from "../../components/common/Toast";
+import { FaSearch, FaTrash, FaUndo } from "react-icons/fa";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import { ToastContainer } from "../../components/common/Toast";
 import { useAuth } from "../../hooks/useAuth";
+import { deleteAdmissionApplication } from "../../services/admission";
 import {
   getStudentsForBranch,
   normalizeBranchName,
+  readBranchScopedData,
   readStoredStudents,
+  writeBranchScopedData,
   writeStoredStudents,
 } from "../../services/adminStorage";
 import "../../styles/admin/admin-trash.css";
@@ -21,6 +24,7 @@ interface ArchiveProps {
 interface Student {
   recordId?: number;
   id: string;
+  trackingNumber?: string;
   name: string;
   program: string;
   yearLevel: string;
@@ -32,6 +36,33 @@ interface Student {
   branch: string;
 }
 
+interface Enrollee {
+  id: string;
+  trackingNumber: string;
+  studentNumber?: string;
+  fullName: string;
+  program: string;
+  yearLevel: string;
+  branch: string;
+  personalInfo: {
+    contactNumber: string;
+  };
+  archivedAt?: string;
+  archivedByRole?: "Admin" | "Registrar";
+}
+
+interface ArchivedTrashItem {
+  key: string;
+  kind: "Student" | "Enrollee";
+  identifier: string;
+  name: string;
+  program: string;
+  yearLevel: string;
+  contact: string;
+  student?: Student;
+  enrollee?: Enrollee;
+}
+
 interface Toast {
   id: string;
   message: string;
@@ -41,7 +72,6 @@ interface Toast {
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
-
 const ITEMS_PER_PAGE = 10;
 
 export default function AdminTrash({
@@ -56,15 +86,22 @@ export default function AdminTrash({
   const [students, setStudents] = useState<Student[]>(
     () => getStudentsForBranch(currentBranch) as Student[],
   );
+  const [enrollees, setEnrollees] = useState<Enrollee[]>(
+    () =>
+      readBranchScopedData<Enrollee[]>("enrollees", currentBranch) ?? [],
+  );
   const [searchTerm, setSearchTerm] = useState("");
+  const [recordTypeFilter, setRecordTypeFilter] = useState<
+    "All Records" | ArchivedTrashItem["kind"]
+  >("All Records");
   const [filterProgram, setFilterProgram] = useState("All Programs");
   const [filterYearLevel, setFilterYearLevel] = useState("All Year Levels");
   const [currentPage, setCurrentPage] = useState(1);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [isLoading, setIsLoading] = useState(false);
+  const [isProcessingTrash, setIsProcessingTrash] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {
     const id = Date.now().toString();
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -78,7 +115,7 @@ export default function AdminTrash({
   };
 
   const handleSidebarToggle = () => {
-    setIsSidebarOpen(!isSidebarOpen);
+    setIsSidebarOpen((prev) => !prev);
   };
 
   const handleSidebarClose = () => {
@@ -90,10 +127,16 @@ export default function AdminTrash({
 
     try {
       setStudents(getStudentsForBranch(currentBranch) as Student[]);
+      setEnrollees(
+        readBranchScopedData<Enrollee[]>("enrollees", currentBranch) ?? [],
+      );
     } catch (error) {
-      console.error("Failed to load archived students", error);
+      console.error("Failed to load archived records", error);
       addToast("Unable to load Trash records for this branch.", "error");
       setStudents(getStudentsForBranch(currentBranch) as Student[]);
+      setEnrollees(
+        readBranchScopedData<Enrollee[]>("enrollees", currentBranch) ?? [],
+      );
     } finally {
       setIsLoading(false);
     }
@@ -107,45 +150,78 @@ export default function AdminTrash({
     writeStoredStudents([...studentsFromOtherBranches, ...students]);
   }, [students, currentBranch]);
 
+  useEffect(() => {
+    writeBranchScopedData("enrollees", currentBranch, enrollees);
+  }, [currentBranch, enrollees]);
+
   const archivedStudents = students.filter(
     (student) => student.status === "Archived",
   );
+  const archivedEnrollees = enrollees.filter((enrollee) => enrollee.archivedAt);
 
-  const availablePrograms = useMemo(() => {
-    return Array.from(
-      new Set(archivedStudents.map((student) => student.program)),
-    ).sort();
-  }, [archivedStudents]);
+  const archivedRecords = useMemo<ArchivedTrashItem[]>(() => {
+    const studentRecords = archivedStudents.map((student) => ({
+      key: `student-${student.id}`,
+      kind: "Student" as const,
+      identifier: student.id,
+      name: student.name,
+      program: student.program,
+      yearLevel: student.yearLevel,
+      contact: student.contact || "",
+      student,
+    }));
 
-  const availableYearLevels = useMemo(() => {
-    return Array.from(
-      new Set(archivedStudents.map((student) => student.yearLevel)),
-    ).sort();
-  }, [archivedStudents]);
+    const enrolleeRecords = archivedEnrollees.map((enrollee) => ({
+      key: `enrollee-${enrollee.id}`,
+      kind: "Enrollee" as const,
+      identifier: enrollee.studentNumber || enrollee.trackingNumber || enrollee.id,
+      name: enrollee.fullName,
+      program: enrollee.program,
+      yearLevel: enrollee.yearLevel,
+      contact: enrollee.personalInfo.contactNumber || "",
+      enrollee,
+    }));
 
-  const filteredArchivedStudents = archivedStudents.filter((student) => {
+    return [...studentRecords, ...enrolleeRecords];
+  }, [archivedEnrollees, archivedStudents]);
+
+  const availablePrograms = useMemo(
+    () =>
+      Array.from(new Set(archivedRecords.map((record) => record.program))).sort(),
+    [archivedRecords],
+  );
+
+  const availableYearLevels = useMemo(
+    () =>
+      Array.from(
+        new Set(archivedRecords.map((record) => record.yearLevel)),
+      ).sort(),
+    [archivedRecords],
+  );
+
+  const filteredArchivedRecords = archivedRecords.filter((record) => {
     const searchValue = searchTerm.toLowerCase().trim();
     const matchesSearch =
       searchValue === "" ||
-      student.name.toLowerCase().includes(searchValue) ||
-      student.id.toLowerCase().includes(searchValue) ||
-      student.contact.toLowerCase().includes(searchValue) ||
-      student.program.toLowerCase().includes(searchValue);
-
+      record.name.toLowerCase().includes(searchValue) ||
+      record.identifier.toLowerCase().includes(searchValue) ||
+      record.contact.toLowerCase().includes(searchValue) ||
+      record.program.toLowerCase().includes(searchValue);
+    const matchesType =
+      recordTypeFilter === "All Records" || record.kind === recordTypeFilter;
     const matchesProgram =
-      filterProgram === "All Programs" || student.program === filterProgram;
-
+      filterProgram === "All Programs" || record.program === filterProgram;
     const matchesYearLevel =
       filterYearLevel === "All Year Levels" ||
-      student.yearLevel === filterYearLevel;
+      record.yearLevel === filterYearLevel;
 
-    return matchesSearch && matchesProgram && matchesYearLevel;
+    return matchesSearch && matchesType && matchesProgram && matchesYearLevel;
   });
 
-  const sortedArchivedStudents = [...filteredArchivedStudents].sort(
+  const sortedArchivedRecords = [...filteredArchivedRecords].sort(
     (left, right) => {
-      const leftNumber = Number(left.id);
-      const rightNumber = Number(right.id);
+      const leftNumber = Number(left.identifier);
+      const rightNumber = Number(right.identifier);
 
       if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
         return sortDirection === "asc"
@@ -153,8 +229,8 @@ export default function AdminTrash({
           : rightNumber - leftNumber;
       }
 
-      const leftValue = left.id.toLowerCase();
-      const rightValue = right.id.toLowerCase();
+      const leftValue = left.identifier.toLowerCase();
+      const rightValue = right.identifier.toLowerCase();
 
       if (leftValue < rightValue) return sortDirection === "asc" ? -1 : 1;
       if (leftValue > rightValue) return sortDirection === "asc" ? 1 : -1;
@@ -167,20 +243,29 @@ export default function AdminTrash({
     setCurrentPage(1);
   };
 
-  const totalPages = Math.ceil(sortedArchivedStudents.length / ITEMS_PER_PAGE);
+  const totalPages = Math.max(
+    1,
+    Math.ceil(sortedArchivedRecords.length / ITEMS_PER_PAGE),
+  );
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
-  const paginatedStudents = sortedArchivedStudents.slice(startIndex, endIndex);
+  const paginatedRecords = sortedArchivedRecords.slice(startIndex, endIndex);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const handlePreviousPage = () => {
     if (currentPage > 1) {
-      setCurrentPage(currentPage - 1);
+      setCurrentPage((prev) => prev - 1);
     }
   };
 
   const handleNextPage = () => {
     if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1);
+      setCurrentPage((prev) => prev + 1);
     }
   };
 
@@ -188,7 +273,158 @@ export default function AdminTrash({
     setCurrentPage(pageNumber);
   };
 
-  const handleUnarchive = async (student: Student) => {
+  const isMissingSupabaseAdmissionError = (error: unknown) =>
+    error instanceof Error &&
+    /tracking number\s+".*?"\s+was not found/i.test(error.message);
+
+  const resolveStudentLink = (student: Student) => {
+    const linkedEnrollee =
+      enrollees.find(
+        (record) =>
+          (student.trackingNumber &&
+            record.trackingNumber === student.trackingNumber) ||
+          record.studentNumber === student.id,
+      ) ?? null;
+
+    return {
+      trackingNumber: student.trackingNumber || linkedEnrollee?.trackingNumber,
+      studentNumber: linkedEnrollee?.studentNumber || student.id,
+    };
+  };
+
+  const removeLinkedRecordsLocally = ({
+    studentId,
+    enrolleeId,
+    trackingNumber,
+    studentNumber,
+  }: {
+    studentId?: string;
+    enrolleeId?: string;
+    trackingNumber?: string;
+    studentNumber?: string;
+  }) => {
+    if (studentId || trackingNumber || studentNumber) {
+      setStudents((prev) =>
+        prev.filter((record) => {
+          const matchesStudentId = studentId
+            ? record.id === studentId
+            : false;
+          const matchesTrackingNumber = trackingNumber
+            ? record.trackingNumber === trackingNumber
+            : false;
+          const matchesStudentNumber = studentNumber
+            ? record.id === studentNumber
+            : false;
+
+          return !(
+            matchesStudentId ||
+            matchesTrackingNumber ||
+            matchesStudentNumber
+          );
+        }),
+      );
+    }
+
+    if (enrolleeId || trackingNumber || studentNumber) {
+      setEnrollees((prev) =>
+        prev.filter((record) => {
+          const matchesEnrolleeId = enrolleeId
+            ? record.id === enrolleeId
+            : false;
+          const matchesTrackingNumber = trackingNumber
+            ? record.trackingNumber === trackingNumber
+            : false;
+          const matchesStudentNumber = studentNumber
+            ? record.studentNumber === studentNumber
+            : false;
+
+          return !(
+            matchesEnrolleeId ||
+            matchesTrackingNumber ||
+            matchesStudentNumber
+          );
+        }),
+      );
+    }
+  };
+
+  const deleteStudentRecord = async (student: Student) => {
+    const { trackingNumber, studentNumber } = resolveStudentLink(student);
+    const warnings: string[] = [];
+
+    if (trackingNumber) {
+      try {
+        await deleteAdmissionApplication(trackingNumber);
+      } catch (error) {
+        if (!isMissingSupabaseAdmissionError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    if (student.recordId) {
+      try {
+        const response = await fetch(`${STUDENTS_API_URL}${student.recordId}/`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          warnings.push(
+            errorData?.detail || "Legacy student record could not be deleted.",
+          );
+        }
+      } catch (error) {
+        warnings.push(
+          error instanceof Error
+            ? error.message
+            : "Legacy student record could not be deleted.",
+        );
+      }
+    }
+
+    removeLinkedRecordsLocally({
+      studentId: student.id,
+      trackingNumber,
+      studentNumber,
+    });
+
+    return { warnings };
+  };
+
+  const deleteEnrolleeRecord = async (enrollee: Enrollee) => {
+    if (enrollee.trackingNumber) {
+      try {
+        await deleteAdmissionApplication(enrollee.trackingNumber);
+      } catch (error) {
+        if (!isMissingSupabaseAdmissionError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    removeLinkedRecordsLocally({
+      enrolleeId: enrollee.id,
+      trackingNumber: enrollee.trackingNumber,
+      studentNumber: enrollee.studentNumber,
+    });
+
+    return { warnings: [] as string[] };
+  };
+
+  const deleteArchivedRecord = async (record: ArchivedTrashItem) => {
+    if (record.student) {
+      return deleteStudentRecord(record.student);
+    }
+
+    if (record.enrollee) {
+      return deleteEnrolleeRecord(record.enrollee);
+    }
+
+    return { warnings: [] as string[] };
+  };
+
+  const handleRestoreStudent = async (student: Student) => {
     const restoreStudentLocally = () => {
       setStudents((prev) =>
         prev.map((record) =>
@@ -230,40 +466,158 @@ export default function AdminTrash({
     }
   };
 
-  const handleDelete = async (student: Student) => {
+  const handleDeleteStudent = async (student: Student) => {
     const confirmed = window.confirm(
       `Delete ${student.name} permanently? This action cannot be undone.`,
     );
-    if (!confirmed) return;
 
-    const deleteStudentLocally = () => {
-      setStudents((prev) => prev.filter((record) => record.id !== student.id));
-    };
-
-    if (!student.recordId) {
-      deleteStudentLocally();
-      addToast(`${student.name} has been permanently deleted.`, "success");
+    if (!confirmed) {
       return;
     }
 
+    setIsProcessingTrash(true);
     try {
-      const response = await fetch(`${STUDENTS_API_URL}${student.recordId}/`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData?.detail || "Failed to delete student.");
-      }
-
-      deleteStudentLocally();
-      addToast(`${student.name} has been permanently deleted.`, "success");
+      const result = await deleteStudentRecord(student);
+      addToast(
+        result.warnings.length > 0
+          ? `${student.name} was deleted from Trash, but the legacy student API still needs cleanup.`
+          : `${student.name} has been permanently deleted.`,
+        result.warnings.length > 0 ? "warning" : "success",
+      );
     } catch (error) {
       console.error("Failed to delete student", error);
       addToast(
         error instanceof Error ? error.message : "Unable to delete student.",
         "error",
       );
+    } finally {
+      setIsProcessingTrash(false);
+    }
+  };
+
+  const handleRestoreEnrollee = (enrollee: Enrollee) => {
+    setEnrollees((prev) =>
+      prev.map((record) =>
+        record.id === enrollee.id
+          ? {
+              ...record,
+              archivedAt: undefined,
+              archivedByRole: undefined,
+            }
+          : record,
+      ),
+    );
+    addToast(`${enrollee.fullName} has been restored successfully.`, "success");
+  };
+
+  const handleDeleteEnrollee = (enrollee: Enrollee) => {
+    void (async () => {
+      const confirmed = window.confirm(
+        `Delete ${enrollee.fullName} permanently? This action cannot be undone.`,
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      setIsProcessingTrash(true);
+
+      try {
+        await deleteEnrolleeRecord(enrollee);
+        addToast(
+          `${enrollee.fullName} has been permanently deleted.`,
+          "success",
+        );
+      } catch (error) {
+        console.error("Failed to delete enrollee", error);
+        addToast(
+          error instanceof Error
+            ? error.message
+            : "Unable to delete enrollee.",
+          "error",
+        );
+      } finally {
+        setIsProcessingTrash(false);
+      }
+    })();
+  };
+
+  const handleClearTrash = async () => {
+    if (archivedRecords.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Clear Trash and permanently delete all archived records? This action cannot be undone.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsProcessingTrash(true);
+
+    let deletedCount = 0;
+    let warningCount = 0;
+    let failedCount = 0;
+    let firstFailureMessage: string | null = null;
+
+    for (const record of archivedRecords) {
+      try {
+        const result = await deleteArchivedRecord(record);
+        deletedCount += 1;
+        if (result.warnings.length > 0) {
+          warningCount += 1;
+        }
+      } catch (error) {
+        console.error("Failed to delete archived record", record, error);
+        failedCount += 1;
+        if (!firstFailureMessage && error instanceof Error) {
+          firstFailureMessage = error.message;
+        }
+      }
+    }
+
+    if (deletedCount > 0) {
+      const deletedLabel = `${deletedCount} record${deletedCount === 1 ? "" : "s"}`;
+      const message =
+        warningCount > 0
+          ? `${deletedLabel} removed from Trash, but ${warningCount} legacy student record${warningCount === 1 ? "" : "s"} still need API cleanup.`
+          : `${deletedLabel} permanently deleted from Trash.`;
+      addToast(message, warningCount > 0 ? "warning" : "success");
+    }
+
+    if (failedCount > 0) {
+      addToast(
+        firstFailureMessage
+          ? `Failed to delete ${failedCount} record${failedCount === 1 ? "" : "s"} from Trash. ${firstFailureMessage}`
+          : `Failed to delete ${failedCount} record${failedCount === 1 ? "" : "s"} from Trash.`,
+        "error",
+      );
+    }
+
+    setIsProcessingTrash(false);
+  };
+
+  const handleRestoreRecord = (record: ArchivedTrashItem) => {
+    if (record.student) {
+      void handleRestoreStudent(record.student);
+      return;
+    }
+
+    if (record.enrollee) {
+      handleRestoreEnrollee(record.enrollee);
+    }
+  };
+
+  const handleDeleteRecord = (record: ArchivedTrashItem) => {
+    if (record.student) {
+      void handleDeleteStudent(record.student);
+      return;
+    }
+
+    if (record.enrollee) {
+      handleDeleteEnrollee(record.enrollee);
     }
   };
 
@@ -284,8 +638,9 @@ export default function AdminTrash({
         className="menu-toggle"
         onClick={handleSidebarToggle}
         aria-label={isSidebarOpen ? "Close menu" : "Open menu"}
+        type="button"
       >
-        {isSidebarOpen ? "✕" : "☰"}
+        {isSidebarOpen ? "X" : "|||"}
       </button>
 
       <main className="archive-content">
@@ -293,8 +648,8 @@ export default function AdminTrash({
           <h1>Trash</h1>
           <p>
             {isLoading
-              ? "Loading archived students from backend..."
-              : "All students that were archived from the Students module appear here."}
+              ? "Loading archived records..."
+              : "Archived students and enrollees for this branch appear here."}
           </p>
         </header>
 
@@ -304,7 +659,7 @@ export default function AdminTrash({
             <input
               type="text"
               className="archive-search"
-              placeholder="Search by Name, ID, Contact, Program..."
+              placeholder="Search by name, ID, tracking number, or program..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -312,6 +667,21 @@ export default function AdminTrash({
               }}
             />
           </div>
+
+          <select
+            className="archive-filter"
+            value={recordTypeFilter}
+            onChange={(e) => {
+              setRecordTypeFilter(
+                e.target.value as "All Records" | ArchivedTrashItem["kind"],
+              );
+              setCurrentPage(1);
+            }}
+          >
+            <option>All Records</option>
+            <option>Student</option>
+            <option>Enrollee</option>
+          </select>
 
           <select
             className="archive-filter"
@@ -344,6 +714,18 @@ export default function AdminTrash({
               </option>
             ))}
           </select>
+
+          <button
+            type="button"
+            className="clear-trash-btn"
+            onClick={() => {
+              void handleClearTrash();
+            }}
+            disabled={isProcessingTrash || archivedRecords.length === 0}
+          >
+            <FaTrash />
+            {isProcessingTrash ? "Processing..." : "Clear Trash"}
+          </button>
         </div>
 
         <div className="archive-table-wrap">
@@ -356,9 +738,10 @@ export default function AdminTrash({
                     className="archive-table-sort-btn"
                     onClick={toggleIdSort}
                   >
-                    Student ID {sortDirection === "asc" ? "↑" : "↓"}
+                    ID / Tracking No. {sortDirection === "asc" ? "^" : "v"}
                   </button>
                 </th>
+                <th>Type</th>
                 <th>Name</th>
                 <th>Program</th>
                 <th>Year Level</th>
@@ -367,27 +750,36 @@ export default function AdminTrash({
               </tr>
             </thead>
             <tbody>
-              {paginatedStudents.length > 0 ? (
-                paginatedStudents.map((student) => (
-                  <tr key={student.id}>
-                    <td className="student-id-cell">{student.id}</td>
-                    <td className="student-name-cell">{student.name}</td>
-                    <td>{student.program}</td>
-                    <td>{student.yearLevel}</td>
-                    <td>{student.contact || "—"}</td>
+              {paginatedRecords.length > 0 ? (
+                paginatedRecords.map((record) => (
+                  <tr key={record.key}>
+                    <td className="student-id-cell">{record.identifier}</td>
+                    <td>
+                      <span
+                        className={`archive-type-badge ${record.kind.toLowerCase()}`}
+                      >
+                        {record.kind}
+                      </span>
+                    </td>
+                    <td className="student-name-cell">{record.name}</td>
+                    <td>{record.program}</td>
+                    <td>{record.yearLevel}</td>
+                    <td>{record.contact || "-"}</td>
                     <td>
                       <div className="archive-actions">
                         <button
                           type="button"
                           className="unarchive-btn"
-                          onClick={() => handleUnarchive(student)}
+                          onClick={() => handleRestoreRecord(record)}
+                          disabled={isProcessingTrash}
                         >
                           <FaUndo /> Restore
                         </button>
                         <button
                           type="button"
                           className="delete-btn"
-                          onClick={() => handleDelete(student)}
+                          onClick={() => handleDeleteRecord(record)}
+                          disabled={isProcessingTrash}
                         >
                           <FaTrash /> Delete
                         </button>
@@ -397,12 +789,12 @@ export default function AdminTrash({
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="no-archive">
+                  <td colSpan={7} className="no-archive">
                     {isLoading
-                      ? "Loading archived students..."
-                      : archivedStudents.length > 0
-                        ? "No archived students match the selected filters."
-                        : "No archived students yet."}
+                      ? "Loading archived records..."
+                      : archivedRecords.length > 0
+                        ? "No archived records match the selected filters."
+                        : "No archived students or enrollees yet."}
                   </td>
                 </tr>
               )}
@@ -410,7 +802,7 @@ export default function AdminTrash({
           </table>
         </div>
 
-        {filteredArchivedStudents.length > 0 && (
+        {filteredArchivedRecords.length > 0 && (
           <div className="archive-pagination">
             <button
               className="pagination-btn prev-btn"
@@ -418,25 +810,27 @@ export default function AdminTrash({
               disabled={currentPage === 1}
               title="Previous page"
               aria-label="Previous page"
+              type="button"
             >
-              ‹
+              &lt;
             </button>
 
             <div className="pagination-info">
               <span>{startIndex + 1}</span>
-              <span>–</span>
-              <span>{Math.min(endIndex, filteredArchivedStudents.length)}</span>
+              <span>-</span>
+              <span>{Math.min(endIndex, filteredArchivedRecords.length)}</span>
               <span>of</span>
-              <span>{filteredArchivedStudents.length}</span>
+              <span>{filteredArchivedRecords.length}</span>
             </div>
 
             <div className="pagination-pages">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map(
                 (pageNumber) => (
                   <button
                     key={pageNumber}
                     className={`pagination-page ${pageNumber === currentPage ? "active" : ""}`}
                     onClick={() => handlePageSelect(pageNumber)}
+                    type="button"
                   >
                     {pageNumber}
                   </button>
@@ -450,8 +844,9 @@ export default function AdminTrash({
               disabled={currentPage === totalPages}
               title="Next page"
               aria-label="Next page"
+              type="button"
             >
-              ›
+              &gt;
             </button>
           </div>
         )}

@@ -1,0 +1,69 @@
+.chart-note {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+  border: 1px solid #dbeafe;
+  color: #334155;
+}
+
+.chart-note-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.chart-note-copy {
+  min-width: 0;
+}
+
+.chart-note-copy strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e3a8a;
+}
+
+.chart-note-copy p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #475569;
+}
+
+.chart-note--compact {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  gap: 10px;
+}
+
+.chart-note--compact .chart-note-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.chart-note--compact .chart-note-copy strong,
+.chart-note--compact .chart-note-copy p {
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .chart-note {
+    padding: 12px;
+  }
+
+  .chart-note-icon {
+    width: 28px;
+    height: 28px;
+  }
+}

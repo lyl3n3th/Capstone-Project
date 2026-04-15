@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
 import {
   getAdmissionDraft,
+  getEstimatedCollegeTuition,
   getAdmissionProgress,
   updateAdmissionProgress,
 } from "../../services/admission";
@@ -21,14 +22,6 @@ function getQueryParam(name: string): string | null {
   const params = new URLSearchParams(window.location.search);
   return params.get(name);
 }
-
-const getHonorDiscount = (honor: string | null): number => {
-  if (!honor) return 0;
-  if (honor.includes("Highest Honor")) return 80;
-  if (honor.includes("High Honor")) return 60;
-  if (honor.includes("With Honor")) return 50;
-  return 0;
-};
 
 interface Toast {
   id: string;
@@ -124,11 +117,12 @@ function AdmissionStep4() {
     }
 
     const isCollege = applicationData.programLevel === "college";
+    const shouldProceedToScholarshipExam = isCollege && applyScholarship;
 
     try {
       const updatedApplication = await updateAdmissionProgress({
         trackingNumber: applicationData.trackingNumber,
-        currentStep: isCollege ? 5 : 4,
+        currentStep: shouldProceedToScholarshipExam ? 5 : 4,
         applicationStatus: "submitted",
         markSubmitted: true,
       });
@@ -155,7 +149,7 @@ function AdmissionStep4() {
       addToast("Application submitted successfully.", "success");
 
       setTimeout(() => {
-        if (isCollege) {
+        if (shouldProceedToScholarshipExam) {
           window.location.href = `/scholarship-exam?trackingNumber=${encodeURIComponent(updatedApplication.trackingNumber)}`;
           return;
         }
@@ -264,21 +258,23 @@ function AdmissionStep4() {
 
   const isCollege = applicationData?.programLevel === "college";
   const canEdit = applicationData?.applicationStatus === "draft";
-  const honorDiscount = getHonorDiscount(applicationData?.honorLabel ?? null);
+  const tuitionEstimate = getEstimatedCollegeTuition({
+    honorLabel: applicationData?.honorLabel ?? null,
+    appliedForScholarship: applyScholarship,
+    scholarshipExamScore: applicationData?.scholarshipExamScore ?? null,
+  });
+  const honorDiscount = tuitionEstimate.honorDiscountPercentage;
   const isAccepted = applicationData?.applicationStatus === "accepted";
+  const shouldShowScholarshipExam = isCollege && applyScholarship;
   const buttonText = isAccepted
     ? "Proceed to Student Portal"
     : canEdit
-      ? isCollege
+      ? shouldShowScholarshipExam
         ? "Submit & Continue to Scholarship Exam"
         : "Submit Application"
-      : isCollege
+      : shouldShowScholarshipExam
         ? "View Scholarship Exam"
         : "Go to Home";
-
-  const baseTuition = 15 * 600;
-  const discountedTuition = baseTuition * (1 - honorDiscount / 100);
-  const downPayment = 300;
 
   if (isLoading) {
     return (
@@ -340,10 +336,12 @@ function AdmissionStep4() {
             </button>
           </div>
 
-          {isCollege && canEdit && (
+          {canEdit && (
             <div className="conf-notice conf-notice-warning">
-              <strong>Next Step:</strong> Submit this application to continue to
-              the scholarship exam schedule page.
+              <strong>Next Step:</strong>{" "}
+              {shouldShowScholarshipExam
+                ? "Submit this application to continue to the scholarship exam page."
+                : "Submit this application to complete your admission record."}
             </div>
           )}
 
@@ -375,19 +373,29 @@ function AdmissionStep4() {
             </div>
           )}
 
-          {isCollege && honorDiscount > 0 && (
+          {isCollege && tuitionEstimate.effectiveDiscountPercentage > 0 && (
             <div className="conf-notice conf-notice-info">
-              <strong>Honor Discount Applied</strong>
+              <strong>
+                {tuitionEstimate.effectiveDiscountSource === "scholarship_exam"
+                  ? "Scholarship Discount Applied"
+                  : "Honor Discount Applied"}
+              </strong>
               <p>
-                You qualify for a <strong>{honorDiscount}% discount</strong>{" "}
-                based on your academic honor.
+                You currently qualify for a{" "}
+                <strong>{tuitionEstimate.effectiveDiscountPercentage}% discount</strong>{" "}
+                based on{" "}
+                {tuitionEstimate.effectiveDiscountSource === "scholarship_exam"
+                  ? "your scholarship exam score"
+                  : "your academic honor"}.
               </p>
               <p className="conf-discount-detail">
-                Estimated Tuition: PHP {baseTuition.toLocaleString()} to PHP{" "}
-                {discountedTuition.toLocaleString()}
+                Estimated Tuition: PHP{" "}
+                {tuitionEstimate.baseTuition.toLocaleString()} to PHP{" "}
+                {tuitionEstimate.tuitionAfterDiscount.toLocaleString()}
               </p>
               <p className="conf-discount-note">
-                Down Payment: PHP {downPayment.toLocaleString()} (pay on-site)
+                Down Payment: PHP {tuitionEstimate.onSitePayment.toLocaleString()}{" "}
+                (pay on-site)
               </p>
             </div>
           )}
@@ -397,8 +405,17 @@ function AdmissionStep4() {
               <strong>Scholarship Exam Selected</strong>
               <p>
                 This application includes a scholarship exam request for the
-                selected college program.
+                selected college program. There is no fixed exam schedule, so
+                you will need to coordinate directly with your selected branch.
               </p>
+              {honorDiscount > 0 && (
+                <p>
+                  If you applied for scholarship and have an academic honor,
+                  the higher percentage between your scholarship exam score and
+                  honor discount will be used. If the exam score is lower, your
+                  honor discount will stay active.
+                </p>
+              )}
             </div>
           )}
 
@@ -474,6 +491,12 @@ function AdmissionStep4() {
               Uploaded requirements and admission details are now submitted in
               registrar's records.
             </p>
+            {isCollege && applyScholarship && honorDiscount > 0 && (
+              <p className="conf-notes-text">
+                Final tuition discount will use the higher percentage between
+                your scholarship exam score and academic honor.
+              </p>
+            )}
           </div>
 
           <div className="conf-actions">
@@ -494,7 +517,7 @@ function AdmissionStep4() {
                 }
 
                 if (!canEdit) {
-                  if (isCollege) {
+                  if (shouldShowScholarshipExam) {
                     window.location.href = `/scholarship-exam?trackingNumber=${encodeURIComponent(applicationData.trackingNumber)}`;
                     return;
                   }

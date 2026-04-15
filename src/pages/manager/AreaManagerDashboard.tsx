@@ -25,6 +25,7 @@ import {
   type AdminEnrolleeRecord,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
+import ChartNote from "../../components/common/ChartNote";
 import "../../styles/manager/area-managerDashboard.css";
 import "../../styles/manager/area-manager.css";
 
@@ -379,6 +380,11 @@ const AreaManagerDashboard = ({
         </div>
 
         <div className="dashboard-card main-bar-chart">
+          <ChartNote>
+            Each stacked bar compares SHS and College enrollees for a branch.
+            Taller columns mean higher combined enrollment, and hovering a bar
+            segment shows its exact count.
+          </ChartNote>
           <div className="chart-wrapper-mobile">
             {barData && (
               <Bar
@@ -427,6 +433,11 @@ const AreaManagerDashboard = ({
                       {branch.total_students} Students
                     </span>
                   </div>
+                  <ChartNote title="Branch pie guide" variant="compact">
+                    Slice size shows each strand or course share inside{" "}
+                    {branch.branch_name}. The percentages beside the chart are
+                    based on this branch total only.
+                  </ChartNote>
                   <div className="chart-content-row-mobile">
                     <div className="pie-container-mobile">
                       <Pie

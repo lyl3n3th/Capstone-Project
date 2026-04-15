@@ -63,9 +63,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loginStudent = useCallback(
-    async ({ branch, studentNumber, password }: StudentLoginPayload) => {
+    async ({ studentNumber, password }: StudentLoginPayload) => {
       const identity = await loginStudentPortal({
-        branch,
         studentNumber,
         password,
       });

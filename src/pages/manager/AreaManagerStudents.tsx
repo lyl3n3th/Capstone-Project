@@ -15,6 +15,7 @@ interface Student {
   student_id: string;
   status: string;
   credential_status: string;
+  admission_status?: string;
   course: string;
   year_level: string;
   branch: string;
@@ -56,6 +57,9 @@ const splitStoredStudentName = (fullName: string) => {
     lastName: parts[parts.length - 1],
   };
 };
+
+const getAdmissionTypeLabel = (studentStatus?: string) =>
+  studentStatus?.trim() || "Not recorded";
 
 const getCredentialStatusLabel = (student: StudentStorageRecord) => {
   const credentialOverview = getStudentCredentialOverview({
@@ -104,6 +108,7 @@ const mapStoredStudentToDirectoryRow = (
     student_id: student.id,
     status: student.status === "Archived" ? "inactive" : "active",
     credential_status: getCredentialStatusLabel(student),
+    admission_status: student.studentStatus,
     course: isShsStudent
       ? "SHS"
       : student.strandOrCourse || "College",
@@ -192,9 +197,13 @@ const AreaManagerStudents: React.FC = () => {
     const filtered = students.filter((student) => {
       const fullName =
         `${student.first_name} ${student.last_name}`.toLowerCase();
+      const normalizedSearchTerm = searchTerm.toLowerCase();
       const matchesSearch =
-        fullName.includes(searchTerm.toLowerCase()) ||
-        student.student_id.toLowerCase().includes(searchTerm.toLowerCase());
+        fullName.includes(normalizedSearchTerm) ||
+        student.student_id.toLowerCase().includes(normalizedSearchTerm) ||
+        getAdmissionTypeLabel(student.admission_status)
+          .toLowerCase()
+          .includes(normalizedSearchTerm);
       const matchesCourse = filterCourse ? student.course === filterCourse : true;
       const matchesSection = filterSection
         ? student.section === filterSection
@@ -479,6 +488,7 @@ const AreaManagerStudents: React.FC = () => {
                 >
                   Year {getSortIcon("year_level")}
                 </th>
+                <th>Admission Type</th>
                 <th>Credential Status</th>
                 <th>Action</th>
               </tr>
@@ -500,6 +510,11 @@ const AreaManagerStudents: React.FC = () => {
                   <td className="am-students-branch-col">{student.branch}</td>
                   <td className="am-students-year-col">{student.year_level}</td>
                   <td>
+                    <span className="am-students-admission-badge">
+                      {getAdmissionTypeLabel(student.admission_status)}
+                    </span>
+                  </td>
+                  <td>
                     <span
                       className={`am-students-credential-badge ${getCredentialStatusClass(student.credential_status)}`}
                     >
@@ -518,7 +533,7 @@ const AreaManagerStudents: React.FC = () => {
               ))}
               {currentStudents.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="am-students-empty-state">
+                  <td colSpan={9} className="am-students-empty-state">
                     No enrolled students found.
                   </td>
                 </tr>
@@ -555,6 +570,9 @@ const AreaManagerStudents: React.FC = () => {
                 <span className="am-students-card-badge">{student.branch}</span>
                 <span className="am-students-card-badge">
                   {student.year_level}
+                </span>
+                <span className="am-students-card-badge am-students-card-admission">
+                  {getAdmissionTypeLabel(student.admission_status)}
                 </span>
                 {student.section && (
                   <span className="am-students-card-badge">
@@ -638,6 +656,12 @@ const AreaManagerStudents: React.FC = () => {
                     className={`am-students-value-box am-students-value-box-highlight am-students-status-${selectedStudent.status?.toLowerCase()}`}
                   >
                     {selectedStudent.status}
+                  </div>
+                </div>
+                <div className="am-students-field">
+                  <label>Admission Type</label>
+                  <div className="am-students-value-box am-students-admission-value">
+                    {getAdmissionTypeLabel(selectedStudent.admission_status)}
                   </div>
                 </div>
                 <div className="am-students-field">

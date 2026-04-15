@@ -273,6 +273,19 @@
   color: #92400e;
 }
 
+.am-students-admission-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #075985;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 /* PAGINATION */
 .am-students-pagination {
   display: flex;
@@ -442,6 +455,12 @@
   color: #92400e;
   background: #ffedd5;
   border-color: #fdba74;
+}
+
+.am-students-admission-value {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+  color: #075985;
 }
 
 /* Mobile Card List */

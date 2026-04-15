@@ -41,6 +41,7 @@ interface Student {
   status: "Complete" | "Incomplete" | "Archived";
   branch: string;
   trackingNumber?: string;
+  studentStatus?: string;
 }
 
 interface StudentRequirementNotification {
@@ -103,6 +104,9 @@ const hasSubmittedAttachmentNamed = (
         attachmentName.trim().toLowerCase(),
     ),
   );
+
+const getAdmissionTypeLabel = (studentStatus?: string) =>
+  studentStatus?.trim() || "Not recorded";
 
 const mapStudentToApiPayload = (student: Student) => {
   const { firstName, middleName, lastName } = splitFullName(student.name);
@@ -240,6 +244,7 @@ export default function AdminStudents({
     address: "",
     status: "Incomplete",
     branch: currentBranch,
+    studentStatus: "",
   });
 
   // Errors for add/edit
@@ -372,7 +377,9 @@ export default function AdminStudents({
       student.name.toLowerCase().includes(search) ||
       student.id.toLowerCase().includes(search) ||
       student.program.toLowerCase().includes(search) ||
-      student.contact.toLowerCase().includes(search);
+      student.contact.toLowerCase().includes(search) ||
+      (student.section || "").toLowerCase().includes(search) ||
+      getAdmissionTypeLabel(student.studentStatus).toLowerCase().includes(search);
 
     const matchesProgram =
       filterProgram === "All Programs" || student.program === filterProgram;
@@ -574,6 +581,7 @@ export default function AdminStudents({
         address: "",
         status: "Incomplete",
         branch: currentBranch,
+        studentStatus: "",
       });
       setShsTrackType("");
       setProgramSpecialization("");
@@ -1171,6 +1179,7 @@ export default function AdminStudents({
                 <th>Course/Track</th>
                 <th>Specialization</th>
                 <th>Grade Year</th>
+                <th>Section</th>
                 <th>Email</th>
                 <th>STATUS</th>
                 <th>ACTION</th>
@@ -1196,6 +1205,11 @@ export default function AdminStudents({
                       {student.program === "SHS"
                         ? getShsYearLevelDisplay(student)
                         : student.yearLevel}
+                    </td>
+                    <td>
+                      <span className="students-admission-type-badge">
+                        {student.section || "N/A"}
+                      </span>
                     </td>
                     <td>{student.email}</td>
                     <td>
@@ -1233,7 +1247,7 @@ export default function AdminStudents({
                 ))
               ) : (
                 <tr>
-                  <td colSpan={8} className="students-no-results">
+                  <td colSpan={9} className="students-no-results">
                     {isLoading
                       ? "Loading students..."
                       : "No students found matching your search."}
@@ -1609,6 +1623,12 @@ export default function AdminStudents({
                       className={`students-profile-value students-profile-value-highlight ${getStudentStatusClassName(viewingStudent.status)}`}
                     >
                       {viewingStudent.status}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Admission Type</label>
+                    <div className="students-profile-value students-profile-admission-type">
+                      {getAdmissionTypeLabel(viewingStudent.studentStatus)}
                     </div>
                   </div>
                   <div className="students-profile-field">

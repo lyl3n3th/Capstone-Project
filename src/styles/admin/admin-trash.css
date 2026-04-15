@@ -157,6 +157,34 @@
   color: #9ca3af;
 }
 
+.clear-trash-btn {
+  height: 46px;
+  border: none;
+  border-radius: 12px;
+  padding: 0 18px;
+  background: #b91c1c;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease, opacity 0.2s ease;
+}
+
+.clear-trash-btn:hover:not(:disabled) {
+  background: #991b1b;
+  transform: translateY(-1px);
+}
+
+.clear-trash-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
 /* ==========================================================================
    TABLE
    ========================================================================== */
@@ -225,6 +253,27 @@
   color: #111827;
 }
 
+.archive-type-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 76px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.archive-type-badge.student {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.archive-type-badge.enrollee {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
 /* ==========================================================================
    ACTION BUTTONS
    ========================================================================== */
@@ -268,6 +317,13 @@
   background: #dc2626;
   color: white;
   transform: translateY(-1px);
+}
+
+.unarchive-btn:disabled,
+.delete-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
 }
 
 .no-archive {

@@ -1,11 +1,11 @@
 import "../../styles/main.css";
-import { FaCalendarAlt, FaClock } from "react-icons/fa";
-import { FaLocationDot, FaCircleExclamation } from "react-icons/fa6";
+import { FaCircleExclamation, FaLocationDot } from "react-icons/fa6";
 import Progress from "../../components/Progress";
 import { useEffect, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
 import {
   getAdmissionDraft,
+  getHonorDiscountPercentage,
   getAdmissionProgress,
 } from "../../services/admission";
 import type { AdmissionApplicationSummary } from "../../types/application";
@@ -26,9 +26,7 @@ function AdmissionStep5() {
   const [application, setApplication] =
     useState<AdmissionApplicationSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [examDetails, setExamDetails] = useState({
-    date: "",
-    time: "",
+  const [examLocation, setExamLocation] = useState({
     location: "",
     room: "",
   });
@@ -63,19 +61,15 @@ function AdmissionStep5() {
           return;
         }
 
-        setApplication(result);
+        if (!result.appliedForScholarship) {
+          setPageError(
+            "This application is under regular enrollment and does not need a scholarship exam page.",
+          );
+          setIsLoading(false);
+          return;
+        }
 
-        const examDates = [
-          "Monday to Friday",
-          "April 3, 2026",
-          "April 7, 2026",
-          "April 10, 2026",
-        ];
-        const examTimes = [
-          "9:00 AM to 11:00 AM",
-          "1:00 PM to 3:00 PM",
-          "3:30 PM to 5:30 PM",
-        ];
+        setApplication(result);
         const locations: Record<string, { location: string; room: string }> = {
           bacoor: { location: "Bacoor Branch", room: "PE Room" },
           taytay: { location: "Taytay Branch", room: "Auditorium" },
@@ -86,18 +80,7 @@ function AdmissionStep5() {
           location: result.branchName,
           room: "Room 101",
         };
-        const hash = result.trackingNumber.charCodeAt(
-          result.trackingNumber.length - 1,
-        );
-        const dateIndex = hash % examDates.length;
-        const timeIndex = Math.floor(hash / 2) % examTimes.length;
-
-        setExamDetails({
-          date: examDates[dateIndex],
-          time: examTimes[timeIndex],
-          location: branchInfo.location,
-          room: branchInfo.room,
-        });
+        setExamLocation(branchInfo);
       } catch (err) {
         console.error(err);
         setPageError(
@@ -112,13 +95,6 @@ function AdmissionStep5() {
 
     void loadApplication();
   }, [trackingNumberFromUrl]);
-
-  const handleAddToCalendar = () => {
-    addToast("Exam schedule noted.", "success");
-    alert(
-      `Scholarship Exam\n${examDetails.date}\n${examDetails.time}\n${examDetails.location} - ${examDetails.room}`,
-    );
-  };
 
   const handleDownloadPermit = () => {
     addToast("Exam permit prepared.", "success");
@@ -151,6 +127,8 @@ function AdmissionStep5() {
     );
   }
 
+  const honorDiscount = getHonorDiscountPercentage(application.honorLabel);
+
   return (
     <div className="entrance-exam-page">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
@@ -162,7 +140,7 @@ function AdmissionStep5() {
         <div className="entrance-exam-card">
           <div className="entrance-exam-header">
             <h2 className="entrance-exam-title">
-              You are assigned to take the Scholarship Exam
+              Scholarship Exam Information
             </h2>
             <p className="entrance-exam-applicant">
               Applicant:{" "}
@@ -185,19 +163,11 @@ function AdmissionStep5() {
             <div className="entrance-exam-details">
               <div className="entrance-exam-row">
                 <span className="entrance-exam-icon">
-                  <FaCalendarAlt />
+                  <strong>i</strong>
                 </span>
                 <div className="entrance-exam-text">
-                  <strong>Date:</strong> {examDetails.date || "To be announced"}
-                </div>
-              </div>
-
-              <div className="entrance-exam-row">
-                <span className="entrance-exam-icon">
-                  <FaClock />
-                </span>
-                <div className="entrance-exam-text">
-                  <strong>Time:</strong> {examDetails.time || "To be announced"}
+                  <strong>Schedule:</strong> Walk-in basis. No fixed exam
+                  schedule.
                 </div>
               </div>
 
@@ -206,8 +176,8 @@ function AdmissionStep5() {
                   <FaLocationDot />
                 </span>
                 <div className="entrance-exam-text">
-                  <strong>Location:</strong> {examDetails.location} -{" "}
-                  {examDetails.room}
+                  <strong>Location:</strong> {examLocation.location} -{" "}
+                  {examLocation.room}
                 </div>
               </div>
 
@@ -222,9 +192,6 @@ function AdmissionStep5() {
             </div>
 
             <div className="entrance-exam-actions">
-              <button className="entrance-exam-btn" onClick={handleAddToCalendar}>
-                <FaCalendarAlt /> Add to Calendar
-              </button>
               <button className="entrance-exam-btn" onClick={handleDownloadPermit}>
                 Download Permit
               </button>
@@ -236,9 +203,22 @@ function AdmissionStep5() {
                 <p className="entrance-exam-notes-title">Important Notes</p>
               </div>
               <p className="entrance-exam-notes-text">
-                Bring a school ID, exam permit, black pen, and your tracking
-                number on exam day.
+                Please coordinate with your selected branch before visiting for
+                the scholarship exam. Bring a school ID, exam permit, black
+                pen, and your tracking number.
               </p>
+              <p className="entrance-exam-notes-text">
+                There is no fixed exam schedule. The branch will assist you
+                with the available on-site exam process.
+              </p>
+              {application.appliedForScholarship && honorDiscount > 0 && (
+                <p className="entrance-exam-notes-text">
+                  If you applied for scholarship and have an academic honor,
+                  the higher percentage between your scholarship exam score and
+                  honor discount will be used. If the exam score is lower, your
+                  honor discount will stay active.
+                </p>
+              )}
             </div>
 
             <div className="entrance-exam-back">

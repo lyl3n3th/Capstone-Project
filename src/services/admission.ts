@@ -3,6 +3,7 @@ import type {
   AdmissionApplicationStatus,
   AdmissionApplicationSummary,
   AdmissionBranchCode,
+  AdmissionDiscountSource,
   AdmissionDraft,
   AdmissionProgramLevel,
   AdmissionProgramName,
@@ -31,12 +32,16 @@ type AdmissionSummaryRow = {
   branch_name: string;
   created_at: string;
   current_step: number;
+  effective_discount_percentage: number | string;
+  effective_discount_source: AdmissionDiscountSource | string | null;
   first_name: string;
+  honor_discount_percentage: number | string;
   honor_label: string | null;
   last_name: string;
   program_level: AdmissionProgramLevel;
   program_name: string;
   requirements_uploaded_at: string | null;
+  scholarship_exam_score: number | string | null;
   student_status_label: string;
   submitted_at: string | null;
   track_name: string;
@@ -51,6 +56,11 @@ type RequirementUploadRow = {
   storage_path: string;
   tracking_number: string;
   uploaded_at: string;
+};
+
+type DeletedAdmissionRow = {
+  tracking_number: string;
+  deleted_student_number: string | null;
 };
 
 export const admissionBranches: ReadonlyArray<{
@@ -197,28 +207,192 @@ const requirementDefinitionsByStatus: Record<
   ],
 };
 
+type DiscountInput = {
+  honorLabel?: string | null;
+  appliedForScholarship?: boolean;
+  scholarshipExamScore?: number | string | null;
+};
+
+const DEFAULT_COLLEGE_TUITION_UNITS = 15;
+const COLLEGE_TUITION_PER_UNIT = 600;
+const COLLEGE_ON_SITE_PAYMENT = 300;
+
+const clampDiscountPercentage = (value: number) =>
+  Math.min(100, Math.max(0, value));
+
+const roundDiscountPercentage = (value: number) =>
+  Math.round(clampDiscountPercentage(value) * 100) / 100;
+
+const toNullableNumber = (value: number | string | null | undefined) => {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsedValue = Number(value);
+  return Number.isFinite(parsedValue) ? parsedValue : null;
+};
+
+const toAdmissionDiscountSource = (
+  value: AdmissionDiscountSource | string | null | undefined,
+): AdmissionDiscountSource | null =>
+  value === "honor" || value === "scholarship_exam" || value === "none"
+    ? value
+    : null;
+
+export const getHonorDiscountPercentage = (honorLabel?: string | null) => {
+  if (!honorLabel) return 0;
+  if (honorLabel.includes("Highest Honor")) return 80;
+  if (honorLabel.includes("High Honor")) return 60;
+  if (honorLabel.includes("With Honor")) return 50;
+  return 0;
+};
+
+export const getEffectiveAdmissionDiscountPercentage = ({
+  honorLabel,
+  appliedForScholarship = false,
+  scholarshipExamScore = null,
+}: DiscountInput) => {
+  const honorDiscountPercentage = getHonorDiscountPercentage(honorLabel);
+  const scholarshipDiscountPercentage =
+    appliedForScholarship && scholarshipExamScore !== null
+      ? toNullableNumber(scholarshipExamScore) ?? 0
+      : 0;
+
+  return roundDiscountPercentage(
+    Math.max(honorDiscountPercentage, scholarshipDiscountPercentage),
+  );
+};
+
+export const getAdmissionDiscountSource = ({
+  honorLabel,
+  appliedForScholarship = false,
+  scholarshipExamScore = null,
+}: DiscountInput): AdmissionDiscountSource => {
+  const honorDiscountPercentage = getHonorDiscountPercentage(honorLabel);
+  const normalizedExamScore =
+    appliedForScholarship && scholarshipExamScore !== null
+      ? toNullableNumber(scholarshipExamScore)
+      : null;
+
+  if (
+    normalizedExamScore !== null &&
+    normalizedExamScore > honorDiscountPercentage
+  ) {
+    return "scholarship_exam";
+  }
+
+  if (honorDiscountPercentage > 0) {
+    return "honor";
+  }
+
+  if (normalizedExamScore !== null && normalizedExamScore > 0) {
+    return "scholarship_exam";
+  }
+
+  return "none";
+};
+
+export const getAdmissionDiscountSourceLabel = (
+  source: AdmissionDiscountSource,
+) => {
+  switch (source) {
+    case "honor":
+      return "Academic Honor";
+    case "scholarship_exam":
+      return "Scholarship Exam";
+    default:
+      return "No Discount";
+  }
+};
+
+export const getEstimatedCollegeTuition = ({
+  honorLabel,
+  appliedForScholarship = false,
+  scholarshipExamScore = null,
+}: DiscountInput) => {
+  const baseTuition = DEFAULT_COLLEGE_TUITION_UNITS * COLLEGE_TUITION_PER_UNIT;
+  const honorDiscountPercentage = getHonorDiscountPercentage(honorLabel);
+  const normalizedScholarshipExamScore = toNullableNumber(scholarshipExamScore);
+  const effectiveDiscountPercentage = getEffectiveAdmissionDiscountPercentage({
+    honorLabel,
+    appliedForScholarship,
+    scholarshipExamScore: normalizedScholarshipExamScore,
+  });
+  const effectiveDiscountSource = getAdmissionDiscountSource({
+    honorLabel,
+    appliedForScholarship,
+    scholarshipExamScore: normalizedScholarshipExamScore,
+  });
+  const effectiveDiscountAmount =
+    baseTuition * (effectiveDiscountPercentage / 100);
+  const tuitionAfterDiscount = baseTuition - effectiveDiscountAmount;
+  const remainingBalance = Math.max(
+    tuitionAfterDiscount - COLLEGE_ON_SITE_PAYMENT,
+    0,
+  );
+
+  return {
+    baseTuition,
+    honorDiscountPercentage,
+    scholarshipExamScore: normalizedScholarshipExamScore,
+    effectiveDiscountPercentage,
+    effectiveDiscountSource,
+    effectiveDiscountSourceLabel:
+      getAdmissionDiscountSourceLabel(effectiveDiscountSource),
+    effectiveDiscountAmount,
+    tuitionAfterDiscount,
+    onSitePayment: COLLEGE_ON_SITE_PAYMENT,
+    remainingBalance,
+  };
+};
+
 const mapAdmissionSummary = (
   row: AdmissionSummaryRow,
-): AdmissionApplicationSummary => ({
-  applicationId: row.application_id,
-  trackingNumber: row.tracking_number,
-  branchCode: row.branch_code,
-  branchName: row.branch_name,
-  studentStatus: row.student_status_label,
-  programName: row.program_name,
-  programLevel: row.program_level,
-  trackName: row.track_name,
-  honorLabel: row.honor_label,
-  appliedForScholarship: row.applied_for_scholarship,
-  applicationStatus: row.application_status,
-  currentStep: row.current_step,
-  firstName: row.first_name,
-  lastName: row.last_name,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-  submittedAt: row.submitted_at,
-  requirementsUploadedAt: row.requirements_uploaded_at,
-});
+): AdmissionApplicationSummary => {
+  const scholarshipExamScore = toNullableNumber(row.scholarship_exam_score);
+  const honorDiscountPercentage =
+    toNullableNumber(row.honor_discount_percentage) ??
+    getHonorDiscountPercentage(row.honor_label);
+  const effectiveDiscountPercentage =
+    toNullableNumber(row.effective_discount_percentage) ??
+    getEffectiveAdmissionDiscountPercentage({
+      honorLabel: row.honor_label,
+      appliedForScholarship: row.applied_for_scholarship,
+      scholarshipExamScore,
+    });
+  const effectiveDiscountSource =
+    toAdmissionDiscountSource(row.effective_discount_source) ??
+    getAdmissionDiscountSource({
+      honorLabel: row.honor_label,
+      appliedForScholarship: row.applied_for_scholarship,
+      scholarshipExamScore,
+    });
+
+  return {
+    applicationId: row.application_id,
+    trackingNumber: row.tracking_number,
+    branchCode: row.branch_code,
+    branchName: row.branch_name,
+    studentStatus: row.student_status_label,
+    programName: row.program_name,
+    programLevel: row.program_level,
+    trackName: row.track_name,
+    honorLabel: row.honor_label,
+    honorDiscountPercentage,
+    appliedForScholarship: row.applied_for_scholarship,
+    scholarshipExamScore,
+    effectiveDiscountPercentage,
+    effectiveDiscountSource,
+    applicationStatus: row.application_status,
+    currentStep: row.current_step,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    submittedAt: row.submitted_at,
+    requirementsUploadedAt: row.requirements_uploaded_at,
+  };
+};
 
 const normalizeTrackingNumber = (value: string) =>
   value.trim().toUpperCase().replace(/\s+/g, "");
@@ -418,11 +592,13 @@ export const updateAdmissionProgress = async ({
   currentStep,
   applicationStatus,
   markSubmitted = false,
+  scholarshipExamScore = null,
 }: {
   trackingNumber: string;
   currentStep: number;
   applicationStatus?: AdmissionApplicationStatus;
   markSubmitted?: boolean;
+  scholarshipExamScore?: number | null;
 }) => {
   const { data, error } = await supabase
     .rpc("update_admission_progress", {
@@ -430,6 +606,7 @@ export const updateAdmissionProgress = async ({
       p_current_step: currentStep,
       p_application_status: applicationStatus ?? null,
       p_mark_submitted: markSubmitted,
+      p_scholarship_exam_score: scholarshipExamScore,
     })
     .returns<AdmissionSummaryRow[]>();
 
@@ -494,5 +671,30 @@ export const uploadAdmissionRequirementFile = async (
     fileName: row.file_name,
     storagePath: row.storage_path,
     uploadedAt: row.uploaded_at,
+  };
+};
+
+export const deleteAdmissionApplication = async (trackingNumber: string) => {
+  const normalizedTracking = normalizeTrackingNumber(trackingNumber);
+
+  const { data, error } = await supabase
+    .rpc("delete_admission_application", {
+      p_tracking_number: normalizedTracking,
+    })
+    .returns<DeletedAdmissionRow[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<DeletedAdmissionRow>(data);
+
+  if (!row) {
+    throw new Error("Supabase did not confirm the deleted admission record.");
+  }
+
+  return {
+    trackingNumber: row.tracking_number,
+    deletedStudentNumber: row.deleted_student_number || undefined,
   };
 };

@@ -234,7 +234,7 @@ function StudentGrades() {
 
   const studentData = {
     name: student ? `${student.firstName} ${student.lastName}` : "Hener C. Verdida",
-    id: student?.studentNumber || "20221131",
+    id: student?.studentNumber || "BAC-261001",
     progrm: student?.programType || "SHS",
   };
 

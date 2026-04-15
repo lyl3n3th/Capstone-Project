@@ -21,7 +21,7 @@ export interface StudentPortalData {
 
 const mockStudent: Student = {
   id: "1",
-  studentNumber: "20221131",
+  studentNumber: "BAC-261001",
   firstName: "Hener",
   lastName: "Verdida",
   middleName: "C.",

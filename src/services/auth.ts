@@ -58,7 +58,6 @@ export interface StudentPortalIdentity {
 }
 
 export interface StudentRegistrationPayload {
-  branch: string;
   studentNumber: string;
   email: string;
   mobile: string;
@@ -175,7 +174,8 @@ export const activateApprovedStudent = async (
   trackingNumber: string,
   preferredStudentNumber?: string,
 ) => {
-  const resolvedPreferredStudentNumber = preferredStudentNumber?.trim() || null;
+  const resolvedPreferredStudentNumber =
+    preferredStudentNumber?.trim().toUpperCase() || null;
   let lastRetriableError: string | null = null;
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -211,8 +211,7 @@ export const registerStudentPortalAccount = async (
 ) => {
   const { data, error } = await supabase
     .rpc("register_student_portal_account", {
-      p_branch: payload.branch.trim(),
-      p_student_number: payload.studentNumber.trim(),
+      p_student_number: payload.studentNumber.trim().toUpperCase(),
       p_email: payload.email.trim().toLowerCase(),
       p_phone_number: payload.mobile.replace(/\D/g, ""),
       p_birth_date: payload.birthDate?.trim() || null,
@@ -224,18 +223,15 @@ export const registerStudentPortalAccount = async (
 };
 
 export const loginStudentPortal = async ({
-  branch,
   studentNumber,
   password,
 }: {
-  branch: string;
   studentNumber: string;
   password: string;
 }) => {
   const { data, error } = await supabase
     .rpc("student_portal_login", {
-      p_branch: branch.trim(),
-      p_student_number: studentNumber.trim(),
+      p_student_number: studentNumber.trim().toUpperCase(),
       p_password: password,
     })
     .returns<StudentPortalSnapshotRow[]>();

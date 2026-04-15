@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import aicslogst from "../../assets/images/aicslogst-2.png";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
@@ -8,32 +8,19 @@ import {
 } from "../../services/auth";
 import {
   findApprovedEnrolleeByStudentNumber,
+  getBranchFromStudentNumber,
+  getStudentNumberExample,
+  isValidStudentNumber,
+  normalizeStudentNumberInput,
   syncApprovedStudentNumber,
 } from "../../services/adminStorage";
 import "../../styles/student/student-regis.css";
 
 function StudentRegistration() {
   const navigate = useNavigate();
-  const [selectedBranch, setSelectedBranch] = useState("");
-  const [isMenuOpenBranch, setIsMenuOpenBranch] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const wrapperRefBranch = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        wrapperRefBranch.current &&
-        !wrapperRefBranch.current.contains(event.target as Node)
-      ) {
-        setIsMenuOpenBranch(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   const [formData, setFormData] = useState({
     studentNumber: "",
@@ -52,36 +39,31 @@ function StudentRegistration() {
   const handleStudentNumberChange = (
     e: React.ChangeEvent<HTMLInputElement>,
   ) => {
-    const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, 6);
-    setFormData((prev) => ({ ...prev, studentNumber: digitsOnly }));
+    const normalizedStudentNumber = normalizeStudentNumberInput(e.target.value);
+    setFormData((prev) => ({ ...prev, studentNumber: normalizedStudentNumber }));
   };
 
-  // Phone number formatting function
   const formatPhoneNumber = (value: string) => {
-    // Remove all non-digit characters
     const cleaned = value.replace(/\D/g, "");
-
-    // Limit to 11 digits (Philippine mobile number)
     const limited = cleaned.slice(0, 11);
 
-    // Format as 0912 123 1234
     if (limited.length <= 4) {
       return limited;
-    } else if (limited.length <= 7) {
-      return `${limited.slice(0, 4)} ${limited.slice(4)}`;
-    } else {
-      return `${limited.slice(0, 4)} ${limited.slice(4, 7)} ${limited.slice(7, 11)}`;
     }
+
+    if (limited.length <= 7) {
+      return `${limited.slice(0, 4)} ${limited.slice(4)}`;
+    }
+
+    return `${limited.slice(0, 4)} ${limited.slice(4, 7)} ${limited.slice(7, 11)}`;
   };
 
-  // Handle phone number input with formatting
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawValue = e.target.value;
     const formatted = formatPhoneNumber(rawValue);
     setFormData((prev) => ({ ...prev, mobile: formatted }));
   };
 
-  // Get raw digits for validation (remove spaces)
   const getRawPhoneNumber = (formatted: string) => {
     return formatted.replace(/\D/g, "");
   };
@@ -89,13 +71,12 @@ function StudentRegistration() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (formData.studentNumber.length !== 6) {
-      alert("Please enter a valid 6-digit student number.");
-      return;
-    }
+    const normalizedStudentNumber = normalizeStudentNumberInput(
+      formData.studentNumber,
+    );
 
-    if (!selectedBranch) {
-      alert("Please select a branch before registering!");
+    if (!isValidStudentNumber(normalizedStudentNumber)) {
+      alert("Please enter a valid student number in the format BAC-261001.");
       return;
     }
 
@@ -129,10 +110,9 @@ function StudentRegistration() {
 
     try {
       setIsSubmitting(true);
-      let resolvedStudentNumber = formData.studentNumber;
+      let resolvedStudentNumber = normalizedStudentNumber;
       const attemptRegistration = (studentNumber: string) =>
         registerStudentPortalAccount({
-          branch: selectedBranch,
           studentNumber,
           email: formData.email,
           mobile: rawPhone,
@@ -148,7 +128,7 @@ function StudentRegistration() {
       } catch (error) {
         const shouldTryLocalBackfill =
           error instanceof Error &&
-          /was not found for the .* branch|admission has not been approved yet/i.test(
+          /was not found|admission has not been approved yet/i.test(
             error.message,
           );
 
@@ -157,8 +137,7 @@ function StudentRegistration() {
         }
 
         const approvedEnrollee = findApprovedEnrolleeByStudentNumber({
-          branch: selectedBranch,
-          studentNumber: formData.studentNumber,
+          studentNumber: normalizedStudentNumber,
         });
 
         if (!approvedEnrollee?.trackingNumber) {
@@ -173,10 +152,9 @@ function StudentRegistration() {
           activatedIdentity.studentNumber || resolvedStudentNumber;
 
         syncApprovedStudentNumber({
-          branch: selectedBranch,
           trackingNumber: approvedEnrollee.trackingNumber,
           previousStudentNumber:
-            approvedEnrollee.studentNumber || formData.studentNumber,
+            approvedEnrollee.studentNumber || normalizedStudentNumber,
           nextStudentNumber: resolvedStudentNumber,
         });
 
@@ -186,12 +164,12 @@ function StudentRegistration() {
       }
 
       const successMessage =
-        resolvedStudentNumber !== formData.studentNumber
+        resolvedStudentNumber !== normalizedStudentNumber
           ? `Registration successful. Your student number is ${resolvedStudentNumber}. You can now sign in to the student portal.`
           : "Registration successful. You can now sign in to the student portal.";
       alert(successMessage);
       navigate(
-        `/student/login?branch=${encodeURIComponent(selectedBranch)}&studentNumber=${encodeURIComponent(resolvedStudentNumber)}`,
+        `/student/login?studentNumber=${encodeURIComponent(resolvedStudentNumber)}`,
         { replace: true },
       );
     } catch (error) {
@@ -206,6 +184,8 @@ function StudentRegistration() {
     }
   };
 
+  const inferredBranch = getBranchFromStudentNumber(formData.studentNumber);
+
   return (
     <div className="student-registration-page">
       <div className="registration-wrapper">
@@ -219,9 +199,9 @@ function StudentRegistration() {
               />
               <h1 className="registration-title">Account Registration</h1>
               <p className="registration-branch-display">
-                Branch:{" "}
-                <strong className={!selectedBranch ? "placeholder" : ""}>
-                  {!selectedBranch ? "—" : selectedBranch}
+                Detected Branch:{" "}
+                <strong className={!inferredBranch ? "placeholder" : ""}>
+                  {inferredBranch || "Will appear from student number"}
                 </strong>
               </p>
             </div>
@@ -229,39 +209,6 @@ function StudentRegistration() {
             <div className="registration-divider"></div>
 
             <form className="registration-form" onSubmit={handleSubmit}>
-              <div className="registration-branch-section">
-                <div className="dropdown-reg" ref={wrapperRefBranch}>
-                  <label className="dropdown-label">Select Branch</label>
-                  <div
-                    className={`dropdown-select ${isMenuOpenBranch ? "select-clicked" : ""}`}
-                    onClick={() => setIsMenuOpenBranch((p) => !p)}
-                  >
-                    <span className="dropdown-selected">
-                      {selectedBranch || "Select branch"}
-                    </span>
-                    <div
-                      className={`dropdown-arrow ${isMenuOpenBranch ? "arrow-rotate" : ""}`}
-                    ></div>
-                  </div>
-
-                  <ul
-                    className={`dropdown-menu ${isMenuOpenBranch ? "show" : ""}`}
-                  >
-                    {["Taytay", "Bacoor", "GMA"].map((branch) => (
-                      <li
-                        key={branch}
-                        onClick={() => {
-                          setSelectedBranch(branch);
-                          setIsMenuOpenBranch(false);
-                        }}
-                      >
-                        {branch}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-
               <div className="registration-grid">
                 <div className="registration-grid-column">
                   <div className="form-field">
@@ -272,13 +219,15 @@ function StudentRegistration() {
                       name="studentNumber"
                       value={formData.studentNumber}
                       onChange={handleStudentNumberChange}
-                      placeholder="261001"
-                      maxLength={6}
-                      pattern="[0-9]{6}"
-                      title="Format: 6-digit number (e.g., 261001)"
+                      placeholder={getStudentNumberExample(inferredBranch)}
+                      maxLength={10}
+                      pattern="[A-Za-z]{3}-[0-9]{6}"
+                      title="Format: BAC-261001"
                       required
                     />
-                    <small className="field-hint"></small>
+                    <small className="field-hint">
+                      Use your full student number, like BAC-261001, TAY-261001, or GMA-261001.
+                    </small>
                   </div>
 
                   <div className="form-field">

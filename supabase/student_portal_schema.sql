@@ -80,9 +80,16 @@ select setval(
   greatest(
     coalesce(
       (
-        select max(student.student_number::bigint)
+        select max(
+          case
+            when upper(trim(student.student_number)) ~ '^[A-Z]{3}-[0-9]{6}$'
+              then substring(upper(trim(student.student_number)) from '([0-9]{6})$')::bigint
+            when trim(student.student_number) ~ '^[0-9]{6}$'
+              then trim(student.student_number)::bigint
+            else null
+          end
+        )
         from public.student_profiles student
-        where student.student_number ~ '^[0-9]+$'
       ),
       261000
     ),
@@ -161,6 +168,112 @@ as $$
   end;
 $$;
 
+create or replace function public.resolve_student_number_prefix(
+  p_branch_id uuid
+)
+returns text
+language sql
+stable
+set search_path = public
+as $$
+  select case lower(branch.code)
+    when 'bacoor' then 'BAC'
+    when 'taytay' then 'TAY'
+    when 'gma' then 'GMA'
+    else null
+  end
+  from public.admission_branches branch
+  where branch.id = p_branch_id
+  limit 1;
+$$;
+
+create or replace function public.extract_student_number_sequence(
+  p_student_number text
+)
+returns bigint
+language sql
+immutable
+as $$
+  select case
+    when upper(trim(coalesce(p_student_number, ''))) ~ '^[A-Z]{3}-[0-9]{6}$'
+      then substring(upper(trim(p_student_number)) from '([0-9]{6})$')::bigint
+    when trim(coalesce(p_student_number, '')) ~ '^[0-9]{6}$'
+      then trim(p_student_number)::bigint
+    else null
+  end;
+$$;
+
+create or replace function public.normalize_branch_student_number(
+  p_student_number text,
+  p_branch_id uuid
+)
+returns text
+language plpgsql
+stable
+set search_path = public
+as $$
+declare
+  v_student_number text;
+  v_branch_prefix text;
+  v_digits text;
+begin
+  v_student_number := upper(trim(coalesce(p_student_number, '')));
+
+  if v_student_number = '' then
+    return null;
+  end if;
+
+  select public.resolve_student_number_prefix(p_branch_id)
+  into v_branch_prefix;
+
+  if coalesce(v_branch_prefix, '') = '' then
+    return v_student_number;
+  end if;
+
+  if v_student_number ~ '^[0-9]{6}$' then
+    return format('%s-%s', v_branch_prefix, v_student_number);
+  end if;
+
+  if v_student_number ~ '^[A-Z]{3}-[0-9]{6}$' then
+    return v_student_number;
+  end if;
+
+  v_digits := regexp_replace(v_student_number, '\D', '', 'g');
+
+  if char_length(v_digits) = 6 then
+    return format('%s-%s', v_branch_prefix, v_digits);
+  end if;
+
+  return v_student_number;
+end;
+$$;
+
+create or replace function public.normalize_portal_student_number(
+  p_student_number text
+)
+returns text
+language sql
+immutable
+as $$
+  with cleaned as (
+    select upper(
+      regexp_replace(trim(coalesce(p_student_number, '')), '[^A-Z0-9]', '', 'g')
+    ) as compact_student_number
+  )
+  select case
+    when compact_student_number ~ '^[A-Z]{3}[0-9]{6}$'
+      then regexp_replace(
+        compact_student_number,
+        '^([A-Z]{3})([0-9]{6})$',
+        '\1-\2'
+      )
+    when compact_student_number ~ '^[0-9]{6}$'
+      then compact_student_number
+    else upper(trim(coalesce(p_student_number, '')))
+  end
+  from cleaned;
+$$;
+
 create or replace function public.generate_student_number()
 returns text
 language plpgsql
@@ -194,25 +307,32 @@ set search_path = public
 as $$
 declare
   v_student_number bigint;
+  v_branch_prefix text;
 begin
   perform pg_advisory_xact_lock(2610, coalesce(hashtext(p_branch_id::text), 0));
 
+  select public.resolve_student_number_prefix(p_branch_id)
+  into v_branch_prefix;
+
   select greatest(
     coalesce(
-      max(student.student_number::bigint),
+      max(public.extract_student_number_sequence(student.student_number)),
       261000
     ),
     261000
   ) + 1
   into v_student_number
   from public.student_profiles student
-  where student.student_number ~ '^[0-9]+$'
-    and (
+  where (
       p_branch_id is null
       or student.branch_id = p_branch_id
     );
 
-  return lpad(v_student_number::text, 6, '0');
+  if coalesce(v_branch_prefix, '') = '' then
+    return lpad(v_student_number::text, 6, '0');
+  end if;
+
+  return format('%s-%s', v_branch_prefix, lpad(v_student_number::text, 6, '0'));
 end;
 $$;
 
@@ -307,6 +427,23 @@ as $$
   limit 1;
 $$;
 
+drop function if exists public.register_student_portal_account(
+  text,
+  text,
+  text,
+  text,
+  date,
+  text
+);
+drop function if exists public.register_student_portal_account(
+  text,
+  text,
+  text,
+  date,
+  text
+);
+drop function if exists public.student_portal_login(text, text, text);
+drop function if exists public.student_portal_login(text, text);
 drop function if exists public.activate_approved_student(text);
 drop function if exists public.activate_approved_student(text, text);
 
@@ -343,11 +480,15 @@ as $$
 declare
   v_application_id uuid;
   v_branch_id uuid;
+  v_branch_prefix text;
   v_student_id uuid;
   v_student_number text;
   v_preferred_student_number text;
 begin
-  v_preferred_student_number := nullif(trim(coalesce(p_preferred_student_number, '')), '');
+  v_preferred_student_number := nullif(
+    upper(trim(coalesce(p_preferred_student_number, ''))),
+    ''
+  );
 
   select app.id, app.branch_id
   into v_application_id, v_branch_id
@@ -359,6 +500,9 @@ begin
   if v_application_id is null then
     raise exception 'Tracking number "%" was not found.', p_tracking_number;
   end if;
+
+  select public.resolve_student_number_prefix(v_branch_id)
+  into v_branch_prefix;
 
   update public.admission_applications app
   set application_status = 'accepted',
@@ -374,10 +518,22 @@ begin
 
   if v_student_id is null then
     if v_preferred_student_number is not null then
+      v_preferred_student_number := public.normalize_branch_student_number(
+        v_preferred_student_number,
+        v_branch_id
+      );
+
+      if (
+        v_branch_prefix is not null
+        and split_part(v_preferred_student_number, '-', 1) <> v_branch_prefix
+      ) then
+        raise exception 'Student number "%" does not match the % branch format.', v_preferred_student_number, v_branch_prefix;
+      end if;
+
       if exists (
         select 1
         from public.student_profiles student
-        where student.student_number = v_preferred_student_number
+        where upper(student.student_number) = v_preferred_student_number
           and student.branch_id = v_branch_id
       ) then
         raise exception 'Student number "%" is already assigned to another student in this branch.', v_preferred_student_number;
@@ -476,8 +632,65 @@ begin
 end;
 $$;
 
+drop function if exists public.delete_admission_application(text);
+
+create or replace function public.delete_admission_application(
+  p_tracking_number text
+)
+returns table (
+  tracking_number text,
+  deleted_student_number text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_tracking_number text;
+  v_application_id uuid;
+  v_student_id uuid;
+  v_student_number text;
+begin
+  v_tracking_number := upper(trim(coalesce(p_tracking_number, '')));
+
+  if v_tracking_number = '' then
+    raise exception 'Tracking number is required.';
+  end if;
+
+  select
+    app.id,
+    student.id,
+    student.student_number
+  into
+    v_application_id,
+    v_student_id,
+    v_student_number
+  from public.admission_applications app
+  left join public.student_profiles student
+    on student.admission_application_id = app.id
+  where app.tracking_number = v_tracking_number
+  limit 1;
+
+  if v_application_id is null then
+    raise exception 'Tracking number "%" was not found.', p_tracking_number;
+  end if;
+
+  if v_student_id is not null then
+    delete from public.student_profiles student
+    where student.id = v_student_id;
+  end if;
+
+  delete from public.admission_applications app
+  where app.id = v_application_id;
+
+  return query
+  select
+    v_tracking_number,
+    v_student_number;
+end;
+$$;
+
 create or replace function public.register_student_portal_account(
-  p_branch text,
   p_student_number text,
   p_email text,
   p_phone_number text,
@@ -511,29 +724,28 @@ set search_path = public
 as $$
 #variable_conflict use_column
 declare
-  v_branch_id uuid;
-  v_branch_name text;
+  v_normalized_student_number text;
   v_student_id uuid;
   v_contact_email text;
   v_contact_phone text;
 begin
-  if trim(coalesce(p_student_number, '')) = ''
+  v_normalized_student_number := public.normalize_portal_student_number(
+    p_student_number
+  );
+
+  if trim(coalesce(v_normalized_student_number, '')) = ''
     or trim(coalesce(p_email, '')) = ''
     or trim(coalesce(p_phone_number, '')) = ''
     or trim(coalesce(p_password, '')) = '' then
-    raise exception 'Branch, student number, email, mobile number, and password are required.';
+    raise exception 'Student number, email, mobile number, and password are required.';
   end if;
 
   if char_length(trim(p_password)) < 8 then
     raise exception 'Password must be at least 8 characters long.';
   end if;
 
-  select branch_id, branch_name
-  into v_branch_id, v_branch_name
-  from public.resolve_student_branch(p_branch);
-
-  if v_branch_id is null then
-    raise exception 'Branch "%" is not configured in Supabase.', p_branch;
+  if v_normalized_student_number !~ '^[A-Z]{3}-[0-9]{6}$' then
+    raise exception 'Student number must use the branch-prefixed format (e.g. BAC-261001).';
   end if;
 
   select student.id, contact.email::text, contact.phone_number
@@ -541,13 +753,12 @@ begin
   from public.student_profiles student
   join public.student_contact_details contact
     on contact.student_id = student.id
-  where student.student_number = trim(p_student_number)
-    and student.branch_id = v_branch_id
+  where upper(student.student_number) = v_normalized_student_number
     and student.status = 'active'
   limit 1;
 
   if v_student_id is null then
-    raise exception 'Student number "%" was not found for the % branch, or the admission has not been approved yet.', p_student_number, v_branch_name;
+    raise exception 'Student number "%" was not found, or the admission has not been approved yet.', v_normalized_student_number;
   end if;
 
   if lower(trim(p_email)) <> lower(trim(coalesce(v_contact_email, ''))) then
@@ -591,7 +802,6 @@ end;
 $$;
 
 create or replace function public.student_portal_login(
-  p_branch text,
   p_student_number text,
   p_password text
 )
@@ -622,33 +832,31 @@ set search_path = public
 as $$
 #variable_conflict use_column
 declare
-  v_branch_id uuid;
-  v_branch_name text;
+  v_normalized_student_number text;
   v_student_id uuid;
 begin
-  if trim(coalesce(p_student_number, '')) = ''
+  v_normalized_student_number := public.normalize_portal_student_number(
+    p_student_number
+  );
+
+  if trim(coalesce(v_normalized_student_number, '')) = ''
     or trim(coalesce(p_password, '')) = '' then
     raise exception 'Student number and password are required.';
   end if;
 
-  select branch_id, branch_name
-  into v_branch_id, v_branch_name
-  from public.resolve_student_branch(p_branch);
-
-  if v_branch_id is null then
-    raise exception 'Branch "%" is not configured in Supabase.', p_branch;
+  if v_normalized_student_number !~ '^[A-Z]{3}-[0-9]{6}$' then
+    raise exception 'Student number must use the branch-prefixed format (e.g. BAC-261001).';
   end if;
 
   select student.id
   into v_student_id
   from public.student_profiles student
-  where student.student_number = trim(p_student_number)
-    and student.branch_id = v_branch_id
+  where upper(student.student_number) = v_normalized_student_number
     and student.status = 'active'
   limit 1;
 
   if v_student_id is null then
-    raise exception 'Student number "%" was not found for the % branch.', p_student_number, v_branch_name;
+    raise exception 'Student number "%" was not found.', v_normalized_student_number;
   end if;
 
   if not exists (
@@ -832,13 +1040,13 @@ grant execute on function public.generate_student_number() to anon, authenticate
 grant execute on function public.generate_student_number(uuid) to anon, authenticated;
 grant execute on function public.get_student_activation_status(text) to anon, authenticated;
 grant execute on function public.activate_approved_student(text, text) to anon, authenticated;
+grant execute on function public.delete_admission_application(text) to anon, authenticated;
 grant execute on function public.register_student_portal_account(
-  text,
   text,
   text,
   text,
   date,
   text
 ) to anon, authenticated;
-grant execute on function public.student_portal_login(text, text, text) to anon, authenticated;
+grant execute on function public.student_portal_login(text, text) to anon, authenticated;
 grant execute on function public.get_admin_admission_queue(text) to anon, authenticated;

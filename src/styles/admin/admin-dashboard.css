@@ -194,6 +194,18 @@
   min-height: 300px;
 }
 
+.pie-center-value {
+  fill: #0f172a;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.pie-center-label {
+  fill: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
 /* Program Details */
 .program-section {
   margin-bottom: 28px;
@@ -272,6 +284,10 @@
 
   .pie-container {
     height: 300px;
+  }
+
+  .pie-center-value {
+    font-size: 18px;
   }
 
   .stat-card {

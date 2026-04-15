@@ -332,7 +332,7 @@ export default function AdminGrades({
       templateType === "SHS"
         ? [
             [
-              "20220001",
+              "BAC-261001",
               "Maria Santos",
               "MATH111",
               "General Mathematics",
@@ -344,7 +344,7 @@ export default function AdminGrades({
           ]
         : [
             [
-              "20220002",
+              "BAC-261002",
               "Juan Dela Cruz",
               "PROG101",
               "Programming 1",

@@ -7,7 +7,6 @@ import type {
 } from "../types/user";
 
 export interface StudentLoginPayload {
-  branch: string;
   studentNumber: string;
   password: string;
 }

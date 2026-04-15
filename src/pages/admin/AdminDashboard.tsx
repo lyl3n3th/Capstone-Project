@@ -6,10 +6,12 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  Label,
 } from "recharts";
 import { FaFileAlt, FaUsers } from "react-icons/fa";
 import { FiMenu, FiX } from "react-icons/fi";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import ChartNote from "../../components/common/ChartNote";
 import { useAuth } from "../../hooks/useAuth";
 import { getStudentsForBranch, normalizeBranchName } from "../../services/adminStorage";
 import "../../styles/admin/admin-dashboard.css";
@@ -235,6 +237,11 @@ export default function AdminDashboard({
         <div className="content-grid">
           <div className="card pie-card">
             <h3>Student Distribution by Program</h3>
+            <ChartNote variant="compact">
+              Each slice represents active students in a strand or course.
+              Hover a slice to view the exact count, and use the center total as
+              the branch-wide summary.
+            </ChartNote>
             <div className="pie-container">
               <ResponsiveContainer
                 width="100%"
@@ -252,6 +259,46 @@ export default function AdminDashboard({
                     paddingAngle={5}
                     dataKey="value"
                   >
+                    <Label
+                      content={({ viewBox }) => {
+                        const pieViewBox = viewBox as
+                          | { cx?: number; cy?: number }
+                          | undefined;
+                        const centerX = pieViewBox?.cx;
+                        const centerY = pieViewBox?.cy;
+
+                        if (
+                          typeof centerX !== "number" ||
+                          typeof centerY !== "number"
+                        ) {
+                          return null;
+                        }
+
+                        return (
+                          <text
+                            x={centerX}
+                            y={centerY}
+                            textAnchor="middle"
+                            dominantBaseline="middle"
+                          >
+                            <tspan
+                              x={centerX}
+                              y={centerY - 6}
+                              className="pie-center-value"
+                            >
+                              {totalStudents.toLocaleString()}
+                            </tspan>
+                            <tspan
+                              x={centerX}
+                              y={centerY + 18}
+                              className="pie-center-label"
+                            >
+                              Active Students
+                            </tspan>
+                          </text>
+                        );
+                      }}
+                    />
                     {programData.map((_entry, index) => (
                       <Cell
                         key={`cell-${index}`}

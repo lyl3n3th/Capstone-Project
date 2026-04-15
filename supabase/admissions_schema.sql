@@ -100,6 +100,7 @@ create table if not exists public.admission_applications (
   last_school_attended text not null,
   year_completion integer not null,
   applied_for_scholarship boolean not null default false,
+  scholarship_exam_score numeric(5, 2),
   current_step smallint not null default 2,
   application_status text not null default 'draft',
   requirements_uploaded_at timestamptz,
@@ -129,6 +130,27 @@ create table if not exists public.admission_applications (
       )
     )
 );
+
+alter table public.admission_applications
+  add column if not exists scholarship_exam_score numeric(5, 2);
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'admission_applications_scholarship_exam_score_check'
+      and conrelid = 'public.admission_applications'::regclass
+  ) then
+    alter table public.admission_applications
+      add constraint admission_applications_scholarship_exam_score_check
+      check (
+        scholarship_exam_score is null
+        or scholarship_exam_score between 0 and 100
+      );
+  end if;
+end;
+$$;
 
 create table if not exists public.admission_application_requirement_files (
   id uuid primary key default gen_random_uuid(),
@@ -343,6 +365,27 @@ begin
 end;
 $$;
 
+create or replace function public.calculate_admission_discount_percentage(
+  p_honor_discount_percent numeric default 0,
+  p_applied_for_scholarship boolean default false,
+  p_scholarship_exam_score numeric default null
+)
+returns numeric(5, 2)
+language sql
+immutable
+as $$
+  select greatest(
+    coalesce(p_honor_discount_percent, 0),
+    case
+      when coalesce(p_applied_for_scholarship, false) then
+        coalesce(least(greatest(p_scholarship_exam_score, 0), 100), 0)
+      else 0
+    end
+  )::numeric(5, 2);
+$$;
+
+drop function if exists public.get_admission_progress(text);
+
 create or replace function public.get_admission_progress(
   p_tracking_number text
 )
@@ -356,7 +399,11 @@ returns table (
   program_level text,
   track_name text,
   honor_label text,
+  honor_discount_percentage numeric,
   applied_for_scholarship boolean,
+  scholarship_exam_score numeric,
+  effective_discount_percentage numeric,
+  effective_discount_source text,
   application_status text,
   current_step smallint,
   first_name text,
@@ -380,7 +427,27 @@ as $$
     program.level as program_level,
     track.name as track_name,
     honor.label as honor_label,
+    coalesce(honor.tuition_discount_percent, 0)::numeric(5, 2) as honor_discount_percentage,
     app.applied_for_scholarship,
+    app.scholarship_exam_score,
+    public.calculate_admission_discount_percentage(
+      honor.tuition_discount_percent,
+      app.applied_for_scholarship,
+      app.scholarship_exam_score
+    ) as effective_discount_percentage,
+    case
+      when coalesce(app.applied_for_scholarship, false)
+        and app.scholarship_exam_score is not null
+        and app.scholarship_exam_score > coalesce(honor.tuition_discount_percent, 0)
+        then 'scholarship_exam'
+      when coalesce(honor.tuition_discount_percent, 0) > 0
+        then 'honor'
+      when coalesce(app.applied_for_scholarship, false)
+        and app.scholarship_exam_score is not null
+        and app.scholarship_exam_score > 0
+        then 'scholarship_exam'
+      else 'none'
+    end as effective_discount_source,
     app.application_status,
     app.current_step,
     app.first_name,
@@ -405,6 +472,28 @@ as $$
   where app.tracking_number = upper(trim(p_tracking_number))
   limit 1;
 $$;
+
+drop function if exists public.upsert_admission_application(
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  integer,
+  text,
+  boolean,
+  smallint,
+  text
+);
 
 create or replace function public.upsert_admission_application(
   p_tracking_number text,
@@ -437,7 +526,11 @@ returns table (
   program_level text,
   track_name text,
   honor_label text,
+  honor_discount_percentage numeric,
   applied_for_scholarship boolean,
+  scholarship_exam_score numeric,
+  effective_discount_percentage numeric,
+  effective_discount_source text,
   application_status text,
   current_step smallint,
   first_name text,
@@ -631,11 +724,14 @@ begin
 end;
 $$;
 
+drop function if exists public.update_admission_progress(text, smallint, text, boolean);
+
 create or replace function public.update_admission_progress(
   p_tracking_number text,
   p_current_step smallint,
   p_application_status text default null,
-  p_mark_submitted boolean default false
+  p_mark_submitted boolean default false,
+  p_scholarship_exam_score numeric default null
 )
 returns table (
   application_id uuid,
@@ -647,7 +743,11 @@ returns table (
   program_level text,
   track_name text,
   honor_label text,
+  honor_discount_percentage numeric,
   applied_for_scholarship boolean,
+  scholarship_exam_score numeric,
+  effective_discount_percentage numeric,
+  effective_discount_source text,
   application_status text,
   current_step smallint,
   first_name text,
@@ -665,9 +765,18 @@ as $$
 declare
   v_tracking_number text;
 begin
+  if p_scholarship_exam_score is not null
+    and (p_scholarship_exam_score < 0 or p_scholarship_exam_score > 100) then
+    raise exception 'Scholarship exam score must be between 0 and 100.';
+  end if;
+
   update public.admission_applications as app
   set current_step = greatest(app.current_step, p_current_step),
       application_status = coalesce(p_application_status, app.application_status),
+      scholarship_exam_score = coalesce(
+        round(p_scholarship_exam_score, 2),
+        app.scholarship_exam_score
+      ),
       submitted_at = case
         when p_mark_submitted then coalesce(app.submitted_at, timezone('utc', now()))
         else app.submitted_at
@@ -829,6 +938,7 @@ returns table (
   program_level text,
   track_name text,
   honor_label text,
+  honor_discount_percentage numeric,
   application_status text,
   current_step smallint,
   first_name text,
@@ -841,6 +951,9 @@ returns table (
   phone_number text,
   year_completion integer,
   applied_for_scholarship boolean,
+  scholarship_exam_score numeric,
+  effective_discount_percentage numeric,
+  effective_discount_source text,
   requirements_uploaded_at timestamptz,
   submitted_at timestamptz,
   created_at timestamptz,
@@ -861,6 +974,7 @@ as $$
     program.level as program_level,
     track.name as track_name,
     honor.label as honor_label,
+    coalesce(honor.tuition_discount_percent, 0)::numeric(5, 2) as honor_discount_percentage,
     app.application_status,
     app.current_step,
     app.first_name,
@@ -873,6 +987,25 @@ as $$
     app.phone_number,
     app.year_completion,
     app.applied_for_scholarship,
+    app.scholarship_exam_score,
+    public.calculate_admission_discount_percentage(
+      honor.tuition_discount_percent,
+      app.applied_for_scholarship,
+      app.scholarship_exam_score
+    ) as effective_discount_percentage,
+    case
+      when coalesce(app.applied_for_scholarship, false)
+        and app.scholarship_exam_score is not null
+        and app.scholarship_exam_score > coalesce(honor.tuition_discount_percent, 0)
+        then 'scholarship_exam'
+      when coalesce(honor.tuition_discount_percent, 0) > 0
+        then 'honor'
+      when coalesce(app.applied_for_scholarship, false)
+        and app.scholarship_exam_score is not null
+        and app.scholarship_exam_score > 0
+        then 'scholarship_exam'
+      else 'none'
+    end as effective_discount_source,
     app.requirements_uploaded_at,
     app.submitted_at,
     app.created_at,
@@ -924,6 +1057,7 @@ as $$
     program.level,
     track.name,
     honor.label,
+    honor.tuition_discount_percent,
     app.application_status,
     app.current_step,
     app.first_name,
@@ -936,6 +1070,7 @@ as $$
     app.phone_number,
     app.year_completion,
     app.applied_for_scholarship,
+    app.scholarship_exam_score,
     app.requirements_uploaded_at,
     app.submitted_at,
     app.created_at,
@@ -1011,6 +1146,7 @@ to anon, authenticated
 using (true);
 
 grant execute on function public.generate_aics_tracking_number() to anon, authenticated;
+grant execute on function public.calculate_admission_discount_percentage(numeric, boolean, numeric) to anon, authenticated;
 grant execute on function public.get_admission_progress(text) to anon, authenticated;
 grant execute on function public.upsert_admission_application(
   text,
@@ -1033,7 +1169,7 @@ grant execute on function public.upsert_admission_application(
   smallint,
   text
 ) to anon, authenticated;
-grant execute on function public.update_admission_progress(text, smallint, text, boolean) to anon, authenticated;
+grant execute on function public.update_admission_progress(text, smallint, text, boolean, numeric) to anon, authenticated;
 grant execute on function public.save_admission_requirement_file(
   text,
   text,

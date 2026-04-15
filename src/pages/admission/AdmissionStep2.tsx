@@ -681,8 +681,9 @@ function AdmissionStep2() {
                   </div>
                   {applyScholarship && (
                     <small className="scholarship-note">
-                      You will be scheduled for an on-site scholarship exam
-                      after approval.
+                      Scholarship exams are taken on-site after approval.
+                      There is no fixed schedule, so please coordinate with
+                      your selected branch before visiting.
                     </small>
                   )}
                 </div>

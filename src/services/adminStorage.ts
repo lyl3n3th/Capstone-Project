@@ -1,9 +1,16 @@
 import type {
   AdmissionApplicationSummary,
+  AdmissionDiscountSource,
   AdmissionDraft,
 } from "../types/application";
 import { supabase } from "../lib/supabase";
-import { getAdmissionRequirements, normalizeBranchCode } from "./admission";
+import {
+  getAdmissionDiscountSource,
+  getAdmissionRequirements,
+  getEffectiveAdmissionDiscountPercentage,
+  getHonorDiscountPercentage,
+  normalizeBranchCode,
+} from "./admission";
 import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 
 export type AdminBranchName = "Bacoor" | "Taytay" | "GMA";
@@ -45,11 +52,16 @@ export interface AdminEnrolleeRecord {
   branch: string;
   studentStatus: string;
   honorLabel?: string | null;
+  honorDiscountPercentage?: number;
   appliedForScholarship?: boolean;
   scholarshipExamScore?: number | null;
+  effectiveDiscountPercentage?: number;
+  effectiveDiscountSource?: AdmissionDiscountSource;
   personalInfo: AdminPersonalInformation;
   attachments?: AdminAttachment[];
   convertedAt?: string;
+  archivedAt?: string;
+  archivedByRole?: "Admin" | "Registrar";
 }
 
 export interface StudentStorageRecord {
@@ -108,6 +120,25 @@ export interface StudentPortalCredentialSummary {
   overallStatus: string;
 }
 
+export interface StudentSubjectPlanItem {
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+}
+
+export interface StudentSubjectPlanRecord {
+  id: string;
+  enrolleeId?: string;
+  trackingNumber?: string;
+  studentNumber?: string;
+  semester: string;
+  academicYear: string;
+  assignedSubjects: StudentSubjectPlanItem[];
+  creditedSubjects: StudentSubjectPlanItem[];
+  updatedAt: string;
+  source: "transferee_validation";
+}
+
 type StoredAcademicSubject = {
   id: string;
   code: string;
@@ -140,11 +171,19 @@ type StoredSubjectAssignment = {
   semester: string;
 };
 
+type StoredClassSection = {
+  id: string;
+  code: string;
+  semester?: string;
+};
+
 const STUDENT_STORAGE_KEY = "aics-students";
 const BRANCH_STORAGE_PREFIX = "aics-admin";
 const DEFAULT_BRANCH: AdminBranchName = "Bacoor";
 const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
+const DEFAULT_SECTION_SEMESTER = "1st Semester";
 const STUDENT_NUMBER_FLOOR = 261000;
+const STUDENT_NUMBER_SUFFIX_LENGTH = 6;
 const REQUIREMENTS_BUCKET = "admission-requirements";
 
 type SupabaseRequirementFileRow = {
@@ -168,7 +207,10 @@ type SupabaseAdminAdmissionQueueRow = {
   created_at: string;
   current_step: number;
   email: string;
+  effective_discount_percentage: number | string;
+  effective_discount_source: AdmissionDiscountSource | string | null;
   first_name: string;
+  honor_discount_percentage: number | string;
   honor_label: string | null;
   last_name: string;
   middle_name: string | null;
@@ -177,6 +219,7 @@ type SupabaseAdminAdmissionQueueRow = {
   program_name: string;
   requirement_files: SupabaseRequirementFileRow[] | null;
   requirements_uploaded_at: string | null;
+  scholarship_exam_score: number | string | null;
   sex: string;
   student_status_label: string;
   submitted_at: string | null;
@@ -225,6 +268,15 @@ const toIsoDateString = (value?: string | null) => {
   }
 
   return parsedDate.toISOString().slice(0, 10);
+};
+
+const toOptionalNumber = (value: number | string | null | undefined) => {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const parsedValue = Number(value);
+  return Number.isFinite(parsedValue) ? parsedValue : null;
 };
 
 const splitFullName = (fullName: string) => {
@@ -298,6 +350,164 @@ export const normalizeBranchName = (branch?: string | null): AdminBranchName => 
 
   return DEFAULT_BRANCH;
 };
+
+const STUDENT_NUMBER_PREFIX_BY_BRANCH: Record<AdminBranchName, string> = {
+  Bacoor: "BAC",
+  Taytay: "TAY",
+  GMA: "GMA",
+};
+
+const BRANCH_BY_STUDENT_NUMBER_PREFIX: Record<string, AdminBranchName> = {
+  BAC: "Bacoor",
+  TAY: "Taytay",
+  GMA: "GMA",
+};
+
+export const getStudentNumberPrefix = (branch?: string | null) =>
+  STUDENT_NUMBER_PREFIX_BY_BRANCH[normalizeBranchName(branch)];
+
+export const getBranchFromStudentNumber = (
+  studentNumber?: string | null,
+): AdminBranchName | null => {
+  const sanitizedValue = studentNumber
+    ?.trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+
+  if (!sanitizedValue) {
+    return null;
+  }
+
+  const prefixMatch = sanitizedValue.match(/^([A-Z]{3})/);
+
+  if (!prefixMatch) {
+    return null;
+  }
+
+  return BRANCH_BY_STUDENT_NUMBER_PREFIX[prefixMatch[1]] ?? null;
+};
+
+const getStudentNumberSequenceValue = (
+  studentNumber?: string | null,
+  branch?: string | null,
+) => {
+  const normalizedStudentNumber = studentNumber?.trim().toUpperCase();
+
+  if (!normalizedStudentNumber) {
+    return null;
+  }
+
+  const formattedMatch = normalizedStudentNumber.match(/^([A-Z]{3})-(\d{6})$/);
+
+  if (formattedMatch) {
+    const [, prefix, suffix] = formattedMatch;
+
+    if (branch && prefix !== getStudentNumberPrefix(branch)) {
+      return null;
+    }
+
+    const parsedValue = Number.parseInt(suffix, 10);
+    return Number.isFinite(parsedValue) ? parsedValue : null;
+  }
+
+  const digitsOnly = normalizedStudentNumber.replace(/\D/g, "");
+
+  if (digitsOnly.length !== STUDENT_NUMBER_SUFFIX_LENGTH) {
+    return null;
+  }
+
+  const parsedValue = Number.parseInt(digitsOnly, 10);
+  return Number.isFinite(parsedValue) ? parsedValue : null;
+};
+
+const studentNumbersMatch = (
+  leftValue?: string | null,
+  rightValue?: string | null,
+  branch?: string | null,
+) => {
+  if (!leftValue || !rightValue) {
+    return false;
+  }
+
+  const leftSequence = getStudentNumberSequenceValue(leftValue, branch);
+  const rightSequence = getStudentNumberSequenceValue(rightValue, branch);
+
+  if (leftSequence !== null && rightSequence !== null) {
+    return leftSequence === rightSequence;
+  }
+
+  return leftValue.trim().toUpperCase() === rightValue.trim().toUpperCase();
+};
+
+export const formatStudentNumber = (
+  branch: string | null | undefined,
+  value: number | string,
+) => {
+  const prefix = getStudentNumberPrefix(branch);
+  const digitsOnly = String(value).replace(/\D/g, "").slice(0, 6);
+  const paddedSuffix = digitsOnly.padStart(STUDENT_NUMBER_SUFFIX_LENGTH, "0");
+
+  return `${prefix}-${paddedSuffix}`;
+};
+
+export const normalizeStudentNumberInput = (
+  value: string,
+  branch?: string | null,
+) => {
+  const trimmedValue = value.trim().toUpperCase();
+
+  if (!trimmedValue) {
+    return "";
+  }
+
+  const digitsOnly = trimmedValue
+    .replace(/\D/g, "")
+    .slice(0, STUDENT_NUMBER_SUFFIX_LENGTH);
+
+  if (branch) {
+    if (!digitsOnly) {
+      return "";
+    }
+
+    return formatStudentNumber(branch, digitsOnly);
+  }
+
+  const sanitizedValue = trimmedValue.replace(/[^A-Z0-9]/g, "");
+  const prefixedMatch = sanitizedValue.match(/^([A-Z]{0,3})(\d{0,6})$/);
+
+  if (prefixedMatch && prefixedMatch[1]) {
+    const [, prefix, suffix] = prefixedMatch;
+
+    if (prefix.length === 3) {
+      return suffix ? `${prefix}-${suffix}` : prefix;
+    }
+
+    return `${prefix}${suffix}`;
+  }
+
+  return digitsOnly;
+};
+
+export const isValidStudentNumber = (
+  value: string,
+  branch?: string | null,
+) => {
+  const normalizedValue = normalizeStudentNumberInput(value, branch);
+
+  if (!branch) {
+    return /^(BAC|TAY|GMA)-\d{6}$/.test(normalizedValue);
+  }
+
+  const prefix = getStudentNumberPrefix(branch);
+  return new RegExp(`^${prefix}-\\d{${STUDENT_NUMBER_SUFFIX_LENGTH}}$`).test(
+    normalizedValue,
+  );
+};
+
+export const getStudentNumberExample = (branch?: string | null) =>
+  branch
+    ? formatStudentNumber(branch, STUDENT_NUMBER_FLOOR + 1)
+    : "BAC-261001";
 
 export const getBranchStorageKey = (scope: string, branch?: string | null) =>
   `${BRANCH_STORAGE_PREFIX}:${scope}:${normalizeBranchName(branch).toLowerCase()}`;
@@ -423,6 +633,11 @@ const matchesStrandOrCourse = (
   return left.includes(right) || right.includes(left);
 };
 
+const normalizeStoredSemester = (value?: string | null) =>
+  value?.trim().toLowerCase().includes("2nd")
+    ? "2nd Semester"
+    : DEFAULT_SECTION_SEMESTER;
+
 const formatClockTime = (value?: string) => {
   if (!value || !/^\d{2}:\d{2}$/.test(value)) {
     return value || "TBA";
@@ -442,7 +657,7 @@ const formatScheduleLabel = (schedule: StoredSchedule[] = []) =>
             `${slot.day.slice(0, 3)} ${formatClockTime(slot.startTime)}-${formatClockTime(slot.endTime)}`,
         )
         .join(" / ")
-    : "To be announced";
+    : "TBA";
 
 const formatScheduleDays = (schedule: StoredSchedule[] = []) =>
   schedule.length > 0
@@ -457,32 +672,107 @@ const formatScheduleTime = (schedule: StoredSchedule[] = []) =>
             `${formatClockTime(slot.startTime)}-${formatClockTime(slot.endTime)}`,
         )
         .join(" / ")
-    : "To be announced";
+    : "TBA";
 
 const formatScheduleRooms = (schedule: StoredSchedule[] = []) =>
   schedule.length > 0
     ? Array.from(new Set(schedule.map((slot) => slot.room || "TBA"))).join(", ")
     : "TBA";
 
+const sortPortalSubjects = (subjects: StudentPortalSubject[]) =>
+  [...subjects].sort((left, right) => left.code.localeCompare(right.code));
+
 const mapStoredSubjectsToPortalSubjects = (
   subjects: StoredAcademicSubject[],
   academicYear = "2026-2027",
 ): StudentPortalSubject[] =>
-  subjects
-    .map((subject) => ({
+  sortPortalSubjects(
+    subjects.map((subject) => ({
       id: subject.id,
       code: subject.code,
       title: subject.name,
       units: subject.units,
-      schedule: "To be announced",
+      schedule: "TBA",
       room: "TBA",
-      professor: "To be assigned",
+      professor: "TBA",
       days: "TBA",
-      time: "To be announced",
+      time: "TBA",
       semester: subject.semester,
       academicYear,
-    }))
-    .sort((left, right) => left.code.localeCompare(right.code));
+    })),
+  );
+
+const mapStoredAssignmentsToPortalSubjects = (
+  assignments: StoredSubjectAssignment[],
+  storedSubjects: StoredAcademicSubject[],
+) =>
+  sortPortalSubjects(
+    assignments.map((assignment) => {
+      const subjectDetails = storedSubjects.find(
+        (subject) =>
+          (subject.id === assignment.subjectId ||
+            subject.code === assignment.subjectCode) &&
+          subject.semester === assignment.semester,
+      );
+
+      return {
+        id: assignment.id,
+        code: assignment.subjectCode,
+        title: assignment.subjectName,
+        units: subjectDetails?.units,
+        schedule: formatScheduleLabel(assignment.schedule),
+        room: formatScheduleRooms(assignment.schedule),
+        professor: assignment.instructorName || "TBA",
+        days: formatScheduleDays(assignment.schedule),
+        time: formatScheduleTime(assignment.schedule),
+        semester: assignment.semester,
+        academicYear: assignment.academicYear,
+      };
+    }),
+  );
+
+const mapPlanItemsToPortalSubjects = (
+  items: StudentSubjectPlanItem[],
+  semester: string,
+  academicYear: string,
+) =>
+  sortPortalSubjects(
+    items.map((item) => ({
+      id: item.subjectId || item.subjectCode,
+      code: item.subjectCode,
+      title: item.subjectName,
+      schedule: "TBA",
+      room: "TBA",
+      professor: "TBA",
+      days: "TBA",
+      time: "TBA",
+      semester,
+      academicYear,
+    })),
+  );
+
+const subjectPlanItemMatches = (
+  item: Pick<StudentSubjectPlanItem, "subjectId" | "subjectCode">,
+  subjectId?: string | null,
+  subjectCode?: string | null,
+) =>
+  (Boolean(item.subjectId) && Boolean(subjectId) && item.subjectId === subjectId) ||
+  (Boolean(item.subjectCode) &&
+    Boolean(subjectCode) &&
+    item.subjectCode === subjectCode);
+
+const findMatchingStudentSubjectPlan = (
+  student: Pick<StudentStorageRecord, "id" | "trackingNumber">,
+  branch: AdminBranchName,
+  plans: Record<string, StudentSubjectPlanRecord>,
+) =>
+  Object.values(plans).find((plan) => {
+    if (student.trackingNumber && plan.trackingNumber === student.trackingNumber) {
+      return true;
+    }
+
+    return studentNumbersMatch(plan.studentNumber, student.id, branch);
+  }) ?? null;
 
 export const findStoredStudent = ({
   branch,
@@ -494,13 +784,19 @@ export const findStoredStudent = ({
   trackingNumber?: string | null;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
+  const normalizedStudentNumber = studentNumber?.trim()
+    ? normalizeStudentNumberInput(studentNumber, resolvedBranch)
+    : null;
 
   return readStoredStudents().find((student) => {
     if (normalizeBranchName(student.branch) !== resolvedBranch) {
       return false;
     }
 
-    if (studentNumber && student.id === studentNumber) {
+    if (
+      normalizedStudentNumber &&
+      studentNumbersMatch(student.id, normalizedStudentNumber, resolvedBranch)
+    ) {
       return true;
     }
 
@@ -523,7 +819,18 @@ export const findApprovedEnrolleeByStudentNumber = ({
     return null;
   }
 
-  const resolvedBranch = normalizeBranchName(branch);
+  const resolvedBranch = branch?.trim()
+    ? normalizeBranchName(branch)
+    : getBranchFromStudentNumber(studentNumber);
+
+  if (!resolvedBranch) {
+    return null;
+  }
+
+  const normalizedStudentNumber = normalizeStudentNumberInput(
+    studentNumber,
+    resolvedBranch,
+  );
   const storedEnrollees =
     readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ?? [];
 
@@ -531,7 +838,11 @@ export const findApprovedEnrolleeByStudentNumber = ({
     storedEnrollees.find(
       (record) =>
         record.status === "Approved" &&
-        record.studentNumber === studentNumber &&
+        studentNumbersMatch(
+          record.studentNumber,
+          normalizedStudentNumber,
+          resolvedBranch,
+        ) &&
         normalizeBranchName(record.branch) === resolvedBranch,
     ) || null
   );
@@ -546,8 +857,10 @@ export const getNextStudentNumber = (
     .filter(
       (student) => normalizeBranchName(student.branch) === resolvedBranch,
     )
-    .map((student) => Number.parseInt(student.id, 10))
-    .filter((studentNumber) => Number.isFinite(studentNumber))
+    .map((student) => getStudentNumberSequenceValue(student.id, resolvedBranch))
+    .filter((studentNumber): studentNumber is number =>
+      Number.isFinite(studentNumber),
+    )
     .filter((studentNumber) => studentNumber >= STUDENT_NUMBER_FLOOR);
 
   const nextStudentNumber =
@@ -555,7 +868,7 @@ export const getNextStudentNumber = (
       ? Math.max(...studentNumbers) + 1
       : STUDENT_NUMBER_FLOOR + 1;
 
-  return String(nextStudentNumber).padStart(6, "0");
+  return formatStudentNumber(resolvedBranch, nextStudentNumber);
 };
 
 export const syncApprovedStudentNumber = ({
@@ -569,7 +882,15 @@ export const syncApprovedStudentNumber = ({
   previousStudentNumber?: string | null;
   nextStudentNumber: string;
 }) => {
-  const resolvedBranch = normalizeBranchName(branch);
+  const resolvedBranch = branch?.trim()
+    ? normalizeBranchName(branch)
+    : getBranchFromStudentNumber(nextStudentNumber) ??
+      getBranchFromStudentNumber(previousStudentNumber);
+
+  if (!resolvedBranch) {
+    return null;
+  }
+
   const normalizedNextStudentNumber = nextStudentNumber.trim();
 
   if (!normalizedNextStudentNumber) {
@@ -583,7 +904,12 @@ export const syncApprovedStudentNumber = ({
   const nextEnrollees = storedEnrollees.map((record) => {
     const isTargetRecord =
       (trackingNumber && record.trackingNumber === trackingNumber) ||
-      (previousStudentNumber && record.studentNumber === previousStudentNumber);
+      (previousStudentNumber &&
+        studentNumbersMatch(
+          record.studentNumber,
+          previousStudentNumber,
+          resolvedBranch,
+        ));
 
     if (!isTargetRecord) {
       return record;
@@ -608,7 +934,8 @@ export const syncApprovedStudentNumber = ({
     const isTargetRecord =
       matchesBranch &&
       ((trackingNumber && student.trackingNumber === trackingNumber) ||
-        (previousStudentNumber && student.id === previousStudentNumber));
+        (previousStudentNumber &&
+          studentNumbersMatch(student.id, previousStudentNumber, resolvedBranch)));
 
     if (!isTargetRecord) {
       return student;
@@ -721,6 +1048,28 @@ export const mergeAdminEnrolleeRecords = (
             totalDocuments: existingRecord.totalDocuments || record.totalDocuments,
             strandOrCourse:
               existingRecord.strandOrCourse || record.strandOrCourse,
+            honorLabel:
+              record.honorLabel ?? existingRecord.honorLabel ?? "No Honor",
+            honorDiscountPercentage:
+              record.honorDiscountPercentage ??
+              existingRecord.honorDiscountPercentage ??
+              0,
+            appliedForScholarship:
+              record.appliedForScholarship ??
+              existingRecord.appliedForScholarship ??
+              false,
+            scholarshipExamScore:
+              record.scholarshipExamScore ??
+              existingRecord.scholarshipExamScore ??
+              null,
+            effectiveDiscountPercentage:
+              record.effectiveDiscountPercentage ??
+              existingRecord.effectiveDiscountPercentage ??
+              0,
+            effectiveDiscountSource:
+              record.effectiveDiscountSource ??
+              existingRecord.effectiveDiscountSource ??
+              "none",
             personalInfo: {
               ...existingRecord.personalInfo,
               ...record.personalInfo,
@@ -1011,7 +1360,8 @@ export const getStudentPortalSubjects = (
   student: Pick<
     StudentStorageRecord,
     "branch" | "program" | "yearLevel" | "strandOrCourse" | "section"
-  >,
+  > &
+    Pick<StudentStorageRecord, "id" | "trackingNumber">,
 ): StudentPortalSubject[] => {
   const branch = normalizeBranchName(student.branch);
   const storedSubjects =
@@ -1019,8 +1369,25 @@ export const getStudentPortalSubjects = (
   const storedAssignments =
     readBranchScopedData<StoredSubjectAssignment[]>("subject-assignments", branch) ??
     [];
+  const storedSections =
+    readBranchScopedData<StoredClassSection[]>("class-sections", branch) ?? [];
+  const storedSubjectPlans =
+    readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
+      "student-subject-plans",
+      branch,
+    ) ?? {};
+  const studentSubjectPlan = findMatchingStudentSubjectPlan(
+    student,
+    branch,
+    storedSubjectPlans,
+  );
+  const plannedSemester = studentSubjectPlan
+    ? normalizeStoredSemester(studentSubjectPlan.semester)
+    : undefined;
   const defaultAcademicYear =
-    storedAssignments[0]?.academicYear || "2026-2027";
+    storedAssignments[0]?.academicYear ||
+    studentSubjectPlan?.academicYear ||
+    "2026-2027";
   const matchedSubjects = storedSubjects.filter(
     (subject) =>
       subject.program === student.program &&
@@ -1030,13 +1397,114 @@ export const getStudentPortalSubjects = (
         student.strandOrCourse,
       ),
   );
+  const matchedSection = student.section
+    ? storedSections.find((section) => section.code === student.section)
+    : undefined;
+  const activeSectionSemester = student.section
+    ? normalizeStoredSemester(
+        matchedSection?.semester ||
+          storedAssignments.find(
+            (assignment) => assignment.sectionCode === student.section,
+          )?.semester,
+      )
+    : undefined;
+  const effectiveSemester = plannedSemester || activeSectionSemester;
+  const semesterScopedSubjects = effectiveSemester
+    ? matchedSubjects.filter(
+        (subject) => subject.semester === effectiveSemester,
+      )
+    : matchedSubjects;
+  const creditedPlanSubjects = studentSubjectPlan?.creditedSubjects ?? [];
+  const creditedScopedSubjects =
+    creditedPlanSubjects.length > 0
+      ? semesterScopedSubjects.filter(
+          (subject) =>
+            !creditedPlanSubjects.some((item) =>
+              subjectPlanItemMatches(item, subject.id, subject.code),
+            ),
+        )
+      : semesterScopedSubjects;
+  const planAcademicYear =
+    studentSubjectPlan?.academicYear?.trim() || defaultAcademicYear;
+
+  if ((studentSubjectPlan?.assignedSubjects.length ?? 0) > 0) {
+    const plannedSubjects = studentSubjectPlan?.assignedSubjects ?? [];
+    const plannedCatalogSubjects = creditedScopedSubjects.filter((subject) =>
+      plannedSubjects.some((item) =>
+        subjectPlanItemMatches(item, subject.id, subject.code),
+      ),
+    );
+    const unresolvedPlannedSubjects = plannedSubjects.filter(
+      (item) =>
+        !plannedCatalogSubjects.some((subject) =>
+          subjectPlanItemMatches(item, subject.id, subject.code),
+        ),
+    );
+
+    if (student.section) {
+      const plannedAssignments = storedAssignments.filter(
+        (assignment) =>
+          assignment.sectionCode === student.section &&
+          (!effectiveSemester || assignment.semester === effectiveSemester) &&
+          plannedSubjects.some((item) =>
+            subjectPlanItemMatches(
+              item,
+              assignment.subjectId,
+              assignment.subjectCode,
+            ),
+          ),
+      );
+
+      if (plannedAssignments.length > 0) {
+        const assignedPortalSubjects = mapStoredAssignmentsToPortalSubjects(
+          plannedAssignments,
+          storedSubjects,
+        );
+        const remainingCatalogSubjects = plannedCatalogSubjects.filter(
+          (subject) =>
+            !plannedAssignments.some(
+              (assignment) =>
+                (assignment.subjectId === subject.id ||
+                  assignment.subjectCode === subject.code) &&
+                assignment.semester === subject.semester,
+            ),
+        );
+
+        return sortPortalSubjects([
+          ...assignedPortalSubjects,
+          ...mapStoredSubjectsToPortalSubjects(
+            remainingCatalogSubjects,
+            planAcademicYear,
+          ),
+          ...mapPlanItemsToPortalSubjects(
+            unresolvedPlannedSubjects,
+            effectiveSemester || DEFAULT_SECTION_SEMESTER,
+            planAcademicYear,
+          ),
+        ]);
+      }
+    }
+
+    return sortPortalSubjects([
+      ...mapStoredSubjectsToPortalSubjects(plannedCatalogSubjects, planAcademicYear),
+      ...mapPlanItemsToPortalSubjects(
+        unresolvedPlannedSubjects,
+        effectiveSemester || DEFAULT_SECTION_SEMESTER,
+        planAcademicYear,
+      ),
+    ]);
+  }
 
   if (student.section) {
     const sectionAssignments = storedAssignments.filter(
       (assignment) =>
         assignment.sectionCode === student.section &&
+        (!effectiveSemester || assignment.semester === effectiveSemester) &&
+        !creditedPlanSubjects.some((item) =>
+          subjectPlanItemMatches(item, assignment.subjectId, assignment.subjectCode),
+        ) &&
         (storedSubjects.length === 0 ||
-          matchedSubjects.some(
+          creditedScopedSubjects.some(
             (subject) =>
               (subject.id === assignment.subjectId ||
                 subject.code === assignment.subjectCode) &&
@@ -1050,37 +1518,17 @@ export const getStudentPortalSubjects = (
       );
       const assignedAcademicYear =
         sectionAssignments[0]?.academicYear || defaultAcademicYear;
-      const assignedPortalSubjects = sectionAssignments
-        .map((assignment) => {
-          const subjectDetails = storedSubjects.find(
-            (subject) =>
-              (subject.id === assignment.subjectId ||
-                subject.code === assignment.subjectCode) &&
-              subject.semester === assignment.semester,
-          );
-
-          return {
-            id: assignment.id,
-            code: assignment.subjectCode,
-            title: assignment.subjectName,
-            units: subjectDetails?.units,
-            schedule: formatScheduleLabel(assignment.schedule),
-            room: formatScheduleRooms(assignment.schedule),
-            professor: assignment.instructorName || "To be assigned",
-            days: formatScheduleDays(assignment.schedule),
-            time: formatScheduleTime(assignment.schedule),
-            semester: assignment.semester,
-            academicYear: assignment.academicYear,
-          };
-        })
-        .sort((left, right) => left.code.localeCompare(right.code));
+      const assignedPortalSubjects = mapStoredAssignmentsToPortalSubjects(
+        sectionAssignments,
+        storedSubjects,
+      );
       const assignedSubjectKeys = new Set(
         sectionAssignments.map(
           (assignment) =>
             `${assignment.subjectId}:${assignment.subjectCode}:${assignment.semester}`,
         ),
       );
-      const remainingCatalogSubjects = matchedSubjects.filter(
+      const remainingCatalogSubjects = creditedScopedSubjects.filter(
         (subject) =>
           assignedSemesters.has(subject.semester) &&
           !assignedSubjectKeys.has(
@@ -1088,13 +1536,13 @@ export const getStudentPortalSubjects = (
           ),
       );
 
-      return [
+      return sortPortalSubjects([
         ...assignedPortalSubjects,
         ...mapStoredSubjectsToPortalSubjects(
           remainingCatalogSubjects,
           assignedAcademicYear,
         ),
-      ].sort((left, right) => left.code.localeCompare(right.code));
+      ]);
     }
   }
 
@@ -1103,7 +1551,7 @@ export const getStudentPortalSubjects = (
   }
 
   return mapStoredSubjectsToPortalSubjects(
-    matchedSubjects,
+    creditedScopedSubjects,
     defaultAcademicYear,
   );
 };
@@ -1254,6 +1702,58 @@ export const getDefaultBranchEnrollees = (
           },
         ],
       },
+      {
+        id: "BAC-APP-003",
+        trackingNumber: "AICS-20260403-BAC103",
+        fullName: "Alyssa Mae Cruz",
+        program: "College",
+        yearLevel: "1st Year",
+        strandOrCourse: "BSIT - Bachelor of Science in Information Technology",
+        applicationDate: "2026-04-03",
+        documentsSubmitted: 4,
+        totalDocuments: 4,
+        status: "Pending",
+        branch: "Bacoor",
+        studentStatus: "Transferee",
+        honorLabel: "No Honor",
+        personalInfo: {
+          fullName: "Alyssa Mae Cruz",
+          birthDate: "2006-09-19",
+          contactNumber: "0917 889 1123",
+          program: "College",
+          guardianName: "Marissa Cruz",
+          email: "alyssa.cruz@example.com",
+          address: "Bacoor, Cavite",
+          yearLevel: "1st Year",
+          guardianContact: "0918 662 0045",
+        },
+        attachments: [
+          {
+            name: "Transcript of Records (TOR)",
+            type: "pdf",
+            url: "#",
+            reviewStatus: "Pending",
+          },
+          {
+            name: "Honorable Dismissal",
+            type: "pdf",
+            url: "#",
+            reviewStatus: "Pending",
+          },
+          {
+            name: "Birth Certificate/PSA",
+            type: "pdf",
+            url: "#",
+            reviewStatus: "Pending",
+          },
+          {
+            name: "Good Moral Character",
+            type: "pdf",
+            url: "#",
+            reviewStatus: "Pending",
+          },
+        ],
+      },
     ],
     Taytay: [
       {
@@ -1390,6 +1890,27 @@ const mapSupabaseApplicantToAdminRecord = async (
   const requirementFiles = Array.isArray(row.requirement_files)
     ? row.requirement_files
     : [];
+  const scholarshipExamScore = toOptionalNumber(row.scholarship_exam_score);
+  const honorDiscountPercentage =
+    toOptionalNumber(row.honor_discount_percentage) ??
+    getHonorDiscountPercentage(row.honor_label || "No Honor");
+  const effectiveDiscountPercentage =
+    toOptionalNumber(row.effective_discount_percentage) ??
+    getEffectiveAdmissionDiscountPercentage({
+      honorLabel: row.honor_label,
+      appliedForScholarship: row.applied_for_scholarship,
+      scholarshipExamScore,
+    });
+  const effectiveDiscountSource =
+    row.effective_discount_source === "honor" ||
+    row.effective_discount_source === "scholarship_exam" ||
+    row.effective_discount_source === "none"
+      ? row.effective_discount_source
+      : getAdmissionDiscountSource({
+          honorLabel: row.honor_label,
+          appliedForScholarship: row.applied_for_scholarship,
+          scholarshipExamScore,
+        });
   const attachments = await Promise.all(
     requirements.map(async (requirement) => {
       const uploadedFile = requirementFiles.find(
@@ -1437,8 +1958,11 @@ const mapSupabaseApplicantToAdminRecord = async (
     branch: normalizeBranchName(row.branch_name || row.branch_code),
     studentStatus: row.student_status_label,
     honorLabel: row.honor_label || "No Honor",
+    honorDiscountPercentage,
     appliedForScholarship: row.applied_for_scholarship,
-    scholarshipExamScore: null,
+    scholarshipExamScore,
+    effectiveDiscountPercentage,
+    effectiveDiscountSource,
     personalInfo: {
       fullName,
       birthDate: "",
@@ -1510,10 +2034,13 @@ export const upsertSubmittedApplicant = ({
     branch,
     studentStatus: application.studentStatus,
     honorLabel,
+    honorDiscountPercentage: application.honorDiscountPercentage,
     appliedForScholarship: Boolean(
       draft?.apply_scholarship ?? application.appliedForScholarship,
     ),
-    scholarshipExamScore: null,
+    scholarshipExamScore: application.scholarshipExamScore,
+    effectiveDiscountPercentage: application.effectiveDiscountPercentage,
+    effectiveDiscountSource: application.effectiveDiscountSource,
     personalInfo: {
       fullName: fullName || `${application.firstName} ${application.lastName}`.trim(),
       birthDate: "",

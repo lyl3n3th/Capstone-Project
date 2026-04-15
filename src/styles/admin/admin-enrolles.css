@@ -173,6 +173,24 @@
   margin-left: 4px;
 }
 
+@media (max-width: 900px) {
+  .enrollment-tabs {
+    flex-wrap: wrap;
+    border-bottom: none;
+    gap: 10px;
+  }
+
+  .tab-btn {
+    border-radius: 10px;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+  }
+
+  .tab-btn.active {
+    border-bottom: 1px solid #066287;
+  }
+}
+
 /* ==========================================================================
    4. STATS CARDS
    ========================================================================== */
@@ -392,6 +410,32 @@
   color: #dc2626;
 }
 
+.validation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.validation-badge.pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.validation-badge.progress {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.validation-badge.ready {
+  background: #dcfce7;
+  color: #166534;
+}
+
 .next-level-badge {
   display: inline-flex;
   align-items: center;
@@ -514,6 +558,85 @@
   color: white;
 }
 
+.action-btn.archive {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fdba74;
+}
+
+.action-btn.archive:hover {
+  background: #c2410c;
+  color: #ffffff;
+}
+
+.table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 18px 8px 0;
+}
+
+.table-pagination-btn,
+.table-pagination-page {
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #111827;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.table-pagination-btn {
+  min-width: 88px;
+  height: 40px;
+  padding: 0 16px;
+}
+
+.table-pagination-btn:hover:not(:disabled),
+.table-pagination-page:hover {
+  background: #e3f2fd;
+  border-color: #066287;
+  color: #066287;
+}
+
+.table-pagination-btn:disabled {
+  background: #f9fafb;
+  color: #9ca3af;
+  border-color: #e5e7eb;
+  cursor: not-allowed;
+}
+
+.table-pagination-summary {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.table-pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.table-pagination-page {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.table-pagination-page.active {
+  background: #066287;
+  border-color: #066287;
+  color: #ffffff;
+}
+
 /* ==========================================================================
    9. SECTION MANAGEMENT BAR
    ========================================================================== */
@@ -574,6 +697,17 @@
 .action-btn.section-manager:hover {
   background: #1A3D5C;
   transform: translateY(-1px);
+}
+
+.transferee-guidance-banner {
+  margin-bottom: 20px;
+  padding: 14px 18px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+  color: #1d4ed8;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 /* ==========================================================================
@@ -776,6 +910,202 @@
   color: #1e3a8a;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.transferee-review-section {
+  margin-bottom: 24px;
+}
+
+.transferee-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.transferee-review-card {
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #f8fbff;
+}
+
+.transferee-review-title {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+}
+
+.transferee-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.transferee-check:last-child {
+  margin-bottom: 0;
+}
+
+.transferee-check input {
+  margin-top: 2px;
+}
+
+.transferee-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.transferee-field:last-child {
+  margin-bottom: 0;
+}
+
+.transferee-field span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.transferee-field input,
+.transferee-field select,
+.transferee-field textarea {
+  width: 100%;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  font-size: 14px;
+  color: #334155;
+  padding: 12px 14px;
+  box-sizing: border-box;
+}
+
+.transferee-field input:focus,
+.transferee-field select:focus,
+.transferee-field textarea:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+}
+
+.transferee-planner-card {
+  grid-column: 1 / -1;
+}
+
+.transferee-planner-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.transferee-planner-copy {
+  margin: -4px 0 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.transferee-planner-stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.transferee-planner-stat {
+  min-width: 96px;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #eff6ff;
+}
+
+.transferee-planner-stat span {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.transferee-planner-stat strong {
+  display: block;
+  margin-top: 6px;
+  color: #1e3a8a;
+  font-size: 20px;
+}
+
+.transferee-planner-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.transferee-subject-picker-header {
+  margin-bottom: 14px;
+}
+
+.transferee-subject-picker-header p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.transferee-subject-planner-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.transferee-subject-column h4 {
+  margin: 0 0 10px;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.transferee-subject-selector {
+  max-height: 280px;
+}
+
+.transferee-review-note {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #e0f2fe;
+  color: #0f4c81;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.transferee-table-meta {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 768px) {
+  .transferee-review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .transferee-planner-header,
+  .transferee-subject-planner-grid,
+  .transferee-planner-filters {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
 }
 
 .requirement-stats-row {
@@ -1271,6 +1601,13 @@
   margin-bottom: 16px;
 }
 
+.section-form-note {
+  margin: -4px 0 16px;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
 .add-section-form-row {
   display: flex;
   align-items: flex-end;
@@ -1297,6 +1634,20 @@
   outline: none;
   border-color: #066287;
   box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.1);
+}
+
+.add-section-form-row input:disabled,
+.add-section-form-row select:disabled {
+  background: #f3f4f6;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
+.add-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 /* ==========================================================================
@@ -1906,6 +2257,10 @@
 .instructor-actions .action-btn {
   padding: 6px 12px;
   font-size: 11px;
+  justify-content: center;
+  text-align: center;
+  min-height: 32px;
+  line-height: 1.2;
 }
 
 /* ==========================================================================
@@ -2285,6 +2640,21 @@
 }
 
 @media (max-width: 768px) {
+  .table-pagination {
+    gap: 8px;
+    padding-top: 16px;
+  }
+
+  .table-pagination-btn,
+  .table-pagination-page {
+    height: 36px;
+  }
+
+  .table-pagination-btn {
+    min-width: 72px;
+    padding: 0 12px;
+  }
+
   .assignment-bulk-toolbar {
     padding: 14px;
   }
@@ -2332,6 +2702,15 @@
   .add-section-form-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .add-section-actions {
+    width: 100%;
+  }
+
+  .add-section-actions .action-btn {
+    flex: 1;
+    justify-content: center;
   }
   
   .personal-info-grid {

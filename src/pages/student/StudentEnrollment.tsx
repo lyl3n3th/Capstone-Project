@@ -11,6 +11,12 @@ import {
   getStudentPortalSubjectsForTerm,
   type StudentPortalSubject,
 } from "../../services/adminStorage";
+import {
+  getAdmissionDiscountSourceLabel,
+  getAdmissionDiscountSource,
+  getEffectiveAdmissionDiscountPercentage,
+  getHonorDiscountPercentage,
+} from "../../services/admission";
 import type { Student } from "../../types/student";
 import "../../styles/main.css";
 
@@ -579,14 +585,6 @@ const getFallbackEnrollmentSubjects = ({
     }));
 };
 
-const getHonorDiscount = (honor: string | null | undefined): number => {
-  if (!honor) return 0;
-  if (honor.includes("Highest Honor")) return 80;
-  if (honor.includes("High Honor")) return 60;
-  if (honor.includes("With Honor")) return 50;
-  return 0;
-};
-
 const formatCurrency = (amount: number) =>
   new Intl.NumberFormat("en-PH", {
     style: "currency",
@@ -698,16 +696,28 @@ function StudentEnrollment() {
   const tuitionPerUnit = 600;
   const estimatedTuition = totalUnits * tuitionPerUnit;
   const honorLabel = credentialOverview?.applicantRecord.honorLabel || "No Honor";
-  const honorDiscount = getHonorDiscount(honorLabel);
-  const discountedTuition =
-    honorDiscount > 0
-      ? estimatedTuition * (1 - honorDiscount / 100)
-      : estimatedTuition;
   const scholarshipApplied = Boolean(
     credentialOverview?.applicantRecord.appliedForScholarship,
   );
   const scholarshipExamScore =
     credentialOverview?.applicantRecord.scholarshipExamScore;
+  const honorDiscount = getHonorDiscountPercentage(honorLabel);
+  const effectiveDiscountPercentage = getEffectiveAdmissionDiscountPercentage({
+    honorLabel,
+    appliedForScholarship: scholarshipApplied,
+    scholarshipExamScore,
+  });
+  const effectiveDiscountSource = getAdmissionDiscountSource({
+    honorLabel,
+    appliedForScholarship: scholarshipApplied,
+    scholarshipExamScore,
+  });
+  const effectiveDiscountSourceLabel =
+    getAdmissionDiscountSourceLabel(effectiveDiscountSource);
+  const discountedTuition =
+    effectiveDiscountPercentage > 0
+      ? estimatedTuition * (1 - effectiveDiscountPercentage / 100)
+      : estimatedTuition;
   const portalRequirementStatus =
     credentialSummary?.overallStatus || "Pending Documents";
 
@@ -1186,7 +1196,7 @@ Date: ${new Date().toLocaleDateString()}
                   </span>
                 </div>
                 <div className="s-finance-stat">
-                  <span className="s-finance-label">Estimated After Honor Discount</span>
+                  <span className="s-finance-label">Estimated After Discount</span>
                   <span className="s-finance-value">
                     {formatCurrency(discountedTuition)}
                   </span>
@@ -1204,6 +1214,18 @@ Date: ${new Date().toLocaleDateString()}
                   <span className="s-finance-value">{honorDiscount}%</span>
                 </div>
                 <div className="s-finance-stat">
+                  <span className="s-finance-label">Applied Discount</span>
+                  <span className="s-finance-value">
+                    {effectiveDiscountPercentage}%
+                  </span>
+                </div>
+                <div className="s-finance-stat">
+                  <span className="s-finance-label">Discount Basis</span>
+                  <span className="s-finance-value">
+                    {effectiveDiscountSourceLabel}
+                  </span>
+                </div>
+                <div className="s-finance-stat">
                   <span className="s-finance-label">Scholarship Exam</span>
                   <span className="s-finance-value">
                     {scholarshipApplied ? "Applied" : "Not Applied"}
@@ -1214,12 +1236,16 @@ Date: ${new Date().toLocaleDateString()}
                   <span className="s-finance-value">
                     {typeof scholarshipExamScore === "number"
                       ? scholarshipExamScore
-                      : "Awaiting result"}
+                      : scholarshipApplied
+                        ? "Awaiting result"
+                        : "Not applicable"}
                   </span>
                 </div>
                 <p className="s-finance-note">
-                  Maintain your honor standing and required scholarship criteria each
-                  term to keep the discount active.
+                  If you applied for scholarship and have an academic honor,
+                  the higher percentage between your scholarship exam score and
+                  honor discount will be used. Maintain the required criteria
+                  each term to keep the discount active.
                 </p>
               </div>
             </div>
