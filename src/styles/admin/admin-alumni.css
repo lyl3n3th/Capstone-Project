@@ -588,6 +588,46 @@
   border-color: #066287;
 }
 
+.alumni-action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.restore-btn {
+  padding: 8px 14px;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.restore-btn:hover:not(:disabled) {
+  background: #047857;
+  color: #ffffff;
+  border-color: #047857;
+}
+
+.restore-btn:disabled,
+.view-btn:disabled,
+.save-btn:disabled,
+.cancel-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .view-modal {
   max-width: 540px;
 }
@@ -619,4 +659,8 @@
   text-align: right;
   flex: 1;
   word-break: break-word;
+}
+
+.view-modal .modal-actions .restore-btn {
+  margin-right: auto;
 }

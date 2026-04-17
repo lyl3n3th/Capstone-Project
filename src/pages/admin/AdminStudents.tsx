@@ -1,21 +1,42 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { useAuth } from "../../hooks/useAuth";
-import { BACKUP_RESTORE_APPLIED_EVENT } from "../../services/backupApi";
+import {
+  BACKUP_RESTORE_APPLIED_EVENT,
+  persistAlumniBackupCache,
+  readCachedAlumni,
+  rememberAlumniStudentStatus,
+  type AlumniBackupRecord,
+} from "../../services/backupApi";
 import {
   fetchSupabaseAdmissionApplicants,
   getNextStudentNumber,
   getStudentRequirementSnapshot,
+  updateStoredStudentOwnScheduleState,
   getStudentsForBranch,
   normalizeBranchName,
   promoteApplicantToStoredStudent,
   readBranchScopedData,
   readStoredStudents,
+  writeBranchScopedData,
   updateStudentRequirementReviewStatus,
   writeStoredStudents,
   type AdminAttachment,
   type AdminEnrolleeRecord,
+  type StudentScheduledAssignmentItem,
+  type StudentScheduleSelectionRequestRecord,
+  type StudentSubjectPlanItem,
+  type StudentSubjectPlanRecord,
 } from "../../services/adminStorage";
+import {
+  getEstimatedCollegeTuition,
+  updateAdmissionProgress,
+} from "../../services/admission";
+import {
+  getStudentAcademicStanding,
+  getStudentGradeRecords,
+  type StoredStudentGradeRecord,
+} from "../../services/studentGrades";
 import "../../styles/admin/admin-students.css";
 
 interface StudentsProps {
@@ -38,10 +59,36 @@ interface Student {
   contact: string;
   email: string;
   address: string;
-  status: "Complete" | "Incomplete" | "Archived";
+  status: "Complete" | "Incomplete" | "Archived" | "Graduated";
   branch: string;
   trackingNumber?: string;
   studentStatus?: string;
+  requestedOwnSchedule?: boolean;
+  ownScheduleRequestStatus?: "Pending" | "Approved" | "Rejected";
+  ownScheduleAcademicYear?: string;
+  ownScheduleSemester?: string;
+  ownScheduleSelectionStatus?:
+    | "Not Submitted"
+    | "Pending Approval"
+    | "Approved"
+    | "Rejected";
+}
+
+interface InlineFeedback {
+  type: "success" | "warning" | "error";
+  message: string;
+}
+
+type StudentLifecycleStatus = "Undergraduate" | "Graduated" | "Dropped";
+
+interface ApiAlumniRecord {
+  id?: number;
+  student_id?: string;
+  full_name?: string;
+  program?: string;
+  year_graduated?: string | null;
+  contact?: string | null;
+  became_alumni_on?: string | null;
 }
 
 interface StudentRequirementNotification {
@@ -54,9 +101,18 @@ interface StudentRequirementNotification {
   submittedAttachments: AdminAttachment[];
 }
 
+interface StudentScheduleSelectionNotification {
+  student: Student;
+  request: StudentScheduleSelectionRequestRecord;
+  selectedCount: number;
+  totalUnits: number;
+  conflictCount: number;
+}
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
+const ALUMNI_API_URL = `${API_BASE_URL}/api/alumni/`;
 const ENROLLEE_STORAGE_SCOPE = "enrollees";
 const RECOVERABLE_BRANCHES = ["Bacoor", "Taytay", "GMA"] as const;
 
@@ -107,6 +163,505 @@ const hasSubmittedAttachmentNamed = (
 
 const getAdmissionTypeLabel = (studentStatus?: string) =>
   studentStatus?.trim() || "Not recorded";
+
+const getStudentLifecycleStatus = (
+  student: Pick<Student, "status">,
+): StudentLifecycleStatus => {
+  if (student.status === "Graduated") {
+    return "Graduated";
+  }
+
+  if (student.status === "Archived") {
+    return "Dropped";
+  }
+
+  return "Undergraduate";
+};
+
+const buildAlumniBackupRecord = (
+  student: Student,
+  apiAlumni?: ApiAlumniRecord | null,
+): AlumniBackupRecord => ({
+  recordId: typeof apiAlumni?.id === "number" ? apiAlumni.id : undefined,
+  id: apiAlumni?.student_id || student.id,
+  fullName: apiAlumni?.full_name || student.name,
+  program: apiAlumni?.program || student.strandOrCourse || student.program,
+  yearGraduated: apiAlumni?.year_graduated || "",
+  contact: apiAlumni?.contact || student.contact || "",
+  becameAlumniOn: apiAlumni?.became_alumni_on || "",
+});
+
+const buildLocalAlumniRecord = (student: Student): ApiAlumniRecord => ({
+  student_id: student.id,
+  full_name: student.name,
+  program: student.strandOrCourse || student.program,
+  year_graduated: "",
+  contact: student.contact || "",
+  became_alumni_on: new Date().toISOString(),
+});
+
+const mergeAlumniBackupRecords = (
+  existingRecords: AlumniBackupRecord[],
+  nextRecords: AlumniBackupRecord[],
+) => {
+  const alumniById = new Map(
+    existingRecords.map((record) => [record.id, record] as const),
+  );
+
+  nextRecords.forEach((record) => {
+    alumniById.set(record.id, record);
+  });
+
+  return Array.from(alumniById.values());
+};
+
+const SEMESTER_DISPLAY_ORDER = ["1st Semester", "2nd Semester", "Summer"];
+const COLLEGE_PERIOD_DISPLAY_ORDER = [
+  "Prelim",
+  "Midterm",
+  "Prefinal",
+  "Final",
+  "Overall",
+  "1st Semester",
+  "2nd Semester",
+  "Summer",
+];
+const SHS_QUARTER_DISPLAY_ORDER = [
+  "1st Quarter",
+  "2nd Quarter",
+  "3rd Quarter",
+  "4th Quarter",
+] as const;
+
+type ShsQuarterLabel = (typeof SHS_QUARTER_DISPLAY_ORDER)[number];
+
+interface ShsGradeSummaryRow {
+  key: string;
+  subjectCode: string;
+  subjectTitle: string;
+  quarterGrades: Record<ShsQuarterLabel, string>;
+}
+
+interface PlannerSubject {
+  id: string;
+  code: string;
+  name: string;
+  units?: number;
+  program: string;
+  yearLevel: string;
+  semester: string;
+  strand?: string;
+}
+
+interface PlannerScheduleSlot {
+  day: string;
+  startTime: string;
+  endTime: string;
+  room: string;
+}
+
+interface PlannerAssignment {
+  id: string;
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  instructorId: string;
+  instructorName: string;
+  sectionId: string;
+  sectionCode: string;
+  schedule: PlannerScheduleSlot[];
+  academicYear: string;
+  semester: string;
+}
+
+interface IrregularPlannerFormState {
+  academicYear: string;
+  semester: string;
+  selectedAssignmentIds: string[];
+  notes: string;
+}
+
+interface PlannerConflict {
+  leftAssignmentId: string;
+  rightAssignmentId: string;
+  message: string;
+}
+
+interface PlannerSubjectSelectionGroup {
+  subject: PlannerSubject;
+  assignmentOptions: PlannerAssignment[];
+  selectedAssignmentId: string;
+}
+
+interface PlannerYearGroup {
+  yearLevel: string;
+  items: PlannerSubjectSelectionGroup[];
+  selectedCount: number;
+}
+
+const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
+const DEFAULT_PLANNING_SEMESTER = "1st Semester";
+const DEFAULT_PLANNING_ACADEMIC_YEAR = "2026-2027";
+const STUDENT_SUBJECT_PLAN_SCOPE = "student-subject-plans";
+const SUBJECT_CATALOG_SCOPE = "subjects";
+const SUBJECT_ASSIGNMENT_SCOPE = "subject-assignments";
+const STUDENT_SCHEDULE_REQUEST_SCOPE = "student-schedule-requests";
+
+const normalizePlanningSemester = (value?: string | null) =>
+  value?.trim().toLowerCase().includes("2nd")
+    ? "2nd Semester"
+    : value?.trim().toLowerCase().includes("summer")
+      ? "Summer"
+      : DEFAULT_PLANNING_SEMESTER;
+
+const normalizeAcademicDescriptor = (value?: string | null) =>
+  (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+const matchesPlannerStrandOrCourse = (
+  leftValue?: string | null,
+  rightValue?: string | null,
+) => {
+  const left = normalizeAcademicDescriptor(leftValue);
+  const right = normalizeAcademicDescriptor(rightValue);
+
+  if (!left || !right || left === "all" || right === "all") {
+    return true;
+  }
+
+  return left.includes(right) || right.includes(left);
+};
+
+const getStudentSubjectPlanKey = (student: Pick<Student, "id" | "trackingNumber">) =>
+  student.trackingNumber || student.id;
+
+const mapSubjectsToPlanItems = (subjects: PlannerSubject[]): StudentSubjectPlanItem[] =>
+  subjects
+    .map((subject) => ({
+      subjectId: subject.id,
+      subjectCode: subject.code,
+      subjectName: subject.name,
+      units: subject.units,
+    }))
+    .sort(
+      (left, right) =>
+        left.subjectCode.localeCompare(right.subjectCode) ||
+        left.subjectName.localeCompare(right.subjectName),
+    );
+
+const mapAssignmentsToScheduledPlanItems = (
+  assignments: PlannerAssignment[],
+): StudentScheduledAssignmentItem[] =>
+  assignments
+    .map((assignment) => ({
+      assignmentId: assignment.id,
+      subjectId: assignment.subjectId,
+      subjectCode: assignment.subjectCode,
+      subjectName: assignment.subjectName,
+      instructorId: assignment.instructorId,
+      instructorName: assignment.instructorName,
+      sectionId: assignment.sectionId,
+      sectionCode: assignment.sectionCode,
+      schedule: assignment.schedule,
+      academicYear: assignment.academicYear,
+      semester: assignment.semester,
+    }))
+    .sort(
+      (left, right) =>
+        left.subjectCode.localeCompare(right.subjectCode) ||
+        left.sectionCode.localeCompare(right.sectionCode),
+    );
+
+const formatScheduleSlotTime = (value: string) => {
+  if (!/^\d{2}:\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const [rawHour, rawMinute] = value.split(":").map(Number);
+  const suffix = rawHour >= 12 ? "PM" : "AM";
+  const hour = rawHour % 12 || 12;
+  return `${hour}:${rawMinute.toString().padStart(2, "0")} ${suffix}`;
+};
+
+const formatPlannerScheduleLabel = (schedule: PlannerScheduleSlot[]) =>
+  schedule.length > 0
+    ? schedule
+        .map(
+          (slot) =>
+            `${slot.day.slice(0, 3)} ${formatScheduleSlotTime(slot.startTime)}-${formatScheduleSlotTime(slot.endTime)} @ ${slot.room || "TBA"}`,
+        )
+        .join(" / ")
+    : "Schedule not set";
+
+const sortPlannerAssignments = (assignments: PlannerAssignment[]) =>
+  [...assignments].sort(
+    (left, right) =>
+      left.subjectCode.localeCompare(right.subjectCode) ||
+      left.sectionCode.localeCompare(right.sectionCode) ||
+      left.instructorName.localeCompare(right.instructorName),
+  );
+
+const parseClockToMinutes = (value: string) => {
+  if (!/^\d{2}:\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+};
+
+const buildPlannerConflicts = (assignments: PlannerAssignment[]): PlannerConflict[] => {
+  const conflicts: PlannerConflict[] = [];
+
+  for (let leftIndex = 0; leftIndex < assignments.length; leftIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < assignments.length;
+      rightIndex += 1
+    ) {
+      const left = assignments[leftIndex];
+      const right = assignments[rightIndex];
+
+      const hasConflict = left.schedule.some((leftSlot) =>
+        right.schedule.some((rightSlot) => {
+          if (leftSlot.day !== rightSlot.day) {
+            return false;
+          }
+
+          const leftStart = parseClockToMinutes(leftSlot.startTime);
+          const leftEnd = parseClockToMinutes(leftSlot.endTime);
+          const rightStart = parseClockToMinutes(rightSlot.startTime);
+          const rightEnd = parseClockToMinutes(rightSlot.endTime);
+
+          if (
+            leftStart === null ||
+            leftEnd === null ||
+            rightStart === null ||
+            rightEnd === null
+          ) {
+            return false;
+          }
+
+          return leftStart < rightEnd && rightStart < leftEnd;
+        }),
+      );
+
+      if (!hasConflict) {
+        continue;
+      }
+
+      conflicts.push({
+        leftAssignmentId: left.id,
+        rightAssignmentId: right.id,
+        message: `${left.subjectCode} conflicts with ${right.subjectCode}.`,
+      });
+    }
+  }
+
+  return conflicts;
+};
+
+const buildScheduledAssignmentConflicts = (
+  assignments: Pick<
+    StudentScheduledAssignmentItem,
+    "assignmentId" | "subjectCode" | "schedule"
+  >[],
+): PlannerConflict[] => {
+  const conflicts: PlannerConflict[] = [];
+
+  for (let leftIndex = 0; leftIndex < assignments.length; leftIndex += 1) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < assignments.length;
+      rightIndex += 1
+    ) {
+      const left = assignments[leftIndex];
+      const right = assignments[rightIndex];
+
+      const hasConflict = left.schedule.some((leftSlot) =>
+        right.schedule.some((rightSlot) => {
+          if (leftSlot.day !== rightSlot.day) {
+            return false;
+          }
+
+          const leftStart = parseClockToMinutes(leftSlot.startTime);
+          const leftEnd = parseClockToMinutes(leftSlot.endTime);
+          const rightStart = parseClockToMinutes(rightSlot.startTime);
+          const rightEnd = parseClockToMinutes(rightSlot.endTime);
+
+          if (
+            leftStart === null ||
+            leftEnd === null ||
+            rightStart === null ||
+            rightEnd === null
+          ) {
+            return false;
+          }
+
+          return leftStart < rightEnd && rightStart < leftEnd;
+        }),
+      );
+
+      if (!hasConflict) {
+        continue;
+      }
+
+      conflicts.push({
+        leftAssignmentId: left.assignmentId,
+        rightAssignmentId: right.assignmentId,
+        message: `${left.subjectCode} conflicts with ${right.subjectCode}.`,
+      });
+    }
+  }
+
+  return conflicts;
+};
+
+const hasApprovedOwnSchedule = (
+  student:
+    | Pick<Student, "requestedOwnSchedule" | "ownScheduleRequestStatus">
+    | null
+    | undefined,
+) =>
+  Boolean(
+    student?.requestedOwnSchedule &&
+      student.ownScheduleRequestStatus === "Approved",
+  );
+
+const getDisplayedAcademicStandingLabel = (
+  student:
+    | Pick<Student, "requestedOwnSchedule" | "ownScheduleRequestStatus">
+    | null
+    | undefined,
+  fallbackLabel?: string | null,
+): "Regular" | "Irregular" =>
+  hasApprovedOwnSchedule(student) || fallbackLabel === "Irregular"
+    ? "Irregular"
+    : "Regular";
+
+const getOwnScheduleSelectionLabel = (
+  status?: Student["ownScheduleSelectionStatus"],
+) => {
+  if (status === "Pending Approval") {
+    return "Pending Approval";
+  }
+
+  if (status === "Approved") {
+    return "Approved";
+  }
+
+  if (status === "Rejected") {
+    return "Needs Resubmission";
+  }
+
+  return "Not Submitted";
+};
+
+const getSemesterOrderIndex = (value: string) => {
+  const index = SEMESTER_DISPLAY_ORDER.indexOf(value);
+  return index >= 0 ? index : SEMESTER_DISPLAY_ORDER.length;
+};
+
+const getPlannerYearGroupOrder = (value: string) => {
+  const normalized = value.trim().toLowerCase();
+  const numericMatch = normalized.match(/(\d+)/);
+  const numericValue = numericMatch ? Number.parseInt(numericMatch[1], 10) : null;
+
+  if (normalized.startsWith("grade") && numericValue !== null) {
+    return numericValue;
+  }
+
+  if (numericValue !== null) {
+    return 100 + numericValue;
+  }
+
+  return Number.MAX_SAFE_INTEGER;
+};
+
+const sortAcademicTerms = <T extends { academicYear: string; semester: string }>(
+  values: T[],
+) =>
+  [...values].sort((left, right) => {
+    const academicYearComparison = left.academicYear.localeCompare(
+      right.academicYear,
+    );
+    if (academicYearComparison !== 0) {
+      return academicYearComparison;
+    }
+
+    const semesterComparison =
+      getSemesterOrderIndex(left.semester) - getSemesterOrderIndex(right.semester);
+    if (semesterComparison !== 0) {
+      return semesterComparison;
+    }
+
+    return left.semester.localeCompare(right.semester);
+  });
+
+const sortCollegeGradeRecords = (records: StoredStudentGradeRecord[]) =>
+  [...records].sort((left, right) => {
+    const subjectComparison =
+      left.subjectCode.localeCompare(right.subjectCode) ||
+      left.subjectTitle.localeCompare(right.subjectTitle);
+    if (subjectComparison !== 0) {
+      return subjectComparison;
+    }
+
+    const leftPeriodIndex = COLLEGE_PERIOD_DISPLAY_ORDER.indexOf(
+      left.gradingPeriod,
+    );
+    const rightPeriodIndex = COLLEGE_PERIOD_DISPLAY_ORDER.indexOf(
+      right.gradingPeriod,
+    );
+
+    if (leftPeriodIndex >= 0 && rightPeriodIndex >= 0) {
+      const periodComparison = leftPeriodIndex - rightPeriodIndex;
+      if (periodComparison !== 0) {
+        return periodComparison;
+      }
+    } else if (leftPeriodIndex >= 0) {
+      return -1;
+    } else if (rightPeriodIndex >= 0) {
+      return 1;
+    }
+
+    return left.gradingPeriod.localeCompare(right.gradingPeriod);
+  });
+
+const buildShsGradeSummaryRows = (records: StoredStudentGradeRecord[]) => {
+  const rows = new Map<string, ShsGradeSummaryRow>();
+
+  records.forEach((record) => {
+    const quarterLabel = record.gradingPeriod as ShsQuarterLabel;
+    if (!SHS_QUARTER_DISPLAY_ORDER.includes(quarterLabel)) {
+      return;
+    }
+
+    const key = `${record.subjectCode}::${record.subjectTitle}`;
+    const existingRow = rows.get(key) ?? {
+      key,
+      subjectCode: record.subjectCode,
+      subjectTitle: record.subjectTitle,
+      quarterGrades: {
+        "1st Quarter": "—",
+        "2nd Quarter": "—",
+        "3rd Quarter": "—",
+        "4th Quarter": "—",
+      },
+    };
+
+    existingRow.quarterGrades[quarterLabel] = record.normalizedGrade;
+    rows.set(key, existingRow);
+  });
+
+  return Array.from(rows.values()).sort(
+    (left, right) =>
+      left.subjectCode.localeCompare(right.subjectCode) ||
+      left.subjectTitle.localeCompare(right.subjectTitle),
+  );
+};
 
 const mapStudentToApiPayload = (student: Student) => {
   const { firstName, middleName, lastName } = splitFullName(student.name);
@@ -215,7 +770,10 @@ export default function AdminStudents({
   const [filterProgram, setFilterProgram] = useState("All Programs");
   const [filterYearLevel, setFilterYearLevel] = useState("");
   const [filterSection, setFilterSection] = useState("");
+  const [filterStudentLifecycleStatus, setFilterStudentLifecycleStatus] =
+    useState<"All" | StudentLifecycleStatus>("Undergraduate");
   const [filterStatus, setFilterStatus] = useState("All");
+  const [filterAcademicStanding, setFilterAcademicStanding] = useState("All");
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
@@ -226,9 +784,39 @@ export default function AdminStudents({
   const [sortField, setSortField] = useState<"id">("id");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
+  const [isScheduleNotificationModalOpen, setIsScheduleNotificationModalOpen] =
+    useState(false);
   const [studentRecoveryMessage, setStudentRecoveryMessage] = useState<
     string | null
   >(null);
+  const [studentSubjectPlans, setStudentSubjectPlans] = useState<
+    Record<string, StudentSubjectPlanRecord>
+  >({});
+  const [studentScheduleRequests, setStudentScheduleRequests] = useState<
+    StudentScheduleSelectionRequestRecord[]
+  >([]);
+  const [plannerSubjects, setPlannerSubjects] = useState<PlannerSubject[]>([]);
+  const [plannerAssignments, setPlannerAssignments] = useState<
+    PlannerAssignment[]
+  >([]);
+  const [hasLoadedPlannerData, setHasLoadedPlannerData] = useState(false);
+  const [planningStudent, setPlanningStudent] = useState<Student | null>(null);
+  const [expandedPlannerYearLevels, setExpandedPlannerYearLevels] = useState<
+    string[]
+  >([]);
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [isBulkMovingToAlumni, setIsBulkMovingToAlumni] = useState(false);
+  const [pendingScholarshipScore, setPendingScholarshipScore] = useState("");
+  const [isSavingScholarshipScore, setIsSavingScholarshipScore] =
+    useState(false);
+  const [scholarshipScoreFeedback, setScholarshipScoreFeedback] =
+    useState<InlineFeedback | null>(null);
+  const [plannerForm, setPlannerForm] = useState<IrregularPlannerFormState>({
+    academicYear: DEFAULT_PLANNING_ACADEMIC_YEAR,
+    semester: DEFAULT_PLANNING_SEMESTER,
+    selectedAssignmentIds: [],
+    notes: "",
+  });
 
   // Form state for add/edit
   const [formData, setFormData] = useState<Student>({
@@ -332,8 +920,62 @@ export default function AdminStudents({
   }, [currentBranch]);
 
   useEffect(() => {
+    setHasLoadedPlannerData(false);
+    setSelectedStudentIds([]);
+    setStudentSubjectPlans(
+      readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
+        STUDENT_SUBJECT_PLAN_SCOPE,
+        currentBranch,
+      ) ?? {},
+    );
+    setStudentScheduleRequests(
+      readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
+        STUDENT_SCHEDULE_REQUEST_SCOPE,
+        currentBranch,
+      ) ?? [],
+    );
+    setPlannerSubjects(
+      readBranchScopedData<PlannerSubject[]>(SUBJECT_CATALOG_SCOPE, currentBranch) ??
+        [],
+    );
+    setPlannerAssignments(
+      sortPlannerAssignments(
+        readBranchScopedData<PlannerAssignment[]>(
+          SUBJECT_ASSIGNMENT_SCOPE,
+          currentBranch,
+        ) ?? [],
+      ),
+    );
+    setHasLoadedPlannerData(true);
+  }, [currentBranch]);
+
+  useEffect(() => {
     const handleBackupRestoreApplied = () => {
       setStudents(getStudentsForBranch(currentBranch) as Student[]);
+      setStudentSubjectPlans(
+        readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
+          STUDENT_SUBJECT_PLAN_SCOPE,
+          currentBranch,
+        ) ?? {},
+      );
+      setStudentScheduleRequests(
+        readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
+          STUDENT_SCHEDULE_REQUEST_SCOPE,
+          currentBranch,
+        ) ?? [],
+      );
+      setPlannerSubjects(
+        readBranchScopedData<PlannerSubject[]>(SUBJECT_CATALOG_SCOPE, currentBranch) ??
+          [],
+      );
+      setPlannerAssignments(
+        sortPlannerAssignments(
+          readBranchScopedData<PlannerAssignment[]>(
+            SUBJECT_ASSIGNMENT_SCOPE,
+            currentBranch,
+          ) ?? [],
+        ),
+      );
     };
 
     window.addEventListener(
@@ -371,15 +1013,211 @@ export default function AdminStudents({
     writeStoredStudents([...studentsFromOtherBranches, ...students]);
   }, [students, currentBranch]);
 
+  useEffect(() => {
+    setSelectedStudentIds((prev) =>
+      prev.filter((studentId) =>
+        students.some(
+          (student) =>
+            student.id === studentId &&
+            student.status !== "Archived" &&
+            student.status !== "Graduated",
+        ),
+      ),
+    );
+  }, [students]);
+
+  useEffect(() => {
+    if (!hasLoadedPlannerData) {
+      return;
+    }
+
+    writeBranchScopedData(
+      STUDENT_SUBJECT_PLAN_SCOPE,
+      currentBranch,
+      studentSubjectPlans,
+    );
+  }, [currentBranch, hasLoadedPlannerData, studentSubjectPlans]);
+
+  const studentAcademicStandingById = useMemo(
+    () =>
+      Object.fromEntries(
+        students.map((student) => [
+          student.id,
+          getStudentAcademicStanding({
+            branch: student.branch || currentBranch,
+            program: student.program,
+            studentId: student.id,
+          }),
+        ]),
+      ),
+    [students, currentBranch],
+  );
+  const getStudentAcademicStandingLabel = (student: Student) =>
+    getDisplayedAcademicStandingLabel(
+      student,
+      studentAcademicStandingById[student.id]?.label,
+    );
+
+  const planningStudentPlan = planningStudent
+    ? studentSubjectPlans[getStudentSubjectPlanKey(planningStudent)] ?? null
+    : null;
+  const planningAvailableSubjects = useMemo(() => {
+    if (!planningStudent) {
+      return [];
+    }
+
+    return plannerSubjects
+      .filter(
+        (subject) =>
+          subject.program === planningStudent.program &&
+          normalizePlanningSemester(subject.semester) ===
+            normalizePlanningSemester(plannerForm.semester) &&
+          matchesPlannerStrandOrCourse(
+            subject.strand,
+            planningStudent.strandOrCourse || DEFAULT_COLLEGE_COURSE,
+          ),
+      )
+      .sort(
+        (left, right) =>
+          left.code.localeCompare(right.code) || left.name.localeCompare(right.name),
+      );
+  }, [plannerForm.semester, plannerSubjects, planningStudent]);
+  const planningAvailableAssignments = useMemo(() => {
+    if (!planningStudent) {
+      return [];
+    }
+
+    const matchingSubjectIds = new Set(planningAvailableSubjects.map((subject) => subject.id));
+
+    return sortPlannerAssignments(
+      plannerAssignments.filter(
+        (assignment) =>
+          matchingSubjectIds.has(assignment.subjectId) &&
+          normalizePlanningSemester(assignment.semester) ===
+            normalizePlanningSemester(plannerForm.semester) &&
+          assignment.academicYear === plannerForm.academicYear,
+      ),
+    );
+  }, [
+    plannerAssignments,
+    plannerForm.academicYear,
+    plannerForm.semester,
+    planningAvailableSubjects,
+    planningStudent,
+  ]);
+  const planningSubjectGroups = useMemo<PlannerSubjectSelectionGroup[]>(
+    () =>
+      planningAvailableSubjects.map((subject) => {
+        const assignmentOptions = planningAvailableAssignments.filter(
+          (assignment) =>
+            assignment.subjectId === subject.id ||
+            assignment.subjectCode === subject.code,
+        );
+        const selectedAssignmentId =
+          plannerForm.selectedAssignmentIds.find((assignmentId) =>
+            assignmentOptions.some((assignment) => assignment.id === assignmentId),
+          ) || "";
+
+        return {
+          subject,
+          assignmentOptions,
+          selectedAssignmentId,
+        };
+      }),
+    [
+      plannerForm.selectedAssignmentIds,
+      planningAvailableAssignments,
+      planningAvailableSubjects,
+    ],
+  );
+  const planningYearGroups = useMemo<PlannerYearGroup[]>(
+    () =>
+      Array.from(
+        planningSubjectGroups.reduce(
+          (groups, subjectGroup) => {
+            const yearLevel =
+              subjectGroup.subject.yearLevel?.trim() || "Other Subjects";
+            const existingItems = groups.get(yearLevel) ?? [];
+            existingItems.push(subjectGroup);
+            groups.set(yearLevel, existingItems);
+            return groups;
+          },
+          new Map<string, PlannerSubjectSelectionGroup[]>(),
+        ),
+      )
+        .sort(
+          ([leftYearLevel], [rightYearLevel]) =>
+            getPlannerYearGroupOrder(leftYearLevel) -
+              getPlannerYearGroupOrder(rightYearLevel) ||
+            leftYearLevel.localeCompare(rightYearLevel),
+        )
+        .map(([yearLevel, items]) => ({
+          yearLevel,
+          items,
+          selectedCount: items.filter((item) => Boolean(item.selectedAssignmentId))
+            .length,
+        })),
+    [planningSubjectGroups],
+  );
+  const selectedPlannerAssignments = useMemo(
+    () =>
+      sortPlannerAssignments(
+        planningAvailableAssignments.filter((assignment) =>
+          plannerForm.selectedAssignmentIds.includes(assignment.id),
+        ),
+      ),
+    [plannerForm.selectedAssignmentIds, planningAvailableAssignments],
+  );
+  const plannerConflicts = useMemo(
+    () => buildPlannerConflicts(selectedPlannerAssignments),
+    [selectedPlannerAssignments],
+  );
+
+  useEffect(() => {
+    if (!planningStudent || planningYearGroups.length === 0) {
+      setExpandedPlannerYearLevels([]);
+      return;
+    }
+
+    setExpandedPlannerYearLevels((prev) => {
+      const validYearLevels = new Set(
+        planningYearGroups.map((group) => group.yearLevel),
+      );
+      const preservedExpanded = prev.filter((yearLevel) =>
+        validYearLevels.has(yearLevel),
+      );
+
+      if (preservedExpanded.length > 0) {
+        return preservedExpanded;
+      }
+
+      const defaultExpanded = planningYearGroups
+        .filter(
+          (group) =>
+            group.selectedCount > 0 || group.yearLevel === planningStudent.yearLevel,
+        )
+        .map((group) => group.yearLevel);
+
+      return defaultExpanded.length > 0
+        ? defaultExpanded
+        : [planningYearGroups[0].yearLevel];
+    });
+  }, [planningStudent, planningYearGroups]);
+
   const filteredStudents = students.filter((student) => {
     const search = searchTerm.toLowerCase();
+    const academicStanding = getStudentAcademicStandingLabel(student);
+    const lifecycleStatus = getStudentLifecycleStatus(student);
     const matchesSearch =
       student.name.toLowerCase().includes(search) ||
       student.id.toLowerCase().includes(search) ||
       student.program.toLowerCase().includes(search) ||
+      student.email.toLowerCase().includes(search) ||
       student.contact.toLowerCase().includes(search) ||
       (student.section || "").toLowerCase().includes(search) ||
-      getAdmissionTypeLabel(student.studentStatus).toLowerCase().includes(search);
+      lifecycleStatus.toLowerCase().includes(search) ||
+      getAdmissionTypeLabel(student.studentStatus).toLowerCase().includes(search) ||
+      academicStanding.toLowerCase().includes(search);
 
     const matchesProgram =
       filterProgram === "All Programs" || student.program === filterProgram;
@@ -387,16 +1225,23 @@ export default function AdminStudents({
       filterYearLevel === "" || student.yearLevel === filterYearLevel;
     const matchesSection =
       filterSection === "" || (student.section || "") === filterSection;
+    const matchesStudentLifecycleStatus =
+      filterStudentLifecycleStatus === "All" ||
+      lifecycleStatus === filterStudentLifecycleStatus;
     const matchesStatus =
-      student.status !== "Archived" &&
       (filterStatus === "All" || student.status === filterStatus);
+    const matchesAcademicStanding =
+      filterAcademicStanding === "All" ||
+      academicStanding === filterAcademicStanding;
 
     return (
       matchesSearch &&
       matchesProgram &&
       matchesYearLevel &&
       matchesSection &&
-      matchesStatus
+      matchesStudentLifecycleStatus &&
+      matchesStatus &&
+      matchesAcademicStanding
     );
   });
 
@@ -449,6 +1294,22 @@ export default function AdminStudents({
         .filter((section): section is string => Boolean(section)),
     ),
   ).sort();
+  const isStudentSelectableForBulkActions = (student: Student) =>
+    getStudentLifecycleStatus(student) === "Undergraduate";
+  const selectedStudents = students.filter((student) =>
+    selectedStudentIds.includes(student.id) &&
+    isStudentSelectableForBulkActions(student),
+  );
+  const isAnyAlumniMovePending = isBulkMovingToAlumni;
+  const visibleStudentIds = sortedStudents
+    .filter(isStudentSelectableForBulkActions)
+    .map((student) => student.id);
+  const areAllVisibleStudentsSelected =
+    visibleStudentIds.length > 0 &&
+    visibleStudentIds.every((studentId) => selectedStudentIds.includes(studentId));
+
+  const getDefaultPlannerAcademicYear = () =>
+    plannerAssignments[0]?.academicYear || DEFAULT_PLANNING_ACADEMIC_YEAR;
 
   // Validation
   const validateForm = () => {
@@ -739,6 +1600,125 @@ export default function AdminStudents({
     }
   };
 
+  const openPlannerModal = (student: Student) => {
+    const existingPlan = studentSubjectPlans[getStudentSubjectPlanKey(student)];
+    setPlanningStudent(student);
+    setPlannerForm({
+      academicYear:
+        existingPlan?.academicYear ||
+        plannerAssignments[0]?.academicYear ||
+        DEFAULT_PLANNING_ACADEMIC_YEAR,
+      semester: normalizePlanningSemester(
+        existingPlan?.semester || DEFAULT_PLANNING_SEMESTER,
+      ),
+      selectedAssignmentIds:
+        existingPlan?.scheduledAssignments?.map(
+          (assignment) => assignment.assignmentId,
+        ) ?? [],
+      notes: existingPlan?.notes || "",
+    });
+  };
+
+  const closePlannerModal = () => {
+    setPlanningStudent(null);
+    setPlannerForm({
+      academicYear: DEFAULT_PLANNING_ACADEMIC_YEAR,
+      semester: DEFAULT_PLANNING_SEMESTER,
+      selectedAssignmentIds: [],
+      notes: "",
+    });
+  };
+
+  const handlePlannerAssignmentChange = (
+    subject: PlannerSubject,
+    nextAssignmentId: string,
+  ) => {
+    const assignmentIdsForSubject = planningAvailableAssignments
+      .filter(
+        (assignment) =>
+          assignment.subjectId === subject.id ||
+          assignment.subjectCode === subject.code,
+      )
+      .map((assignment) => assignment.id);
+
+    setPlannerForm((prev) => ({
+      ...prev,
+      selectedAssignmentIds: [
+        ...prev.selectedAssignmentIds.filter(
+          (assignmentId) => !assignmentIdsForSubject.includes(assignmentId),
+        ),
+        ...(nextAssignmentId ? [nextAssignmentId] : []),
+      ],
+    }));
+  };
+
+  const handleSavePlanner = () => {
+    if (!planningStudent) {
+      return;
+    }
+
+    const planKey = getStudentSubjectPlanKey(planningStudent);
+    const existingPlan = studentSubjectPlans[planKey];
+    const selectedAssignments = selectedPlannerAssignments;
+    const selectedSubjects = planningAvailableSubjects.filter((subject) =>
+      selectedAssignments.some(
+        (assignment) =>
+          assignment.subjectId === subject.id ||
+          assignment.subjectCode === subject.code,
+      ),
+    );
+
+    if (selectedAssignments.length === 0) {
+      if (existingPlan && existingPlan.creditedSubjects.length > 0) {
+        setStudentSubjectPlans((prev) => ({
+          ...prev,
+          [planKey]: {
+            ...existingPlan,
+            semester: normalizePlanningSemester(plannerForm.semester),
+            academicYear:
+              plannerForm.academicYear.trim() || getDefaultPlannerAcademicYear(),
+            assignedSubjects: [],
+            scheduledAssignments: [],
+            notes: plannerForm.notes.trim() || existingPlan?.notes,
+            updatedAt: new Date().toISOString(),
+          },
+        }));
+      } else {
+        setStudentSubjectPlans((prev) => {
+          if (!prev[planKey]) {
+            return prev;
+          }
+
+          const nextPlans = { ...prev };
+          delete nextPlans[planKey];
+          return nextPlans;
+        });
+      }
+      closePlannerModal();
+      return;
+    }
+
+    const nextPlan: StudentSubjectPlanRecord = {
+      id: planKey,
+      trackingNumber: planningStudent.trackingNumber,
+      studentNumber: planningStudent.id,
+      semester: normalizePlanningSemester(plannerForm.semester),
+      academicYear: plannerForm.academicYear.trim() || getDefaultPlannerAcademicYear(),
+      assignedSubjects: mapSubjectsToPlanItems(selectedSubjects),
+      creditedSubjects: existingPlan?.creditedSubjects ?? [],
+      scheduledAssignments: mapAssignmentsToScheduledPlanItems(selectedAssignments),
+      notes: plannerForm.notes.trim() || undefined,
+      updatedAt: new Date().toISOString(),
+      source: "irregular_assignment",
+    };
+
+    setStudentSubjectPlans((prev) => ({
+      ...prev,
+      [planKey]: nextPlan,
+    }));
+    closePlannerModal();
+  };
+
   // Open archive modal
   const openArchiveConfirm = (id: string) => {
     setStudentToArchive(id);
@@ -807,6 +1787,283 @@ export default function AdminStudents({
 
   const closeViewModal = () => {
     setViewingStudent(null);
+    setPendingScholarshipScore("");
+    setScholarshipScoreFeedback(null);
+  };
+
+  const togglePlannerYearGroup = (yearLevel: string) => {
+    setExpandedPlannerYearLevels((prev) =>
+      prev.includes(yearLevel)
+        ? prev.filter((value) => value !== yearLevel)
+        : [...prev, yearLevel],
+    );
+  };
+
+  const toggleStudentSelection = (studentId: string) => {
+    setSelectedStudentIds((prev) => {
+      const matchingStudent = students.find((student) => student.id === studentId);
+      if (!matchingStudent || !isStudentSelectableForBulkActions(matchingStudent)) {
+        return prev;
+      }
+
+      return prev.includes(studentId)
+        ? prev.filter((value) => value !== studentId)
+        : [...prev, studentId];
+    });
+  };
+
+  const toggleVisibleStudentSelection = () => {
+    setSelectedStudentIds((prev) =>
+      areAllVisibleStudentsSelected
+        ? prev.filter((studentId) => !visibleStudentIds.includes(studentId))
+        : Array.from(new Set([...prev, ...visibleStudentIds])),
+    );
+  };
+
+  const handleApplyScholarshipScore = async () => {
+    if (!viewingStudent || !viewingStudentApplicantRecord?.trackingNumber) {
+      return;
+    }
+
+    const trimmedScore = pendingScholarshipScore.trim();
+    const parsedScore = Number(trimmedScore);
+
+    if (
+      trimmedScore === "" ||
+      !Number.isFinite(parsedScore) ||
+      parsedScore < 0 ||
+      parsedScore > 100
+    ) {
+      setScholarshipScoreFeedback({
+        type: "warning",
+        message: "Enter a scholarship exam score from 0 to 100.",
+      });
+      return;
+    }
+
+    setIsSavingScholarshipScore(true);
+    let syncFailed = false;
+
+    try {
+      try {
+        await updateAdmissionProgress({
+          trackingNumber: viewingStudentApplicantRecord.trackingNumber,
+          currentStep: 4,
+          applicationStatus: "accepted",
+          scholarshipExamScore: parsedScore,
+        });
+      } catch (error) {
+        console.warn(
+          "Unable to sync scholarship exam score to Supabase, keeping local student state.",
+          error,
+        );
+        syncFailed = true;
+      }
+
+      const resolvedBranch = viewingStudent.branch || currentBranch;
+      const storedEnrollees =
+        readBranchScopedData<AdminEnrolleeRecord[]>(
+          ENROLLEE_STORAGE_SCOPE,
+          resolvedBranch,
+        ) ?? [];
+      let didUpdateLinkedRecord = false;
+
+      const nextEnrollees = storedEnrollees.map((record) => {
+        const matchesRecord =
+          record.trackingNumber === viewingStudentApplicantRecord.trackingNumber ||
+          (viewingStudent.id && record.studentNumber === viewingStudent.id);
+
+        if (!matchesRecord) {
+          return record;
+        }
+
+        didUpdateLinkedRecord = true;
+        const tuitionEstimate = getEstimatedCollegeTuition({
+          honorLabel: record.honorLabel,
+          appliedForScholarship: record.appliedForScholarship,
+          scholarshipExamScore: parsedScore,
+        });
+
+        return {
+          ...record,
+          scholarshipExamScore: parsedScore,
+          honorDiscountPercentage: tuitionEstimate.honorDiscountPercentage,
+          effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
+          effectiveDiscountSource: tuitionEstimate.effectiveDiscountSource,
+        };
+      });
+
+      if (!didUpdateLinkedRecord) {
+        throw new Error("No linked admission record was found for this student.");
+      }
+
+      writeBranchScopedData(ENROLLEE_STORAGE_SCOPE, resolvedBranch, nextEnrollees);
+      setStudents((prev) => [...prev]);
+      setScholarshipScoreFeedback(
+        syncFailed
+          ? {
+              type: "warning",
+              message:
+                "Scholarship exam score updated locally. Supabase sync failed, so you can retry anytime.",
+            }
+          : {
+              type: "success",
+              message: "Scholarship exam score updated successfully.",
+            },
+      );
+    } catch (error) {
+      console.error("Failed to update scholarship exam score", error);
+      setScholarshipScoreFeedback({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to update scholarship exam score.",
+      });
+    } finally {
+      setIsSavingScholarshipScore(false);
+    }
+  };
+
+  const moveStudentsToAlumni = async (studentsToMove: Student[]) => {
+    const movedStudentIds: string[] = [];
+    const failedStudents: string[] = [];
+    const createdAlumniRecords: AlumniBackupRecord[] = [];
+    const locallyCachedStudents: string[] = [];
+
+    for (const student of studentsToMove) {
+      try {
+        let createdAlumni: ApiAlumniRecord | null = null;
+
+        try {
+          const createResponse = await fetch(ALUMNI_API_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              student_id: student.id,
+              full_name: student.name,
+              program: student.strandOrCourse || student.program,
+              year_graduated: "",
+              contact: student.contact || "",
+            }),
+          });
+
+          if (!createResponse.ok) {
+            const errorData = await createResponse.json().catch(() => ({}));
+            const firstError = Object.values(errorData).find((value) =>
+              Array.isArray(value),
+            ) as string[] | undefined;
+            throw new Error(
+              firstError?.[0] ||
+                errorData?.detail ||
+                "Failed to add alumni record.",
+            );
+          }
+
+          createdAlumni = (await createResponse
+            .json()
+            .catch(() => null)) as ApiAlumniRecord | null;
+        } catch (error) {
+          console.warn(
+            "Unable to create alumni record in backend. Saving locally instead.",
+            error,
+          );
+          createdAlumni = buildLocalAlumniRecord(student);
+          locallyCachedStudents.push(student.name);
+        }
+
+        if (student.recordId) {
+          try {
+            const response = await fetch(`${STUDENTS_API_URL}${student.recordId}/`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ status: "Graduated" }),
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              throw new Error(
+                errorData?.detail || "Unable to sync graduated status.",
+              );
+            }
+          } catch (error) {
+            console.warn(
+              "Unable to sync graduated status to backend student API.",
+              error,
+            );
+          }
+        }
+
+        rememberAlumniStudentStatus(student.id, student.status);
+        movedStudentIds.push(student.id);
+        createdAlumniRecords.push(buildAlumniBackupRecord(student, createdAlumni));
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unable to move to alumni.";
+        failedStudents.push(`${student.name}: ${message}`);
+      }
+    }
+
+    if (movedStudentIds.length > 0) {
+      setStudents((prev) =>
+        prev.map((student) =>
+          movedStudentIds.includes(student.id)
+            ? { ...student, status: "Graduated" }
+            : student,
+        ),
+      );
+      setSelectedStudentIds((prev) =>
+        prev.filter((studentId) => !movedStudentIds.includes(studentId)),
+      );
+      persistAlumniBackupCache(
+        mergeAlumniBackupRecords(readCachedAlumni(), createdAlumniRecords),
+      );
+      const movedLabel = `Moved ${movedStudentIds.length} student${movedStudentIds.length === 1 ? "" : "s"} to alumni.`;
+      const cachedLabel =
+        locallyCachedStudents.length > 0
+          ? ` ${locallyCachedStudents.length} ${locallyCachedStudents.length === 1 ? "record was" : "records were"} saved locally because the alumni backend is unavailable.`
+          : "";
+      const failedLabel =
+        failedStudents.length > 0
+          ? ` ${failedStudents.length} could not be moved.`
+          : "";
+      setStudentRecoveryMessage(`${movedLabel}${cachedLabel}${failedLabel}`);
+
+      if (viewingStudent && movedStudentIds.includes(viewingStudent.id)) {
+        closeViewModal();
+      }
+    }
+
+    if (failedStudents.length > 0) {
+      alert(failedStudents.join("\n"));
+    }
+
+    return movedStudentIds.length;
+  };
+
+  const handleMoveSelectedStudentsToAlumni = async () => {
+    if (selectedStudents.length === 0) {
+      return;
+    }
+
+    const shouldContinue = window.confirm(
+      `Move ${selectedStudents.length} selected student${selectedStudents.length === 1 ? "" : "s"} to alumni?`,
+    );
+    if (!shouldContinue) {
+      return;
+    }
+
+    setIsBulkMovingToAlumni(true);
+
+    try {
+      await moveStudentsToAlumni(selectedStudents);
+    } finally {
+      setIsBulkMovingToAlumni(false);
+    }
   };
 
   const getStudentStatusClassName = (status: Student["status"]) => {
@@ -814,6 +2071,23 @@ export default function AdminStudents({
     if (status === "Archived") return "students-status-archived";
     return "students-status-incomplete";
   };
+
+  const getStudentLifecycleStatusClassName = (status: StudentLifecycleStatus) => {
+    if (status === "Graduated") {
+      return "students-lifecycle-status-graduated";
+    }
+
+    if (status === "Dropped") {
+      return "students-lifecycle-status-dropped";
+    }
+
+    return "students-lifecycle-status-undergraduate";
+  };
+
+  const getAcademicStandingClassName = (standing: "Regular" | "Irregular") =>
+    standing === "Irregular"
+      ? "students-regularity-irregular"
+      : "students-regularity-regular";
 
   const viewingStudentRequirements = viewingStudent
     ? getStudentRequirementSnapshot({
@@ -848,6 +2122,58 @@ export default function AdminStudents({
       };
   const viewingStudentProgram = viewingStudent?.program || "";
   const isViewingCollegeStudent = viewingStudentProgram === "College";
+  const viewingStudentAcademicStanding = viewingStudent
+    ? studentAcademicStandingById[viewingStudent.id] ||
+      getStudentAcademicStanding({
+        branch: viewingStudent.branch || currentBranch,
+        program: viewingStudent.program,
+        studentId: viewingStudent.id,
+      })
+    : null;
+  const viewingStudentAcademicStandingLabel = getDisplayedAcademicStandingLabel(
+    viewingStudent,
+    viewingStudentAcademicStanding?.label,
+  );
+  const viewingStudentOwnScheduleReason = hasApprovedOwnSchedule(viewingStudent)
+    ? "This student was approved for own-schedule admission and is treated as irregular while the customized load is being managed."
+    : "";
+  const viewingStudentSubjectPlan = viewingStudent
+    ? studentSubjectPlans[getStudentSubjectPlanKey(viewingStudent)] ?? null
+    : null;
+  const viewingStudentScheduleRequest = viewingStudent
+    ? studentScheduleRequests.find(
+        (request) =>
+          request.studentNumber === viewingStudent.id ||
+          (request.trackingNumber &&
+            request.trackingNumber === viewingStudent.trackingNumber),
+      ) ?? null
+    : null;
+  const viewingStudentGradeRecords = viewingStudent
+    ? getStudentGradeRecords({
+        branch: viewingStudent.branch || currentBranch,
+        studentId: viewingStudent.id,
+      })
+    : [];
+  const viewingStudentGradeTerms = sortAcademicTerms(
+    Array.from(
+      new Map(
+        viewingStudentGradeRecords
+          .filter(
+            (record) => Boolean(record.academicYear) && Boolean(record.semester),
+          )
+          .map((record) => [
+            `${record.academicYear}::${record.semester}`,
+            {
+              academicYear: record.academicYear,
+              semester: record.semester,
+            },
+          ]),
+      ).values(),
+    ),
+  );
+  const viewingStudentGradeTriggerIds = new Set(
+    viewingStudentAcademicStanding?.triggerGrades.map((grade) => grade.id) ?? [],
+  );
   const viewingStudentApplicantRecord =
     viewingStudentRequirements?.applicantRecord ?? null;
   const viewingStudentHonorLabel =
@@ -888,9 +2214,34 @@ export default function AdminStudents({
           : viewingStudentApplicantRecord?.appliedForScholarship
             ? "Awaiting result"
             : "Not applicable";
+  const canEditViewingStudentScholarshipScore =
+    isViewingCollegeStudent &&
+    Boolean(viewingStudent && viewingStudentApplicantRecord?.trackingNumber);
+
+  useEffect(() => {
+    if (!canEditViewingStudentScholarshipScore) {
+      setPendingScholarshipScore("");
+      setScholarshipScoreFeedback(null);
+      return;
+    }
+
+    setPendingScholarshipScore(
+      typeof viewingStudentApplicantRecord?.scholarshipExamScore === "number"
+        ? String(viewingStudentApplicantRecord.scholarshipExamScore)
+        : "",
+    );
+    setScholarshipScoreFeedback(null);
+  }, [
+    canEditViewingStudentScholarshipScore,
+    viewingStudent?.id,
+    viewingStudentApplicantRecord?.scholarshipExamScore,
+  ]);
 
   const requirementNotifications: StudentRequirementNotification[] = students
-    .filter((student) => student.status !== "Archived")
+    .filter(
+      (student) =>
+        student.status !== "Archived" && student.status !== "Graduated",
+    )
     .map((student) => {
       const requirementSnapshot = getStudentRequirementSnapshot({
         branch: student.branch || currentBranch,
@@ -941,6 +2292,49 @@ export default function AdminStudents({
     (total, notification) => total + notification.pendingReviewCount,
     0,
   );
+  const pendingScheduleNotifications = useMemo<
+    StudentScheduleSelectionNotification[]
+  >(
+    () =>
+      studentScheduleRequests
+        .filter((request) => request.status === "Pending")
+        .map((request) => {
+          const student =
+            students.find(
+              (record) =>
+                record.id === request.studentNumber ||
+                (request.trackingNumber &&
+                  record.trackingNumber === request.trackingNumber),
+            ) ?? null;
+
+          if (!student) {
+            return null;
+          }
+
+          return {
+            student,
+            request,
+            selectedCount: request.selections.length,
+            totalUnits: request.selections.reduce(
+              (sum, selection) => sum + (selection.units ?? 0),
+              0,
+            ),
+            conflictCount: buildScheduledAssignmentConflicts(request.selections)
+              .length,
+          };
+        })
+        .filter(
+          (
+            notification,
+          ): notification is StudentScheduleSelectionNotification =>
+            notification !== null,
+        )
+        .sort((left, right) =>
+          right.request.submittedAt.localeCompare(left.request.submittedAt),
+        ),
+    [studentScheduleRequests, students],
+  );
+  const pendingScheduleNotificationCount = pendingScheduleNotifications.length;
 
   const handleEditFromView = () => {
     if (!viewingStudent) return;
@@ -957,8 +2351,17 @@ export default function AdminStudents({
     setIsNotificationModalOpen(false);
   };
 
+  const handleOpenScheduleNotifications = () => {
+    setIsScheduleNotificationModalOpen(true);
+  };
+
+  const handleCloseScheduleNotifications = () => {
+    setIsScheduleNotificationModalOpen(false);
+  };
+
   const handleOpenStudentFromNotification = (student: Student) => {
     handleCloseNotifications();
+    handleCloseScheduleNotifications();
     openViewModal(student);
   };
 
@@ -985,6 +2388,121 @@ export default function AdminStudents({
     }
 
     setStudents((prev) => [...prev]);
+  };
+
+  const handleScheduleSelectionDecision = (
+    notification: StudentScheduleSelectionNotification,
+    status: "Approved" | "Rejected",
+  ) => {
+    if (
+      status === "Approved" &&
+      buildScheduledAssignmentConflicts(notification.request.selections).length > 0
+    ) {
+      alert(
+        "This submitted schedule still has conflicts. Ask the student to resubmit before approval.",
+      );
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const nextRequests = studentScheduleRequests.map((request) =>
+      request.id === notification.request.id
+        ? {
+            ...request,
+            status,
+            updatedAt: timestamp,
+            reviewedAt: timestamp,
+            reviewedByRole: loggedInRole,
+          }
+        : request,
+    );
+
+    setStudentScheduleRequests(nextRequests);
+    writeBranchScopedData(
+      STUDENT_SCHEDULE_REQUEST_SCOPE,
+      currentBranch,
+      nextRequests,
+    );
+
+    if (status === "Approved") {
+      const student = notification.student;
+      const planKey = getStudentSubjectPlanKey(student);
+      const existingPlan = studentSubjectPlans[planKey];
+      const assignedSubjects: StudentSubjectPlanItem[] = Array.from(
+        notification.request.selections.reduce((items, selection) => {
+          const key = `${selection.subjectId}:${selection.subjectCode}`;
+          if (!items.has(key)) {
+            items.set(key, {
+              subjectId: selection.subjectId,
+              subjectCode: selection.subjectCode,
+              subjectName: selection.subjectName,
+              units: selection.units,
+            });
+          }
+
+          return items;
+        }, new Map<string, StudentSubjectPlanItem>()),
+      )
+        .map(([, item]) => item)
+        .sort(
+          (left, right) =>
+            left.subjectCode.localeCompare(right.subjectCode) ||
+            left.subjectName.localeCompare(right.subjectName),
+        );
+
+      setStudentSubjectPlans((prev) => ({
+        ...prev,
+        [planKey]: {
+          id: planKey,
+          trackingNumber: student.trackingNumber,
+          studentNumber: student.id,
+          semester: notification.request.semester,
+          academicYear: notification.request.academicYear,
+          assignedSubjects,
+          creditedSubjects: existingPlan?.creditedSubjects ?? [],
+          scheduledAssignments: notification.request.selections,
+          notes:
+            existingPlan?.notes ||
+            "Approved from student own-schedule selection.",
+          updatedAt: timestamp,
+          source: "student_schedule_request",
+        },
+      }));
+    }
+
+    updateStoredStudentOwnScheduleState({
+      branch: notification.student.branch || currentBranch,
+      studentNumber: notification.student.id,
+      trackingNumber: notification.student.trackingNumber,
+      updates: {
+        requestedOwnSchedule: true,
+        ownScheduleRequestStatus: "Approved",
+        ownScheduleAcademicYear: notification.request.academicYear,
+        ownScheduleSemester: notification.request.semester,
+        ownScheduleSelectionStatus:
+          status === "Approved" ? "Approved" : "Rejected",
+      },
+    });
+
+    const refreshedStudents = getStudentsForBranch(currentBranch) as Student[];
+    setStudents(refreshedStudents);
+
+    if (viewingStudent) {
+      const refreshedViewingStudent =
+        refreshedStudents.find(
+          (student) =>
+            student.id === viewingStudent.id ||
+            (viewingStudent.trackingNumber &&
+              student.trackingNumber === viewingStudent.trackingNumber),
+        ) ?? null;
+      setViewingStudent(refreshedViewingStudent);
+    }
+
+    alert(
+      status === "Approved"
+        ? "Student schedule approved and saved as the official load."
+        : "Student schedule request rejected. The student can revise and submit again.",
+    );
   };
 
   const getNotificationReviewStatusLabel = (
@@ -1092,7 +2610,7 @@ export default function AdminStudents({
         <div className="students-controls">
           <input
             type="text"
-            placeholder="Search by Name, ID, Email..."
+            placeholder="Search by Name, ID, Email, Status..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="students-search-input"
@@ -1107,7 +2625,47 @@ export default function AdminStudents({
               {pendingNotificationCount}
             </span>
           </button>
+          <button
+            type="button"
+            className="students-notification-btn students-schedule-notification-btn"
+            onClick={handleOpenScheduleNotifications}
+          >
+            <span>Schedule Approvals</span>
+            <span className="students-notification-badge">
+              {pendingScheduleNotificationCount}
+            </span>
+          </button>
         </div>
+
+        {selectedStudents.length > 0 ? (
+          <div className="students-bulk-actions">
+            <div className="students-bulk-copy">
+              <strong>{selectedStudents.length} selected</strong>
+              <span>
+                Move selected students to alumni when you are ready to continue
+                the alumni workflow.
+              </span>
+            </div>
+            <div className="students-bulk-action-buttons">
+              <button
+                type="button"
+                className="students-bulk-move-btn"
+                onClick={handleMoveSelectedStudentsToAlumni}
+                disabled={isAnyAlumniMovePending}
+              >
+                {isBulkMovingToAlumni ? "Moving..." : "Move to Alumni"}
+              </button>
+              <button
+                type="button"
+                className="students-bulk-clear-btn"
+                onClick={() => setSelectedStudentIds([])}
+                disabled={isAnyAlumniMovePending}
+              >
+                Clear Selection
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="students-filters">
           <div className="students-filter-group">
@@ -1150,6 +2708,22 @@ export default function AdminStudents({
             </select>
           </div>
           <div className="students-filter-group">
+            <label>Student Status</label>
+            <select
+              value={filterStudentLifecycleStatus}
+              onChange={(e) =>
+                setFilterStudentLifecycleStatus(
+                  e.target.value as "All" | StudentLifecycleStatus,
+                )
+              }
+            >
+              <option value="All">All</option>
+              <option value="Undergraduate">Undergraduate</option>
+              <option value="Graduated">Graduated</option>
+              <option value="Dropped">Dropped</option>
+            </select>
+          </div>
+          <div className="students-filter-group">
             <label>Requirement Status</label>
             <select
               value={filterStatus}
@@ -1160,12 +2734,33 @@ export default function AdminStudents({
               <option>Incomplete</option>
             </select>
           </div>
+          <div className="students-filter-group">
+            <label>Academic Standing</label>
+            <select
+              value={filterAcademicStanding}
+              onChange={(e) => setFilterAcademicStanding(e.target.value)}
+            >
+              <option>All</option>
+              <option>Regular</option>
+              <option>Irregular</option>
+            </select>
+          </div>
         </div>
 
         <div className="students-table-container">
           <table className="students-table">
             <thead>
               <tr>
+                <th className="students-selection-column">
+                  <input
+                    type="checkbox"
+                    className="students-selection-checkbox"
+                    checked={areAllVisibleStudentsSelected}
+                    onChange={toggleVisibleStudentSelection}
+                    disabled={visibleStudentIds.length === 0}
+                    aria-label="Select all visible students"
+                  />
+                </th>
                 <th>
                   <button
                     type="button"
@@ -1180,15 +2775,34 @@ export default function AdminStudents({
                 <th>Specialization</th>
                 <th>Grade Year</th>
                 <th>Section</th>
-                <th>Email</th>
-                <th>STATUS</th>
+                <th>Student Status</th>
+                <th>Requirement Status</th>
+                <th>Academic Standing</th>
                 <th>ACTION</th>
               </tr>
             </thead>
             <tbody>
               {sortedStudents.length > 0 ? (
                 sortedStudents.map((student) => (
-                  <tr key={student.id}>
+                  <tr
+                    key={student.id}
+                    className={
+                      selectedStudentIds.includes(student.id) &&
+                      isStudentSelectableForBulkActions(student)
+                        ? "students-table-row-selected"
+                        : ""
+                    }
+                  >
+                    <td className="students-selection-column">
+                      <input
+                        type="checkbox"
+                        className="students-selection-checkbox"
+                        checked={selectedStudentIds.includes(student.id)}
+                        onChange={() => toggleStudentSelection(student.id)}
+                        disabled={!isStudentSelectableForBulkActions(student)}
+                        aria-label={`Select ${student.name}`}
+                      />
+                    </td>
                     <td>{student.id}</td>
                     <td>{student.name}</td>
                     <td>
@@ -1211,18 +2825,29 @@ export default function AdminStudents({
                         {student.section || "N/A"}
                       </span>
                     </td>
-                    <td>{student.email}</td>
                     <td>
                       <span
-                        className={
-                          student.status === "Complete"
-                            ? "students-status-complete"
-                            : student.status === "Archived"
-                              ? "students-status-archived"
-                              : "students-status-incomplete"
-                        }
+                        className={getStudentLifecycleStatusClassName(
+                          getStudentLifecycleStatus(student),
+                        )}
+                      >
+                        {getStudentLifecycleStatus(student)}
+                      </span>
+                    </td>
+                    <td>
+                      <span
+                        className={getStudentStatusClassName(student.status)}
                       >
                         {student.status}
+                      </span>
+                    </td>
+                    <td>
+                      <span
+                        className={getAcademicStandingClassName(
+                          getStudentAcademicStandingLabel(student),
+                        )}
+                      >
+                        {getStudentAcademicStandingLabel(student)}
                       </span>
                     </td>
                     <td className="students-action-cell">
@@ -1230,13 +2855,16 @@ export default function AdminStudents({
                         <button
                           className="students-action-btn students-view-btn"
                           onClick={() => openViewModal(student)}
+                          disabled={isAnyAlumniMovePending}
                         >
                           View Details
                         </button>
-                        {student.status !== "Archived" ? (
+                        {student.status !== "Archived" &&
+                        student.status !== "Graduated" ? (
                           <button
                             className="students-action-btn students-archive-btn"
                             onClick={() => openArchiveConfirm(student.id)}
+                            disabled={isAnyAlumniMovePending}
                           >
                             Trash
                           </button>
@@ -1247,7 +2875,7 @@ export default function AdminStudents({
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9} className="students-no-results">
+                  <td colSpan={11} className="students-no-results">
                     {isLoading
                       ? "Loading students..."
                       : "No students found matching your search."}
@@ -1618,11 +3246,55 @@ export default function AdminStudents({
                     </div>
                   </div>
                   <div className="students-profile-field">
-                    <label>Status</label>
+                    <label>Requirement Status</label>
                     <div
                       className={`students-profile-value students-profile-value-highlight ${getStudentStatusClassName(viewingStudent.status)}`}
                     >
                       {viewingStudent.status}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Academic Standing</label>
+                    <div
+                      className={`students-profile-value students-profile-value-highlight ${getAcademicStandingClassName(
+                        viewingStudentAcademicStandingLabel,
+                      )}`}
+                    >
+                      {viewingStudentAcademicStandingLabel}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Own Schedule Admission</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.requestedOwnSchedule
+                        ? viewingStudent.ownScheduleRequestStatus || "Requested"
+                        : "Standard"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Schedule Selection</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.requestedOwnSchedule
+                        ? getOwnScheduleSelectionLabel(
+                            viewingStudent.ownScheduleSelectionStatus,
+                          )
+                        : "Not applicable"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Own Schedule Term</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.requestedOwnSchedule
+                        ? `${
+                            viewingStudent.ownScheduleAcademicYear ||
+                            viewingStudentScheduleRequest?.academicYear ||
+                            "Academic year pending"
+                          } • ${
+                            viewingStudent.ownScheduleSemester ||
+                            viewingStudentScheduleRequest?.semester ||
+                            "Semester pending"
+                          }`
+                        : "Not applicable"}
                     </div>
                   </div>
                   <div className="students-profile-field">
@@ -1727,10 +3399,51 @@ export default function AdminStudents({
                       {viewingStudentScholarshipStatus}
                     </div>
                   </div>
-                  <div className="students-profile-field">
+                  <div className="students-profile-field students-profile-field-full">
                     <label>Scholarship Exam Score</label>
-                    <div className="students-profile-value">
-                      {viewingStudentScholarshipScore}
+                    <div className="students-profile-value students-profile-list-box students-scholarship-score-box">
+                      <div className="students-scholarship-score-current">
+                        {viewingStudentScholarshipScore}
+                      </div>
+                      {canEditViewingStudentScholarshipScore ? (
+                        <div className="students-scholarship-score-editor">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={pendingScholarshipScore}
+                            onChange={(event) => {
+                              setPendingScholarshipScore(event.target.value);
+                              if (scholarshipScoreFeedback) {
+                                setScholarshipScoreFeedback(null);
+                              }
+                            }}
+                            placeholder="Enter 0 to 100"
+                          />
+                          <button
+                            type="button"
+                            className="students-save-btn students-inline-save-btn"
+                            onClick={handleApplyScholarshipScore}
+                            disabled={isSavingScholarshipScore}
+                          >
+                            {isSavingScholarshipScore ? "Saving..." : "Apply Score"}
+                          </button>
+                        </div>
+                      ) : null}
+                      {canEditViewingStudentScholarshipScore ? (
+                        <p className="students-scholarship-score-hint">
+                          You can still update the scholarship exam score after
+                          approval from this view.
+                        </p>
+                      ) : null}
+                      {scholarshipScoreFeedback ? (
+                        <p
+                          className={`students-inline-feedback ${scholarshipScoreFeedback.type}`}
+                        >
+                          {scholarshipScoreFeedback.message}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <div className="students-profile-field students-profile-field-full">
@@ -1792,14 +3505,258 @@ export default function AdminStudents({
                       )}
                     </div>
                   </div>
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Planned Load and Schedule</label>
+                    <div className="students-profile-value students-profile-list-box">
+                      {viewingStudentSubjectPlan?.scheduledAssignments &&
+                      viewingStudentSubjectPlan.scheduledAssignments.length > 0 ? (
+                        <div className="students-profile-list">
+                          {viewingStudentSubjectPlan.scheduledAssignments.map(
+                            (assignment) => (
+                              <div
+                                key={assignment.assignmentId}
+                                className="students-profile-list-item"
+                              >
+                                <span>
+                                  <strong>
+                                    {assignment.subjectCode} - {assignment.subjectName}
+                                  </strong>
+                                  {" "}
+                                  ({assignment.sectionCode || "No section"}) •{" "}
+                                  {formatPlannerScheduleLabel(assignment.schedule)}
+                                </span>
+                                <span>
+                                  {assignment.instructorName || "TBA"}
+                                </span>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      ) : viewingStudentScheduleRequest &&
+                        viewingStudentScheduleRequest.selections.length > 0 ? (
+                        <div className="students-profile-list">
+                          {viewingStudentScheduleRequest.selections.map(
+                            (assignment) => (
+                              <div
+                                key={assignment.assignmentId}
+                                className="students-profile-list-item"
+                              >
+                                <span>
+                                  <strong>
+                                    {assignment.subjectCode} - {assignment.subjectName}
+                                  </strong>
+                                  {" "}
+                                  ({assignment.sectionCode || "No section"}) •{" "}
+                                  {formatPlannerScheduleLabel(assignment.schedule)}
+                                </span>
+                                <span>
+                                  {viewingStudentScheduleRequest.status === "Pending"
+                                    ? "Awaiting admin approval"
+                                    : viewingStudentScheduleRequest.status ===
+                                        "Rejected"
+                                      ? "Needs student revision"
+                                      : assignment.instructorName || "TBA"}
+                                </span>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      ) : viewingStudent.program === "College" ? (
+                        "No planned load saved yet"
+                      ) : (
+                        "Not applicable"
+                      )}
+                    </div>
+                  </div>
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Standing Notes</label>
+                    <div className="students-profile-value students-profile-list-box">
+                      <div className="students-profile-note">
+                        <p>
+                          {viewingStudentAcademicStanding?.reason ||
+                            viewingStudentOwnScheduleReason ||
+                            "No academic standing details available yet."}
+                        </p>
+                        {viewingStudentOwnScheduleReason &&
+                        viewingStudentAcademicStanding?.reason ? (
+                          <p>{viewingStudentOwnScheduleReason}</p>
+                        ) : null}
+                        {isViewingCollegeStudent &&
+                        (viewingStudentAcademicStanding?.pendingGroups || 0) > 0 ? (
+                          <p>
+                            Some college subjects only have non-final grading
+                            period uploads, so the standing is based on the
+                            final or semester grades already recorded.
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>
+                      {isViewingCollegeStudent
+                        ? "Uploaded Grades by Semester"
+                        : "Uploaded Grades by Quarter"}
+                    </label>
+                    <div className="students-profile-value students-profile-list-box">
+                      {viewingStudentGradeRecords.length > 0 ? (
+                        <div className="students-grade-sections">
+                          {viewingStudentGradeTerms.map(
+                            ({ academicYear, semester }) => {
+                              const termGrades = viewingStudentGradeRecords.filter(
+                                (record) =>
+                                  record.academicYear === academicYear &&
+                                  record.semester === semester,
+                              );
+
+                              if (isViewingCollegeStudent) {
+                                const sortedTermGrades =
+                                  sortCollegeGradeRecords(termGrades);
+                                const hasIrregularTrigger = sortedTermGrades.some(
+                                  (record) =>
+                                    viewingStudentGradeTriggerIds.has(record.id),
+                                );
+
+                                return (
+                                  <div
+                                    key={`${academicYear}-${semester}`}
+                                    className="students-grade-section"
+                                  >
+                                    <div className="students-grade-section-header">
+                                      <div>
+                                        <h4>{semester}</h4>
+                                        <p>{academicYear}</p>
+                                      </div>
+                                      <span
+                                        className={getAcademicStandingClassName(
+                                          hasIrregularTrigger
+                                            ? "Irregular"
+                                            : "Regular",
+                                        )}
+                                      >
+                                        {hasIrregularTrigger
+                                          ? "Has failed/INC grades"
+                                          : "No failed/INC grades"}
+                                      </span>
+                                    </div>
+                                    <div className="students-grade-table-wrapper">
+                                      <table className="students-grade-table">
+                                        <thead>
+                                          <tr>
+                                            <th>Subject Code</th>
+                                            <th>Subject Title</th>
+                                            <th>Period</th>
+                                            <th>Grade</th>
+                                            <th>Units</th>
+                                            <th>Result</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {sortedTermGrades.map((record) => (
+                                            <tr
+                                              key={record.id}
+                                              className={
+                                                viewingStudentGradeTriggerIds.has(
+                                                  record.id,
+                                                )
+                                                  ? "students-grade-row-flagged"
+                                                  : ""
+                                              }
+                                            >
+                                              <td>{record.subjectCode}</td>
+                                              <td>{record.subjectTitle}</td>
+                                              <td>{record.gradingPeriod}</td>
+                                              <td>{record.normalizedGrade}</td>
+                                              <td>{record.units ?? "—"}</td>
+                                              <td>{record.evaluation}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                );
+                              }
+
+                              const shsRows = buildShsGradeSummaryRows(termGrades);
+
+                              return (
+                                <div
+                                  key={`${academicYear}-${semester}`}
+                                  className="students-grade-section"
+                                >
+                                  <div className="students-grade-section-header">
+                                    <div>
+                                      <h4>{semester}</h4>
+                                      <p>{academicYear}</p>
+                                    </div>
+                                  </div>
+                                  <div className="students-grade-table-wrapper">
+                                    <table className="students-grade-table">
+                                      <thead>
+                                        <tr>
+                                          <th>Subject Code</th>
+                                          <th>Subject Title</th>
+                                          <th>1st Quarter</th>
+                                          <th>2nd Quarter</th>
+                                          <th>3rd Quarter</th>
+                                          <th>4th Quarter</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {shsRows.map((row) => (
+                                          <tr key={row.key}>
+                                            <td>{row.subjectCode}</td>
+                                            <td>{row.subjectTitle}</td>
+                                            <td>
+                                              {row.quarterGrades["1st Quarter"]}
+                                            </td>
+                                            <td>
+                                              {row.quarterGrades["2nd Quarter"]}
+                                            </td>
+                                            <td>
+                                              {row.quarterGrades["3rd Quarter"]}
+                                            </td>
+                                            <td>
+                                              {row.quarterGrades["4th Quarter"]}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              );
+                            },
+                          )}
+                        </div>
+                      ) : (
+                        "No uploaded grades yet"
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <div className="students-modal-actions">
+                {viewingStudent.program === "College" ? (
+                  <button
+                    type="button"
+                    className="students-plan-btn"
+                    onClick={() => {
+                      const selectedStudent = viewingStudent;
+                      closeViewModal();
+                      openPlannerModal(selectedStudent);
+                    }}
+                  >
+                    Plan Load
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="students-save-btn"
                   onClick={handleEditFromView}
+                  disabled={isAnyAlumniMovePending}
                 >
                   Edit
                 </button>
@@ -1807,8 +3764,277 @@ export default function AdminStudents({
                   type="button"
                   className="students-cancel-btn"
                   onClick={closeViewModal}
+                  disabled={isAnyAlumniMovePending}
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {planningStudent && (
+          <div className="students-modal-overlay" onClick={closePlannerModal}>
+            <div
+              className="students-modal students-planner-modal"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="students-modal-header students-planner-header">
+                <div>
+                  <h2>Irregular Load Planner</h2>
+                  <p className="students-profile-subtitle">
+                    {planningStudent.name} - {planningStudent.id}
+                  </p>
+                </div>
+                <button
+                  className="students-modal-close students-modal-close-text"
+                  onClick={closePlannerModal}
+                  aria-label="Close irregular planner"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="students-modal-body students-planner-body">
+                <div className="students-planner-controls">
+                  <label className="students-planner-field">
+                    <span>Academic Year</span>
+                    <input
+                      type="text"
+                      value={plannerForm.academicYear}
+                      onChange={(event) =>
+                        setPlannerForm((prev) => ({
+                          ...prev,
+                          academicYear: event.target.value,
+                          selectedAssignmentIds: [],
+                        }))
+                      }
+                      placeholder={getDefaultPlannerAcademicYear()}
+                    />
+                  </label>
+                  <label className="students-planner-field">
+                    <span>Planning Semester</span>
+                    <select
+                      value={plannerForm.semester}
+                      onChange={(event) =>
+                        setPlannerForm((prev) => ({
+                          ...prev,
+                          semester: normalizePlanningSemester(event.target.value),
+                          selectedAssignmentIds: [],
+                        }))
+                      }
+                    >
+                      {SEMESTER_DISPLAY_ORDER.map((semester) => (
+                        <option key={semester} value={semester}>
+                          {semester}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="students-planner-summary">
+                  <div className="students-planner-stat">
+                    <span>Available subjects</span>
+                    <strong>{planningSubjectGroups.length}</strong>
+                  </div>
+                  <div className="students-planner-stat">
+                    <span>Selected schedules</span>
+                    <strong>{selectedPlannerAssignments.length}</strong>
+                  </div>
+                  <div className="students-planner-stat">
+                    <span>Conflicts</span>
+                    <strong>{plannerConflicts.length}</strong>
+                  </div>
+                </div>
+
+                {plannerConflicts.length > 0 ? (
+                  <div className="students-planner-warning">
+                    <strong>Schedule conflict detected.</strong>
+                    <ul className="students-planner-warning-list">
+                      {plannerConflicts.map((conflict) => (
+                        <li
+                          key={`${conflict.leftAssignmentId}-${conflict.rightAssignmentId}`}
+                        >
+                          {conflict.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {planningStudentPlan?.notes ? (
+                  <div className="students-planner-existing-note">
+                    Current saved note: {planningStudentPlan.notes}
+                  </div>
+                ) : null}
+
+                {planningYearGroups.length > 0 ? (
+                  <div className="students-planner-grid">
+                    <div className="students-planner-subjects">
+                      {planningYearGroups.map(({ yearLevel, items, selectedCount }) => {
+                        const isExpanded = expandedPlannerYearLevels.includes(yearLevel);
+
+                        return (
+                          <div
+                            key={yearLevel}
+                            className="students-planner-year-group"
+                          >
+                            <button
+                              type="button"
+                              className="students-planner-year-toggle"
+                              onClick={() => togglePlannerYearGroup(yearLevel)}
+                            >
+                              <div>
+                                <strong>{yearLevel}</strong>
+                                <span>
+                                  {items.length} subject
+                                  {items.length === 1 ? "" : "s"}
+                                  {selectedCount > 0
+                                    ? ` | ${selectedCount} selected`
+                                    : ""}
+                                </span>
+                              </div>
+                              <span>{isExpanded ? "Hide" : "Show"}</span>
+                            </button>
+                            {isExpanded ? (
+                              <div className="students-planner-year-content">
+                                {items.map(
+                                  ({
+                                    subject,
+                                    assignmentOptions,
+                                    selectedAssignmentId,
+                                  }) => (
+                                    <div
+                                      key={subject.id}
+                                      className="students-planner-subject-card"
+                                    >
+                                      <div className="students-planner-subject-copy">
+                                        <h4>
+                                          {subject.code} - {subject.name}
+                                        </h4>
+                                        <p>
+                                          {subject.yearLevel}
+                                          {subject.units
+                                            ? ` | ${subject.units} units`
+                                            : ""}
+                                        </p>
+                                      </div>
+                                      <label className="students-planner-field">
+                                        <span>Schedule option</span>
+                                        <select
+                                          value={selectedAssignmentId}
+                                          onChange={(event) =>
+                                            handlePlannerAssignmentChange(
+                                              subject,
+                                              event.target.value,
+                                            )
+                                          }
+                                        >
+                                          <option value="">
+                                            Not included in load
+                                          </option>
+                                          {assignmentOptions.map((assignment) => (
+                                            <option
+                                              key={assignment.id}
+                                              value={assignment.id}
+                                            >
+                                              {assignment.sectionCode} -{" "}
+                                              {formatPlannerScheduleLabel(
+                                                assignment.schedule,
+                                              )}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      {assignmentOptions.length === 0 ? (
+                                        <p className="students-planner-empty-option">
+                                          No scheduled section offering found for
+                                          this subject and term.
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  ),
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="students-planner-selection-panel">
+                      <h3>Selected load</h3>
+                      {selectedPlannerAssignments.length > 0 ? (
+                        <div className="students-planner-selection-list">
+                          {selectedPlannerAssignments.map((assignment) => (
+                            <div
+                              key={assignment.id}
+                              className={`students-planner-selection-item ${
+                                plannerConflicts.some(
+                                  (conflict) =>
+                                    conflict.leftAssignmentId === assignment.id ||
+                                    conflict.rightAssignmentId === assignment.id,
+                                )
+                                  ? "flagged"
+                                  : ""
+                              }`}
+                            >
+                              <strong>
+                                {assignment.subjectCode} - {assignment.subjectName}
+                              </strong>
+                              <span>{assignment.sectionCode}</span>
+                              <span>{formatPlannerScheduleLabel(assignment.schedule)}</span>
+                              <span>{assignment.instructorName || "TBA"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="students-planner-empty-state">
+                          Pick one schedule option per subject to build the
+                          irregular load.
+                        </div>
+                      )}
+
+                      <label className="students-planner-field">
+                        <span>Registrar notes</span>
+                        <textarea
+                          rows={4}
+                          value={plannerForm.notes}
+                          onChange={(event) =>
+                            setPlannerForm((prev) => ({
+                              ...prev,
+                              notes: event.target.value,
+                            }))
+                          }
+                          placeholder="Example: Student will cross-enroll with mixed section schedules while completing INC subject."
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="students-planner-empty-state">
+                    No subject offerings were found for this student, semester,
+                    and academic year. Open Academic Management first to add the
+                    needed subject and section offerings.
+                  </div>
+                )}
+              </div>
+
+              <div className="students-modal-actions">
+                <button
+                  type="button"
+                  className="students-cancel-btn"
+                  onClick={closePlannerModal}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="students-save-btn"
+                  onClick={handleSavePlanner}
+                >
+                  Save Load Plan
                 </button>
               </div>
             </div>
@@ -1995,6 +4221,208 @@ export default function AdminStudents({
                   type="button"
                   className="students-cancel-btn"
                   onClick={handleCloseNotifications}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isScheduleNotificationModalOpen && (
+          <div
+            className="students-modal-overlay"
+            onClick={handleCloseScheduleNotifications}
+          >
+            <div
+              className="students-modal students-notification-modal students-schedule-modal"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="students-modal-header">
+                <div className="students-notification-header-copy">
+                  <h2>Student Schedule Approvals</h2>
+                  <p>
+                    Review self-selected schedules from irregular admissions
+                    before they become the student's official subject load.
+                  </p>
+                </div>
+                <button
+                  className="students-modal-close"
+                  onClick={handleCloseScheduleNotifications}
+                  aria-label="Close schedule approvals"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="students-modal-body">
+                {pendingScheduleNotifications.length > 0 ? (
+                  <div className="students-notification-list">
+                    {pendingScheduleNotifications.map((notification) => {
+                      const scheduleConflicts = buildScheduledAssignmentConflicts(
+                        notification.request.selections,
+                      );
+
+                      return (
+                        <div
+                          key={notification.request.id}
+                          className="students-notification-card students-schedule-card"
+                        >
+                          <div className="students-notification-card-head">
+                            <div>
+                              <h3>{notification.student.name}</h3>
+                              <p>
+                                {notification.student.id} •{" "}
+                                {notification.request.academicYear} •{" "}
+                                {notification.request.semester}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="students-notification-open-btn"
+                              onClick={() =>
+                                handleOpenStudentFromNotification(
+                                  notification.student,
+                                )
+                              }
+                            >
+                              View Student
+                            </button>
+                          </div>
+
+                          <div className="students-notification-stats students-schedule-stats">
+                            <div className="students-notification-stat">
+                              <span className="students-notification-stat-label">
+                                Selected
+                              </span>
+                              <strong>{notification.selectedCount}</strong>
+                            </div>
+                            <div className="students-notification-stat">
+                              <span className="students-notification-stat-label">
+                                Units
+                              </span>
+                              <strong>{notification.totalUnits}</strong>
+                            </div>
+                            <div className="students-notification-stat">
+                              <span className="students-notification-stat-label">
+                                Conflicts
+                              </span>
+                              <strong>{notification.conflictCount}</strong>
+                            </div>
+                            <div className="students-notification-stat">
+                              <span className="students-notification-stat-label">
+                                Submitted
+                              </span>
+                              <strong>
+                                {new Date(
+                                  notification.request.submittedAt,
+                                ).toLocaleDateString()}
+                              </strong>
+                            </div>
+                          </div>
+
+                          <div className="students-notification-documents students-schedule-selections">
+                            {notification.request.selections.map((selection) => (
+                              <div
+                                key={selection.assignmentId}
+                                className={`students-notification-document students-schedule-selection-item ${
+                                  scheduleConflicts.some(
+                                    (conflict) =>
+                                      conflict.leftAssignmentId ===
+                                        selection.assignmentId ||
+                                      conflict.rightAssignmentId ===
+                                        selection.assignmentId,
+                                  )
+                                    ? "flagged"
+                                    : ""
+                                }`}
+                              >
+                                <div className="students-notification-document-top">
+                                  <div className="students-notification-document-copy">
+                                    <h4>
+                                      {selection.subjectCode} -{" "}
+                                      {selection.subjectName}
+                                    </h4>
+                                    <p>
+                                      {selection.sectionCode || "No section"} •{" "}
+                                      {formatPlannerScheduleLabel(
+                                        selection.schedule,
+                                      )}
+                                    </p>
+                                    <p>
+                                      {selection.instructorName || "Instructor TBA"}
+                                      {typeof selection.units === "number"
+                                        ? ` • ${selection.units} units`
+                                        : ""}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {scheduleConflicts.length > 0 ? (
+                            <div className="students-planner-warning students-schedule-warning">
+                              <strong>Resolve conflicts before approval.</strong>
+                              <ul className="students-planner-warning-list">
+                                {scheduleConflicts.map((conflict) => (
+                                  <li
+                                    key={`${conflict.leftAssignmentId}-${conflict.rightAssignmentId}`}
+                                  >
+                                    {conflict.message}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+
+                          <div className="students-notification-actions">
+                            <button
+                              type="button"
+                              className="students-notification-review-btn approve"
+                              onClick={() =>
+                                handleScheduleSelectionDecision(
+                                  notification,
+                                  "Approved",
+                                )
+                              }
+                              disabled={scheduleConflicts.length > 0}
+                            >
+                              Approve Schedule
+                            </button>
+                            <button
+                              type="button"
+                              className="students-notification-review-btn redo"
+                              onClick={() =>
+                                handleScheduleSelectionDecision(
+                                  notification,
+                                  "Rejected",
+                                )
+                              }
+                            >
+                              Reject Schedule
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="students-notification-empty">
+                    <h3>No pending schedule approvals</h3>
+                    <p>
+                      New self-selected schedules from irregular admissions will
+                      appear here after students submit them in the portal.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="students-modal-actions">
+                <button
+                  type="button"
+                  className="students-cancel-btn"
+                  onClick={handleCloseScheduleNotifications}
                 >
                   Close
                 </button>

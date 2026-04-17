@@ -154,6 +154,25 @@
   overflow-wrap: anywhere;
 }
 
+.s-balance-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.s-balance-content p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.s-balance-amount {
+  font-size: 30px;
+  font-weight: 700;
+  color: #0f3c53;
+}
+
 /* ===== CREDENTIAL STATUS SECTION ===== */
 .s-credential-header {
   display: flex;
@@ -475,6 +494,10 @@
   .s-card-value1 {
     margin-top: 15px;
     font-size: 13px;
+  }
+
+  .s-balance-amount {
+    font-size: 24px;
   }
   
   .s-card-label1 {

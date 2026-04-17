@@ -16,9 +16,18 @@ export interface Student {
   programType: 'SHS' | 'BS' | 'Short Course';
   gender: 'Male' | 'Female';
   birthday?: string;
-  status: 'New' | 'Old' | 'Transferee' | 'Regular';
+  status: 'New' | 'Old' | 'Transferee' | 'Regular' | 'Irregular';
   civilStatus?: string;
   religion?: string;
   guardianName?: string;
   guardianContact?: string;
+  requestedOwnSchedule?: boolean;
+  ownScheduleRequestStatus?: 'Pending' | 'Approved' | 'Rejected';
+  ownScheduleAcademicYear?: string;
+  ownScheduleSemester?: string;
+  ownScheduleSelectionStatus?:
+    | 'Not Submitted'
+    | 'Pending Approval'
+    | 'Approved'
+    | 'Rejected';
 }

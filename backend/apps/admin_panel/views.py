@@ -1,26 +1,31 @@
 import logging
 
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.manager.permissions import IsBranchAdmin, get_request_branch, resolve_staff_account_from_request
 
+from .automation import dispatch_due_automated_backups
 from .models import BackupHistory
 from .repository import (
     create_backup_history,
     get_backup_history,
     get_or_create_backup_settings,
     list_backup_history,
+    save_backup_snapshot,
     save_backup_settings,
     update_backup_history,
 )
 from .serializers import (
+    BackupAutomatedDispatchSerializer,
     BackupHistorySerializer,
     BackupRestoreStartSerializer,
     BackupSettingsSerializer,
     BackupSettingsUpdateSerializer,
     BackupSnapshotCreateSerializer,
+    BackupSnapshotSyncSerializer,
 )
 from .services import create_branch_backup, delete_backup_artifacts, read_backup_snapshot, restore_branch_backup
 
@@ -64,6 +69,12 @@ class BackupSettingsView(APIView):
             updated_by=user,
             updated_by_name=request.headers.get("X-User-Name", "").strip(),
         )
+        dispatch_due_automated_backups(
+            branch_id=branch_id,
+            timezone_offset_minutes=settings_row.timezone_offset_minutes,
+            created_by=user,
+            created_by_name=request.headers.get("X-User-Name", "").strip(),
+        )
         return Response(BackupSettingsSerializer(settings_row).data)
 
 
@@ -77,6 +88,67 @@ class BackupHistoryListView(APIView):
 
         history = list_backup_history(branch_id)
         return Response(BackupHistorySerializer(history, many=True).data)
+
+
+class BackupSnapshotSyncView(APIView):
+    permission_classes = [IsBranchAdmin]
+
+    def post(self, request):
+        branch_id, user = get_request_branch_context(request)
+        if not branch_id:
+            return Response({"detail": "Branch context is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = BackupSnapshotSyncSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+
+        timezone_offset_minutes = serializer.validated_data.get("timezone_offset_minutes")
+        if timezone_offset_minutes is not None:
+            save_backup_settings(
+                branch_id,
+                {"timezone_offset_minutes": timezone_offset_minutes},
+                updated_by=user,
+                updated_by_name=request.headers.get("X-User-Name", "").strip(),
+            )
+
+        snapshot = save_backup_snapshot(
+            branch_id,
+            serializer.validated_data.get("students", []),
+            serializer.validated_data.get("alumni", []),
+            updated_by=user,
+            updated_by_name=request.headers.get("X-User-Name", "").strip(),
+        )
+        return Response(
+            {
+                "branch": snapshot.branch,
+                "record_count": snapshot.record_count,
+                "updated_at": snapshot.updated_at,
+                "updated_by_name": snapshot.updated_by_name,
+            }
+        )
+
+
+class BackupAutomatedDispatchView(APIView):
+    permission_classes = [IsBranchAdmin]
+
+    def post(self, request):
+        branch_id, user = get_request_branch_context(request)
+        if not branch_id:
+            return Response({"detail": "Branch context is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = BackupAutomatedDispatchSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+
+        histories = dispatch_due_automated_backups(
+            branch_id=branch_id,
+            reference_time=serializer.validated_data.get("reference_time"),
+            timezone_offset_minutes=serializer.validated_data.get("timezone_offset_minutes"),
+            created_by=user,
+            created_by_name=request.headers.get("X-User-Name", "").strip(),
+        )
+        return Response(
+            BackupHistorySerializer(histories, many=True).data,
+            status=status.HTTP_202_ACCEPTED if histories else status.HTTP_200_OK,
+        )
 
 
 class BackupManualCreateView(APIView):
@@ -146,6 +218,21 @@ class BackupManualCreateView(APIView):
                 created_by=user,
                 history=history,
                 snapshot_data=snapshot_data,
+            )
+
+        if backup_type == BackupHistory.TYPE_AUTOMATED:
+            settings_row = get_or_create_backup_settings(branch_id)
+            save_backup_settings(
+                branch_id,
+                {
+                    "automated_time": settings_row.automated_time,
+                    "retention_days": settings_row.retention_days,
+                    "is_enabled": settings_row.is_enabled,
+                    "timezone_offset_minutes": settings_row.timezone_offset_minutes,
+                    "last_automated_backup_at": timezone.now(),
+                },
+                updated_by=user,
+                updated_by_name=request.headers.get("X-User-Name", "").strip(),
             )
 
         return Response(BackupHistorySerializer(history).data, status=status.HTTP_202_ACCEPTED)

@@ -99,6 +99,12 @@ interface Enrollee {
   scholarshipExamScore?: number | null;
   effectiveDiscountPercentage?: number;
   effectiveDiscountSource?: "none" | "honor" | "scholarship_exam";
+  requestedOwnSchedule?: boolean;
+  ownScheduleRequestStatus?: "Pending" | "Approved" | "Rejected";
+  ownScheduleRequestSubmittedAt?: string;
+  ownScheduleAcademicYear?: string;
+  ownScheduleSemester?: string;
+  ownScheduleDecisionAt?: string;
   convertedAt?: string;
   personalInfo: PersonalInformation;
   attachments?: Attachment[];
@@ -237,6 +243,24 @@ const normalizeStudentStatus = (value?: string | null) =>
 const isTransfereeAdmission = (
   enrollee: Pick<Enrollee, "studentStatus"> | { studentStatus?: string | null },
 ) => normalizeStudentStatus(enrollee.studentStatus) === "transferee";
+
+const getOwnScheduleRequestLabel = (
+  enrollee: Pick<Enrollee, "requestedOwnSchedule" | "ownScheduleRequestStatus">,
+) => {
+  if (!enrollee.requestedOwnSchedule) {
+    return "Standard";
+  }
+
+  if (enrollee.ownScheduleRequestStatus === "Approved") {
+    return "Approved";
+  }
+
+  if (enrollee.ownScheduleRequestStatus === "Rejected") {
+    return "Declined";
+  }
+
+  return "Pending Review";
+};
 
 const getProgramYearLevelOptions = (program: string) =>
   program === "SHS"
@@ -923,6 +947,7 @@ export default function AdminEnrollees({
   const [statusFilter, setStatusFilter] = useState<"All" | Enrollee["status"]>(
     "All",
   );
+  const [showOwnScheduleOnly, setShowOwnScheduleOnly] = useState(false);
   const [enrollmentStatusFilter, setEnrollmentStatusFilter] = useState<
     "All" | "Pending" | "Approved" | "Rejected"
   >("All");
@@ -3743,6 +3768,40 @@ export default function AdminEnrollees({
     setPendingScholarshipScore("");
   };
 
+  const handleOwnScheduleRequestDecision = (
+    enrollee: Enrollee,
+    status: "Approved" | "Rejected",
+  ) => {
+    const updatedEnrollee: Enrollee = {
+      ...enrollee,
+      ownScheduleRequestStatus: status,
+      ownScheduleAcademicYear:
+        status === "Approved"
+          ? enrollee.ownScheduleAcademicYear || reflectedAcademicYear
+          : undefined,
+      ownScheduleSemester:
+        status === "Approved"
+          ? enrollee.ownScheduleSemester || reflectedSemester
+          : undefined,
+      ownScheduleDecisionAt: new Date().toISOString(),
+    };
+
+    setEnrollees((prev) =>
+      prev.map((record) => (record.id === enrollee.id ? updatedEnrollee : record)),
+    );
+    setSelectedRequest((prev) =>
+      prev && !isEnrollmentRequest(prev) && prev.id === enrollee.id
+        ? updatedEnrollee
+        : prev,
+    );
+    addToast(
+      status === "Approved"
+        ? "Own schedule request approved. Admission can now proceed as irregular once accepted."
+        : "Own schedule request declined. The applicant will continue under the standard schedule flow.",
+      status === "Approved" ? "success" : "warning",
+    );
+  };
+
   const handleApproveRequest = (request: EnrollmentRequest | Enrollee) => {
     let scholarshipExamScore: number | null = null;
 
@@ -3756,6 +3815,18 @@ export default function AdminEnrollees({
         );
         return false;
       }
+    }
+
+    if (
+      !isEnrollmentRequest(request) &&
+      request.requestedOwnSchedule &&
+      request.ownScheduleRequestStatus !== "Approved"
+    ) {
+      addToast(
+        "Review the own schedule request first before approving the admission.",
+        "warning",
+      );
+      return false;
     }
 
     if (!isEnrollmentRequest(request) && request.program === "College") {
@@ -4017,7 +4088,9 @@ export default function AdminEnrollees({
         .includes(searchTerm.toLowerCase());
     const matchesStatus =
       statusFilter === "All" || enrollee.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesOwnSchedule =
+      !showOwnScheduleOnly || Boolean(enrollee.requestedOwnSchedule);
+    return matchesSearch && matchesStatus && matchesOwnSchedule;
   });
   const totalEnrolleePages = Math.max(
     1,
@@ -4121,7 +4194,7 @@ export default function AdminEnrollees({
 
   useEffect(() => {
     setCurrentEnrolleePage(1);
-  }, [searchTerm, statusFilter, activeTab, currentBranch]);
+  }, [searchTerm, statusFilter, activeTab, currentBranch, showOwnScheduleOnly]);
 
   useEffect(() => {
     if (currentEnrolleePage > totalEnrolleePages) {
@@ -4131,6 +4204,17 @@ export default function AdminEnrollees({
 
   const pendingCount = regularAdmissions.filter(
     (e) => e.status === "Pending",
+  ).length;
+  const pendingOwnScheduleRequestCount = regularAdmissions.filter(
+    (enrollee) =>
+      enrollee.status === "Pending" &&
+      enrollee.requestedOwnSchedule &&
+      enrollee.ownScheduleRequestStatus !== "Approved",
+  ).length;
+  const approvedOwnScheduleRequestCount = regularAdmissions.filter(
+    (enrollee) =>
+      enrollee.requestedOwnSchedule &&
+      enrollee.ownScheduleRequestStatus === "Approved",
   ).length;
   const approvedCount = regularAdmissions.filter(
     (e) => e.status === "Approved",
@@ -4443,6 +4527,12 @@ export default function AdminEnrollees({
                 <span className="stat-label">Pending Review</span>
                 <span className="stat-value">{pendingCount}</span>
               </div>
+              <div className="stat-card">
+                <span className="stat-label">Own Schedule Requests</span>
+                <span className="stat-value">
+                  {pendingOwnScheduleRequestCount}
+                </span>
+              </div>
             </>
           ) : activeTab === "transferees" ? (
             <>
@@ -4540,6 +4630,27 @@ export default function AdminEnrollees({
                 section automatically after approval when possible.
               </div>
             )}
+            {activeTab === "admissions" &&
+              (pendingOwnScheduleRequestCount > 0 ||
+                approvedOwnScheduleRequestCount > 0) && (
+                <div className="transferee-guidance-banner own-schedule-guidance-banner">
+                  <strong>Own schedule requests:</strong>{" "}
+                  {pendingOwnScheduleRequestCount > 0
+                    ? `${pendingOwnScheduleRequestCount} applicant(s) still need schedule-request review before admission approval.`
+                    : "All requested own-schedule admissions have already been reviewed."}
+                  <button
+                    type="button"
+                    className="assignment-selection-btn"
+                    onClick={() =>
+                      setShowOwnScheduleOnly((previousValue) => !previousValue)
+                    }
+                  >
+                    {showOwnScheduleOnly
+                      ? "Show All Admissions"
+                      : "Show Requested Own Schedule"}
+                  </button>
+                </div>
+              )}
             <div className="controls">
               <input
                 type="text"
@@ -4564,6 +4675,21 @@ export default function AdminEnrollees({
                 <option value="Approved">Approved</option>
                 <option value="Rejected">Rejected</option>
               </select>
+              {activeTab === "admissions" && (
+                <button
+                  type="button"
+                  className={`status-filter own-schedule-filter-btn ${
+                    showOwnScheduleOnly ? "active" : ""
+                  }`}
+                  onClick={() =>
+                    setShowOwnScheduleOnly((previousValue) => !previousValue)
+                  }
+                >
+                  {showOwnScheduleOnly
+                    ? "Showing Own Schedule Only"
+                    : "Filter Own Schedule"}
+                </button>
+              )}
             </div>
             <div className="table-container">
               <table className="enrollees-table">
@@ -4579,7 +4705,10 @@ export default function AdminEnrollees({
                         <th>SECTION</th>
                       </>
                     ) : (
-                      <th>DOCUMENTS</th>
+                      <>
+                        <th>DOCUMENTS</th>
+                        <th>OWN SCHEDULE</th>
+                      </>
                     )}
                     <th>STATUS</th>
                     <th>ACTION</th>
@@ -4651,10 +4780,29 @@ export default function AdminEnrollees({
                             </td>
                           </>
                         ) : (
-                          <td>
-                            {enrollee.documentsSubmitted}/
-                            {enrollee.totalDocuments}
-                          </td>
+                          <>
+                            <td>
+                              {enrollee.documentsSubmitted}/
+                              {enrollee.totalDocuments}
+                            </td>
+                            <td>
+                              <span
+                                className={`validation-badge ${
+                                  enrollee.requestedOwnSchedule
+                                    ? enrollee.ownScheduleRequestStatus ===
+                                      "Approved"
+                                      ? "ready"
+                                      : enrollee.ownScheduleRequestStatus ===
+                                          "Rejected"
+                                        ? "pending"
+                                        : "progress"
+                                    : "pending"
+                                }`}
+                              >
+                                {getOwnScheduleRequestLabel(enrollee)}
+                              </span>
+                            </td>
+                          </>
                         )}
                         <td>
                           <span
@@ -4686,7 +4834,7 @@ export default function AdminEnrollees({
                   ) : (
                     <tr>
                       <td
-                        colSpan={activeTab === "transferees" ? 8 : 7}
+                        colSpan={8}
                         className="no-results"
                       >
                         {isLoading
@@ -5656,6 +5804,14 @@ export default function AdminEnrollees({
                           <span>Academic Year</span>
                           <strong>{reflectedAcademicYear}</strong>
                         </div>
+                        <div className="personal-info-item">
+                          <span>Own Schedule Request</span>
+                          <strong>
+                            {selectedRequest.requestedOwnSchedule
+                              ? getOwnScheduleRequestLabel(selectedRequest)
+                              : "Standard flow"}
+                          </strong>
+                        </div>
                         {isTransfereeAdmission(selectedRequest) && (
                           <>
                             <div className="personal-info-item">
@@ -5805,6 +5961,108 @@ export default function AdminEnrollees({
                   </div>
                 </div>
               </div>
+              {!isEnrollmentRequest(selectedRequest) &&
+                selectedRequest.requestedOwnSchedule && (
+                  <div className="requirements-section transferee-review-section">
+                    <h3>Own Schedule Request</h3>
+                    <div className="transferee-review-grid">
+                      <div className="transferee-review-card">
+                        <p className="transferee-review-title">
+                          Applicant request summary
+                        </p>
+                        <div className="transferee-review-note">
+                          This applicant asked to choose their own class
+                          schedules in the student portal. If you approve this
+                          request and then approve the admission, the student
+                          will enter the portal under an irregular scheduling
+                          flow.
+                        </div>
+                        <label className="transferee-field">
+                          <span>Request Status</span>
+                          <input
+                            type="text"
+                            value={getOwnScheduleRequestLabel(selectedRequest)}
+                            readOnly
+                          />
+                        </label>
+                        <label className="transferee-field">
+                          <span>Target Academic Year</span>
+                          <input
+                            type="text"
+                            value={
+                              selectedRequest.ownScheduleAcademicYear ||
+                              reflectedAcademicYear
+                            }
+                            readOnly
+                          />
+                        </label>
+                        <label className="transferee-field">
+                          <span>Target Semester</span>
+                          <input
+                            type="text"
+                            value={
+                              selectedRequest.ownScheduleSemester ||
+                              reflectedSemester
+                            }
+                            readOnly
+                          />
+                        </label>
+                      </div>
+                      <div className="transferee-review-card">
+                        <p className="transferee-review-title">
+                          Review and approval
+                        </p>
+                        <div className="transferee-review-note">
+                          Approve this first if you want the student to build
+                          their schedule later in the portal. Reject it to keep
+                          the student under the standard section assignment
+                          workflow.
+                        </div>
+                        {selectedRequest.status === "Pending" ? (
+                          <div className="assignment-selection-actions">
+                            <button
+                              type="button"
+                              className="assignment-selection-btn"
+                              onClick={() =>
+                                handleOwnScheduleRequestDecision(
+                                  selectedRequest,
+                                  "Approved",
+                                )
+                              }
+                              disabled={
+                                selectedRequest.ownScheduleRequestStatus ===
+                                "Approved"
+                              }
+                            >
+                              Approve Request
+                            </button>
+                            <button
+                              type="button"
+                              className="assignment-selection-btn secondary"
+                              onClick={() =>
+                                handleOwnScheduleRequestDecision(
+                                  selectedRequest,
+                                  "Rejected",
+                                )
+                              }
+                              disabled={
+                                selectedRequest.ownScheduleRequestStatus ===
+                                "Rejected"
+                              }
+                            >
+                              Reject Request
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="transferee-review-note">
+                            This admission record is already{" "}
+                            {selectedRequest.status.toLowerCase()}.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               {!isEnrollmentRequest(selectedRequest) &&
                 isTransfereeAdmission(selectedRequest) &&
                 selectedTransfereeEvaluation && (
@@ -6525,7 +6783,11 @@ export default function AdminEnrollees({
                       : selectedAdmissionActionRecord.documentsSubmitted <
                           selectedAdmissionActionRecord.totalDocuments
                         ? "Approval is allowed even with pending admission credentials. The student account will be activated and the remaining credential status will still appear in the student portal."
-                        : "This will activate the student account and make the approved admission visible in the student portal."
+                        : selectedAdmissionActionRecord.requestedOwnSchedule &&
+                            selectedAdmissionActionRecord.ownScheduleRequestStatus ===
+                              "Approved"
+                          ? "This will activate the student account as an irregular schedule admission. The student will choose available schedules in the portal first, and those choices will still need admin or registrar approval before they become official subjects."
+                          : "This will activate the student account and make the approved admission visible in the student portal."
                     : "This will progress the student to the next academic level and generate new enrollment records."}
                 </p>
               )}

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils.dateparse import parse_datetime
 
 from .models import BackupHistory
 
@@ -8,6 +9,7 @@ class BackupSettingsSerializer(serializers.Serializer):
     automated_time = serializers.TimeField(read_only=True)
     retention_days = serializers.IntegerField(read_only=True)
     is_enabled = serializers.BooleanField(read_only=True)
+    timezone_offset_minutes = serializers.IntegerField(read_only=True)
     last_automated_backup_at = serializers.DateTimeField(read_only=True, allow_null=True)
     updated_at = serializers.DateTimeField(read_only=True, allow_null=True)
 
@@ -16,6 +18,7 @@ class BackupSettingsUpdateSerializer(serializers.Serializer):
     automated_time = serializers.TimeField(required=False)
     retention_days = serializers.IntegerField(required=False, min_value=1)
     is_enabled = serializers.BooleanField(required=False)
+    timezone_offset_minutes = serializers.IntegerField(required=False, min_value=-1440, max_value=1440)
 
 
 class BackupHistorySerializer(serializers.Serializer):
@@ -58,3 +61,35 @@ class BackupSnapshotCreateSerializer(serializers.Serializer):
         required=False,
         default=list,
     )
+
+
+class BackupSnapshotSyncSerializer(serializers.Serializer):
+    students = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        default=list,
+    )
+    alumni = serializers.ListField(
+        child=serializers.DictField(),
+        required=False,
+        default=list,
+    )
+    timezone_offset_minutes = serializers.IntegerField(
+        required=False,
+        min_value=-1440,
+        max_value=1440,
+    )
+
+
+class BackupAutomatedDispatchSerializer(serializers.Serializer):
+    reference_time = serializers.CharField(required=False)
+    timezone_offset_minutes = serializers.IntegerField(
+        required=False,
+        min_value=-1440,
+        max_value=1440,
+    )
+
+    def validate_reference_time(self, value):
+        if parse_datetime(value) is None:
+            raise serializers.ValidationError("Use an ISO 8601 date-time value.")
+        return value

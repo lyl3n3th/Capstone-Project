@@ -4,13 +4,19 @@ import {
   FaEye,
   FaUserGraduate,
   FaGraduationCap,
+  FaUndo,
 } from "react-icons/fa";
 import { ToastContainer } from "../../components/common/Toast";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import {
   BACKUP_RESTORE_APPLIED_EVENT,
+  forgetRememberedAlumniStudentStatus,
+  getRememberedAlumniStudentStatus,
   persistAlumniBackupCache,
+  readCachedAlumni,
+  rememberAlumniStudentStatus,
 } from "../../services/backupApi";
+import { readStoredStudents, writeStoredStudents } from "../../services/adminStorage";
 import "../../styles/admin/admin-alumni.css";
 
 interface AlumniProps {
@@ -64,6 +70,16 @@ interface ApiStudent {
   status: string;
 }
 
+interface ApiAlumniRecord {
+  id?: number;
+  student_id?: string;
+  full_name?: string;
+  program?: string;
+  year_graduated?: string | null;
+  contact?: string | null;
+  became_alumni_on?: string | null;
+}
+
 interface Toast {
   id: string;
   message: string;
@@ -74,6 +90,15 @@ const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const ALUMNI_API_URL = `${API_BASE_URL}/api/alumni/`;
 const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
+
+const buildLocalAlumniRecord = (student: StudentRecord): ApiAlumniRecord => ({
+  student_id: student.id,
+  full_name: student.name,
+  program: student.strandOrCourse || student.program,
+  year_graduated: "",
+  contact: student.contact || "",
+  became_alumni_on: new Date().toISOString(),
+});
 
 export default function AdminAlumni({
   onLogout,
@@ -94,6 +119,7 @@ export default function AdminAlumni({
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [students, setStudents] = useState<StudentRecord[]>([]);
   const [alumni, setAlumni] = useState<AlumniStudent[]>([]);
+  const [restoringAlumniId, setRestoringAlumniId] = useState<string | null>(null);
 
   // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {
@@ -132,6 +158,43 @@ export default function AdminAlumni({
         ? "Archived"
         : (apiStudent.status as StudentRecord["status"]),
   });
+
+  const buildAlumniUiRecord = (
+    student: StudentRecord,
+    apiAlumni?: ApiAlumniRecord | null,
+  ): AlumniStudent => ({
+    recordId: typeof apiAlumni?.id === "number" ? apiAlumni.id : undefined,
+    id: apiAlumni?.student_id || student.id,
+    fullName: apiAlumni?.full_name || student.name,
+    program: apiAlumni?.program || student.strandOrCourse || student.program,
+    yearGraduated: apiAlumni?.year_graduated || "",
+    contact: apiAlumni?.contact || student.contact || "",
+    becameAlumniOn: apiAlumni?.became_alumni_on || "",
+  });
+
+  const updateStoredStudentStatus = (
+    studentId: string,
+    nextStatus: NonNullable<StudentRecord["status"]>,
+  ) => {
+    const storedStudents = readStoredStudents();
+    let didUpdate = false;
+
+    const nextStoredStudents = storedStudents.map((student) => {
+      if (student.id !== studentId) {
+        return student;
+      }
+
+      didUpdate = true;
+      return {
+        ...student,
+        status: nextStatus,
+      };
+    });
+
+    if (didUpdate) {
+      writeStoredStudents(nextStoredStudents);
+    }
+  };
 
   const loadPaginated = async <T,>(url: string): Promise<T[]> => {
     const collected: T[] = [];
@@ -175,10 +238,9 @@ export default function AdminAlumni({
       setStudents(apiStudents.map(mapApiStudentToUi));
     } catch (error) {
       console.error("Failed to load alumni data", error);
-      addToast("Unable to load alumni from backend.", "error");
-      setAlumni([]);
-      persistAlumniBackupCache([]);
-      setStudents([]);
+      setAlumni(readCachedAlumni());
+      setStudents(readStoredStudents());
+      addToast("Backend alumni service is unavailable. Showing saved local records.", "warning");
     } finally {
       setIsLoading(false);
     }
@@ -277,47 +339,157 @@ export default function AdminAlumni({
 
   const handleAddFromStudent = async (student: StudentRecord) => {
     try {
-      const createResponse = await fetch(ALUMNI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          student_id: student.id,
-          full_name: student.name,
-          program: student.strandOrCourse || student.program,
-          year_graduated: "",
-          contact: student.contact || "",
-        }),
-      });
+      let createdAlumni: ApiAlumniRecord | null = null;
+      let savedLocallyOnly = false;
 
-      if (!createResponse.ok) {
-        const errorData = await createResponse.json().catch(() => ({}));
-        const firstError = Object.values(errorData).find((value) =>
-          Array.isArray(value),
-        ) as string[] | undefined;
-        throw new Error(firstError?.[0] || "Failed to add alumni record.");
+      try {
+        const createResponse = await fetch(ALUMNI_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            student_id: student.id,
+            full_name: student.name,
+            program: student.strandOrCourse || student.program,
+            year_graduated: "",
+            contact: student.contact || "",
+          }),
+        });
+
+        if (!createResponse.ok) {
+          const errorData = await createResponse.json().catch(() => ({}));
+          const firstError = Object.values(errorData).find((value) =>
+            Array.isArray(value),
+          ) as string[] | undefined;
+          throw new Error(firstError?.[0] || "Failed to add alumni record.");
+        }
+
+        createdAlumni = (await createResponse
+          .json()
+          .catch(() => null)) as ApiAlumniRecord | null;
+      } catch (error) {
+        console.warn(
+          "Unable to create alumni record in backend. Saving locally instead.",
+          error,
+        );
+        createdAlumni = buildLocalAlumniRecord(student);
+        savedLocallyOnly = true;
       }
 
       if (student.recordId) {
-        await fetch(`${STUDENTS_API_URL}${student.recordId}/`, {
+        const response = await fetch(`${STUDENTS_API_URL}${student.recordId}/`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ status: "Graduated" }),
         });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData?.detail || "Unable to update student status.");
+        }
       }
 
-      await loadAlumniAndStudents();
+      rememberAlumniStudentStatus(student.id, student.status || "Complete");
+
+      const nextAlumniRecord = buildAlumniUiRecord(student, createdAlumni);
+      const nextAlumni = [...alumni.filter((record) => record.id !== student.id), nextAlumniRecord];
+      persistAlumniBackupCache(nextAlumni);
+      setAlumni(nextAlumni);
+      setStudents((prev) =>
+        prev.map((record) =>
+          record.id === student.id ? { ...record, status: "Graduated" } : record,
+        ),
+      );
+      updateStoredStudentStatus(student.id, "Graduated");
       setIsAddModalOpen(false);
-      addToast(`${student.name} added to alumni successfully!`, "success");
+      addToast(
+        savedLocallyOnly
+          ? `${student.name} added to alumni locally.`
+          : `${student.name} added to alumni successfully!`,
+        savedLocallyOnly ? "warning" : "success",
+      );
     } catch (error) {
       console.error("Failed to add alumni from student", error);
       addToast(
         error instanceof Error ? error.message : "Unable to add alumni record.",
         "error",
       );
+    }
+  };
+
+  const handleRestoreAlumni = async (alumniStudent: AlumniStudent) => {
+    const shouldContinue = window.confirm(
+      `Restore ${alumniStudent.fullName} back to Students?`,
+    );
+    if (!shouldContinue) {
+      return;
+    }
+
+    setRestoringAlumniId(alumniStudent.id);
+
+    try {
+      const rememberedStatus = getRememberedAlumniStudentStatus(alumniStudent.id);
+      const restoredStatus =
+        rememberedStatus === "Archived" || rememberedStatus === "Graduated"
+          ? "Complete"
+          : rememberedStatus || "Complete";
+      const linkedStudent = students.find((student) => student.id === alumniStudent.id);
+
+      if (linkedStudent?.recordId) {
+        const response = await fetch(`${STUDENTS_API_URL}${linkedStudent.recordId}/`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ status: restoredStatus }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData?.detail || "Unable to reactivate student.");
+        }
+      }
+
+      if (alumniStudent.recordId) {
+        const response = await fetch(`${ALUMNI_API_URL}${alumniStudent.recordId}/`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData?.detail || "Unable to remove alumni record.");
+        }
+      }
+
+      const nextAlumni = alumni.filter((record) => record.id !== alumniStudent.id);
+      persistAlumniBackupCache(nextAlumni);
+      setAlumni(nextAlumni);
+      setStudents((prev) =>
+        prev.map((student) =>
+          student.id === alumniStudent.id
+            ? { ...student, status: restoredStatus }
+            : student,
+        ),
+      );
+      updateStoredStudentStatus(alumniStudent.id, restoredStatus);
+      forgetRememberedAlumniStudentStatus(alumniStudent.id);
+
+      if (viewingAlumni?.id === alumniStudent.id) {
+        closeViewModal();
+      }
+
+      addToast(`${alumniStudent.fullName} restored to students successfully.`, "success");
+    } catch (error) {
+      console.error("Failed to restore alumni record", error);
+      addToast(
+        error instanceof Error ? error.message : "Unable to restore alumni record.",
+        "error",
+      );
+    } finally {
+      setRestoringAlumniId(null);
     }
   };
 
@@ -427,13 +599,27 @@ export default function AdminAlumni({
                     <td>{alum.yearGraduated || "—"}</td>
                     <td>{alum.contact || "—"}</td>
                     <td>
-                      <button
-                        className="view-btn"
-                        type="button"
-                        onClick={() => openViewModal(alum)}
-                      >
-                        <FaEye /> View Details
-                      </button>
+                      <div className="alumni-action-group">
+                        <button
+                          className="view-btn"
+                          type="button"
+                          onClick={() => openViewModal(alum)}
+                          disabled={restoringAlumniId !== null}
+                        >
+                          <FaEye /> View Details
+                        </button>
+                        <button
+                          className="restore-btn"
+                          type="button"
+                          onClick={() => handleRestoreAlumni(alum)}
+                          disabled={restoringAlumniId !== null}
+                        >
+                          <FaUndo />
+                          {restoringAlumniId === alum.id
+                            ? "Restoring..."
+                            : "Restore"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -616,8 +802,20 @@ export default function AdminAlumni({
               <div className="modal-actions">
                 <button
                   type="button"
+                  className="restore-btn"
+                  onClick={() => handleRestoreAlumni(viewingAlumni)}
+                  disabled={restoringAlumniId !== null}
+                >
+                  <FaUndo />
+                  {restoringAlumniId === viewingAlumni.id
+                    ? "Restoring..."
+                    : "Restore to Students"}
+                </button>
+                <button
+                  type="button"
                   className="cancel-btn"
                   onClick={closeViewModal}
+                  disabled={restoringAlumniId !== null}
                 >
                   Close
                 </button>

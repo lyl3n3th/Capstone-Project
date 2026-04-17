@@ -109,50 +109,62 @@
 
 /* Honor & Scholarship Row */
 .honor-scholarship-row {
-  display: flex;
-  gap: 30px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
   margin-bottom: 10px;
-  flex-wrap: wrap;
+  align-items: start;
 }
 
 .honor-group {
-  flex: 1;
-  min-width: 250px;
+  min-width: 0;
 }
 
 .scholarship-group {
-  flex: 1;
-  min-width: 280px;
+  min-width: 0;
+}
+
+.honor-group .dropdown {
+  max-width: none;
 }
 
 .scholarship-options {
-  display: flex;
-  gap: 20px;
-  margin: 1px 0;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 4px 0 0;
 }
 
 .radio-label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   cursor: pointer;
   font-size: 14px;
   color: #333;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #f8fbfd;
+  line-height: 1.4;
 }
 
 .radio-label input[type="radio"] {
   width: 16px;
   height: 16px;
   cursor: pointer;
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .scholarship-note {
   display: block;
   font-size: 11px;
   color: #066287;
-  margin-top: 1px;
+  margin-top: 10px;
   font-style: italic;
+  line-height: 1.5;
 }
 
 /* Dropdown Styles (specific to Step 2) */
@@ -345,7 +357,7 @@
   }
 
   .pinfo .form-row {
-    gap: 1px;
+    gap: 12px;
   }
 
   .form-row {
@@ -391,6 +403,14 @@
     gap: 10px;
   }
 
+  .honor-scholarship-row {
+    grid-template-columns: 1fr;
+  }
+
+  .scholarship-options {
+    grid-template-columns: 1fr;
+  }
+
   .dropdown {
     max-width: 100%;
   }
@@ -420,5 +440,14 @@
   .btn4 {
     font-size: 13px;
     padding: 8px;
+  }
+
+  .radio-label {
+    min-height: auto;
+    padding: 10px 12px;
+  }
+
+  .scholarship-note {
+    font-size: 12px;
   }
 }

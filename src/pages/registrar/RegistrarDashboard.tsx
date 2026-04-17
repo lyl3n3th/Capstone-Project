@@ -27,7 +27,7 @@ interface ProgramData {
 
 interface StudentRecord {
   program: string;
-  status: "Complete" | "Incomplete" | "Archived";
+  status: "Complete" | "Incomplete" | "Archived" | "Graduated";
   strandOrCourse?: string;
   shsTrackType?: string;
   branch?: string;
@@ -74,7 +74,10 @@ export default function RegistrarDashboard({
   const hasStudentData = students.length > 0;
 
   const activeStudents = hasStudentData
-    ? students.filter((student) => student.status !== "Archived")
+    ? students.filter(
+        (student) =>
+          student.status !== "Archived" && student.status !== "Graduated",
+      )
     : [];
 
   const totalStudents = hasStudentData ? activeStudents.length : 250;

@@ -4,14 +4,12 @@ from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 
+from .automation import dispatch_due_automated_backups
 from .models import BackupHistory
 from .repository import (
-    create_backup_history,
     get_backup_history,
     list_all_backup_settings,
-    list_enabled_backup_settings,
     list_backup_history,
-    save_backup_settings,
     update_backup_history,
 )
 from .services import create_branch_backup, delete_backup_artifacts, restore_branch_backup
@@ -58,51 +56,7 @@ def create_branch_backup_task(
 
 @shared_task
 def dispatch_scheduled_backups():
-    now = timezone.localtime()
-    current_time = now.time().replace(second=0, microsecond=0)
-
-    for settings_row in list_enabled_backup_settings():
-        last_run = timezone.localtime(settings_row.last_automated_backup_at) if settings_row.last_automated_backup_at else None
-        already_ran_today = last_run and last_run.date() == now.date()
-        scheduled_time = settings_row.automated_time.replace(second=0, microsecond=0)
-
-        if already_ran_today or current_time < scheduled_time:
-            continue
-
-        history = create_backup_history(
-            branch=settings_row.branch,
-            backup_type=BackupHistory.TYPE_AUTOMATED,
-            file_path="",
-            sql_file_path="",
-            backup_filename="pending.zip",
-            created_by=settings_row.updated_by,
-            created_by_name=settings_row.updated_by_name,
-            status=BackupHistory.STATUS_PENDING,
-            progress=0,
-        )
-        task = create_branch_backup_task.delay(
-            branch_id=settings_row.branch,
-            backup_type=BackupHistory.TYPE_AUTOMATED,
-            created_by_id=(
-                str(settings_row.updated_by.pk)
-                if hasattr(settings_row.updated_by, "pk")
-                else settings_row.updated_by
-            ),
-            history_id=str(history.id),
-        )
-        update_backup_history(history.id, task_id=task.id)
-        # Preserve any existing settings fields while updating the last run timestamp.
-        save_backup_settings(
-            settings_row.branch,
-            {
-                "automated_time": settings_row.automated_time,
-                "retention_days": settings_row.retention_days,
-                "is_enabled": settings_row.is_enabled,
-                "last_automated_backup_at": now,
-            },
-            updated_by=settings_row.updated_by,
-            updated_by_name=settings_row.updated_by_name,
-        )
+    dispatch_due_automated_backups()
 
 
 @shared_task

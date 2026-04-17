@@ -159,6 +159,53 @@
   color: #e65100;
 }
 
+.conf-schedule-request {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #f5c26b;
+  border-radius: 12px;
+  background: #fff8e8;
+}
+
+.conf-schedule-request-copy strong {
+  display: block;
+  color: #7c4a03;
+  margin-bottom: 6px;
+}
+
+.conf-schedule-request-copy p {
+  margin: 0;
+  color: #8a5a12;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.conf-schedule-request-btn {
+  border: none;
+  border-radius: 10px;
+  background: #f59e0b;
+  color: #ffffff;
+  padding: 11px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.conf-schedule-request-btn.active {
+  background: #b45309;
+}
+
+.conf-schedule-request-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(180, 83, 9, 0.2);
+}
+
 .conf-discount-detail {
   margin-top: 6px;
   font-weight: 500;
@@ -332,6 +379,11 @@
   
   .conf-actions {
     flex-direction: column;
+  }
+
+  .conf-schedule-request {
+    flex-direction: column;
+    align-items: stretch;
   }
   
   .conf-btn-back,

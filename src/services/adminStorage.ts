@@ -57,6 +57,12 @@ export interface AdminEnrolleeRecord {
   scholarshipExamScore?: number | null;
   effectiveDiscountPercentage?: number;
   effectiveDiscountSource?: AdmissionDiscountSource;
+  requestedOwnSchedule?: boolean;
+  ownScheduleRequestStatus?: "Pending" | "Approved" | "Rejected";
+  ownScheduleRequestSubmittedAt?: string;
+  ownScheduleAcademicYear?: string;
+  ownScheduleSemester?: string;
+  ownScheduleDecisionAt?: string;
   personalInfo: AdminPersonalInformation;
   attachments?: AdminAttachment[];
   convertedAt?: string;
@@ -77,10 +83,19 @@ export interface StudentStorageRecord {
   contact: string;
   email: string;
   address: string;
-  status: "Complete" | "Incomplete" | "Archived";
+  status: "Complete" | "Incomplete" | "Archived" | "Graduated";
   branch: string;
   trackingNumber?: string;
   studentStatus?: string;
+  requestedOwnSchedule?: boolean;
+  ownScheduleRequestStatus?: "Pending" | "Approved" | "Rejected";
+  ownScheduleAcademicYear?: string;
+  ownScheduleSemester?: string;
+  ownScheduleSelectionStatus?:
+    | "Not Submitted"
+    | "Pending Approval"
+    | "Approved"
+    | "Rejected";
   birthDate?: string;
   guardianName?: string;
   guardianContact?: string;
@@ -93,6 +108,7 @@ export interface StudentPortalSubject {
   code: string;
   title: string;
   units?: number;
+  section?: string;
   schedule: string;
   room: string;
   professor: string;
@@ -124,6 +140,29 @@ export interface StudentSubjectPlanItem {
   subjectId: string;
   subjectCode: string;
   subjectName: string;
+  units?: number;
+}
+
+export interface StudentScheduledAssignmentSlot {
+  day: string;
+  startTime: string;
+  endTime: string;
+  room: string;
+}
+
+export interface StudentScheduledAssignmentItem {
+  assignmentId: string;
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  units?: number;
+  instructorId?: string;
+  instructorName?: string;
+  sectionId?: string;
+  sectionCode?: string;
+  schedule: StudentScheduledAssignmentSlot[];
+  academicYear: string;
+  semester: string;
 }
 
 export interface StudentSubjectPlanRecord {
@@ -135,8 +174,40 @@ export interface StudentSubjectPlanRecord {
   academicYear: string;
   assignedSubjects: StudentSubjectPlanItem[];
   creditedSubjects: StudentSubjectPlanItem[];
+  scheduledAssignments?: StudentScheduledAssignmentItem[];
+  notes?: string;
   updatedAt: string;
-  source: "transferee_validation";
+  source:
+    | "transferee_validation"
+    | "irregular_assignment"
+    | "student_schedule_request";
+}
+
+export interface StudentScheduleChoiceGroup {
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  units?: number;
+  assignmentOptions: StudentScheduledAssignmentItem[];
+}
+
+export interface StudentScheduleSelectionRequestRecord {
+  id: string;
+  studentNumber: string;
+  trackingNumber?: string;
+  studentName: string;
+  branch: string;
+  program: string;
+  yearLevel: string;
+  strandOrCourse?: string;
+  academicYear: string;
+  semester: string;
+  status: "Pending" | "Approved" | "Rejected";
+  selections: StudentScheduledAssignmentItem[];
+  submittedAt: string;
+  updatedAt: string;
+  reviewedAt?: string;
+  reviewedByRole?: "Admin" | "Registrar";
 }
 
 type StoredAcademicSubject = {
@@ -692,6 +763,7 @@ const mapStoredSubjectsToPortalSubjects = (
       code: subject.code,
       title: subject.name,
       units: subject.units,
+      section: undefined,
       schedule: "TBA",
       room: "TBA",
       professor: "TBA",
@@ -720,6 +792,7 @@ const mapStoredAssignmentsToPortalSubjects = (
         code: assignment.subjectCode,
         title: assignment.subjectName,
         units: subjectDetails?.units,
+        section: assignment.sectionCode,
         schedule: formatScheduleLabel(assignment.schedule),
         room: formatScheduleRooms(assignment.schedule),
         professor: assignment.instructorName || "TBA",
@@ -741,6 +814,8 @@ const mapPlanItemsToPortalSubjects = (
       id: item.subjectId || item.subjectCode,
       code: item.subjectCode,
       title: item.subjectName,
+      units: item.units,
+      section: undefined,
       schedule: "TBA",
       room: "TBA",
       professor: "TBA",
@@ -749,6 +824,43 @@ const mapPlanItemsToPortalSubjects = (
       semester,
       academicYear,
     })),
+  );
+
+const mapScheduledAssignmentsToPortalSubjects = (
+  assignments: StudentScheduledAssignmentItem[],
+  plannedSubjects: StudentSubjectPlanItem[] = [],
+  storedSubjects: StoredAcademicSubject[] = [],
+) =>
+  sortPortalSubjects(
+    assignments.map((assignment) => {
+      const matchingPlannedSubject = plannedSubjects.find((item) =>
+        subjectPlanItemMatches(item, assignment.subjectId, assignment.subjectCode),
+      );
+      const matchingStoredSubject = storedSubjects.find(
+        (subject) =>
+          (subject.id === assignment.subjectId ||
+            subject.code === assignment.subjectCode) &&
+          subject.semester === assignment.semester,
+      );
+
+      return {
+        id: assignment.assignmentId,
+        code: assignment.subjectCode,
+        title: assignment.subjectName,
+        units:
+          assignment.units ??
+          matchingPlannedSubject?.units ??
+          matchingStoredSubject?.units,
+        section: assignment.sectionCode,
+        schedule: formatScheduleLabel(assignment.schedule),
+        room: formatScheduleRooms(assignment.schedule),
+        professor: assignment.instructorName || "TBA",
+        days: formatScheduleDays(assignment.schedule),
+        time: formatScheduleTime(assignment.schedule),
+        semester: assignment.semester,
+        academicYear: assignment.academicYear,
+      };
+    }),
   );
 
 const subjectPlanItemMatches = (
@@ -1415,6 +1527,7 @@ export const getStudentPortalSubjects = (
       )
     : matchedSubjects;
   const creditedPlanSubjects = studentSubjectPlan?.creditedSubjects ?? [];
+  const plannedScheduledAssignments = studentSubjectPlan?.scheduledAssignments ?? [];
   const creditedScopedSubjects =
     creditedPlanSubjects.length > 0
       ? semesterScopedSubjects.filter(
@@ -1426,6 +1539,41 @@ export const getStudentPortalSubjects = (
       : semesterScopedSubjects;
   const planAcademicYear =
     studentSubjectPlan?.academicYear?.trim() || defaultAcademicYear;
+
+  if (plannedScheduledAssignments.length > 0) {
+    const scheduledPortalSubjects = mapScheduledAssignmentsToPortalSubjects(
+      plannedScheduledAssignments,
+      studentSubjectPlan?.assignedSubjects ?? [],
+      storedSubjects,
+    );
+
+    if ((studentSubjectPlan?.assignedSubjects.length ?? 0) > 0) {
+      const scheduledAssignmentKeys = new Set(
+        plannedScheduledAssignments.map(
+          (assignment) =>
+            `${assignment.subjectId}:${assignment.subjectCode}:${assignment.semester}`,
+        ),
+      );
+      const unresolvedPlannedSubjects =
+        studentSubjectPlan?.assignedSubjects.filter(
+          (item) =>
+            !scheduledAssignmentKeys.has(
+              `${item.subjectId}:${item.subjectCode}:${effectiveSemester || DEFAULT_SECTION_SEMESTER}`,
+            ),
+        ) ?? [];
+
+      return sortPortalSubjects([
+        ...scheduledPortalSubjects,
+        ...mapPlanItemsToPortalSubjects(
+          unresolvedPlannedSubjects,
+          effectiveSemester || DEFAULT_SECTION_SEMESTER,
+          planAcademicYear,
+        ),
+      ]);
+    }
+
+    return scheduledPortalSubjects;
+  }
 
   if ((studentSubjectPlan?.assignedSubjects.length ?? 0) > 0) {
     const plannedSubjects = studentSubjectPlan?.assignedSubjects ?? [];
@@ -1595,6 +1743,193 @@ export const getStudentPortalSubjectsForTerm = ({
     ),
     resolvedAcademicYear,
   );
+};
+
+export const getStudentScheduleChoiceGroups = ({
+  branch,
+  program,
+  yearLevel,
+  strandOrCourse,
+  semester,
+  academicYear,
+}: {
+  branch?: string | null;
+  program: string;
+  yearLevel: string;
+  strandOrCourse?: string;
+  semester: string;
+  academicYear?: string;
+}): StudentScheduleChoiceGroup[] => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedSubjects =
+    readBranchScopedData<StoredAcademicSubject[]>("subjects", resolvedBranch) ?? [];
+  const storedAssignments =
+    readBranchScopedData<StoredSubjectAssignment[]>(
+      "subject-assignments",
+      resolvedBranch,
+    ) ?? [];
+  const resolvedAcademicYear =
+    academicYear || storedAssignments[0]?.academicYear || "2026-2027";
+
+  return storedSubjects
+    .filter(
+      (subject) =>
+        subject.program === program &&
+        subject.yearLevel === yearLevel &&
+        subject.semester === semester &&
+        matchesStrandOrCourse(
+          resolveStoredSubjectStrandOrCourse(subject),
+          strandOrCourse,
+        ),
+    )
+    .map((subject) => ({
+      subjectId: subject.id,
+      subjectCode: subject.code,
+      subjectName: subject.name,
+      units: subject.units,
+      assignmentOptions: storedAssignments
+        .filter(
+          (assignment) =>
+            assignment.academicYear === resolvedAcademicYear &&
+            assignment.semester === semester &&
+            (assignment.subjectId === subject.id ||
+              assignment.subjectCode === subject.code),
+        )
+        .map((assignment) => ({
+          assignmentId: assignment.id,
+          subjectId: assignment.subjectId,
+          subjectCode: assignment.subjectCode,
+          subjectName: assignment.subjectName,
+          units: subject.units,
+          instructorId: assignment.instructorId,
+          instructorName: assignment.instructorName,
+          sectionId: assignment.sectionId,
+          sectionCode: assignment.sectionCode,
+          schedule: assignment.schedule,
+          academicYear: assignment.academicYear,
+          semester: assignment.semester,
+        }))
+        .sort(
+          (left, right) =>
+            left.subjectCode.localeCompare(right.subjectCode) ||
+            (left.sectionCode || "").localeCompare(right.sectionCode || ""),
+        ),
+    }))
+    .sort(
+      (left, right) =>
+        left.subjectCode.localeCompare(right.subjectCode) ||
+        left.subjectName.localeCompare(right.subjectName),
+    );
+};
+
+export const getStudentScheduleSelectionRequest = ({
+  branch,
+  studentNumber,
+  trackingNumber,
+}: {
+  branch?: string | null;
+  studentNumber?: string | null;
+  trackingNumber?: string | null;
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const requests =
+    readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
+      "student-schedule-requests",
+      resolvedBranch,
+    ) ?? [];
+
+  return (
+    requests.find((request) => {
+      if (
+        trackingNumber &&
+        request.trackingNumber &&
+        request.trackingNumber === trackingNumber
+      ) {
+        return true;
+      }
+
+      return Boolean(studentNumber) && request.studentNumber === studentNumber;
+    }) ?? null
+  );
+};
+
+export const saveStudentScheduleSelectionRequest = (
+  request: StudentScheduleSelectionRequestRecord,
+) => {
+  const resolvedBranch = normalizeBranchName(request.branch);
+  const existingRequests =
+    readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
+      "student-schedule-requests",
+      resolvedBranch,
+    ) ?? [];
+  const existingIndex = existingRequests.findIndex(
+    (record) =>
+      record.id === request.id ||
+      (record.studentNumber === request.studentNumber &&
+        record.semester === request.semester &&
+        record.academicYear === request.academicYear),
+  );
+  const nextRequests =
+    existingIndex >= 0
+      ? existingRequests.map((record, index) =>
+          index === existingIndex ? request : record,
+        )
+      : [request, ...existingRequests];
+
+  writeBranchScopedData("student-schedule-requests", resolvedBranch, nextRequests);
+  return request;
+};
+
+export const updateStoredStudentOwnScheduleState = ({
+  branch,
+  studentNumber,
+  trackingNumber,
+  updates,
+}: {
+  branch?: string | null;
+  studentNumber?: string | null;
+  trackingNumber?: string | null;
+  updates: Partial<
+    Pick<
+      StudentStorageRecord,
+      | "requestedOwnSchedule"
+      | "ownScheduleRequestStatus"
+      | "ownScheduleAcademicYear"
+      | "ownScheduleSemester"
+      | "ownScheduleSelectionStatus"
+    >
+  >;
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  let updatedStudent: StudentStorageRecord | null = null;
+
+  const nextStudents = readStoredStudents().map((student) => {
+    const matchesBranch = normalizeBranchName(student.branch) === resolvedBranch;
+    const matchesStudentNumber =
+      studentNumber && student.id === studentNumber && matchesBranch;
+    const matchesTrackingNumber =
+      trackingNumber &&
+      student.trackingNumber === trackingNumber &&
+      matchesBranch;
+
+    if (!matchesStudentNumber && !matchesTrackingNumber) {
+      return student;
+    }
+
+    updatedStudent = {
+      ...student,
+      ...updates,
+    };
+
+    return updatedStudent;
+  });
+
+  if (!updatedStudent) {
+    return null;
+  }
+
+  writeStoredStudents(nextStudents);
+  return updatedStudent;
 };
 
 export const getDefaultBranchEnrollees = (
@@ -2041,6 +2376,11 @@ export const upsertSubmittedApplicant = ({
     scholarshipExamScore: application.scholarshipExamScore,
     effectiveDiscountPercentage: application.effectiveDiscountPercentage,
     effectiveDiscountSource: application.effectiveDiscountSource,
+    requestedOwnSchedule: Boolean(draft?.requestOwnSchedule),
+    ownScheduleRequestStatus: draft?.requestOwnSchedule ? "Pending" : undefined,
+    ownScheduleRequestSubmittedAt: draft?.requestOwnSchedule
+      ? application.submittedAt || application.updatedAt
+      : undefined,
     personalInfo: {
       fullName: fullName || `${application.firstName} ${application.lastName}`.trim(),
       birthDate: "",
@@ -2117,6 +2457,14 @@ export const promoteApplicantToStoredStudent = (
     branch: normalizeBranchName(applicant.branch),
     trackingNumber: applicant.trackingNumber,
     studentStatus: applicant.studentStatus,
+    requestedOwnSchedule: applicant.requestedOwnSchedule,
+    ownScheduleRequestStatus: applicant.ownScheduleRequestStatus,
+    ownScheduleAcademicYear: applicant.ownScheduleAcademicYear,
+    ownScheduleSemester: applicant.ownScheduleSemester,
+    ownScheduleSelectionStatus:
+      applicant.ownScheduleRequestStatus === "Approved"
+        ? "Not Submitted"
+        : undefined,
     birthDate: applicant.personalInfo.birthDate,
     guardianName: applicant.personalInfo.guardianName,
     guardianContact: applicant.personalInfo.guardianContact,

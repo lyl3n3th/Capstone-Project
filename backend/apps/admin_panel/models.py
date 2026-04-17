@@ -11,6 +11,7 @@ class BackupSettings(models.Model):
     automated_time = models.TimeField(default="23:00")
     retention_days = models.PositiveIntegerField(default=30)
     is_enabled = models.BooleanField(default=True)
+    timezone_offset_minutes = models.SmallIntegerField(default=0)
     last_automated_backup_at = models.DateTimeField(null=True, blank=True)
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -28,6 +29,30 @@ class BackupSettings(models.Model):
 
     def __str__(self):
         return f"{self.branch} backup settings"
+
+
+class BackupSnapshot(models.Model):
+    branch = models.CharField(max_length=20, choices=BRANCH_CHOICES, unique=True)
+    students = models.JSONField(default=list, blank=True)
+    alumni = models.JSONField(default=list, blank=True)
+    record_count = models.PositiveIntegerField(default=0)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="updated_backup_snapshots",
+    )
+    updated_by_name = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("branch",)
+        verbose_name_plural = "Backup snapshots"
+
+    def __str__(self):
+        return f"{self.branch} backup snapshot"
 
 
 class BackupHistory(models.Model):

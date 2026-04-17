@@ -710,6 +710,17 @@
   line-height: 1.6;
 }
 
+.own-schedule-guidance-banner {
+  border-color: #99f6e4;
+  background: linear-gradient(135deg, #ecfeff 0%, #f8fafc 100%);
+  color: #0f766e;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
 /* ==========================================================================
    10. MODALS
    ========================================================================== */
@@ -746,12 +757,16 @@
 
 .application-review-modal .review-modal-header {
   flex-shrink: 0;
+  padding: 18px 24px;
+  align-items: flex-start;
+  gap: 16px;
 }
 
 .application-review-modal .review-modal-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  padding: 24px 24px 16px;
 }
 
 .application-review-modal .review-modal-footer {
@@ -760,6 +775,7 @@
   z-index: 1;
   flex-shrink: 0;
   background: #ffffff;
+  padding: 16px 24px 24px;
 }
 
 .confirmation-modal {
@@ -923,10 +939,13 @@
 }
 
 .transferee-review-card {
-  padding: 16px;
+  padding: 18px;
   border: 1px solid #dbeafe;
   border-radius: 14px;
   background: #f8fbff;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .transferee-review-title {
@@ -998,6 +1017,7 @@
 
 .transferee-planner-card {
   grid-column: 1 / -1;
+  gap: 18px;
 }
 
 .transferee-planner-header {
@@ -1005,11 +1025,19 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin: 0;
+}
+
+.transferee-planner-header > div:first-child {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .transferee-planner-copy {
-  margin: -4px 0 0;
+  margin: 0;
   color: #475569;
   font-size: 13px;
   line-height: 1.55;
@@ -1049,11 +1077,11 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  margin-bottom: 16px;
+  margin: 0;
 }
 
 .transferee-subject-picker-header {
-  margin-bottom: 14px;
+  margin: 0;
 }
 
 .transferee-subject-picker-header p {
@@ -1069,8 +1097,15 @@
   gap: 16px;
 }
 
+.transferee-subject-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .transferee-subject-column h4 {
-  margin: 0 0 10px;
+  margin: 0;
   color: #0f172a;
   font-size: 13px;
 }
@@ -1088,6 +1123,20 @@
   line-height: 1.55;
 }
 
+.transferee-review-card .transferee-review-title,
+.transferee-review-card .transferee-review-note,
+.transferee-review-card .transferee-field {
+  margin: 0;
+}
+
+.transferee-review-card .assignment-selection-actions {
+  margin-top: 4px;
+}
+
+.transferee-review-card .assignment-selection-btn {
+  padding: 9px 14px;
+}
+
 .transferee-table-meta {
   margin-top: 4px;
   color: #64748b;
@@ -1096,6 +1145,18 @@
 }
 
 @media (max-width: 768px) {
+  .application-review-modal .review-modal-header {
+    padding: 18px 20px;
+  }
+
+  .application-review-modal .review-modal-body {
+    padding: 20px 20px 12px;
+  }
+
+  .application-review-modal .review-modal-footer {
+    padding: 14px 20px 20px;
+  }
+
   .transferee-review-grid {
     grid-template-columns: 1fr;
   }
@@ -2455,6 +2516,19 @@
 
 .assignment-selection-btn:hover {
   background: #dbeafe;
+}
+
+.own-schedule-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+}
+
+.own-schedule-filter-btn.active {
+  border-color: #0f766e;
+  background: #0f766e;
+  color: #ffffff;
 }
 
 .assignment-selection-btn.secondary {

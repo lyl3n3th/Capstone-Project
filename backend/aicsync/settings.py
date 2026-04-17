@@ -159,6 +159,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "reports")
 SUPABASE_BACKUP_BUCKET = os.getenv("SUPABASE_BACKUP_BUCKET", "branch-backups")
+BACKUP_DISPATCH_INTERVAL_SECONDS = float(os.getenv("BACKUP_DISPATCH_INTERVAL_SECONDS", "60"))
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
@@ -170,7 +171,7 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_BEAT_SCHEDULE = {
     "dispatch-scheduled-backups": {
         "task": "apps.admin_panel.tasks.dispatch_scheduled_backups",
-        "schedule": 300.0,
+        "schedule": BACKUP_DISPATCH_INTERVAL_SECONDS,
     },
     "cleanup-expired-backups": {
         "task": "apps.admin_panel.tasks.cleanup_expired_backups",

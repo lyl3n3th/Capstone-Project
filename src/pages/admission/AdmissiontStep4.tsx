@@ -8,6 +8,7 @@ import {
   getAdmissionDraft,
   getEstimatedCollegeTuition,
   getAdmissionProgress,
+  mergeAdmissionDraft,
   updateAdmissionProgress,
 } from "../../services/admission";
 import {
@@ -35,6 +36,7 @@ function AdmissionStep4() {
   const [applicationData, setApplicationData] =
     useState<AdmissionApplicationSummary | null>(null);
   const [applyScholarship, setApplyScholarship] = useState(false);
+  const [requestOwnSchedule, setRequestOwnSchedule] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [activatedStudentNumber, setActivatedStudentNumber] = useState("");
@@ -63,6 +65,7 @@ function AdmissionStep4() {
 
       setTrackingNumber(resolvedTrackingNumber);
       setApplyScholarship(Boolean(draft?.apply_scholarship));
+      setRequestOwnSchedule(Boolean(draft?.requestOwnSchedule));
 
       try {
         const application = await getAdmissionProgress(resolvedTrackingNumber);
@@ -80,6 +83,7 @@ function AdmissionStep4() {
         } else {
           setApplyScholarship(application.appliedForScholarship);
         }
+        setRequestOwnSchedule(Boolean(draft?.requestOwnSchedule));
       } catch (err) {
         console.error(err);
         setPageError(
@@ -133,6 +137,7 @@ function AdmissionStep4() {
           "enrollmentDraft",
           JSON.stringify({
             ...draft,
+            requestOwnSchedule,
             submitted: true,
             submissionDate: new Date().toISOString(),
             trackingNumber: updatedApplication.trackingNumber,
@@ -345,6 +350,44 @@ function AdmissionStep4() {
             </div>
           )}
 
+          {canEdit && (
+            <div className="conf-schedule-request">
+              <div className="conf-schedule-request-copy">
+                <strong>Request Own Schedule</strong>
+                <p>
+                  Choose this if you want the registrar/admin to review your
+                  admission for self-scheduling in the student portal.
+                </p>
+              </div>
+              <button
+                type="button"
+                className={`conf-schedule-request-btn ${
+                  requestOwnSchedule ? "active" : ""
+                }`}
+                onClick={() => {
+                  const nextValue = !requestOwnSchedule;
+                  setRequestOwnSchedule(nextValue);
+                  mergeAdmissionDraft({
+                    requestOwnSchedule: nextValue,
+                  });
+                }}
+              >
+                {requestOwnSchedule
+                  ? "Own Schedule Requested"
+                  : "Request Own Schedule"}
+              </button>
+            </div>
+          )}
+
+          {requestOwnSchedule && (
+            <div className="conf-notice conf-notice-warning">
+              <strong>Warning:</strong> If this request is approved together
+              with your admission, your student record will be tagged as
+              irregular and you will choose from available schedules in the
+              student portal before final subject approval.
+            </div>
+          )}
+
           {!canEdit && (
             <div className="conf-notice conf-notice-success">
               <strong>Application Submitted:</strong> Your admission record is
@@ -439,6 +482,12 @@ function AdmissionStep4() {
                 <span className="conf-summary-label">Program:</span>
                 <span className="conf-summary-value">
                   {applicationData.programName}
+                </span>
+              </div>
+              <div className="conf-summary-item">
+                <span className="conf-summary-label">Own Schedule:</span>
+                <span className="conf-summary-value">
+                  {requestOwnSchedule ? "Requested" : "Standard admission flow"}
                 </span>
               </div>
               <div className="conf-summary-item">

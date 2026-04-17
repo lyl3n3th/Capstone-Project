@@ -4,7 +4,7 @@ from django.utils.dateparse import parse_datetime, parse_time
 
 from apps.core.supabase_rest import SupabaseRestClient, is_supabase_feature_enabled
 
-from .models import BackupHistory, BackupSettings
+from .models import BackupHistory, BackupSettings, BackupSnapshot
 
 
 @dataclass
@@ -13,6 +13,7 @@ class BackupSettingsRecord:
     automated_time: object
     retention_days: int
     is_enabled: bool
+    timezone_offset_minutes: int = 0
     last_automated_backup_at: object = None
     updated_at: object = None
     updated_by: str | None = None
@@ -39,6 +40,17 @@ class BackupHistoryRecord:
     restored_from: str | None = None
     restore_started_at: object = None
     restore_finished_at: object = None
+
+
+@dataclass
+class BackupSnapshotRecord:
+    branch: str
+    students: list = field(default_factory=list)
+    alumni: list = field(default_factory=list)
+    record_count: int = 0
+    updated_at: object = None
+    updated_by: str | None = None
+    updated_by_name: str = ""
 
 
 def use_supabase_backups():
@@ -88,6 +100,7 @@ def _settings_from_model(settings_row):
         automated_time=settings_row.automated_time,
         retention_days=settings_row.retention_days,
         is_enabled=settings_row.is_enabled,
+        timezone_offset_minutes=settings_row.timezone_offset_minutes,
         last_automated_backup_at=settings_row.last_automated_backup_at,
         updated_at=settings_row.updated_at,
         updated_by=settings_row.updated_by,
@@ -128,6 +141,7 @@ def _settings_from_row(row):
         automated_time=_normalize_time(row.get("automated_time")),
         retention_days=int(row.get("retention_days") or 30),
         is_enabled=bool(row.get("is_enabled", True)),
+        timezone_offset_minutes=int(row.get("timezone_offset_minutes") or 0),
         last_automated_backup_at=_normalize_datetime(row.get("last_automated_backup_at")),
         updated_at=_normalize_datetime(row.get("updated_at")),
         updated_by=row.get("updated_by"),
@@ -166,6 +180,34 @@ def _serialize_time_value(value):
     return value.isoformat()
 
 
+def _snapshot_from_model(snapshot_row):
+    updated_by_name = ""
+    if snapshot_row.updated_by:
+        updated_by_name = snapshot_row.updated_by.get_full_name().strip() or snapshot_row.updated_by.username
+
+    return BackupSnapshotRecord(
+        branch=snapshot_row.branch,
+        students=list(snapshot_row.students or []),
+        alumni=list(snapshot_row.alumni or []),
+        record_count=snapshot_row.record_count,
+        updated_at=snapshot_row.updated_at,
+        updated_by=snapshot_row.updated_by,
+        updated_by_name=updated_by_name,
+    )
+
+
+def _snapshot_from_row(row):
+    return BackupSnapshotRecord(
+        branch=row.get("branch") or "",
+        students=list(row.get("students") or []),
+        alumni=list(row.get("alumni") or []),
+        record_count=int(row.get("record_count") or 0),
+        updated_at=_normalize_datetime(row.get("updated_at")),
+        updated_by=row.get("updated_by"),
+        updated_by_name=row.get("updated_by_name") or "",
+    )
+
+
 def get_or_create_backup_settings(branch):
     if use_supabase_backups():
         rows = _client().select(
@@ -198,6 +240,8 @@ def save_backup_settings(branch, data, *, updated_by=None, updated_by_name=""):
             payload["retention_days"] = data["retention_days"]
         if "is_enabled" in data:
             payload["is_enabled"] = data["is_enabled"]
+        if "timezone_offset_minutes" in data:
+            payload["timezone_offset_minutes"] = data["timezone_offset_minutes"]
         if "last_automated_backup_at" in data:
             payload["last_automated_backup_at"] = (
                 data["last_automated_backup_at"].isoformat()
@@ -367,3 +411,52 @@ def list_all_backup_settings():
         return [_settings_from_row(row) for row in rows or []]
 
     return [_settings_from_model(row) for row in BackupSettings.objects.all()]
+
+
+def get_backup_snapshot(branch):
+    if use_supabase_backups():
+        rows = _client().select(
+            "branch_backup_snapshots",
+            filters={"branch": f"eq.{branch}"},
+            limit=1,
+        )
+        if not rows:
+            return None
+        return _snapshot_from_row(rows[0])
+
+    snapshot = BackupSnapshot.objects.filter(branch=branch).select_related("updated_by").first()
+    if not snapshot:
+        return None
+    return _snapshot_from_model(snapshot)
+
+
+def save_backup_snapshot(branch, students, alumni, *, updated_by=None, updated_by_name=""):
+    updated_by_id, resolved_name = _resolve_actor(updated_by, updated_by_name)
+    students = list(students or [])
+    alumni = list(alumni or [])
+    record_count = len(students) + len(alumni)
+
+    if use_supabase_backups():
+        rows = _client().insert(
+            "branch_backup_snapshots",
+            {
+                "branch": branch,
+                "students": students,
+                "alumni": alumni,
+                "record_count": record_count,
+                "updated_by": updated_by_id,
+                "updated_by_name": resolved_name or None,
+            },
+            upsert=True,
+            on_conflict="branch",
+        )
+        return _snapshot_from_row(rows[0])
+
+    snapshot, _created = BackupSnapshot.objects.get_or_create(branch=branch)
+    snapshot.students = students
+    snapshot.alumni = alumni
+    snapshot.record_count = record_count
+    snapshot.updated_by = updated_by if hasattr(updated_by, "pk") else None
+    snapshot.updated_by_name = resolved_name
+    snapshot.save()
+    return _snapshot_from_model(snapshot)

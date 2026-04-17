@@ -104,6 +104,18 @@ export default defineConfig([
 
 // python manage.py runserver (/)
 
+// for automated backups, run the Celery worker and scheduler too
+
+// celery -A aicsync worker -l info (/)
+
+// celery -A aicsync beat -l info (/)
+
+// if you are storing backup settings/history in Supabase:
+
+// 1. run supabase/backup_operations_schema.sql in your Supabase SQL editor
+// 2. set USE_SUPABASE_BACKUPS=true in backend .env
+// 3. set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_BACKUP_BUCKET
+
 // github process
 
 // git checkout -b branch-name

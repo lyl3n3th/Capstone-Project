@@ -15,6 +15,7 @@ create table if not exists public.branch_backup_settings (
   automated_time time not null default '23:00',
   retention_days integer not null default 30,
   is_enabled boolean not null default true,
+  timezone_offset_minutes integer not null default 0,
   last_automated_backup_at timestamptz,
   updated_by text,
   updated_by_name text,
@@ -62,3 +63,22 @@ create index if not exists branch_backup_history_branch_created_idx
 
 create index if not exists branch_backup_history_status_idx
   on public.branch_backup_history (status, backup_type);
+
+create table if not exists public.branch_backup_snapshots (
+  branch text primary key,
+  students jsonb not null default '[]'::jsonb,
+  alumni jsonb not null default '[]'::jsonb,
+  record_count integer not null default 0,
+  updated_by text,
+  updated_by_name text,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint branch_backup_snapshots_record_count_check
+    check (record_count >= 0)
+);
+
+drop trigger if exists branch_backup_snapshots_set_updated_at on public.branch_backup_snapshots;
+create trigger branch_backup_snapshots_set_updated_at
+before update on public.branch_backup_snapshots
+for each row
+execute function public.set_updated_at();

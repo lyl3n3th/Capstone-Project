@@ -243,12 +243,21 @@ const mapStoredStudentToPortalStudent = (
     gender: storedStudent.gender || mockStudent.gender,
     birthday: storedStudent.birthDate || mockStudent.birthday,
     status:
-      storedStudent.studentStatus === "Transferee" ? "Transferee" : "Regular",
+      storedStudent.ownScheduleRequestStatus === "Approved"
+        ? "Irregular"
+        : storedStudent.studentStatus === "Transferee"
+          ? "Transferee"
+          : "Regular",
     civilStatus: storedStudent.civilStatus || mockStudent.civilStatus,
     religion: mockStudent.religion,
     guardianName: storedStudent.guardianName || mockStudent.guardianName,
     guardianContact:
       storedStudent.guardianContact || mockStudent.guardianContact,
+    requestedOwnSchedule: storedStudent.requestedOwnSchedule,
+    ownScheduleRequestStatus: storedStudent.ownScheduleRequestStatus,
+    ownScheduleAcademicYear: storedStudent.ownScheduleAcademicYear,
+    ownScheduleSemester: storedStudent.ownScheduleSemester,
+    ownScheduleSelectionStatus: storedStudent.ownScheduleSelectionStatus,
   };
 };
 

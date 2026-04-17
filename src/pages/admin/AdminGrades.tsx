@@ -6,6 +6,14 @@ import { MdOutlineFileUpload } from "react-icons/md";
 import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
+import { getCurrentBranch } from "../../services/adminStorage";
+import {
+  upsertStudentGradeRecordsForBranch,
+  validateAndNormalizeUploadedGradeRow,
+  type StoredStudentGradeRecord,
+  type StudentGradeEvaluation,
+  type StudentGradeProgramType,
+} from "../../services/studentGrades";
 import "../../styles/admin/admin-grades.css";
 
 interface GradesProps {
@@ -31,10 +39,14 @@ interface PreviewGradeRow {
   subjectTitle: string;
   grade: string;
   unit: string;
+  academicYear: string;
+  semester: string;
   gradingPeriod: string;
-  programType: "SHS" | "College";
+  programType: StudentGradeProgramType | "";
+  evaluation: StudentGradeEvaluation | "Invalid";
   status: "Valid" | "Error";
   errorReason: string;
+  normalizedRecord?: StoredStudentGradeRecord;
 }
 
 interface Toast {
@@ -43,7 +55,22 @@ interface Toast {
   type: "success" | "error" | "info" | "warning";
 }
 
+type WorksheetRow = Array<string | number | boolean | null | undefined>;
+
 const UPLOAD_HISTORY_STORAGE_KEY = "aics-upload-history";
+const TEMPLATE_DOWNLOADS: Record<
+  StudentGradeProgramType,
+  { href: string; fileName: string }
+> = {
+  SHS: {
+    href: `${import.meta.env.BASE_URL}templates/shs_grades_template.xlsx`,
+    fileName: "shs_grades_template.xlsx",
+  },
+  College: {
+    href: `${import.meta.env.BASE_URL}templates/college_grades_template.xlsx`,
+    fileName: "college_grades_template.xlsx",
+  },
+};
 
 const DEFAULT_UPLOAD_HISTORY: UploadHistoryItem[] = [
   {
@@ -156,6 +183,8 @@ export default function AdminGrades({
       .replace(/[^A-Z0-9]+/g, "_")
       .replace(/^_+|_+$/g, "");
 
+  const getCellText = (value: unknown) => String(value ?? "").trim();
+
   const findHeaderKey = (keys: string[], candidates: string[]) => {
     const normalizedCandidates = candidates.map((candidate) =>
       normalizeHeader(candidate),
@@ -163,6 +192,59 @@ export default function AdminGrades({
     return keys.find((key) =>
       normalizedCandidates.includes(normalizeHeader(key)),
     );
+  };
+
+  const findHeaderRowIndex = (rows: WorksheetRow[]) =>
+    rows.findIndex((row) => {
+      const normalizedRow = row.map((cell) => normalizeHeader(getCellText(cell)));
+      return (
+        normalizedRow.includes("STUDENT_ID") &&
+        normalizedRow.includes("FULL_NAME") &&
+        normalizedRow.includes("SUBJECT_CODE")
+      );
+    });
+
+  const getMetadataValue = (
+    rows: WorksheetRow[],
+    headerRowIndex: number,
+    candidates: string[],
+  ) => {
+    const normalizedCandidates = candidates.map((candidate) =>
+      normalizeHeader(candidate),
+    );
+
+    for (let rowIndex = 0; rowIndex < headerRowIndex; rowIndex += 1) {
+      const row = rows[rowIndex];
+
+      for (let cellIndex = 0; cellIndex < row.length; cellIndex += 1) {
+        const normalizedCell = normalizeHeader(getCellText(row[cellIndex]));
+        if (normalizedCandidates.includes(normalizedCell)) {
+          return getCellText(row[cellIndex + 1]);
+        }
+      }
+    }
+
+    return "";
+  };
+
+  const resolveProgramType = (
+    value: string,
+    fallbackProgramType: StudentGradeProgramType | "",
+  ): StudentGradeProgramType | "" => {
+    const normalizedValue = value.trim().toUpperCase();
+
+    if (
+      normalizedValue === "SHS" ||
+      normalizedValue.includes("SENIOR HIGH")
+    ) {
+      return "SHS";
+    }
+
+    if (normalizedValue === "COLLEGE" || normalizedValue.includes("COLLEGE")) {
+      return "College";
+    }
+
+    return fallbackProgramType;
   };
 
   const parsePreviewRowsFromFile = async (file: File) => {
@@ -175,16 +257,58 @@ export default function AdminGrades({
     }
 
     const worksheet = workbook.Sheets[firstSheetName];
-    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(
-      worksheet,
-      { defval: "" },
-    );
+    const sheetRows = XLSX.utils.sheet_to_json<WorksheetRow>(worksheet, {
+      header: 1,
+      defval: "",
+      blankrows: false,
+    });
+
+    if (sheetRows.length === 0) {
+      return [] as PreviewGradeRow[];
+    }
+
+    const headerRowIndex = findHeaderRowIndex(sheetRows);
+    if (headerRowIndex === -1) {
+      throw new Error("No recognizable header row found in the uploaded file.");
+    }
+
+    const headerRow = sheetRows[headerRowIndex] ?? [];
+    const rawRows = sheetRows
+      .slice(headerRowIndex + 1)
+      .map((row) =>
+        headerRow.reduce<Record<string, unknown>>((record, headerCell, index) => {
+          const key = getCellText(headerCell);
+          if (key) {
+            record[key] = row[index] ?? "";
+          }
+          return record;
+        }, {}),
+      )
+      .filter((row) =>
+        Object.values(row).some((value) => Boolean(getCellText(value))),
+      );
 
     if (rawRows.length === 0) {
       return [] as PreviewGradeRow[];
     }
 
     const keys = Object.keys(rawRows[0]);
+    const templateAcademicYear = getMetadataValue(sheetRows, headerRowIndex, [
+      "ACADEMIC_YEAR",
+      "ACADEMIC YEAR",
+      "SCHOOL_YEAR",
+      "SCHOOL YEAR",
+      "AY",
+    ]);
+    const templateSemester = getMetadataValue(sheetRows, headerRowIndex, [
+      "SEMESTER",
+      "TERM",
+    ]);
+    const templateProgramType = getMetadataValue(sheetRows, headerRowIndex, [
+      "PROGRAM_TYPE",
+      "PROGRAM",
+      "TYPE",
+    ]);
     const studentIdKey = findHeaderKey(keys, [
       "STUDENT_ID",
       "STUDENT ID",
@@ -202,13 +326,21 @@ export default function AdminGrades({
       "TITLE",
       "SUBJECT",
     ]);
-    const gradeKey = findHeaderKey(keys, ["GRADE"]);
+    const gradeKey = findHeaderKey(keys, ["GRADE", "GRADES"]);
     const unitKey = findHeaderKey(keys, ["UNIT", "UNITS"]);
+    const academicYearKey = findHeaderKey(keys, [
+      "ACADEMIC_YEAR",
+      "ACADEMIC YEAR",
+      "SCHOOL_YEAR",
+      "SCHOOL YEAR",
+      "AY",
+    ]);
+    const semesterKey = findHeaderKey(keys, ["SEMESTER", "TERM"]);
     const gradingPeriodKey = findHeaderKey(keys, [
       "GRADING_PERIOD",
+      "GRADING PERIOD",
       "PERIOD",
       "QUARTER",
-      "SEMESTER",
     ]);
     const programTypeKey = findHeaderKey(keys, [
       "PROGRAM_TYPE",
@@ -217,52 +349,53 @@ export default function AdminGrades({
     ]);
 
     const rows: PreviewGradeRow[] = rawRows.map((row) => {
-      const studentId = String(
-        studentIdKey ? (row[studentIdKey] ?? "") : "",
-      ).trim();
-      const fullName = String(
-        fullNameKey ? (row[fullNameKey] ?? "") : "",
-      ).trim();
-      const subjectCode = String(
-        subjectCodeKey ? (row[subjectCodeKey] ?? "") : "",
-      ).trim();
-      const subjectTitle = String(
-        subjectTitleKey ? (row[subjectTitleKey] ?? "") : "",
-      ).trim();
-      const grade = String(gradeKey ? (row[gradeKey] ?? "") : "").trim();
-      const unit = String(unitKey ? (row[unitKey] ?? "") : "").trim();
-      const gradingPeriod = String(
-        gradingPeriodKey ? (row[gradingPeriodKey] ?? "") : "",
-      ).trim();
-      const programType = String(
-        programTypeKey ? (row[programTypeKey] ?? "") : "",
-      ).trim();
-
-      const gradeNumber = Number(grade);
-      const isGradeValid =
-        grade !== "" &&
-        Number.isFinite(gradeNumber) &&
-        gradeNumber >= 0 &&
-        gradeNumber <= 100;
-      const reasons: string[] = [];
-
-      if (!studentId) reasons.push("Missing Student ID");
-      if (!fullName) reasons.push("Missing Full Name");
-      if (!subjectCode) reasons.push("Missing Subject Code");
-      if (!subjectTitle) reasons.push("Missing Subject Title");
-      if (!grade) reasons.push("Missing Grade");
-      else if (!isGradeValid) reasons.push("Invalid Grade (must be 0-100)");
-      if (!unit) reasons.push("Missing Unit");
-      if (!gradingPeriod) reasons.push("Missing Grading Period");
-      if (!programType) reasons.push("Missing Program Type (SHS/College)");
-      else if (
-        programType.toUpperCase() !== "SHS" &&
-        programType.toUpperCase() !== "COLLEGE"
-      ) {
-        reasons.push("Program Type must be SHS or College");
-      }
-
-      const isValid = reasons.length === 0;
+      const studentId = getCellText(studentIdKey ? row[studentIdKey] : "");
+      const fullName = getCellText(fullNameKey ? row[fullNameKey] : "");
+      const subjectCode = getCellText(subjectCodeKey ? row[subjectCodeKey] : "");
+      const subjectTitle = getCellText(
+        subjectTitleKey ? row[subjectTitleKey] : "",
+      );
+      const grade = getCellText(gradeKey ? row[gradeKey] : "");
+      const unit = getCellText(unitKey ? row[unitKey] : "");
+      const academicYear =
+        getCellText(academicYearKey ? row[academicYearKey] : "") ||
+        templateAcademicYear;
+      const semester =
+        getCellText(semesterKey ? row[semesterKey] : "") || templateSemester;
+      const rawGradingPeriod = getCellText(
+        gradingPeriodKey ? row[gradingPeriodKey] : "",
+      );
+      const rawProgramType =
+        getCellText(programTypeKey ? row[programTypeKey] : "") ||
+        templateProgramType;
+      const inferredProgramType =
+        gradingPeriodKey && normalizeHeader(gradingPeriodKey) === "QUARTER"
+          ? "SHS"
+          : !gradingPeriodKey && unitKey
+            ? "College"
+            : "";
+      const normalizedProgramType = resolveProgramType(
+        rawProgramType,
+        inferredProgramType,
+      );
+      const gradingPeriod =
+        rawGradingPeriod ||
+        (normalizedProgramType === "College" ? semester : "");
+      const validationResult = normalizedProgramType
+        ? validateAndNormalizeUploadedGradeRow({
+            studentId,
+            fullName,
+            subjectCode,
+            subjectTitle,
+            grade,
+            unit,
+            academicYear,
+            semester,
+            gradingPeriod,
+            programType: normalizedProgramType,
+          })
+        : { errorReason: "Program Type must be SHS or College" };
+      const normalizedRecord = validationResult.normalizedRecord;
 
       return {
         studentId,
@@ -271,10 +404,16 @@ export default function AdminGrades({
         subjectTitle,
         grade,
         unit,
-        gradingPeriod,
-        programType: programType.toUpperCase() as "SHS" | "College",
-        status: isValid ? "Valid" : "Error",
-        errorReason: isValid ? "" : reasons.join(", "),
+        academicYear: normalizedRecord?.academicYear || academicYear,
+        semester: normalizedRecord?.semester || semester,
+        gradingPeriod: normalizedRecord?.gradingPeriod || gradingPeriod,
+        programType: normalizedProgramType,
+        evaluation: normalizedRecord?.evaluation || "Invalid",
+        status: normalizedRecord ? "Valid" : "Error",
+        errorReason: normalizedRecord
+          ? ""
+          : validationResult.errorReason || "Invalid row",
+        normalizedRecord,
       };
     });
 
@@ -316,62 +455,16 @@ export default function AdminGrades({
     }
   };
 
-  const handleDownloadTemplate = (templateType: "College" | "SHS") => {
-    const headers = [
-      "STUDENT_ID",
-      "FULL_NAME",
-      "SUBJECT_CODE",
-      "SUBJECT_TITLE",
-      "GRADE",
-      "UNITS",
-      "GRADING_PERIOD",
-      "PROGRAM_TYPE",
-    ];
+  const handleDownloadTemplate = (templateType: StudentGradeProgramType) => {
+    const template = TEMPLATE_DOWNLOADS[templateType];
+    const downloadLink = document.createElement("a");
 
-    const sampleData =
-      templateType === "SHS"
-        ? [
-            [
-              "BAC-261001",
-              "Maria Santos",
-              "MATH111",
-              "General Mathematics",
-              "85",
-              "3",
-              "1st Quarter",
-              "SHS",
-            ],
-          ]
-        : [
-            [
-              "BAC-261002",
-              "Juan Dela Cruz",
-              "PROG101",
-              "Programming 1",
-              "78",
-              "3",
-              "1st Semester",
-              "College",
-            ],
-          ];
+    downloadLink.href = template.href;
+    downloadLink.download = template.fileName;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
 
-    const wsData = [headers, ...sampleData];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Grades Template");
-
-    ws["!cols"] = [
-      { wch: 15 },
-      { wch: 25 },
-      { wch: 15 },
-      { wch: 35 },
-      { wch: 10 },
-      { wch: 8 },
-      { wch: 15 },
-      { wch: 12 },
-    ];
-
-    XLSX.writeFile(wb, `${templateType.toLowerCase()}_grades_template.xlsx`);
     addToast(`${templateType} template downloaded successfully!`, "success");
   };
 
@@ -396,6 +489,16 @@ export default function AdminGrades({
     }).format(new Date());
 
     const normalizedName = selectedFile.name.replace(/\.[^/.]+$/, "");
+    const gradeRecordsToStore = previewRows
+      .filter(
+        (
+          row,
+        ): row is PreviewGradeRow & { normalizedRecord: StoredStudentGradeRecord } =>
+          row.status === "Valid" && Boolean(row.normalizedRecord),
+      )
+      .map((row) => row.normalizedRecord);
+
+    upsertStudentGradeRecordsForBranch(getCurrentBranch(), gradeRecordsToStore);
 
     const newHistoryItem: UploadHistoryItem = {
       fileName: normalizedName,
@@ -479,7 +582,8 @@ export default function AdminGrades({
         <header className="page-header">
           <h1>Grades Management</h1>
           <p>
-            Upload Excel files with student grades to update student portals
+            Upload Excel files with student grades to update student records and
+            grade history
           </p>
         </header>
 
@@ -521,8 +625,8 @@ export default function AdminGrades({
 
             <div className="upload-note">
               <span>
-                Note: Uploaded grades will be immediately visible to students in
-                their portal.
+                Note: Uploaded grades will be reflected in the student details
+                modal right away for this branch.
               </span>
             </div>
             <div className="upload-note warning">
@@ -568,11 +672,16 @@ export default function AdminGrades({
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
+                Academic year and semester tracking
+              </li>
+              <li>
+                <IoMdCheckmarkCircleOutline className="list-icon success" />
                 SHS uses quarterly grading (1st-4th Quarter)
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
-                College uses semester grading (Prelim, Midterm, Prefinal, Final)
+                College supports semester or final grade uploads, including
+                failed and INC grades
               </li>
             </ul>
 
@@ -616,7 +725,7 @@ export default function AdminGrades({
                       {previewFileName ||
                         selectedFileName.replace(/\.[^/.]+$/, "")}
                     </h3>
-                    <p>Review the grades before uploading to student portals</p>
+                    <p>Review the grades before saving them for this branch</p>
                   </div>
                 </div>
 
@@ -648,8 +757,11 @@ export default function AdminGrades({
                         <th>SUBJECT TITLE</th>
                         <th>GRADE</th>
                         <th>UNIT</th>
+                        <th>ACADEMIC YEAR</th>
+                        <th>SEMESTER</th>
                         <th>GRADING PERIOD</th>
                         <th>PROGRAM</th>
+                        <th>RESULT</th>
                         <th>STATUS</th>
                         <th>ERROR REASON</th>
                       </tr>
@@ -665,8 +777,11 @@ export default function AdminGrades({
                             <td>{row.subjectTitle || "—"}</td>
                             <td>{row.grade || "—"}</td>
                             <td>{row.unit || "—"}</td>
+                            <td>{row.academicYear || "—"}</td>
+                            <td>{row.semester || "—"}</td>
                             <td>{row.gradingPeriod || "—"}</td>
                             <td>{row.programType || "—"}</td>
+                            <td>{row.evaluation}</td>
                             <td>
                               <span
                                 className={`grade-status-badge ${row.status.toLowerCase()}`}
@@ -681,7 +796,7 @@ export default function AdminGrades({
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={10} className="no-results">
+                          <td colSpan={13} className="no-results">
                             No preview rows detected from this file.
                           </td>
                         </tr>

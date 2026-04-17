@@ -33,6 +33,7 @@ export interface AdmissionDraft {
   trackingNumber?: string;
   branch?: string;
   status?: string;
+  requestOwnSchedule?: boolean;
   step?: number;
   createdAt?: string;
   lastUpdated?: string;

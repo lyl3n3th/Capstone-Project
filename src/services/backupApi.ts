@@ -6,8 +6,12 @@ import {
   type StudentStorageRecord,
 } from "./adminStorage";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  "http://127.0.0.1:8000";
 const ALUMNI_BACKUP_CACHE_KEY = "aics-admin-alumni-backup-cache";
+const ALUMNI_RESTORE_STATUS_CACHE_KEY = "aics-admin-alumni-restore-status-cache";
 export const BACKUP_RESTORE_APPLIED_EVENT = "aics-backup-restore-applied";
 
 export interface BackupSettingsRecord {
@@ -15,6 +19,7 @@ export interface BackupSettingsRecord {
   automated_time: string;
   retention_days: number;
   is_enabled: boolean;
+  timezone_offset_minutes?: number;
   last_automated_backup_at?: string | null;
   updated_at: string;
 }
@@ -55,6 +60,13 @@ export interface BackupSnapshotPayload {
   snapshot_format: string;
   students: StudentStorageRecord[];
   alumni: AlumniBackupRecord[];
+}
+
+export interface BackupSnapshotSyncResult {
+  branch: string;
+  record_count: number;
+  updated_at: string;
+  updated_by_name: string;
 }
 
 const readAuthSession = (): AuthSession | null => {
@@ -120,7 +132,7 @@ const parseJsonResponse = async <T>(response: Response): Promise<T> => {
   return (await response.json()) as T;
 };
 
-const readCachedAlumni = (): AlumniBackupRecord[] => {
+export const readCachedAlumni = (): AlumniBackupRecord[] => {
   if (typeof window === "undefined") {
     return [];
   }
@@ -145,6 +157,83 @@ export const persistAlumniBackupCache = (records: AlumniBackupRecord[]) => {
   }
 
   localStorage.setItem(ALUMNI_BACKUP_CACHE_KEY, JSON.stringify(records));
+};
+
+const readCachedAlumniRestoreStatuses = (): Record<string, StudentStorageRecord["status"]> => {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  const raw = localStorage.getItem(ALUMNI_RESTORE_STATUS_CACHE_KEY);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, StudentStorageRecord["status"]>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    console.error("Failed to parse cached alumni restore status data", error);
+    return {};
+  }
+};
+
+const persistCachedAlumniRestoreStatuses = (
+  records: Record<string, StudentStorageRecord["status"]>,
+) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  localStorage.setItem(
+    ALUMNI_RESTORE_STATUS_CACHE_KEY,
+    JSON.stringify(records),
+  );
+};
+
+export const rememberAlumniStudentStatus = (
+  studentId: string,
+  status: StudentStorageRecord["status"],
+) => {
+  if (typeof window === "undefined" || !studentId) {
+    return;
+  }
+
+  const normalizedStatus =
+    status === "Archived" || status === "Graduated" ? "Complete" : status;
+  const cachedStatuses = readCachedAlumniRestoreStatuses();
+  cachedStatuses[studentId] = normalizedStatus;
+  persistCachedAlumniRestoreStatuses(cachedStatuses);
+};
+
+export const getRememberedAlumniStudentStatus = (
+  studentId: string,
+): StudentStorageRecord["status"] | undefined => {
+  if (!studentId) {
+    return undefined;
+  }
+
+  return readCachedAlumniRestoreStatuses()[studentId];
+};
+
+export const forgetRememberedAlumniStudentStatus = (studentId: string) => {
+  if (typeof window === "undefined" || !studentId) {
+    return;
+  }
+
+  const cachedStatuses = readCachedAlumniRestoreStatuses();
+  if (!Object.prototype.hasOwnProperty.call(cachedStatuses, studentId)) {
+    return;
+  }
+
+  delete cachedStatuses[studentId];
+  persistCachedAlumniRestoreStatuses(cachedStatuses);
+};
+
+const getClientTimezoneOffsetMinutes = () => new Date().getTimezoneOffset();
+
+const buildClientReferenceTime = () => {
+  return new Date().toISOString();
 };
 
 const buildBackupSnapshot = () => {
@@ -185,7 +274,10 @@ export async function saveBackupSettings(payload: {
   const response = await fetch(`${API_BASE_URL}/api/admin/backup/settings/`, {
     method: "PUT",
     headers: buildHeaders("application/json"),
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      timezone_offset_minutes: getClientTimezoneOffsetMinutes(),
+    }),
   });
 
   return parseJsonResponse<BackupSettingsRecord>(response);
@@ -212,6 +304,34 @@ export async function createManualBackup(options?: { backupType?: "manual" | "au
   });
 
   return parseJsonResponse<BackupHistoryRecord>(response);
+}
+
+export async function syncBackupSnapshot() {
+  const snapshot = buildBackupSnapshot();
+  const response = await fetch(`${API_BASE_URL}/api/admin/backup/snapshot-sync/`, {
+    method: "POST",
+    headers: buildHeaders("application/json"),
+    body: JSON.stringify({
+      students: snapshot.students,
+      alumni: snapshot.alumni,
+      timezone_offset_minutes: getClientTimezoneOffsetMinutes(),
+    }),
+  });
+
+  return parseJsonResponse<BackupSnapshotSyncResult>(response);
+}
+
+export async function dispatchDueAutomatedBackups() {
+  const response = await fetch(`${API_BASE_URL}/api/admin/backup/automated/dispatch/`, {
+    method: "POST",
+    headers: buildHeaders("application/json"),
+    body: JSON.stringify({
+      reference_time: buildClientReferenceTime(),
+      timezone_offset_minutes: getClientTimezoneOffsetMinutes(),
+    }),
+  });
+
+  return parseJsonResponse<BackupHistoryRecord[]>(response);
 }
 
 export async function startBackupRestore(backupHistoryId: string) {

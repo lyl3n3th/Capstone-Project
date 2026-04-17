@@ -16,6 +16,14 @@
   margin: 0;
 }
 
+.s-grades-banner-description {
+  margin: 10px 0 0;
+  color: #5f6b7a;
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 720px;
+}
+
 /* Controls Row */
 .s-grades-controls-row {
   display: flex;
@@ -54,6 +62,10 @@
 .s-grades-banner-actions {
   display: flex;
   gap: 12px;
+}
+
+.s-grades-summary {
+  margin-top: 24px;
 }
 
 /* Buttons */
@@ -249,6 +261,47 @@
   min-width: 70px;
 }
 
+.s-grade-status-cell {
+  min-width: 150px;
+}
+
+.s-instructor-name {
+  min-width: 180px;
+  white-space: normal;
+}
+
+.s-grade-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.s-grade-status-neutral {
+  background: #eef2f6;
+  color: #51606f;
+}
+
+.s-grade-status-info {
+  background: #e4f2ff;
+  color: #0b63a8;
+}
+
+.s-grade-status-success {
+  background: #e8f8ee;
+  color: #1f7a3a;
+}
+
+.s-grade-status-danger {
+  background: #fdeaea;
+  color: #b53737;
+}
+
 .s-no-data {
   text-align: center;
   padding: 40px !important;
@@ -268,6 +321,10 @@
   height: 100vh;
   margin-left: 280px;
   background: #f5f7fa;
+}
+
+.s-grades-table-college {
+  min-width: 1100px;
 }
 
 /* Fixed Header for Grades Page */
@@ -327,6 +384,10 @@
   .s-grades-table-container {
     min-width: 700px;
   }
+
+  .s-grades-table-college {
+    min-width: 1100px;
+  }
   
   .s-grades-table th,
   .s-grades-table td {
@@ -339,10 +400,18 @@
   .s-grades-table-container {
     min-width: 700px;
   }
+
+  .s-grades-table-college {
+    min-width: 1100px;
+  }
   
   .s-grades-table th,
   .s-grades-table td {
     padding: 8px 10px;
     font-size: 12px;
+  }
+
+  .s-grades-banner-description {
+    font-size: 13px;
   }
 }
