@@ -52,6 +52,14 @@ export interface StaffLoginResult {
   role: Extract<AppStaffRole, "admin" | "registrar">;
 }
 
+export interface StaffPasswordResetPayload {
+  branch: StaffBranch;
+  role: Extract<AppStaffRole, "admin" | "registrar">;
+  email: string;
+  contactNumber: string;
+  newPassword: string;
+}
+
 const mapApiRoleToDirectoryRole = (
   role: StaffApiRecord["role"],
 ): StaffDirectoryRole =>
@@ -230,6 +238,37 @@ export async function authenticateStaffLogin(
   const row = getSingleRow<StaffLoginApiResponse>(data);
   if (!row) {
     throw new Error("Invalid login credentials. Please try again.");
+  }
+
+  return {
+    employeeId: row.employee_id,
+    branch: row.branch,
+    fullName: row.full_name,
+    role: row.role,
+  };
+}
+
+export async function resetStaffPassword(
+  payload: StaffPasswordResetPayload,
+): Promise<StaffLoginResult> {
+  const { data, error } = await supabase
+    .rpc("reset_staff_account_password", {
+      p_branch: payload.branch,
+      p_role: payload.role,
+      p_email: payload.email.trim().toLowerCase(),
+      p_contact_number: payload.contactNumber.replace(/\D/g, ""),
+      p_new_password: payload.newPassword,
+    })
+    .returns<StaffLoginApiResponse[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<StaffLoginApiResponse>(data);
+
+  if (!row) {
+    throw new Error("Unable to reset the password right now.");
   }
 
   return {

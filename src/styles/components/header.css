@@ -25,8 +25,8 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  cursor: pointer;
   padding: 6px 12px;
+  position: relative;
   border-radius: 30px;
   transition: background 0.3s;
 }
@@ -47,6 +47,39 @@
   font-weight: 600;
   font-size: 16px;
   flex-shrink: 0;
+}
+
+.s-profile-avatar-wrapper,
+.s-user-profile-mobile {
+  position: relative;
+}
+
+.s-avatar-button {
+  background: none;
+  border: none;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.s-avatar-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(2, 132, 199, 0.2);
+}
+
+.s-user-avatar-image {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
 }
 
 .s-user-details {
@@ -114,20 +147,60 @@
 /* Mobile User Profile */
 .s-user-profile-mobile {
   display: none;
-  cursor: pointer;
   padding: 4px;
-  border-radius: 50%;
-  transition: background 0.3s;
-}
-
-.s-user-profile-mobile:hover {
-  background: rgba(6, 98, 135, 0.1);
 }
 
 .s-user-profile-mobile .s-user-avatar {
   width: 36px;
   height: 36px;
   font-size: 14px;
+}
+
+.s-user-profile-mobile .s-user-avatar-image {
+  width: 36px;
+  height: 36px;
+}
+
+.s-profile-menu {
+  position: absolute;
+  top: calc(100% + 12px);
+  min-width: 180px;
+  max-width: min(220px, calc(100vw - 32px));
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
+  overflow: hidden;
+  z-index: 120;
+}
+
+.s-profile-menu-desktop {
+  left: 0;
+  right: auto;
+}
+
+.s-profile-menu-mobile {
+  left: auto;
+  right: 0;
+}
+
+.s-profile-action {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: none;
+  color: #1f2937;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.s-profile-action:hover {
+  background: #f8fafc;
 }
 
 /* Responsive Header Styles */
@@ -155,6 +228,10 @@
   .s-user-profile-mobile {
     display: flex;
   }
+
+  .s-profile-menu-mobile {
+    top: calc(100% + 8px);
+  }
   
   .s-header-date {
     display: none;
@@ -179,5 +256,10 @@
     width: 32px;
     height: 32px;
     font-size: 12px;
+  }
+
+  .s-user-profile-mobile .s-user-avatar-image {
+    width: 32px;
+    height: 32px;
   }
 }

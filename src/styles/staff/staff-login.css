@@ -359,6 +359,26 @@
   cursor: pointer;
 }
 
+.staff-login-page .staff-select-wrapper {
+  position: relative;
+}
+
+.staff-login-page .staff-select-wrapper select {
+  padding-right: 42px;
+}
+
+.staff-login-page .staff-select-arrow {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  color: #64748b;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .staff-login-page .field-hint {
   font-size: 12px;
   color: #888;
@@ -423,13 +443,99 @@
 }
 
 .staff-login-page .forgot-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
   font-size: 13px;
   color: #066287;
-  text-decoration: none;
+  cursor: pointer;
 }
 
 .staff-login-page .forgot-link:hover {
   text-decoration: underline;
+}
+
+.staff-login-page .forgot-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+.staff-login-page .reset-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.staff-login-page .reset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.staff-login-page .reset-password-wrapper input {
+  padding-right: 44px;
+}
+
+.staff-login-page .reset-feedback {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.staff-login-page .reset-feedback.error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.staff-login-page .reset-feedback.success {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.staff-login-page .reset-cancel-btn,
+.staff-login-page .reset-submit-btn {
+  border: none;
+  border-radius: 12px;
+  padding: 12px 18px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.staff-login-page .reset-cancel-btn {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.staff-login-page .reset-cancel-btn:hover {
+  background: #cbd5e1;
+}
+
+.staff-login-page .reset-submit-btn {
+  background: linear-gradient(135deg, #1A3D5C 0%, #066287 100%);
+  color: #ffffff;
+}
+
+.staff-login-page .reset-submit-btn:hover {
+  transform: translateY(-1px);
+}
+
+.staff-login-page .reset-cancel-btn:disabled,
+.staff-login-page .reset-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* Submit Button - Using the usual color (not green) */
@@ -536,6 +642,10 @@
   .staff-login-page .manager-toggle {
     width: 100%;
     justify-content: center;
+  }
+
+  .staff-login-page .reset-grid {
+    grid-template-columns: 1fr;
   }
   
   .staff-login-page .form-groups label,

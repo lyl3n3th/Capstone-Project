@@ -65,6 +65,13 @@ export interface StudentRegistrationPayload {
   password: string;
 }
 
+export interface StudentPasswordResetPayload {
+  studentNumber: string;
+  email: string;
+  mobile: string;
+  newPassword: string;
+}
+
 export interface StudentActivationStatus {
   studentNumber?: string;
   portalAccountRegistered: boolean;
@@ -233,6 +240,21 @@ export const loginStudentPortal = async ({
     .rpc("student_portal_login", {
       p_student_number: studentNumber.trim().toUpperCase(),
       p_password: password,
+    })
+    .returns<StudentPortalSnapshotRow[]>();
+
+  return ensureStudentSnapshot(data, error);
+};
+
+export const resetStudentPortalPassword = async (
+  payload: StudentPasswordResetPayload,
+) => {
+  const { data, error } = await supabase
+    .rpc("reset_student_portal_password", {
+      p_student_number: payload.studentNumber.trim().toUpperCase(),
+      p_email: payload.email.trim().toLowerCase(),
+      p_phone_number: payload.mobile.replace(/\D/g, ""),
+      p_new_password: payload.newPassword,
     })
     .returns<StudentPortalSnapshotRow[]>();
 

@@ -25,6 +25,7 @@ export interface AuthContextType {
   isReady: boolean;
   loginStudent: (payload: StudentLoginPayload) => Promise<AuthUser>;
   loginStaff: (payload: StaffLoginPayload) => Promise<AuthUser>;
+  updateCurrentUser: (updates: Partial<AuthUser>) => void;
   logout: () => void;
   hasAnyRole: (roles: AppRole[]) => boolean;
   getDefaultRouteForRole: (role?: AppRole | null) => string;

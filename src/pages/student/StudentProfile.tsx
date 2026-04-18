@@ -9,6 +9,8 @@ import {
 import { IoPersonSharp } from "react-icons/io5";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
+import { useAuth } from "../../hooks/useAuth";
+import { useStoredProfileImage } from "../../hooks/useStoredProfileImage";
 import { useStudent } from "../../hooks/useStudent";
 import type { Student } from "../../types/student";
 import "../../styles/main.css";
@@ -48,8 +50,10 @@ const useToast = () => {
 
 function StudentProfile() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { currentUser } = useAuth();
   const { student, credentialSummary, isLoading, error, updateStudent } =
     useStudent();
+  const { profileImage } = useStoredProfileImage(currentUser);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Student>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -207,7 +211,13 @@ function StudentProfile() {
         <main className="s-profile-content">
           {/* Profile Header Card */}
           <div className="s-profile-header-card">
-            <div className="s-profile-avatar-large">{getInitials()}</div>
+            <div className="s-profile-avatar-large">
+              {profileImage ? (
+                <img src={profileImage} alt={`${student.firstName} ${student.lastName}`} />
+              ) : (
+                getInitials()
+              )}
+            </div>
             <div className="s-profile-header-info">
               <div className="s-profile-name-row">
                 <h1>

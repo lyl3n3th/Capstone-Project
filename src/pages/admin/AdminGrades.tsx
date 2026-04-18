@@ -3,10 +3,15 @@ import { PiMicrosoftExcelLogo } from "react-icons/pi";
 import { IoMdCheckmarkCircleOutline } from "react-icons/io";
 import { FiAlertCircle, FiDownload, FiUpload } from "react-icons/fi";
 import { MdOutlineFileUpload } from "react-icons/md";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
-import { getCurrentBranch } from "../../services/adminStorage";
+import {
+  getCurrentBranch,
+  getStudentsForBranch,
+  readBranchScopedData,
+} from "../../services/adminStorage";
 import {
   upsertStudentGradeRecordsForBranch,
   validateAndNormalizeUploadedGradeRow,
@@ -33,6 +38,7 @@ interface UploadHistoryItem {
 }
 
 interface PreviewGradeRow {
+  sheetName: string;
   studentId: string;
   fullName: string;
   subjectCode: string;
@@ -55,6 +61,44 @@ interface Toast {
   type: "success" | "error" | "info" | "warning";
 }
 
+interface TemplateClassSection {
+  id: string;
+  code: string;
+  program: string;
+  yearLevel: string;
+  semester?: string;
+  strand?: string;
+}
+
+interface TemplateSubjectAssignment {
+  id: string;
+  subjectId: string;
+  subjectCode: string;
+  subjectName: string;
+  instructorName?: string;
+  sectionId: string;
+  sectionCode: string;
+  academicYear: string;
+  semester: string;
+}
+
+interface TemplateSubjectCatalogItem {
+  id: string;
+  code: string;
+  name: string;
+  units?: number;
+}
+
+interface GeneratedTemplateSheet {
+  academicYear: string;
+  descriptor: string;
+  rows: string[][];
+  sectionCode: string;
+  semester: string;
+  sheetName: string;
+  yearLevel: string;
+}
+
 type WorksheetRow = Array<string | number | boolean | null | undefined>;
 
 const UPLOAD_HISTORY_STORAGE_KEY = "aics-upload-history";
@@ -71,6 +115,25 @@ const TEMPLATE_DOWNLOADS: Record<
     fileName: "college_grades_template.xlsx",
   },
 };
+const TEMPLATE_FIRST_DATA_ROW_INDEX = 6;
+const TEMPLATE_DATA_CAPACITY = 19;
+const TEMPLATE_FILE_MIME_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const XML_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const XML_REL_NS =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const XML_PACKAGE_REL_NS =
+  "http://schemas.openxmlformats.org/package/2006/relationships";
+const XML_EXT_PROPS_NS =
+  "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties";
+const XML_VT_NS =
+  "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes";
+const XML_NAMESPACE_NS = "http://www.w3.org/XML/1998/namespace";
+const WORKSHEET_RELATIONSHIP_TYPE =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+const WORKSHEET_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+const TEMPLATE_DATA_COLUMNS = ["A", "B", "C", "D", "E", "F", "G", "H", "I"];
 
 const DEFAULT_UPLOAD_HISTORY: UploadHistoryItem[] = [
   {
@@ -109,6 +172,7 @@ export default function AdminGrades({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: GradesProps) {
+  const currentBranch = getCurrentBranch();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedFileName, setSelectedFileName] = useState("No file chosen");
@@ -247,175 +311,1061 @@ export default function AdminGrades({
     return fallbackProgramType;
   };
 
+  const getDefaultAcademicYear = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+
+    return month >= 6 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+  };
+
+  const getAcademicYearSortValue = (value: string) => {
+    const match = value.trim().match(/^(\d{4})[-/](\d{4})$/);
+
+    if (!match) {
+      return Number.NEGATIVE_INFINITY;
+    }
+
+    return Number(match[1]) * 10_000 + Number(match[2]);
+  };
+
+  const normalizeSemesterLabel = (value?: string) => {
+    const normalized = value?.trim().toLowerCase() || "";
+
+    if (!normalized) {
+      return "";
+    }
+
+    if (normalized.includes("summer")) {
+      return "Summer";
+    }
+
+    if (normalized.includes("2nd") || normalized.includes("second")) {
+      return "2nd Semester";
+    }
+
+    return "1st Semester";
+  };
+
+  const sortStudentsForTemplate = (
+    left: { id: string; name: string },
+    right: { id: string; name: string },
+  ) =>
+    left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
+
+  const sortSectionsForTemplate = (
+    left: TemplateClassSection,
+    right: TemplateClassSection,
+  ) =>
+    left.yearLevel.localeCompare(right.yearLevel) ||
+    (left.strand || "").localeCompare(right.strand || "") ||
+    left.code.localeCompare(right.code);
+
+  const sortAssignmentsForTemplate = (
+    left: TemplateSubjectAssignment,
+    right: TemplateSubjectAssignment,
+  ) =>
+    left.subjectCode.localeCompare(right.subjectCode) ||
+    left.subjectName.localeCompare(right.subjectName);
+
+  const getUniqueSheetName = (name: string, usedNames: Set<string>) => {
+    const sanitizedBase =
+      name
+        .replace(/[\\/?*:[\]]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim() || "Section";
+
+    let candidate = sanitizedBase.slice(0, 31);
+    let suffixNumber = 2;
+
+    while (usedNames.has(candidate)) {
+      const suffix = ` (${suffixNumber})`;
+      candidate = `${sanitizedBase.slice(0, 31 - suffix.length)}${suffix}`;
+      suffixNumber += 1;
+    }
+
+    usedNames.add(candidate);
+    return candidate;
+  };
+
+  const getLatestAcademicYear = (values: string[]) => {
+    const sorted = [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+      .sort((left, right) => {
+        const rightValue = getAcademicYearSortValue(right);
+        const leftValue = getAcademicYearSortValue(left);
+
+        if (rightValue !== leftValue) {
+          return rightValue - leftValue;
+        }
+
+        return right.localeCompare(left);
+      });
+
+    return sorted[0] || getDefaultAcademicYear();
+  };
+
+  const getSectionAcademicDescriptor = (
+    section: TemplateClassSection,
+    sectionStudents: Array<{ strandOrCourse?: string }>,
+  ) =>
+    section.strand?.trim() ||
+    sectionStudents.find((student) => student.strandOrCourse?.trim())
+      ?.strandOrCourse?.trim() ||
+    "";
+
+  const buildSectionTemplateRows = ({
+    programType,
+    students,
+    assignments,
+    subjectCatalog,
+  }: {
+    programType: StudentGradeProgramType;
+    students: Array<{ id: string; name: string }>;
+    assignments: TemplateSubjectAssignment[];
+    subjectCatalog: TemplateSubjectCatalogItem[];
+  }) => {
+    if (students.length === 0) {
+      return [] as string[][];
+    }
+
+    const unitsBySubjectKey = new Map<string, string>();
+
+    subjectCatalog.forEach((subject) => {
+      const unitsLabel =
+        subject.units === undefined || subject.units === null
+          ? ""
+          : String(subject.units);
+
+      unitsBySubjectKey.set(`id:${subject.id}`, unitsLabel);
+      unitsBySubjectKey.set(`code:${subject.code.toUpperCase()}`, unitsLabel);
+    });
+
+    if (assignments.length === 0) {
+      return students.map((student) => [
+        student.id,
+        student.name,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ]);
+    }
+
+    return students.flatMap((student) =>
+      assignments.map((assignment) => {
+        const units =
+          unitsBySubjectKey.get(`id:${assignment.subjectId}`) ||
+          unitsBySubjectKey.get(`code:${assignment.subjectCode.toUpperCase()}`) ||
+          "";
+
+        return programType === "College"
+          ? [
+              student.id,
+              student.name,
+              assignment.subjectCode,
+              assignment.subjectName,
+              units,
+              "",
+              "",
+              assignment.instructorName || "",
+              "",
+              "",
+            ]
+          : [
+              student.id,
+              student.name,
+              assignment.subjectCode,
+              assignment.subjectName,
+              "",
+              "",
+              "",
+              assignment.instructorName || "",
+              "",
+              "",
+            ];
+      }),
+    );
+  };
+
+  const getGeneratedTemplateSheets = (
+    templateType: StudentGradeProgramType,
+  ): GeneratedTemplateSheet[] => {
+    const usedSheetNames = new Set<string>();
+    const storedSections =
+      readBranchScopedData<TemplateClassSection[]>("class-sections", currentBranch) ??
+      [];
+    const storedAssignments =
+      readBranchScopedData<TemplateSubjectAssignment[]>(
+        "subject-assignments",
+        currentBranch,
+      ) ?? [];
+    const storedSubjects =
+      readBranchScopedData<TemplateSubjectCatalogItem[]>("subjects", currentBranch) ??
+      [];
+    const storedStudents = getStudentsForBranch(currentBranch);
+
+    return storedSections
+      .filter(
+        (section) =>
+          section.program === templateType && Boolean(section.code.trim()),
+      )
+      .sort(sortSectionsForTemplate)
+      .map((section) => {
+        const sectionStudents = storedStudents
+          .filter(
+            (student) =>
+              student.program === templateType && student.section === section.code,
+          )
+          .sort(sortStudentsForTemplate);
+        const sectionAssignments = storedAssignments
+          .filter(
+            (assignment) =>
+              assignment.sectionId === section.id ||
+              assignment.sectionCode === section.code,
+          )
+          .sort(sortAssignmentsForTemplate);
+        const latestAcademicYear = getLatestAcademicYear(
+          sectionAssignments.map((assignment) => assignment.academicYear),
+        );
+        const currentSectionAssignments = sectionAssignments.filter(
+          (assignment) =>
+            !assignment.academicYear ||
+            assignment.academicYear.trim() === latestAcademicYear,
+        );
+
+        return {
+          academicYear: latestAcademicYear,
+          descriptor: getSectionAcademicDescriptor(section, sectionStudents),
+          rows: buildSectionTemplateRows({
+            programType: templateType,
+            students: sectionStudents.map((student) => ({
+              id: student.id,
+              name: student.name,
+            })),
+            assignments: currentSectionAssignments,
+            subjectCatalog: storedSubjects,
+          }),
+          sectionCode: section.code,
+          semester:
+            normalizeSemesterLabel(
+              section.semester || currentSectionAssignments[0]?.semester,
+            ) || "1st Semester",
+          sheetName: getUniqueSheetName(section.code, usedSheetNames),
+          yearLevel: section.yearLevel,
+        };
+      });
+  };
+
+  const getSheetRows = (sheetData: Element) =>
+    Array.from(sheetData.childNodes).filter(
+      (node): node is Element =>
+        node.nodeType === Node.ELEMENT_NODE &&
+        (node as Element).localName === "row",
+    );
+
+  const getRowNumber = (row: Element) => Number(row.getAttribute("r") || "0");
+
+  const clearCellValue = (cell: Element) => {
+    cell.removeAttribute("t");
+
+    while (cell.firstChild) {
+      cell.removeChild(cell.firstChild);
+    }
+  };
+
+  const setCellInlineString = (cell: Element, value: string) => {
+    clearCellValue(cell);
+
+    if (!value) {
+      return;
+    }
+
+    const document = cell.ownerDocument;
+    const inlineString = document.createElementNS(XML_MAIN_NS, "is");
+    const textNode = document.createElementNS(XML_MAIN_NS, "t");
+
+    if (/^\s|\s$|\n/.test(value)) {
+      textNode.setAttributeNS(XML_NAMESPACE_NS, "xml:space", "preserve");
+    }
+
+    textNode.textContent = value;
+    inlineString.appendChild(textNode);
+    cell.setAttribute("t", "inlineStr");
+    cell.appendChild(inlineString);
+  };
+
+  const getCellColumn = (cell: Element, fallbackIndex: number) => {
+    const cellReference = cell.getAttribute("r") || "";
+    const matchedColumn = cellReference.match(/[A-Z]+/)?.[0];
+
+    if (matchedColumn) {
+      return matchedColumn;
+    }
+
+    return XLSX.utils.encode_col(fallbackIndex);
+  };
+
+  const updateRowNumber = (row: Element, rowNumber: number) => {
+    row.setAttribute("r", String(rowNumber));
+
+    Array.from(row.childNodes).forEach((node, index) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        return;
+      }
+
+      const cell = node as Element;
+
+      if (cell.localName !== "c") {
+        return;
+      }
+
+      const column = getCellColumn(cell, index);
+      cell.setAttribute("r", `${column}${rowNumber}`);
+    });
+  };
+
+  const getCellByAddress = (sheetData: Element, address: string) => {
+    const matchedAddress = address.match(/^([A-Z]+)(\d+)$/);
+
+    if (!matchedAddress) {
+      return null;
+    }
+
+    const rowNumber = Number(matchedAddress[2]);
+    const row = getSheetRows(sheetData).find(
+      (rowElement) => getRowNumber(rowElement) === rowNumber,
+    );
+
+    if (!row) {
+      return null;
+    }
+
+    return (
+      Array.from(row.childNodes).find(
+        (node): node is Element =>
+          node.nodeType === Node.ELEMENT_NODE &&
+          (node as Element).localName === "c" &&
+          (node as Element).getAttribute("r") === address,
+      ) ?? null
+    );
+  };
+
+  const populateStyledTemplateMetadata = ({
+    sheetData,
+    templateType,
+    sheet,
+  }: {
+    sheetData: Element;
+    templateType: StudentGradeProgramType;
+    sheet: GeneratedTemplateSheet;
+  }) => {
+    const metadataEntries =
+      templateType === "SHS"
+        ? [
+            ["I3", "PROGRAM:"],
+            ["J3", templateType],
+            ["C4", "BRANCH:"],
+            ["D4", currentBranch],
+            ["E4", "SCHOOL YEAR:"],
+            ["F4", sheet.academicYear],
+            ["G4", "TRACK:"],
+            ["H4", sheet.descriptor],
+            ["I4", "SEMESTER:"],
+            ["J4", sheet.semester],
+          ]
+        : [
+            ["H3", "PROGRAM:"],
+            ["I3", templateType],
+            ["J3", ""],
+            ["C4", "BRANCH:"],
+            ["D4", currentBranch],
+            ["E4", "SCHOOL YEAR:"],
+            ["F4", sheet.academicYear],
+            ["G4", "COURSE:"],
+            ["H4", sheet.descriptor],
+            ["I4", "SEMESTER:"],
+            ["J4", sheet.semester],
+          ];
+
+    [
+      ...metadataEntries,
+      ["C5", "SECTION:"],
+      ["D5", sheet.sectionCode],
+      ["E5", "YEAR LEVEL:"],
+      ["F5", sheet.yearLevel],
+    ].forEach(([address, value]) => {
+      const cell = getCellByAddress(sheetData, address);
+
+      if (cell) {
+        setCellInlineString(cell, value);
+      }
+    });
+  };
+
+  const populateStyledTemplateDataRow = (
+    row: Element,
+    rowNumber: number,
+    rowValues: string[],
+  ) => {
+    updateRowNumber(row, rowNumber);
+
+    const cellsByColumn = new Map<string, Element>();
+    Array.from(row.childNodes).forEach((node, index) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        return;
+      }
+
+      const cell = node as Element;
+
+      if (cell.localName !== "c") {
+        return;
+      }
+
+      cellsByColumn.set(getCellColumn(cell, index), cell);
+    });
+
+    TEMPLATE_DATA_COLUMNS.forEach((column, index) => {
+      const cell = cellsByColumn.get(column);
+
+      if (cell) {
+        setCellInlineString(cell, rowValues[index] ?? "");
+      }
+    });
+
+    const trailingCell = cellsByColumn.get("J");
+    if (trailingCell) {
+      setCellInlineString(trailingCell, "");
+    }
+  };
+
+  const parseXml = (xmlText: string) =>
+    new DOMParser().parseFromString(xmlText, "application/xml");
+
+  const serializeXml = (document: Document) =>
+    new XMLSerializer().serializeToString(document);
+
+  const cloneBytes = (value: Uint8Array) => new Uint8Array(value);
+
+  const updateWorksheetDimension = (worksheetDocument: Document, endRow: number) => {
+    const dimension =
+      worksheetDocument.getElementsByTagNameNS(XML_MAIN_NS, "dimension")[0];
+
+    if (dimension) {
+      dimension.setAttribute("ref", `A1:J${Math.max(endRow, 33)}`);
+    }
+  };
+
+  const updateWorksheetSelection = (
+    worksheetDocument: Document,
+    isPrimarySheet: boolean,
+  ) => {
+    const primarySheetView =
+      worksheetDocument.getElementsByTagNameNS(XML_MAIN_NS, "sheetView")[0];
+
+    if (!primarySheetView) {
+      return;
+    }
+
+    if (isPrimarySheet) {
+      primarySheetView.setAttribute("tabSelected", "1");
+      return;
+    }
+
+    primarySheetView.removeAttribute("tabSelected");
+  };
+
+  const buildStyledWorksheetXml = ({
+    baseWorksheetXml,
+    sheet,
+    templateType,
+    isPrimarySheet,
+  }: {
+    baseWorksheetXml: string;
+    sheet: GeneratedTemplateSheet;
+    templateType: StudentGradeProgramType;
+    isPrimarySheet: boolean;
+  }) => {
+    const worksheetDocument = parseXml(baseWorksheetXml);
+    const sheetData =
+      worksheetDocument.getElementsByTagNameNS(XML_MAIN_NS, "sheetData")[0];
+
+    if (!sheetData) {
+      throw new Error("The template worksheet is missing sheet data.");
+    }
+
+    populateStyledTemplateMetadata({
+      sheetData,
+      templateType,
+      sheet,
+    });
+    updateWorksheetSelection(worksheetDocument, isPrimarySheet);
+
+    if (sheet.rows.length === 0) {
+      return serializeXml(worksheetDocument);
+    }
+
+    const templateRows = getSheetRows(sheetData);
+    const rowMap = new Map(templateRows.map((row) => [getRowNumber(row), row]));
+    const headerRows = templateRows.filter((row) => getRowNumber(row) <= 6);
+    const footerRows = templateRows.filter((row) => getRowNumber(row) >= 26);
+    const firstDataTemplate = rowMap.get(7);
+    const middleDataTemplate = rowMap.get(8) || firstDataTemplate;
+    const lastDataTemplate = rowMap.get(25) || middleDataTemplate || firstDataTemplate;
+
+    if (!firstDataTemplate || !middleDataTemplate || !lastDataTemplate) {
+      throw new Error("The template worksheet is missing its data row styles.");
+    }
+
+    while (sheetData.firstChild) {
+      sheetData.removeChild(sheetData.firstChild);
+    }
+
+    headerRows.forEach((row) => {
+      sheetData.appendChild(row.cloneNode(true));
+    });
+
+    if (sheet.rows.length <= TEMPLATE_DATA_CAPACITY) {
+      for (let rowNumber = 7; rowNumber <= 25; rowNumber += 1) {
+        const templateRow = rowMap.get(rowNumber);
+
+        if (!templateRow) {
+          continue;
+        }
+
+        const nextRow = templateRow.cloneNode(true) as Element;
+        const dataIndex = rowNumber - 7;
+
+        if (dataIndex < sheet.rows.length) {
+          populateStyledTemplateDataRow(
+            nextRow,
+            rowNumber,
+            sheet.rows[dataIndex].slice(0, TEMPLATE_DATA_COLUMNS.length),
+          );
+        }
+
+        sheetData.appendChild(nextRow);
+      }
+
+      footerRows.forEach((row) => {
+        sheetData.appendChild(row.cloneNode(true));
+      });
+      updateWorksheetDimension(worksheetDocument, 33);
+      return serializeXml(worksheetDocument);
+    }
+
+    sheet.rows.forEach((rowValues, index) => {
+      const rowNumber = TEMPLATE_FIRST_DATA_ROW_INDEX + 1 + index;
+      const templateRow =
+        index === 0
+          ? firstDataTemplate
+          : index === sheet.rows.length - 1
+            ? lastDataTemplate
+            : middleDataTemplate;
+      const nextRow = templateRow.cloneNode(true) as Element;
+
+      populateStyledTemplateDataRow(
+        nextRow,
+        rowNumber,
+        rowValues.slice(0, TEMPLATE_DATA_COLUMNS.length),
+      );
+      sheetData.appendChild(nextRow);
+    });
+
+    footerRows.slice(0, 2).forEach((row, index) => {
+      const nextRow = row.cloneNode(true) as Element;
+      updateRowNumber(
+        nextRow,
+        TEMPLATE_FIRST_DATA_ROW_INDEX + 1 + sheet.rows.length + index,
+      );
+      sheetData.appendChild(nextRow);
+    });
+
+    updateWorksheetDimension(
+      worksheetDocument,
+      TEMPLATE_FIRST_DATA_ROW_INDEX + 2 + sheet.rows.length,
+    );
+    return serializeXml(worksheetDocument);
+  };
+
+  const updateWorkbookXml = ({
+    workbookXml,
+    sheetNames,
+    relationshipIds,
+  }: {
+    workbookXml: string;
+    sheetNames: string[];
+    relationshipIds: string[];
+  }) => {
+    const workbookDocument = parseXml(workbookXml);
+    const sheets = workbookDocument.getElementsByTagNameNS(XML_MAIN_NS, "sheets")[0];
+
+    if (!sheets) {
+      throw new Error("The template workbook is missing its sheet list.");
+    }
+
+    while (sheets.firstChild) {
+      sheets.removeChild(sheets.firstChild);
+    }
+
+    sheetNames.forEach((sheetName, index) => {
+      const sheet = workbookDocument.createElementNS(XML_MAIN_NS, "sheet");
+
+      sheet.setAttribute("name", sheetName);
+      sheet.setAttribute("sheetId", String(index + 1));
+      sheet.setAttributeNS(XML_REL_NS, "r:id", relationshipIds[index]);
+      sheets.appendChild(sheet);
+    });
+
+    return serializeXml(workbookDocument);
+  };
+
+  const updateWorkbookRelationshipsXml = ({
+    workbookRelationshipsXml,
+    sheetCount,
+  }: {
+    workbookRelationshipsXml: string;
+    sheetCount: number;
+  }) => {
+    const relationshipsDocument = parseXml(workbookRelationshipsXml);
+    const relationshipsRoot = relationshipsDocument.documentElement;
+
+    Array.from(relationshipsRoot.childNodes).forEach((node) => {
+      if (
+        node.nodeType === Node.ELEMENT_NODE &&
+        (node as Element).localName === "Relationship" &&
+        (node as Element).getAttribute("Type") === WORKSHEET_RELATIONSHIP_TYPE
+      ) {
+        relationshipsRoot.removeChild(node);
+      }
+    });
+
+    const relationshipIds = Array.from({ length: sheetCount }, (_, index) => {
+      const relationshipId = `rId${101 + index}`;
+      const relationship = relationshipsDocument.createElementNS(
+        XML_PACKAGE_REL_NS,
+        "Relationship",
+      );
+
+      relationship.setAttribute("Id", relationshipId);
+      relationship.setAttribute("Type", WORKSHEET_RELATIONSHIP_TYPE);
+      relationship.setAttribute("Target", `worksheets/sheet${index + 1}.xml`);
+      relationshipsRoot.appendChild(relationship);
+      return relationshipId;
+    });
+
+    return {
+      relationshipIds,
+      xml: serializeXml(relationshipsDocument),
+    };
+  };
+
+  const updateContentTypesXml = ({
+    contentTypesXml,
+    sheetCount,
+  }: {
+    contentTypesXml: string;
+    sheetCount: number;
+  }) => {
+    const contentTypesDocument = parseXml(contentTypesXml);
+    const contentTypesRoot = contentTypesDocument.documentElement;
+
+    Array.from(contentTypesRoot.childNodes).forEach((node) => {
+      if (
+        node.nodeType === Node.ELEMENT_NODE &&
+        (node as Element).localName === "Override" &&
+        ((node as Element).getAttribute("PartName") || "").startsWith(
+          "/xl/worksheets/sheet",
+        )
+      ) {
+        contentTypesRoot.removeChild(node);
+      }
+    });
+
+    Array.from({ length: sheetCount }, (_, index) => {
+      const override = contentTypesDocument.createElementNS(
+        contentTypesRoot.namespaceURI,
+        "Override",
+      );
+
+      override.setAttribute("PartName", `/xl/worksheets/sheet${index + 1}.xml`);
+      override.setAttribute("ContentType", WORKSHEET_CONTENT_TYPE);
+      contentTypesRoot.appendChild(override);
+    });
+
+    return serializeXml(contentTypesDocument);
+  };
+
+  const updateAppPropertiesXml = ({
+    appXml,
+    sheetNames,
+  }: {
+    appXml: string;
+    sheetNames: string[];
+  }) => {
+    const appDocument = parseXml(appXml);
+    const headingPairs = appDocument.getElementsByTagNameNS(
+      XML_EXT_PROPS_NS,
+      "HeadingPairs",
+    )[0];
+    const titlesOfParts = appDocument.getElementsByTagNameNS(
+      XML_EXT_PROPS_NS,
+      "TitlesOfParts",
+    )[0];
+
+    if (headingPairs) {
+      while (headingPairs.firstChild) {
+        headingPairs.removeChild(headingPairs.firstChild);
+      }
+
+      const vector = appDocument.createElementNS(XML_VT_NS, "vt:vector");
+      vector.setAttribute("size", "2");
+      vector.setAttribute("baseType", "variant");
+
+      const labelVariant = appDocument.createElementNS(XML_VT_NS, "vt:variant");
+      const label = appDocument.createElementNS(XML_VT_NS, "vt:lpstr");
+      label.textContent = "Worksheets";
+      labelVariant.appendChild(label);
+
+      const countVariant = appDocument.createElementNS(XML_VT_NS, "vt:variant");
+      const count = appDocument.createElementNS(XML_VT_NS, "vt:i4");
+      count.textContent = String(sheetNames.length);
+      countVariant.appendChild(count);
+
+      vector.appendChild(labelVariant);
+      vector.appendChild(countVariant);
+      headingPairs.appendChild(vector);
+    }
+
+    if (titlesOfParts) {
+      while (titlesOfParts.firstChild) {
+        titlesOfParts.removeChild(titlesOfParts.firstChild);
+      }
+
+      const vector = appDocument.createElementNS(XML_VT_NS, "vt:vector");
+      vector.setAttribute("size", String(sheetNames.length));
+      vector.setAttribute("baseType", "lpstr");
+
+      sheetNames.forEach((sheetName) => {
+        const title = appDocument.createElementNS(XML_VT_NS, "vt:lpstr");
+        title.textContent = sheetName;
+        vector.appendChild(title);
+      });
+
+      titlesOfParts.appendChild(vector);
+    }
+
+    return serializeXml(appDocument);
+  };
+
+  const downloadBlob = (fileName: string, payload: BlobPart | Uint8Array) => {
+    const normalizedPayload =
+      payload instanceof Uint8Array
+        ? new Uint8Array(payload).buffer
+        : payload;
+    const blob = new Blob([normalizedPayload], { type: TEMPLATE_FILE_MIME_TYPE });
+    const downloadUrl = URL.createObjectURL(blob);
+    const downloadLink = document.createElement("a");
+
+    downloadLink.href = downloadUrl;
+    downloadLink.download = fileName;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    URL.revokeObjectURL(downloadUrl);
+  };
+
+  const downloadOriginalTemplate = (templateType: StudentGradeProgramType) => {
+    const template = TEMPLATE_DOWNLOADS[templateType];
+    const downloadLink = document.createElement("a");
+
+    downloadLink.href = template.href;
+    downloadLink.download = template.fileName;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+  };
+
+  const buildStyledTemplateArchive = async (
+    templateType: StudentGradeProgramType,
+  ) => {
+    const template = TEMPLATE_DOWNLOADS[templateType];
+    const generatedSheets = getGeneratedTemplateSheets(templateType);
+
+    if (generatedSheets.length === 0) {
+      return {
+        archive: null,
+        generatedSheetCount: 0,
+        matchedSectionCount: 0,
+      };
+    }
+
+    const templateResponse = await fetch(template.href);
+
+    if (!templateResponse.ok) {
+      throw new Error(
+        `Template download failed with status ${templateResponse.status}`,
+      );
+    }
+
+    const templateBuffer = await templateResponse.arrayBuffer();
+    const archiveEntries = unzipSync(new Uint8Array(templateBuffer)) as Record<
+      string,
+      Uint8Array
+    >;
+    const baseWorksheetXml = strFromU8(archiveEntries["xl/worksheets/sheet1.xml"]);
+    const baseWorksheetRels = archiveEntries["xl/worksheets/_rels/sheet1.xml.rels"];
+    const workbookRelationships = updateWorkbookRelationshipsXml({
+      workbookRelationshipsXml: strFromU8(
+        archiveEntries["xl/_rels/workbook.xml.rels"],
+      ),
+      sheetCount: generatedSheets.length,
+    });
+
+    generatedSheets.forEach((sheet, index) => {
+      archiveEntries[`xl/worksheets/sheet${index + 1}.xml`] = strToU8(
+        buildStyledWorksheetXml({
+          baseWorksheetXml,
+          sheet,
+          templateType,
+          isPrimarySheet: index === 0,
+        }),
+      );
+
+      if (baseWorksheetRels) {
+        archiveEntries[`xl/worksheets/_rels/sheet${index + 1}.xml.rels`] =
+          cloneBytes(baseWorksheetRels);
+      }
+    });
+
+    Object.keys(archiveEntries).forEach((entryName) => {
+      const matchedSheetFile = entryName.match(/^xl\/worksheets\/sheet(\d+)\.xml$/);
+      const matchedSheetRelFile = entryName.match(
+        /^xl\/worksheets\/_rels\/sheet(\d+)\.xml\.rels$/,
+      );
+
+      if (
+        (matchedSheetFile && Number(matchedSheetFile[1]) > generatedSheets.length) ||
+        (matchedSheetRelFile &&
+          Number(matchedSheetRelFile[1]) > generatedSheets.length)
+      ) {
+        delete archiveEntries[entryName];
+      }
+    });
+
+    archiveEntries["xl/workbook.xml"] = strToU8(
+      updateWorkbookXml({
+        workbookXml: strFromU8(archiveEntries["xl/workbook.xml"]),
+        sheetNames: generatedSheets.map((sheet) => sheet.sheetName),
+        relationshipIds: workbookRelationships.relationshipIds,
+      }),
+    );
+    archiveEntries["xl/_rels/workbook.xml.rels"] = strToU8(
+      workbookRelationships.xml,
+    );
+    archiveEntries["[Content_Types].xml"] = strToU8(
+      updateContentTypesXml({
+        contentTypesXml: strFromU8(archiveEntries["[Content_Types].xml"]),
+        sheetCount: generatedSheets.length,
+      }),
+    );
+    archiveEntries["docProps/app.xml"] = strToU8(
+      updateAppPropertiesXml({
+        appXml: strFromU8(archiveEntries["docProps/app.xml"]),
+        sheetNames: generatedSheets.map((sheet) => sheet.sheetName),
+      }),
+    );
+
+    return {
+      archive: zipSync(archiveEntries),
+      generatedSheetCount: generatedSheets.length,
+      matchedSectionCount: generatedSheets.length,
+    };
+  };
+
   const parsePreviewRowsFromFile = async (file: File) => {
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: "array" });
-    const firstSheetName = workbook.SheetNames[0];
+    let recognizedWorksheetCount = 0;
 
-    if (!firstSheetName) {
-      return [] as PreviewGradeRow[];
-    }
+    const rows: PreviewGradeRow[] = workbook.SheetNames.flatMap<PreviewGradeRow>(
+      (sheetName) => {
+        const worksheet = workbook.Sheets[sheetName];
+        const sheetRows = XLSX.utils.sheet_to_json<WorksheetRow>(worksheet, {
+          header: 1,
+          defval: "",
+          blankrows: false,
+        });
 
-    const worksheet = workbook.Sheets[firstSheetName];
-    const sheetRows = XLSX.utils.sheet_to_json<WorksheetRow>(worksheet, {
-      header: 1,
-      defval: "",
-      blankrows: false,
-    });
+        if (sheetRows.length === 0) {
+          return [] as PreviewGradeRow[];
+        }
 
-    if (sheetRows.length === 0) {
-      return [] as PreviewGradeRow[];
-    }
+        const headerRowIndex = findHeaderRowIndex(sheetRows);
+        if (headerRowIndex === -1) {
+          return [] as PreviewGradeRow[];
+        }
 
-    const headerRowIndex = findHeaderRowIndex(sheetRows);
-    if (headerRowIndex === -1) {
-      throw new Error("No recognizable header row found in the uploaded file.");
-    }
+        recognizedWorksheetCount += 1;
 
-    const headerRow = sheetRows[headerRowIndex] ?? [];
-    const rawRows = sheetRows
-      .slice(headerRowIndex + 1)
-      .map((row) =>
-        headerRow.reduce<Record<string, unknown>>((record, headerCell, index) => {
-          const key = getCellText(headerCell);
-          if (key) {
-            record[key] = row[index] ?? "";
-          }
-          return record;
-        }, {}),
-      )
-      .filter((row) =>
-        Object.values(row).some((value) => Boolean(getCellText(value))),
-      );
+        const headerRow = sheetRows[headerRowIndex] ?? [];
+        const rawRows = sheetRows
+          .slice(headerRowIndex + 1)
+          .map((row) =>
+            headerRow.reduce<Record<string, unknown>>((record, headerCell, index) => {
+              const key = getCellText(headerCell);
+              if (key) {
+                record[key] = row[index] ?? "";
+              }
+              return record;
+            }, {}),
+          )
+          .filter((row) =>
+            Object.values(row).some((value) => Boolean(getCellText(value))),
+          );
 
-    if (rawRows.length === 0) {
-      return [] as PreviewGradeRow[];
-    }
+        if (rawRows.length === 0) {
+          return [] as PreviewGradeRow[];
+        }
 
-    const keys = Object.keys(rawRows[0]);
-    const templateAcademicYear = getMetadataValue(sheetRows, headerRowIndex, [
-      "ACADEMIC_YEAR",
-      "ACADEMIC YEAR",
-      "SCHOOL_YEAR",
-      "SCHOOL YEAR",
-      "AY",
-    ]);
-    const templateSemester = getMetadataValue(sheetRows, headerRowIndex, [
-      "SEMESTER",
-      "TERM",
-    ]);
-    const templateProgramType = getMetadataValue(sheetRows, headerRowIndex, [
-      "PROGRAM_TYPE",
-      "PROGRAM",
-      "TYPE",
-    ]);
-    const studentIdKey = findHeaderKey(keys, [
-      "STUDENT_ID",
-      "STUDENT ID",
-      "ID",
-    ]);
-    const fullNameKey = findHeaderKey(keys, ["FULL_NAME", "FULL NAME", "NAME"]);
-    const subjectCodeKey = findHeaderKey(keys, [
-      "SUBJECT_CODE",
-      "SUBJECT CODE",
-      "CODE",
-    ]);
-    const subjectTitleKey = findHeaderKey(keys, [
-      "SUBJECT_TITLE",
-      "SUBJECT TITLE",
-      "TITLE",
-      "SUBJECT",
-    ]);
-    const gradeKey = findHeaderKey(keys, ["GRADE", "GRADES"]);
-    const unitKey = findHeaderKey(keys, ["UNIT", "UNITS"]);
-    const academicYearKey = findHeaderKey(keys, [
-      "ACADEMIC_YEAR",
-      "ACADEMIC YEAR",
-      "SCHOOL_YEAR",
-      "SCHOOL YEAR",
-      "AY",
-    ]);
-    const semesterKey = findHeaderKey(keys, ["SEMESTER", "TERM"]);
-    const gradingPeriodKey = findHeaderKey(keys, [
-      "GRADING_PERIOD",
-      "GRADING PERIOD",
-      "PERIOD",
-      "QUARTER",
-    ]);
-    const programTypeKey = findHeaderKey(keys, [
-      "PROGRAM_TYPE",
-      "PROGRAM",
-      "TYPE",
-    ]);
+        const keys = Object.keys(rawRows[0]);
+        const templateAcademicYear = getMetadataValue(sheetRows, headerRowIndex, [
+          "ACADEMIC_YEAR",
+          "ACADEMIC YEAR",
+          "SCHOOL_YEAR",
+          "SCHOOL YEAR",
+          "AY",
+        ]);
+        const templateSemester = getMetadataValue(sheetRows, headerRowIndex, [
+          "SEMESTER",
+          "TERM",
+        ]);
+        const templateProgramType = getMetadataValue(sheetRows, headerRowIndex, [
+          "PROGRAM_TYPE",
+          "PROGRAM",
+          "TYPE",
+        ]);
+        const studentIdKey = findHeaderKey(keys, [
+          "STUDENT_ID",
+          "STUDENT ID",
+          "ID",
+        ]);
+        const fullNameKey = findHeaderKey(keys, ["FULL_NAME", "FULL NAME", "NAME"]);
+        const subjectCodeKey = findHeaderKey(keys, [
+          "SUBJECT_CODE",
+          "SUBJECT CODE",
+          "CODE",
+        ]);
+        const subjectTitleKey = findHeaderKey(keys, [
+          "SUBJECT_TITLE",
+          "SUBJECT TITLE",
+          "TITLE",
+          "SUBJECT",
+        ]);
+        const gradeKey = findHeaderKey(keys, ["GRADE", "GRADES"]);
+        const unitKey = findHeaderKey(keys, ["UNIT", "UNITS"]);
+        const academicYearKey = findHeaderKey(keys, [
+          "ACADEMIC_YEAR",
+          "ACADEMIC YEAR",
+          "SCHOOL_YEAR",
+          "SCHOOL YEAR",
+          "AY",
+        ]);
+        const semesterKey = findHeaderKey(keys, ["SEMESTER", "TERM"]);
+        const gradingPeriodKey = findHeaderKey(keys, [
+          "GRADING_PERIOD",
+          "GRADING PERIOD",
+          "PERIOD",
+          "QUARTER",
+        ]);
+        const programTypeKey = findHeaderKey(keys, [
+          "PROGRAM_TYPE",
+          "PROGRAM",
+          "TYPE",
+        ]);
 
-    const rows: PreviewGradeRow[] = rawRows.map((row) => {
-      const studentId = getCellText(studentIdKey ? row[studentIdKey] : "");
-      const fullName = getCellText(fullNameKey ? row[fullNameKey] : "");
-      const subjectCode = getCellText(subjectCodeKey ? row[subjectCodeKey] : "");
-      const subjectTitle = getCellText(
-        subjectTitleKey ? row[subjectTitleKey] : "",
-      );
-      const grade = getCellText(gradeKey ? row[gradeKey] : "");
-      const unit = getCellText(unitKey ? row[unitKey] : "");
-      const academicYear =
-        getCellText(academicYearKey ? row[academicYearKey] : "") ||
-        templateAcademicYear;
-      const semester =
-        getCellText(semesterKey ? row[semesterKey] : "") || templateSemester;
-      const rawGradingPeriod = getCellText(
-        gradingPeriodKey ? row[gradingPeriodKey] : "",
-      );
-      const rawProgramType =
-        getCellText(programTypeKey ? row[programTypeKey] : "") ||
-        templateProgramType;
-      const inferredProgramType =
-        gradingPeriodKey && normalizeHeader(gradingPeriodKey) === "QUARTER"
-          ? "SHS"
-          : !gradingPeriodKey && unitKey
-            ? "College"
-            : "";
-      const normalizedProgramType = resolveProgramType(
-        rawProgramType,
-        inferredProgramType,
-      );
-      const gradingPeriod =
-        rawGradingPeriod ||
-        (normalizedProgramType === "College" ? semester : "");
-      const validationResult = normalizedProgramType
-        ? validateAndNormalizeUploadedGradeRow({
+        return rawRows.map((row): PreviewGradeRow => {
+          const studentId = getCellText(studentIdKey ? row[studentIdKey] : "");
+          const fullName = getCellText(fullNameKey ? row[fullNameKey] : "");
+          const subjectCode = getCellText(
+            subjectCodeKey ? row[subjectCodeKey] : "",
+          );
+          const subjectTitle = getCellText(
+            subjectTitleKey ? row[subjectTitleKey] : "",
+          );
+          const grade = getCellText(gradeKey ? row[gradeKey] : "");
+          const unit = getCellText(unitKey ? row[unitKey] : "");
+          const academicYear =
+            getCellText(academicYearKey ? row[academicYearKey] : "") ||
+            templateAcademicYear;
+          const semester =
+            getCellText(semesterKey ? row[semesterKey] : "") || templateSemester;
+          const rawGradingPeriod = getCellText(
+            gradingPeriodKey ? row[gradingPeriodKey] : "",
+          );
+          const rawProgramType =
+            getCellText(programTypeKey ? row[programTypeKey] : "") ||
+            templateProgramType;
+          const inferredProgramType =
+            gradingPeriodKey && normalizeHeader(gradingPeriodKey) === "QUARTER"
+              ? "SHS"
+              : !gradingPeriodKey && unitKey
+                ? "College"
+                : "";
+          const normalizedProgramType = resolveProgramType(
+            rawProgramType,
+            inferredProgramType,
+          );
+          const gradingPeriod =
+            rawGradingPeriod ||
+            (normalizedProgramType === "College" ? semester : "");
+          const validationResult = normalizedProgramType
+            ? validateAndNormalizeUploadedGradeRow({
+                studentId,
+                fullName,
+                subjectCode,
+                subjectTitle,
+                grade,
+                unit,
+                academicYear,
+                semester,
+                gradingPeriod,
+                programType: normalizedProgramType,
+              })
+            : { errorReason: "Program Type must be SHS or College" };
+          const normalizedRecord = validationResult.normalizedRecord;
+
+          return {
+            sheetName,
             studentId,
             fullName,
             subjectCode,
             subjectTitle,
             grade,
             unit,
-            academicYear,
-            semester,
-            gradingPeriod,
+            academicYear: normalizedRecord?.academicYear || academicYear,
+            semester: normalizedRecord?.semester || semester,
+            gradingPeriod: normalizedRecord?.gradingPeriod || gradingPeriod,
             programType: normalizedProgramType,
-          })
-        : { errorReason: "Program Type must be SHS or College" };
-      const normalizedRecord = validationResult.normalizedRecord;
+            evaluation: normalizedRecord
+              ? normalizedRecord.evaluation
+              : "Invalid",
+            status: normalizedRecord ? "Valid" : "Error",
+            errorReason: normalizedRecord
+              ? ""
+              : validationResult.errorReason || "Invalid row",
+            normalizedRecord,
+          };
+        });
+      },
+    );
 
-      return {
-        studentId,
-        fullName,
-        subjectCode,
-        subjectTitle,
-        grade,
-        unit,
-        academicYear: normalizedRecord?.academicYear || academicYear,
-        semester: normalizedRecord?.semester || semester,
-        gradingPeriod: normalizedRecord?.gradingPeriod || gradingPeriod,
-        programType: normalizedProgramType,
-        evaluation: normalizedRecord?.evaluation || "Invalid",
-        status: normalizedRecord ? "Valid" : "Error",
-        errorReason: normalizedRecord
-          ? ""
-          : validationResult.errorReason || "Invalid row",
-        normalizedRecord,
-      };
-    });
+    if (recognizedWorksheetCount === 0) {
+      throw new Error("No recognizable grade worksheets were found in the uploaded file.");
+    }
 
     return rows;
   };
@@ -440,8 +1390,9 @@ export default function AdminGrades({
       const parsedRows = await parsePreviewRowsFromFile(file);
       setPreviewRows(parsedRows);
       setIsPreviewModalOpen(true);
+      const sheetCount = new Set(parsedRows.map((row) => row.sheetName)).size;
       addToast(
-        `File "${file.name}" loaded successfully. Please review the data.`,
+        `File "${file.name}" loaded successfully from ${sheetCount || 1} worksheet${sheetCount === 1 ? "" : "s"}. Please review the data.`,
         "info",
       );
     } catch (error) {
@@ -455,17 +1406,40 @@ export default function AdminGrades({
     }
   };
 
-  const handleDownloadTemplate = (templateType: StudentGradeProgramType) => {
-    const template = TEMPLATE_DOWNLOADS[templateType];
-    const downloadLink = document.createElement("a");
+  const handleDownloadTemplate = async (
+    templateType: StudentGradeProgramType,
+  ) => {
+    try {
+      const template = TEMPLATE_DOWNLOADS[templateType];
+      const { archive, generatedSheetCount, matchedSectionCount } =
+        await buildStyledTemplateArchive(templateType);
 
-    downloadLink.href = template.href;
-    downloadLink.download = template.fileName;
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-    downloadLink.remove();
+      if (matchedSectionCount === 0) {
+        downloadOriginalTemplate(templateType);
+        addToast(
+          `No ${templateType} sections were found for ${currentBranch}, so the general template was downloaded.`,
+          "warning",
+        );
+        return;
+      }
 
-    addToast(`${templateType} template downloaded successfully!`, "success");
+      if (!archive) {
+        throw new Error("Template archive was not generated.");
+      }
+
+      downloadBlob(template.fileName, archive);
+
+      addToast(
+        `${templateType} template downloaded with ${generatedSheetCount} section worksheet${generatedSheetCount === 1 ? "" : "s"}.`,
+        "success",
+      );
+    } catch (error) {
+      console.error("Failed to generate grade template", error);
+      addToast(
+        "Unable to generate the grade template right now. Please try again.",
+        "error",
+      );
+    }
   };
 
   const handleUploadGrades = () => {
@@ -498,7 +1472,7 @@ export default function AdminGrades({
       )
       .map((row) => row.normalizedRecord);
 
-    upsertStudentGradeRecordsForBranch(getCurrentBranch(), gradeRecordsToStore);
+    upsertStudentGradeRecordsForBranch(currentBranch, gradeRecordsToStore);
 
     const newHistoryItem: UploadHistoryItem = {
       fileName: normalizedName,
@@ -625,8 +1599,8 @@ export default function AdminGrades({
 
             <div className="upload-note">
               <span>
-                Note: Uploaded grades will be reflected in the student details
-                modal right away for this branch.
+                Note: Uploaded grades from every worksheet will be reflected in
+                the student details modal right away for this branch.
               </span>
             </div>
             <div className="upload-note warning">
@@ -660,19 +1634,24 @@ export default function AdminGrades({
             <ul className="template-list">
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
-                Pre-formatted columns for all required fields
+                Your original Excel template design is preserved
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
-                Sample data to guide your entries
+                One worksheet tab per existing section in this branch
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
-                Data validation for grade formats
+                Pre-filled student and subject rows when section assignments
+                already exist
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
-                Academic year and semester tracking
+                Section details, academic year, and semester metadata at the top
+              </li>
+              <li>
+                <IoMdCheckmarkCircleOutline className="list-icon success" />
+                Multi-sheet upload support during import review
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
@@ -751,6 +1730,7 @@ export default function AdminGrades({
                   <table className="grades-table">
                     <thead>
                       <tr>
+                        <th>WORKSHEET</th>
                         <th>STUDENT_ID</th>
                         <th>FULL NAME</th>
                         <th>SUBJECT CODE</th>
@@ -770,7 +1750,8 @@ export default function AdminGrades({
                     <tbody>
                       {previewRows.length > 0 ? (
                         previewRows.map((row, index) => (
-                          <tr key={`${row.studentId}-${index}`}>
+                          <tr key={`${row.sheetName}-${row.studentId}-${index}`}>
+                            <td>{row.sheetName || "N/A"}</td>
                             <td>{row.studentId || "—"}</td>
                             <td>{row.fullName || "—"}</td>
                             <td>{row.subjectCode || "—"}</td>
@@ -796,7 +1777,7 @@ export default function AdminGrades({
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={13} className="no-results">
+                          <td colSpan={14} className="no-results">
                             No preview rows detected from this file.
                           </td>
                         </tr>

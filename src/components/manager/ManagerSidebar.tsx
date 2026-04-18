@@ -11,7 +11,9 @@ import {
   MdSettings,
 } from "react-icons/md";
 import { FiLogOut } from "react-icons/fi";
-import { BsEye, BsEyeSlash } from "react-icons/bs";
+import AccountSettingsModal, {
+  type AccountSettingsDraft,
+} from "../common/AccountSettingsModal";
 
 interface AreaManagerSidebarProps {
   isOpen: boolean;
@@ -102,11 +104,11 @@ export default function AreaManagerSidebar({
 }: AreaManagerSidebarProps) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [userAccount, setUserAccount] = useState<UserAccount>(() =>
     createFallbackUserAccount(loggedInUsername),
   );
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [accountError, setAccountError] = useState("");
+  const [isSavingAccount, setIsSavingAccount] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -150,15 +152,6 @@ export default function AreaManagerSidebar({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [loggedInUsername]);
 
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = event.target;
-    setUserAccount((currentAccount) => ({ ...currentAccount, [name]: value }));
-
-    if (errors[name]) {
-      setErrors((currentErrors) => ({ ...currentErrors, [name]: false }));
-    }
-  };
-
   const handleFileChange = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
@@ -180,39 +173,19 @@ export default function AreaManagerSidebar({
       });
       await fetchProfile();
       setShowProfileMenu(false);
+      setAccountError("");
     } catch {
       alert("Failed to update profile picture.");
     }
   };
 
-  const handleUpdateAccount = async () => {
-    const nextErrors: Record<string, boolean> = {};
-
-    if (!userAccount.firstName.trim()) {
-      nextErrors.firstName = true;
-    }
-
-    if (!userAccount.lastName.trim()) {
-      nextErrors.lastName = true;
-    }
-
-    if (!userAccount.username.trim()) {
-      nextErrors.username = true;
-    }
-
-    if (
-      (userAccount.newPassword || userAccount.confirmPassword) &&
-      userAccount.newPassword !== userAccount.confirmPassword
-    ) {
-      nextErrors.confirmPassword = true;
-      alert("Passwords do not match!");
-    }
-
-    if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors);
-      return;
-    }
-
+  const handleUpdateAccount = async ({
+    firstName,
+    lastName,
+    newPassword,
+  }: AccountSettingsDraft) => {
+    setIsSavingAccount(true);
+    setAccountError("");
     try {
       const formData = new FormData();
 
@@ -220,12 +193,12 @@ export default function AreaManagerSidebar({
         formData.append("id", userAccount.id.toString());
       }
 
-      formData.append("first_name", userAccount.firstName);
-      formData.append("last_name", userAccount.lastName);
+      formData.append("first_name", firstName);
+      formData.append("last_name", lastName);
       formData.append("username", userAccount.username);
 
-      if (userAccount.newPassword) {
-        formData.append("password", userAccount.newPassword);
+      if (newPassword) {
+        formData.append("password", newPassword);
       }
 
       const response = await axios.post<UserProfileResponse>(
@@ -238,20 +211,22 @@ export default function AreaManagerSidebar({
       oldUsernameRef.current = updatedUsername;
       setUserAccount((currentAccount) => ({
         ...currentAccount,
+        firstName,
+        lastName,
         username: updatedUsername,
         newPassword: "",
         confirmPassword: "",
       }));
 
-      alert("Account Updated Successfully!");
       setShowEditModal(false);
       await fetchProfile(updatedUsername);
     } catch (error) {
       const errorMessage = axios.isAxiosError(error)
         ? (error.response?.data as ApiErrorResponse | undefined)?.error
         : null;
-
-      alert(errorMessage || "Update failed. Username may be taken.");
+      setAccountError(errorMessage || "Update failed. Please try again.");
+    } finally {
+      setIsSavingAccount(false);
     }
   };
 
@@ -342,6 +317,7 @@ export default function AreaManagerSidebar({
                   <button
                     className="area-manager-profile-action"
                     onClick={() => {
+                      setAccountError("");
                       setShowEditModal(true);
                       setShowProfileMenu(false);
                     }}
@@ -399,117 +375,21 @@ export default function AreaManagerSidebar({
         </div>
       </aside>
 
-      {showEditModal && (
-        <div
-          className="area-manager-modal-overlay"
-          onClick={() => setShowEditModal(false)}
-        >
-          <div
-            className="area-manager-modal-card"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="area-manager-modal-header">
-              <h3>Account Settings</h3>
-              <button
-                className="area-manager-close-btn"
-                onClick={() => setShowEditModal(false)}
-                type="button"
-              >
-                <MdClose size={20} />
-              </button>
-            </div>
-            <div className="area-manager-modal-body">
-              <div className="area-manager-form-grid">
-                <div className="area-manager-form-group half">
-                  <label className="area-manager-label-sm">First Name</label>
-                  <input
-                    type="text"
-                    name="firstName"
-                    className={`area-manager-form-input ${errors.firstName ? "input-error" : ""}`}
-                    value={userAccount.firstName}
-                    onChange={handleInputChange}
-                  />
-                </div>
-                <div className="area-manager-form-group half">
-                  <label className="area-manager-label-sm">Last Name</label>
-                  <input
-                    type="text"
-                    name="lastName"
-                    className={`area-manager-form-input ${errors.lastName ? "input-error" : ""}`}
-                    value={userAccount.lastName}
-                    onChange={handleInputChange}
-                  />
-                </div>
-                <div className="area-manager-form-group full">
-                  <label className="area-manager-label-sm">Username</label>
-                  <input
-                    type="text"
-                    name="username"
-                    className={`area-manager-form-input ${errors.username ? "input-error" : ""}`}
-                    value={userAccount.username}
-                    onChange={handleInputChange}
-                  />
-                </div>
-                <div className="area-manager-form-group half">
-                  <label className="area-manager-label-sm">New Password</label>
-                  <div className="area-manager-password-input-wrapper">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      name="newPassword"
-                      value={userAccount.newPassword}
-                      onChange={handleInputChange}
-                      className="area-manager-form-input"
-                      placeholder="Enter a new password"
-                    />
-                    <button
-                      type="button"
-                      className="area-manager-password-toggle-eye"
-                      onClick={() =>
-                        setShowPassword((currentValue) => !currentValue)
-                      }
-                    >
-                      {showPassword ? (
-                        <BsEyeSlash size={18} />
-                      ) : (
-                        <BsEye size={18} />
-                      )}
-                    </button>
-                  </div>
-                </div>
-                <div className="area-manager-form-group half">
-                  <label className="area-manager-label-sm">
-                    Confirm Password
-                  </label>
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    name="confirmPassword"
-                    value={userAccount.confirmPassword}
-                    onChange={handleInputChange}
-                    className={`area-manager-form-input ${errors.confirmPassword ? "input-error" : ""}`}
-                    placeholder="Confirm your new password"
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="area-manager-modal-footer">
-              <button
-                className="area-manager-btn-cancel"
-                onClick={() => setShowEditModal(false)}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                className="area-manager-btn-save"
-                onClick={handleUpdateAccount}
-                type="button"
-              >
-                Update Account
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AccountSettingsModal
+        open={showEditModal}
+        title="Account Settings"
+        values={{
+          firstName: userAccount.firstName,
+          lastName: userAccount.lastName,
+        }}
+        errorMessage={accountError}
+        isSaving={isSavingAccount}
+        onClose={() => {
+          setAccountError("");
+          setShowEditModal(false);
+        }}
+        onSave={handleUpdateAccount}
+      />
     </>
   );
 }

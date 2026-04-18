@@ -36,6 +36,14 @@
   box-shadow: 0 5px 15px rgba(0,0,0,0.2);
   border: 4px solid rgba(255,255,255,0.3);
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.s-profile-avatar-large img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .s-profile-header-info h1 {

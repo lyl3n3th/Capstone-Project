@@ -216,9 +216,12 @@ begin
     raise exception 'Role "%" is not supported.', p_role;
   end if;
 
-  select branch_id, branch_code, branch_name
+  select
+    resolved.branch_id,
+    resolved.branch_code,
+    resolved.branch_name
   into v_branch_id, v_branch_code, v_branch_name
-  from public.resolve_staff_branch(p_branch);
+  from public.resolve_staff_branch(p_branch) as resolved;
 
   if v_branch_id is null then
     raise exception 'Branch "%" is not configured in Supabase.', p_branch;
@@ -345,9 +348,12 @@ begin
     raise exception 'Role "%" is not supported.', p_role;
   end if;
 
-  select branch_id, branch_code, branch_name
+  select
+    resolved.branch_id,
+    resolved.branch_code,
+    resolved.branch_name
   into v_branch_id, v_branch_code, v_branch_name
-  from public.resolve_staff_branch(p_branch);
+  from public.resolve_staff_branch(p_branch) as resolved;
 
   if v_branch_id is null then
     raise exception 'Branch "%" is not configured in Supabase.', p_branch;
@@ -514,9 +520,12 @@ begin
     raise exception 'Role "%" is not supported.', p_role;
   end if;
 
-  select branch_id, branch_code, branch_name
+  select
+    resolved.branch_id,
+    resolved.branch_code,
+    resolved.branch_name
   into v_branch_id, v_branch_code, v_branch_name
-  from public.resolve_staff_branch(p_branch);
+  from public.resolve_staff_branch(p_branch) as resolved;
 
   if v_branch_id is null then
     raise exception 'Branch "%" is not configured in Supabase.', p_branch;
@@ -540,6 +549,99 @@ begin
 
   if not found then
     raise exception 'Invalid login credentials.';
+  end if;
+end;
+$$;
+
+drop function if exists public.reset_staff_account_password(
+  text,
+  text,
+  text,
+  text,
+  text
+);
+
+create or replace function public.reset_staff_account_password(
+  p_branch text,
+  p_role text,
+  p_email text,
+  p_contact_number text,
+  p_new_password text
+)
+returns table (
+  employee_id text,
+  branch text,
+  full_name text,
+  role text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_role text;
+begin
+  if trim(coalesce(p_branch, '')) = ''
+    or trim(coalesce(p_role, '')) = ''
+    or trim(coalesce(p_email, '')) = ''
+    or trim(coalesce(p_contact_number, '')) = ''
+    or trim(coalesce(p_new_password, '')) = '' then
+    raise exception 'Branch, role, email, mobile number, and new password are required.';
+  end if;
+
+  if char_length(trim(p_new_password)) < 8 then
+    raise exception 'Password must be at least 8 characters long.';
+  end if;
+
+  v_role := public.resolve_staff_role(p_role);
+  if v_role is null then
+    raise exception 'Role "%" is not supported.', p_role;
+  end if;
+
+  if not exists (
+    select 1
+    from public.resolve_staff_branch(p_branch) as resolved
+  ) then
+    raise exception 'Branch "%" is not configured in Supabase.', p_branch;
+  end if;
+
+  return query
+  with resolved_branch as (
+    select resolved.branch_id
+    from public.resolve_staff_branch(p_branch) as resolved
+    limit 1
+  ),
+  updated_account as (
+    update public.staff_accounts account
+    set password_hash = extensions.crypt(trim(p_new_password), extensions.gen_salt('bf'))
+    where account.branch_id in (
+        select branch_id
+        from resolved_branch
+      )
+      and account.role = v_role
+      and account.status = 'active'
+      and account.is_trashed = false
+      and account.email = trim(lower(p_email))::citext
+      and regexp_replace(trim(account.contact_number), '\D', '', 'g')
+        = regexp_replace(trim(p_contact_number), '\D', '', 'g')
+    returning
+      account.employee_id,
+      account.branch_id,
+      account.first_name,
+      account.last_name,
+      account.role
+  )
+  select
+    updated_account.employee_id,
+    branch.name as branch,
+    concat_ws(' ', updated_account.first_name, updated_account.last_name) as full_name,
+    updated_account.role
+  from updated_account
+  join public.admission_branches branch
+    on branch.id = updated_account.branch_id;
+
+  if not found then
+    raise exception 'The recovery details do not match the active staff account for this branch and role.';
   end if;
 end;
 $$;
@@ -574,3 +676,10 @@ grant execute on function public.update_staff_account(
 grant execute on function public.set_staff_account_trashed(text, boolean) to anon, authenticated;
 grant execute on function public.delete_staff_account(text) to anon, authenticated;
 grant execute on function public.staff_login(text, text, text) to anon, authenticated;
+grant execute on function public.reset_staff_account_password(
+  text,
+  text,
+  text,
+  text,
+  text
+) to anon, authenticated;

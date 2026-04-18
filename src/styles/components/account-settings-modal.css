@@ -1,0 +1,203 @@
+.account-settings-modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.52);
+  backdrop-filter: blur(4px);
+  z-index: 900;
+}
+
+.account-settings-modal-card {
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 24px 50px rgba(15, 23, 42, 0.24);
+  overflow: hidden;
+}
+
+.account-settings-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.account-settings-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.account-settings-close-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.account-settings-close-btn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.account-settings-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.account-settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.account-settings-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.account-settings-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.account-settings-input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.account-settings-input:focus {
+  border-color: #1a3d5c;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(26, 61, 92, 0.1);
+}
+
+.account-settings-input.input-error {
+  border-color: #dc2626;
+}
+
+.account-settings-password-wrapper {
+  position: relative;
+}
+
+.account-settings-password-wrapper .account-settings-input {
+  padding-right: 40px;
+}
+
+.account-settings-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.account-settings-password-toggle:hover {
+  color: #1a3d5c;
+}
+
+.account-settings-error {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.account-settings-loading {
+  padding: 16px 0;
+  color: #475569;
+  font-size: 14px;
+}
+
+.account-settings-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid #eef2f7;
+}
+
+.account-settings-btn {
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.account-settings-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.account-settings-btn-cancel {
+  border: 1px solid #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.account-settings-btn-cancel:hover:not(:disabled) {
+  background: #e2e8f0;
+}
+
+.account-settings-btn-save {
+  border: none;
+  background: #1a3d5c;
+  color: #ffffff;
+}
+
+.account-settings-btn-save:hover:not(:disabled) {
+  background: #0f2c45;
+}
+
+@media (max-width: 640px) {
+  .account-settings-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .account-settings-modal-body {
+    padding: 16px;
+  }
+
+  .account-settings-modal-footer {
+    padding: 14px 16px;
+  }
+}

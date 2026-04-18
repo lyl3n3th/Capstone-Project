@@ -223,8 +223,7 @@ begin
     return null;
   end if;
 
-  select public.resolve_student_number_prefix(p_branch_id)
-  into v_branch_prefix;
+  v_branch_prefix := public.resolve_student_number_prefix(p_branch_id);
 
   if coalesce(v_branch_prefix, '') = '' then
     return v_student_number;
@@ -311,8 +310,7 @@ declare
 begin
   perform pg_advisory_xact_lock(2610, coalesce(hashtext(p_branch_id::text), 0));
 
-  select public.resolve_student_number_prefix(p_branch_id)
-  into v_branch_prefix;
+  v_branch_prefix := public.resolve_student_number_prefix(p_branch_id);
 
   select greatest(
     coalesce(
@@ -501,8 +499,7 @@ begin
     raise exception 'Tracking number "%" was not found.', p_tracking_number;
   end if;
 
-  select public.resolve_student_number_prefix(v_branch_id)
-  into v_branch_prefix;
+  v_branch_prefix := public.resolve_student_number_prefix(v_branch_id);
 
   update public.admission_applications app
   set application_status = 'accepted',
@@ -726,8 +723,6 @@ as $$
 declare
   v_normalized_student_number text;
   v_student_id uuid;
-  v_contact_email text;
-  v_contact_phone text;
 begin
   v_normalized_student_number := public.normalize_portal_student_number(
     p_student_number
@@ -892,6 +887,112 @@ begin
 end;
 $$;
 
+drop function if exists public.reset_student_portal_password(
+  text,
+  text,
+  text,
+  text
+);
+
+create or replace function public.reset_student_portal_password(
+  p_student_number text,
+  p_email text,
+  p_phone_number text,
+  p_new_password text
+)
+returns table (
+  student_id uuid,
+  student_number text,
+  tracking_number text,
+  branch text,
+  full_name text,
+  first_name text,
+  last_name text,
+  middle_name text,
+  program_name text,
+  track_name text,
+  year_level text,
+  section text,
+  email text,
+  phone_number text,
+  address text,
+  birth_date date,
+  sex text,
+  civil_status text,
+  portal_account_registered boolean
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  v_normalized_student_number text;
+  v_student_id uuid;
+begin
+  v_normalized_student_number := public.normalize_portal_student_number(
+    p_student_number
+  );
+
+  if trim(coalesce(v_normalized_student_number, '')) = ''
+    or trim(coalesce(p_email, '')) = ''
+    or trim(coalesce(p_phone_number, '')) = ''
+    or trim(coalesce(p_new_password, '')) = '' then
+    raise exception 'Student number, email, mobile number, and new password are required.';
+  end if;
+
+  if char_length(trim(p_new_password)) < 8 then
+    raise exception 'Password must be at least 8 characters long.';
+  end if;
+
+  if v_normalized_student_number !~ '^[A-Z]{3}-[0-9]{6}$' then
+    raise exception 'Student number must use the branch-prefixed format (e.g. BAC-261001).';
+  end if;
+
+  v_student_id := (
+    select student.id
+    from public.student_profiles student
+    join public.student_contact_details contact
+      on contact.student_id = student.id
+    where upper(student.student_number) = v_normalized_student_number
+      and student.status = 'active'
+      and lower(trim(p_email)) = lower(trim(coalesce(contact.email::text, '')))
+      and regexp_replace(trim(p_phone_number), '\D', '', 'g')
+        = regexp_replace(trim(coalesce(contact.phone_number, '')), '\D', '', 'g')
+    limit 1
+  );
+
+  if v_student_id is null then
+    raise exception 'The recovery details do not match the approved student record.';
+  end if;
+
+  if not exists (
+    select 1
+    from public.student_portal_accounts account
+    where account.student_id = v_student_id
+  ) then
+    raise exception 'This student number is approved but not yet registered. Please create your student portal account first.';
+  end if;
+
+  if exists (
+    select 1
+    from public.student_portal_accounts account
+    where account.student_id = v_student_id
+      and account.status <> 'active'
+  ) then
+    raise exception 'This student portal account is inactive. Please contact the registrar.';
+  end if;
+
+  update public.student_portal_accounts account
+  set password_hash = extensions.crypt(trim(p_new_password), extensions.gen_salt('bf'))
+  where account.student_id = v_student_id;
+
+  return query
+  select *
+  from public.get_student_portal_snapshot(v_student_id);
+end;
+$$;
+
 drop function if exists public.get_admin_admission_queue(text);
 
 create or replace function public.get_admin_admission_queue(
@@ -1049,4 +1150,10 @@ grant execute on function public.register_student_portal_account(
   text
 ) to anon, authenticated;
 grant execute on function public.student_portal_login(text, text) to anon, authenticated;
+grant execute on function public.reset_student_portal_password(
+  text,
+  text,
+  text,
+  text
+) to anon, authenticated;
 grant execute on function public.get_admin_admission_queue(text) to anon, authenticated;

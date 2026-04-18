@@ -103,6 +103,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [persistSession],
   );
 
+  const updateCurrentUser = useCallback((updates: Partial<AuthUser>) => {
+    setSession((currentSession) => {
+      if (!currentSession) {
+        return currentSession;
+      }
+
+      const nextSession: AuthSession = {
+        ...currentSession,
+        user: {
+          ...currentSession.user,
+          ...updates,
+        },
+      };
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextSession));
+      }
+
+      return nextSession;
+    });
+  }, []);
+
   const logout = useCallback(() => {
     persistSession(null);
   }, [persistSession]);
@@ -134,6 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isReady,
       loginStudent,
       loginStaff,
+      updateCurrentUser,
       logout,
       hasAnyRole,
       getDefaultRouteForRole,
@@ -145,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginStaff,
       loginStudent,
       logout,
+      updateCurrentUser,
       session,
     ],
   );
