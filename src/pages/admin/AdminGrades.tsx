@@ -1,7 +1,14 @@
 import { useState, useRef } from "react";
 import { PiMicrosoftExcelLogo } from "react-icons/pi";
 import { IoMdCheckmarkCircleOutline } from "react-icons/io";
-import { FiAlertCircle, FiDownload, FiUpload } from "react-icons/fi";
+import {
+  FiAlertCircle,
+  FiCheck,
+  FiDownload,
+  FiMenu,
+  FiUpload,
+  FiX,
+} from "react-icons/fi";
 import { MdOutlineFileUpload } from "react-icons/md";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import * as XLSX from "xlsx";
@@ -33,7 +40,7 @@ interface UploadHistoryItem {
   dateUpload: string;
   records: number;
   errors: number;
-  status: "Completed" | "Pending" | "Failed";
+  status: "Completed" | "Pending" | "Failed" | "Error";
   fileData?: PreviewGradeRow[]; // Store the actual file data
 }
 
@@ -141,14 +148,14 @@ const DEFAULT_UPLOAD_HISTORY: UploadHistoryItem[] = [
     dateUpload: "January 29, 2026, 2:30 PM",
     records: 35,
     errors: 1,
-    status: "Completed",
+    status: "Error",
   },
   {
     fileName: "ICTBDA_1st_quarter_grades",
     dateUpload: "January 28, 2026, 10:00 AM",
     records: 32,
     errors: 2,
-    status: "Completed",
+    status: "Error",
   },
   {
     fileName: "ICTBDA_1st_quarter_grades",
@@ -165,6 +172,19 @@ const DEFAULT_UPLOAD_HISTORY: UploadHistoryItem[] = [
     status: "Completed",
   },
 ];
+
+const normalizeUploadHistory = (
+  history: UploadHistoryItem[],
+): UploadHistoryItem[] =>
+  history.map((item) => ({
+    ...item,
+    status:
+      item.status === "Pending" || item.status === "Failed"
+        ? item.status
+        : item.errors > 0
+          ? "Error"
+          : "Completed",
+  }));
 
 export default function AdminGrades({
   onLogout,
@@ -205,20 +225,24 @@ export default function AdminGrades({
         try {
           const parsed = JSON.parse(savedHistory);
           if (Array.isArray(parsed)) {
-            return parsed as UploadHistoryItem[];
+            return normalizeUploadHistory(parsed as UploadHistoryItem[]);
           }
         } catch (error) {
           console.error("Failed to load upload history", error);
         }
       }
-      return DEFAULT_UPLOAD_HISTORY;
+      return normalizeUploadHistory(DEFAULT_UPLOAD_HISTORY);
     },
   );
 
   // Save upload history to localStorage
   const saveUploadHistory = (history: UploadHistoryItem[]) => {
-    localStorage.setItem(UPLOAD_HISTORY_STORAGE_KEY, JSON.stringify(history));
-    setUploadHistory(history);
+    const normalizedHistory = normalizeUploadHistory(history);
+    localStorage.setItem(
+      UPLOAD_HISTORY_STORAGE_KEY,
+      JSON.stringify(normalizedHistory),
+    );
+    setUploadHistory(normalizedHistory);
   };
 
   const sortedUploadHistory = [...uploadHistory].sort((left, right) => {
@@ -609,6 +633,47 @@ export default function AdminGrades({
     return XLSX.utils.encode_col(fallbackIndex);
   };
 
+  const getRowCellsByColumn = (row: Element) => {
+    const cellsByColumn = new Map<string, Element>();
+
+    Array.from(row.childNodes).forEach((node, index) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        return;
+      }
+
+      const cell = node as Element;
+
+      if (cell.localName !== "c") {
+        return;
+      }
+
+      cellsByColumn.set(getCellColumn(cell, index), cell);
+    });
+
+    return cellsByColumn;
+  };
+
+  const copyReferenceRowStyles = (
+    targetRow: Element,
+    referenceRow: Element,
+    columns: string[],
+  ) => {
+    const targetCellsByColumn = getRowCellsByColumn(targetRow);
+    const referenceCellsByColumn = getRowCellsByColumn(referenceRow);
+
+    columns.forEach((column) => {
+      const targetCell = targetCellsByColumn.get(column);
+      const referenceCell = referenceCellsByColumn.get(column);
+      const referenceStyle = referenceCell?.getAttribute("s");
+
+      if (!targetCell || !referenceStyle) {
+        return;
+      }
+
+      targetCell.setAttribute("s", referenceStyle);
+    });
+  };
+
   const updateRowNumber = (row: Element, rowNumber: number) => {
     row.setAttribute("r", String(rowNumber));
 
@@ -712,21 +777,7 @@ export default function AdminGrades({
     rowValues: string[],
   ) => {
     updateRowNumber(row, rowNumber);
-
-    const cellsByColumn = new Map<string, Element>();
-    Array.from(row.childNodes).forEach((node, index) => {
-      if (node.nodeType !== Node.ELEMENT_NODE) {
-        return;
-      }
-
-      const cell = node as Element;
-
-      if (cell.localName !== "c") {
-        return;
-      }
-
-      cellsByColumn.set(getCellColumn(cell, index), cell);
-    });
+    const cellsByColumn = getRowCellsByColumn(row);
 
     TEMPLATE_DATA_COLUMNS.forEach((column, index) => {
       const cell = cellsByColumn.get(column);
@@ -845,6 +896,10 @@ export default function AdminGrades({
             rowNumber,
             sheet.rows[dataIndex].slice(0, TEMPLATE_DATA_COLUMNS.length),
           );
+
+          if (dataIndex === 0) {
+            copyReferenceRowStyles(nextRow, middleDataTemplate, TEMPLATE_DATA_COLUMNS);
+          }
         }
 
         sheetData.appendChild(nextRow);
@@ -872,6 +927,11 @@ export default function AdminGrades({
         rowNumber,
         rowValues.slice(0, TEMPLATE_DATA_COLUMNS.length),
       );
+
+      if (index === 0) {
+        copyReferenceRowStyles(nextRow, middleDataTemplate, TEMPLATE_DATA_COLUMNS);
+      }
+
       sheetData.appendChild(nextRow);
     });
 
@@ -1334,13 +1394,14 @@ export default function AdminGrades({
                 semester,
                 gradingPeriod,
                 programType: normalizedProgramType,
+                branch: currentBranch,
               })
             : { errorReason: "Program Type must be SHS or College" };
           const normalizedRecord = validationResult.normalizedRecord;
 
           return {
             sheetName,
-            studentId,
+            studentId: normalizedRecord?.studentId || studentId,
             fullName,
             subjectCode,
             subjectTitle,
@@ -1479,7 +1540,7 @@ export default function AdminGrades({
       dateUpload: uploadedAt,
       records: uploadedRecords,
       errors: errorRecords,
-      status: "Completed",
+      status: errorRecords > 0 ? "Error" : "Completed",
       fileData: [...previewRows], // Store the actual file data
     };
 
@@ -1547,7 +1608,11 @@ export default function AdminGrades({
         className="menu-toggle"
         onClick={handleSidebarToggle}
         aria-label={isSidebarOpen ? "Close menu" : "Open menu"}
+        type="button"
       >
+        <span className="menu-toggle-icon" aria-hidden="true">
+          {isSidebarOpen ? <FiX /> : <FiMenu />}
+        </span>
         {isSidebarOpen ? "✕" : "☰"}
       </button>
 
@@ -1600,7 +1665,8 @@ export default function AdminGrades({
             <div className="upload-note">
               <span>
                 Note: Uploaded grades from every worksheet will be reflected in
-                the student details modal right away for this branch.
+                the student portal grades page for matching students in this
+                branch.
               </span>
             </div>
             <div className="upload-note warning">
@@ -1697,7 +1763,8 @@ export default function AdminGrades({
                 </button>
               </div>
 
-              <div className="preview-card">
+              <div className="preview-modal-body">
+                <div className="preview-card">
                 <div className="preview-header">
                   <div>
                     <h3>
@@ -1710,7 +1777,9 @@ export default function AdminGrades({
 
                 <div className="preview-summary">
                   <div className="summary-item success">
-                    <span className="summary-icon">✔</span>
+                    <span className="summary-icon" aria-hidden="true">
+                      <FiCheck />
+                    </span>
                     <div>
                       <strong>Valid Records</strong>
                       <p>{uploadedRecords}</p>
@@ -1718,7 +1787,9 @@ export default function AdminGrades({
                   </div>
 
                   <div className="summary-item error">
-                    <span className="summary-icon">!</span>
+                    <span className="summary-icon" aria-hidden="true">
+                      <FiAlertCircle />
+                    </span>
                     <div>
                       <strong>Errors</strong>
                       <p>{errorRecords}</p>
@@ -1726,7 +1797,7 @@ export default function AdminGrades({
                   </div>
                 </div>
 
-                <div className="table-container">
+                <div className="table-container preview-table-container">
                   <table className="grades-table">
                     <thead>
                       <tr>
@@ -1802,6 +1873,7 @@ export default function AdminGrades({
                     Proceed to Upload
                   </button>
                 </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1813,7 +1885,7 @@ export default function AdminGrades({
             <h3>Upload History</h3>
           </div>
 
-          <div className="table-container">
+          <div className="table-container history-table-container">
             <table className="history-table">
               <thead>
                 <tr>
@@ -1822,6 +1894,7 @@ export default function AdminGrades({
                       type="button"
                       className="history-table-sort-btn"
                       onClick={toggleFileNameSort}
+                      data-sort-direction={sortDirection}
                     >
                       File Name {sortDirection === "asc" ? "↑" : "↓"}
                     </button>

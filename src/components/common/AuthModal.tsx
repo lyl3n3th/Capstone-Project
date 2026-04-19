@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { MdClose } from "react-icons/md";
 import "../../styles/components/auth-modal.css";
@@ -19,6 +20,28 @@ function AuthModal({
   children,
   footer,
 }: AuthModalProps) {
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const originalOverflow = document.body.style.overflow;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) {
     return null;
   }
@@ -27,6 +50,8 @@ function AuthModal({
     <div className="auth-modal-overlay" onClick={onClose}>
       <div
         className="auth-modal-card"
+        role="dialog"
+        aria-modal="true"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="auth-modal-header">

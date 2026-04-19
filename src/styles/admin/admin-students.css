@@ -103,7 +103,8 @@
 }
 
 .students-add-btn,
-.students-notification-btn {
+.students-notification-btn,
+.students-export-btn {
   height: 44px;
   padding: 0 24px;
   border: none;
@@ -121,6 +122,11 @@
   color: #ffffff;
 }
 
+.students-export-btn {
+  background: #1d4ed8;
+  color: #ffffff;
+}
+
 .students-notification-btn {
   display: inline-flex;
   align-items: center;
@@ -133,6 +139,12 @@
   background: #1A3D5C;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(6, 98, 135, 0.3);
+}
+
+.students-export-btn:hover:not(:disabled) {
+  background: #1e40af;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.28);
 }
 
 .students-schedule-notification-btn {
@@ -155,6 +167,13 @@
   justify-content: center;
   font-size: 12px;
   font-weight: 700;
+}
+
+.students-export-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .students-bulk-actions {
@@ -1684,7 +1703,8 @@
   }
   
   .students-add-btn,
-  .students-notification-btn {
+  .students-notification-btn,
+  .students-export-btn {
     width: 100%;
   }
 

@@ -25,12 +25,20 @@
   box-sizing: border-box;
 }
 
-.student-login-page *,
-.student-login-page *::before,
-.student-login-page *::after {
+/* Keep the page reset away from the shared auth modal */
+.student-login-page > :not(.auth-modal-overlay),
+.student-login-page > :not(.auth-modal-overlay) *,
+.student-login-page > :not(.auth-modal-overlay) *::before,
+.student-login-page > :not(.auth-modal-overlay) *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+.student-login-page .auth-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
 }
 
 
@@ -556,6 +564,11 @@
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
+  min-width: 0;
+}
+
+.student-login-page .reset-form .form-groups {
+  min-width: 0;
 }
 
 .student-login-page .reset-password-wrapper input {
@@ -568,6 +581,7 @@
   border-radius: 0.75rem;
   font-size: 0.78rem;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .student-login-page .reset-feedback.error {

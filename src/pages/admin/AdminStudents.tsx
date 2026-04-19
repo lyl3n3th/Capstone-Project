@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { useAuth } from "../../hooks/useAuth";
 import {
@@ -115,6 +116,40 @@ const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
 const ALUMNI_API_URL = `${API_BASE_URL}/api/alumni/`;
 const ENROLLEE_STORAGE_SCOPE = "enrollees";
 const RECOVERABLE_BRANCHES = ["Bacoor", "Taytay", "GMA"] as const;
+const STUDENT_EXPORT_MIME_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+const sanitizeStudentExportSegment = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "students";
+
+const formatStudentExportDateStamp = (value = new Date()) => {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
+
+const buildStudentExportFileName = (branch: string, value = new Date()) =>
+  `students_${sanitizeStudentExportSegment(branch)}_${formatStudentExportDateStamp(
+    value,
+  )}.xlsx`;
+
+const downloadStudentExportFile = (fileName: string, blob: Blob) => {
+  const downloadUrl = URL.createObjectURL(blob);
+  const downloadLink = document.createElement("a");
+
+  downloadLink.href = downloadUrl;
+  downloadLink.download = fileName;
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  downloadLink.remove();
+  URL.revokeObjectURL(downloadUrl);
+};
 
 const splitFullName = (fullName: string) => {
   const normalizedName = fullName.trim().replace(/\s+/g, " ");
@@ -2567,6 +2602,133 @@ export default function AdminStudents({
     return student.yearLevel || "—";
   };
 
+  const handleExportStudents = () => {
+    if (sortedStudents.length === 0) {
+      alert("No students match the current filters.");
+      return;
+    }
+
+    try {
+      const exportedAt = new Date();
+      const exportRows = sortedStudents.map((student) => {
+        const requirementSnapshot = getStudentRequirementSnapshot({
+          branch: student.branch || currentBranch,
+          studentNumber: student.id,
+          trackingNumber: student.trackingNumber,
+        });
+        const ownScheduleTerm = student.requestedOwnSchedule
+          ? `${
+              student.ownScheduleAcademicYear || "Academic year pending"
+            } / ${student.ownScheduleSemester || "Semester pending"}`
+          : "Not applicable";
+
+        return {
+          "Student ID": student.id,
+          "Full Name": student.name,
+          "Academic Level": student.program,
+          "Track / Course":
+            student.program === "SHS"
+              ? getShsTrackDisplay(student)
+              : student.strandOrCourse || student.program,
+          Specialization:
+            student.program === "SHS"
+              ? getShsSpecializationDisplay(student)
+              : student.strandOrCourse || "N/A",
+          "Year Level":
+            student.program === "SHS"
+              ? getShsYearLevelDisplay(student)
+              : student.yearLevel || "N/A",
+          Section: student.section || "N/A",
+          "Student Status": getStudentLifecycleStatus(student),
+          "Requirement Status": student.status,
+          "Academic Standing": getStudentAcademicStandingLabel(student),
+          "Admission Type": getAdmissionTypeLabel(student.studentStatus),
+          Branch: student.branch || currentBranch,
+          "Tracking Number": student.trackingNumber || "",
+          "Document Submitted": student.documentSubmitted || "Not submitted",
+          "Requirements Submitted": requirementSnapshot?.summary.submitted ?? 0,
+          "Requirements Pending": requirementSnapshot?.summary.pending ?? 0,
+          "Requirements Approved": requirementSnapshot?.summary.approved ?? 0,
+          "Requirements Rejected": requirementSnapshot?.summary.rejected ?? 0,
+          "Own Schedule Admission": student.requestedOwnSchedule
+            ? student.ownScheduleRequestStatus || "Requested"
+            : "Standard",
+          "Schedule Selection": student.requestedOwnSchedule
+            ? getOwnScheduleSelectionLabel(student.ownScheduleSelectionStatus)
+            : "Not applicable",
+          "Own Schedule Term": ownScheduleTerm,
+          Contact: student.contact || "Not provided",
+          Email: student.email || "Not provided",
+          Address: student.address || "Not provided",
+        };
+      });
+
+      const workbook = XLSX.utils.book_new();
+      const studentsSheet = XLSX.utils.json_to_sheet(exportRows);
+      const filtersSheet = XLSX.utils.aoa_to_sheet([
+        ["Branch", currentBranch],
+        ["Exported By", `${loggedInUsername} (${loggedInRole})`],
+        ["Exported At", exportedAt.toLocaleString()],
+        ["Visible Students", sortedStudents.length],
+        ["Search", searchTerm.trim() || "All"],
+        ["Academic Level Filter", filterProgram],
+        ["Year Level Filter", filterYearLevel || "All"],
+        ["Section Filter", filterSection || "All"],
+        ["Student Status Filter", filterStudentLifecycleStatus],
+        ["Requirement Status Filter", filterStatus],
+        ["Academic Standing Filter", filterAcademicStanding],
+        ["Sort", `${sortField} ${sortDirection}`],
+      ]);
+
+      studentsSheet["!cols"] = [
+        { wch: 16 },
+        { wch: 28 },
+        { wch: 16 },
+        { wch: 28 },
+        { wch: 30 },
+        { wch: 16 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 20 },
+        { wch: 12 },
+        { wch: 20 },
+        { wch: 18 },
+        { wch: 20 },
+        { wch: 20 },
+        { wch: 20 },
+        { wch: 20 },
+        { wch: 22 },
+        { wch: 20 },
+        { wch: 30 },
+        { wch: 18 },
+        { wch: 28 },
+        { wch: 42 },
+      ];
+      filtersSheet["!cols"] = [{ wch: 24 }, { wch: 40 }];
+
+      XLSX.utils.book_append_sheet(workbook, studentsSheet, "Students");
+      XLSX.utils.book_append_sheet(workbook, filtersSheet, "Export Filters");
+
+      const workbookBuffer = XLSX.write(workbook, {
+        bookType: "xlsx",
+        type: "array",
+      });
+      const workbookBlob = new Blob([workbookBuffer], {
+        type: STUDENT_EXPORT_MIME_TYPE,
+      });
+
+      downloadStudentExportFile(
+        buildStudentExportFileName(currentBranch, exportedAt),
+        workbookBlob,
+      );
+    } catch (error) {
+      console.error("Failed to export students", error);
+      alert("Unable to export the current student list right now.");
+    }
+  };
+
   const handleSidebarToggle = () => {
     setIsSidebarOpen(!isSidebarOpen);
   };
@@ -2634,6 +2796,15 @@ export default function AdminStudents({
             <span className="students-notification-badge">
               {pendingScheduleNotificationCount}
             </span>
+          </button>
+          <button
+            type="button"
+            className="students-export-btn"
+            onClick={handleExportStudents}
+            disabled={isLoading || sortedStudents.length === 0}
+            title="Export the currently visible students to Excel"
+          >
+            Export Excel
           </button>
         </div>
 

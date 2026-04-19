@@ -13,6 +13,7 @@ import { useStudent } from "../../hooks/useStudent";
 import type { StudentPortalSubject } from "../../services/adminStorage";
 import {
   getStudentGradeRecords,
+  STUDENT_GRADE_RECORDS_UPDATED_EVENT,
   type StoredStudentGradeRecord,
 } from "../../services/studentGrades";
 import "../../styles/main.css";
@@ -25,6 +26,7 @@ const shsQuarterOrder = [
   "4th Quarter",
 ] as const;
 const placeholderGrade = "-";
+const studentGradeStorageKeyPrefix = "aics-admin:student-grades:";
 
 type ShsQuarterLabel = (typeof shsQuarterOrder)[number];
 
@@ -575,6 +577,7 @@ function StudentGrades() {
   const [selectedAcademicYear, setSelectedAcademicYear] = useState("");
   const [selectedSemester, setSelectedSemester] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const { toasts, addToast, removeToast } = useToast();
 
@@ -591,8 +594,36 @@ function StudentGrades() {
             (record) => record.programType === (isSHS ? "SHS" : "College"),
           )
         : [],
-    [isSHS, student?.branch, student?.studentNumber],
+    [gradeRecordsVersion, isSHS, student?.branch, student?.studentNumber],
   );
+
+  useEffect(() => {
+    const refreshStudentGrades = () => {
+      setGradeRecordsVersion((previousValue) => previousValue + 1);
+    };
+
+    const handleStorageUpdate = (event: StorageEvent) => {
+      if (!event.key?.startsWith(studentGradeStorageKeyPrefix)) {
+        return;
+      }
+
+      refreshStudentGrades();
+    };
+
+    window.addEventListener(
+      STUDENT_GRADE_RECORDS_UPDATED_EVENT,
+      refreshStudentGrades,
+    );
+    window.addEventListener("storage", handleStorageUpdate);
+
+    return () => {
+      window.removeEventListener(
+        STUDENT_GRADE_RECORDS_UPDATED_EVENT,
+        refreshStudentGrades,
+      );
+      window.removeEventListener("storage", handleStorageUpdate);
+    };
+  }, []);
 
   const availableAcademicYears = useMemo(() => {
     const years = new Set<string>();

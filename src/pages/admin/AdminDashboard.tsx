@@ -5,7 +5,6 @@ import {
   Cell,
   Tooltip,
   ResponsiveContainer,
-  Legend,
   Label,
 } from "recharts";
 import { FaFileAlt, FaUsers } from "react-icons/fa";
@@ -310,15 +309,36 @@ export default function AdminDashboard({
                     ))}
                   </Pie>
                   <Tooltip />
-                  <Legend
-                    verticalAlign="bottom"
-                    align="center"
-                    formatter={(value: string | number) =>
-                      formatProgramLabel(String(value))
-                    }
-                  />
                 </PieChart>
               </ResponsiveContainer>
+            </div>
+            <div
+              className="dashboard-program-legend"
+              aria-label="Program distribution legend"
+            >
+              {programData.map((program) => (
+                <div
+                  key={program.name}
+                  className="dashboard-program-legend-item"
+                >
+                  <span
+                    className="dashboard-program-legend-swatch"
+                    style={{
+                      backgroundColor:
+                        programColor.get(program.name) || COLORS[0],
+                    }}
+                    aria-hidden="true"
+                  />
+                  <div className="dashboard-program-legend-copy">
+                    <span className="dashboard-program-legend-label">
+                      {formatProgramLabel(program.name)}
+                    </span>
+                    <span className="dashboard-program-legend-value">
+                      {program.value} Students
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -335,9 +355,11 @@ export default function AdminDashboard({
                         style={{
                           backgroundColor: programColor.get(program.name),
                         }}
-                      ></span>{" "}
-                      {formatProgramLabel(program.name)} - {program.value}{" "}
-                      Students
+                      ></span>
+                      <span className="program-section-copy">
+                        {formatProgramLabel(program.name)} - {program.value}{" "}
+                        Students
+                      </span>
                     </li>
                   ))
                 ) : (
@@ -356,9 +378,11 @@ export default function AdminDashboard({
                         style={{
                           backgroundColor: programColor.get(program.name),
                         }}
-                      ></span>{" "}
-                      {formatProgramLabel(program.name)} - {program.value}{" "}
-                      Students
+                      ></span>
+                      <span className="program-section-copy">
+                        {formatProgramLabel(program.name)} - {program.value}{" "}
+                        Students
+                      </span>
                     </li>
                   ))
                 ) : (

@@ -1,5 +1,6 @@
 import {
   normalizeBranchName,
+  normalizeStudentNumberInput,
   readBranchScopedData,
   writeBranchScopedData,
 } from "./adminStorage";
@@ -19,6 +20,7 @@ export interface UploadedStudentGradeRow {
   programType: StudentGradeProgramType;
   academicYear?: string;
   semester?: string;
+  branch?: string | null;
 }
 
 export interface StoredStudentGradeRecord {
@@ -52,6 +54,7 @@ export interface StudentAcademicStandingSnapshot {
 }
 
 const STUDENT_GRADE_STORAGE_SCOPE = "student-grades";
+export const STUDENT_GRADE_RECORDS_UPDATED_EVENT = "aics-student-grades-updated";
 const PASSING_GRADE = 75;
 const SEMESTER_ORDER = ["1st Semester", "2nd Semester", "Summer"];
 const SHS_QUARTER_ORDER = [
@@ -315,6 +318,29 @@ const evaluateGradeValue = (
   };
 };
 
+const normalizeGradeStudentId = (
+  studentId: string,
+  branch?: string | null,
+) => {
+  const trimmedValue = studentId.trim();
+
+  if (!trimmedValue) {
+    return "";
+  }
+
+  const normalizedWithBranch = normalizeStudentNumberInput(trimmedValue, branch);
+  if (normalizedWithBranch) {
+    return normalizedWithBranch.toUpperCase();
+  }
+
+  const normalizedGeneric = normalizeStudentNumberInput(trimmedValue);
+  if (normalizedGeneric) {
+    return normalizedGeneric.toUpperCase();
+  }
+
+  return trimmedValue.toUpperCase();
+};
+
 const buildGradeRecordId = (row: {
   studentId: string;
   subjectCode: string;
@@ -323,12 +349,36 @@ const buildGradeRecordId = (row: {
   gradingPeriod: string;
 }) =>
   [
-    row.studentId.trim().toUpperCase(),
+    normalizeGradeStudentId(row.studentId),
     row.subjectCode.trim().toUpperCase(),
     row.academicYear.trim().toUpperCase(),
     row.semester.trim().toUpperCase(),
     row.gradingPeriod.trim().toUpperCase(),
   ].join("::");
+
+const buildGradeRecordLookupKey = (
+  record: Pick<
+    StoredStudentGradeRecord,
+    | "studentId"
+    | "subjectCode"
+    | "academicYear"
+    | "semester"
+    | "gradingPeriod"
+    | "programType"
+  >,
+  branch?: string | null,
+) =>
+  buildGradeRecordId({
+    studentId: normalizeGradeStudentId(record.studentId, branch),
+    subjectCode: record.subjectCode,
+    academicYear: normalizeAcademicYear(record.academicYear),
+    semester: resolveSemester(
+      record.programType,
+      record.semester,
+      record.gradingPeriod,
+    ),
+    gradingPeriod: record.gradingPeriod,
+  });
 
 const isTerminalCollegeGradeRecord = (record: StoredStudentGradeRecord) => {
   const normalizedPeriod = record.gradingPeriod.trim().toLowerCase();
@@ -416,7 +466,7 @@ export const validateAndNormalizeUploadedGradeRow = (
   updatedAt = new Date().toISOString(),
 ): UploadedStudentGradeValidationResult => {
   const reasons: string[] = [];
-  const studentId = row.studentId.trim();
+  const studentId = normalizeGradeStudentId(row.studentId, row.branch);
   const fullName = row.fullName.trim();
   const subjectCode = row.subjectCode.trim();
   const subjectTitle = row.subjectTitle.trim();
@@ -482,11 +532,20 @@ export const writeStudentGradeRecordsForBranch = (
   branch: string | null | undefined,
   records: StoredStudentGradeRecord[],
 ) => {
+  const resolvedBranch = normalizeBranchName(branch);
   writeBranchScopedData(
     STUDENT_GRADE_STORAGE_SCOPE,
-    normalizeBranchName(branch),
+    resolvedBranch,
     sortGrades(records),
   );
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(STUDENT_GRADE_RECORDS_UPDATED_EVENT, {
+        detail: { branch: resolvedBranch },
+      }),
+    );
+  }
 };
 
 export const upsertStudentGradeRecordsForBranch = (
@@ -498,11 +557,11 @@ export const upsertStudentGradeRecordsForBranch = (
   const recordMap = new Map<string, StoredStudentGradeRecord>();
 
   existingRecords.forEach((record) => {
-    recordMap.set(record.id, record);
+    recordMap.set(buildGradeRecordLookupKey(record, resolvedBranch), record);
   });
 
   records.forEach((record) => {
-    recordMap.set(record.id, record);
+    recordMap.set(buildGradeRecordLookupKey(record, resolvedBranch), record);
   });
 
   const nextRecords = Array.from(recordMap.values());
@@ -516,10 +575,14 @@ export const getStudentGradeRecords = ({
 }: {
   branch?: string | null;
   studentId: string;
-}) =>
-  readStudentGradeRecordsForBranch(branch).filter(
-    (record) => record.studentId.trim().toLowerCase() === studentId.trim().toLowerCase(),
+}) => {
+  const normalizedStudentId = normalizeGradeStudentId(studentId, branch);
+
+  return readStudentGradeRecordsForBranch(branch).filter(
+    (record) =>
+      normalizeGradeStudentId(record.studentId, branch) === normalizedStudentId,
   );
+};
 
 export const getStudentAcademicStanding = ({
   branch,
