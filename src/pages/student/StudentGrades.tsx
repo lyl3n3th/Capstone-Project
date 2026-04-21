@@ -581,7 +581,7 @@ function StudentGrades() {
   const sidebarRef = useRef<HTMLDivElement>(null);
   const { toasts, addToast, removeToast } = useToast();
 
-  const { student, subjects, isLoading } = useStudent();
+  const { student, subjects, currentTerm, isLoading } = useStudent();
   const isSHS = student?.programType === "SHS";
 
   const studentGradeRecords = useMemo(
@@ -628,6 +628,10 @@ function StudentGrades() {
   const availableAcademicYears = useMemo(() => {
     const years = new Set<string>();
 
+    if (currentTerm?.academicYear) {
+      years.add(currentTerm.academicYear);
+    }
+
     subjects.forEach((subject) => {
       if (subject.academicYear) {
         years.add(subject.academicYear);
@@ -641,9 +645,10 @@ function StudentGrades() {
     });
 
     return Array.from(years).sort((left, right) => right.localeCompare(left));
-  }, [studentGradeRecords, subjects]);
+  }, [currentTerm?.academicYear, studentGradeRecords, subjects]);
 
   const fallbackAcademicYear =
+    currentTerm?.academicYear ||
     subjects[0]?.academicYear ||
     studentGradeRecords[0]?.academicYear ||
     getDefaultAcademicYear();
@@ -652,10 +657,20 @@ function StudentGrades() {
     selectedAcademicYear &&
     availableAcademicYears.includes(selectedAcademicYear)
       ? selectedAcademicYear
-      : availableAcademicYears[0] || fallbackAcademicYear;
+      : currentTerm?.academicYear &&
+          availableAcademicYears.includes(currentTerm.academicYear)
+        ? currentTerm.academicYear
+        : availableAcademicYears[0] || fallbackAcademicYear;
 
   const availableSemesters = useMemo(() => {
     const semesters = new Set<string>();
+
+    if (
+      currentTerm?.semester &&
+      currentTerm.academicYear === effectiveAcademicYear
+    ) {
+      semesters.add(currentTerm.semester);
+    }
 
     subjects
       .filter((subject) => subject.academicYear === effectiveAcademicYear)
@@ -674,9 +689,18 @@ function StudentGrades() {
       });
 
     return sortSemesters(Array.from(semesters));
-  }, [effectiveAcademicYear, studentGradeRecords, subjects]);
+  }, [
+    currentTerm?.academicYear,
+    currentTerm?.semester,
+    effectiveAcademicYear,
+    studentGradeRecords,
+    subjects,
+  ]);
 
   const fallbackSemester =
+    (currentTerm?.academicYear === effectiveAcademicYear
+      ? currentTerm.semester
+      : undefined) ||
     subjects.find((subject) => subject.academicYear === effectiveAcademicYear)
       ?.semester ||
     studentGradeRecords.find(
@@ -687,7 +711,11 @@ function StudentGrades() {
   const effectiveSemester =
     selectedSemester && availableSemesters.includes(selectedSemester)
       ? selectedSemester
-      : availableSemesters[0] || fallbackSemester;
+      : currentTerm?.academicYear === effectiveAcademicYear &&
+          currentTerm?.semester &&
+          availableSemesters.includes(currentTerm.semester)
+        ? currentTerm.semester
+        : availableSemesters[0] || fallbackSemester;
 
   const termSubjects = useMemo(
     () =>

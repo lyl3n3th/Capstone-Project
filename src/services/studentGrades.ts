@@ -23,6 +23,15 @@ export interface UploadedStudentGradeRow {
   branch?: string | null;
 }
 
+export interface StudentGradeRecordIdentity {
+  studentId: string;
+  subjectCode: string;
+  academicYear: string;
+  semester: string;
+  gradingPeriod: string;
+  programType: StudentGradeProgramType;
+}
+
 export interface StoredStudentGradeRecord {
   id: string;
   studentId: string;
@@ -43,8 +52,17 @@ export interface StoredStudentGradeRecord {
 
 export interface UploadedStudentGradeValidationResult {
   normalizedRecord?: StoredStudentGradeRecord;
+  clearRecordIdentity?: StudentGradeRecordIdentity;
   errorReason?: string;
 }
+
+export interface UploadedStudentGradeValidationOptions {
+  allowBlankGradeClear?: boolean;
+}
+
+export type StudentGradeUploadOperation =
+  | { type: "upsert"; record: StoredStudentGradeRecord }
+  | { type: "clear"; identity: StudentGradeRecordIdentity };
 
 export interface StudentAcademicStandingSnapshot {
   label: StudentAcademicStandingLabel;
@@ -63,6 +81,22 @@ const SHS_QUARTER_ORDER = [
   "3rd Quarter",
   "4th Quarter",
 ];
+const COLLEGE_GRADE_SCALE = [
+  1,
+  1.25,
+  1.5,
+  1.75,
+  2,
+  2.25,
+  2.5,
+  2.75,
+  3,
+  4,
+  5,
+];
+const COLLEGE_GRADE_SCALE_SET = new Set(COLLEGE_GRADE_SCALE);
+const COLLEGE_GRADE_ERROR_MESSAGE =
+  "College grades must use 1.00, 1.25, 1.50, 1.75, 2.00, 2.25, 2.50, 2.75, 3.00, 4.00 (INC), or 5.00 (FAILED)";
 
 const getDefaultAcademicYear = () => {
   const now = new Date();
@@ -276,7 +310,13 @@ const evaluateGradeValue = (
   const normalized = trimmed.toUpperCase();
 
   if (programType === "College") {
-    if (normalized === "INC" || normalized === "INCOMPLETE") {
+    if (
+      normalized === "INC" ||
+      normalized === "INCOMPLETE" ||
+      normalized === "4" ||
+      normalized === "4.0" ||
+      normalized === "4.00"
+    ) {
       return {
         normalizedGrade: "INC",
         numericGrade: null,
@@ -287,14 +327,34 @@ const evaluateGradeValue = (
     if (
       normalized === "FAILED" ||
       normalized === "FAIL" ||
-      normalized === "5.0"
+      normalized === "5" ||
+      normalized === "5.0" ||
+      normalized === "5.00"
     ) {
       return {
-        normalizedGrade: normalized === "5.0" ? "5.0" : "FAILED",
-        numericGrade: normalized === "5.0" ? 5 : null,
+        normalizedGrade: "FAILED",
+        numericGrade: null,
         evaluation: "Failed",
       };
     }
+
+    const numericGrade = Number(trimmed);
+    const normalizedNumericGrade = Number(numericGrade.toFixed(2));
+
+    if (
+      Number.isFinite(numericGrade) &&
+      COLLEGE_GRADE_SCALE_SET.has(normalizedNumericGrade)
+    ) {
+      return {
+        normalizedGrade: normalizedNumericGrade.toFixed(2),
+        numericGrade: normalizedNumericGrade,
+        evaluation: normalizedNumericGrade <= 3 ? "Passed" : "Failed",
+      };
+    }
+
+    return {
+      errorReason: COLLEGE_GRADE_ERROR_MESSAGE,
+    };
   }
 
   const numericGrade = Number(trimmed);
@@ -311,10 +371,7 @@ const evaluateGradeValue = (
   }
 
   return {
-    errorReason:
-      programType === "College"
-        ? "College grades must be 0-100, INC, Incomplete, FAIL, Failed, or 5.0"
-        : "SHS grades must be numeric values from 0-100",
+    errorReason: "SHS grades must be numeric values from 0-100",
   };
 };
 
@@ -357,15 +414,7 @@ const buildGradeRecordId = (row: {
   ].join("::");
 
 const buildGradeRecordLookupKey = (
-  record: Pick<
-    StoredStudentGradeRecord,
-    | "studentId"
-    | "subjectCode"
-    | "academicYear"
-    | "semester"
-    | "gradingPeriod"
-    | "programType"
-  >,
+  record: StudentGradeRecordIdentity,
   branch?: string | null,
 ) =>
   buildGradeRecordId({
@@ -464,6 +513,7 @@ const sortGrades = (grades: StoredStudentGradeRecord[]) =>
 export const validateAndNormalizeUploadedGradeRow = (
   row: UploadedStudentGradeRow,
   updatedAt = new Date().toISOString(),
+  options: UploadedStudentGradeValidationOptions = {},
 ): UploadedStudentGradeValidationResult => {
   const reasons: string[] = [];
   const studentId = normalizeGradeStudentId(row.studentId, row.branch);
@@ -478,7 +528,12 @@ export const validateAndNormalizeUploadedGradeRow = (
   );
   const academicYear = normalizeAcademicYear(row.academicYear);
   const units = normalizeUnits(row.unit);
-  const gradeEvaluation = evaluateGradeValue(row.grade, row.programType);
+  const trimmedGrade = row.grade.trim();
+  const shouldClearBlankGrade =
+    options.allowBlankGradeClear === true && trimmedGrade === "";
+  const gradeEvaluation = shouldClearBlankGrade
+    ? null
+    : evaluateGradeValue(row.grade, row.programType);
 
   if (!studentId) reasons.push("Missing Student ID");
   if (!fullName) reasons.push("Missing Full Name");
@@ -487,10 +542,23 @@ export const validateAndNormalizeUploadedGradeRow = (
   if (units === null && row.unit.trim()) reasons.push("Units must be numeric");
   if (!gradingPeriod) reasons.push("Missing Grading Period");
   if (!semester) reasons.push("Missing Semester or unable to infer it");
-  if (gradeEvaluation.errorReason) reasons.push(gradeEvaluation.errorReason);
+  if (gradeEvaluation?.errorReason) reasons.push(gradeEvaluation.errorReason);
 
   if (reasons.length > 0) {
     return { errorReason: reasons.join(", ") };
+  }
+
+  if (shouldClearBlankGrade) {
+    return {
+      clearRecordIdentity: {
+        studentId,
+        subjectCode,
+        academicYear,
+        semester,
+        gradingPeriod,
+        programType: row.programType,
+      },
+    };
   }
 
   const normalizedRecord: StoredStudentGradeRecord = {
@@ -510,10 +578,10 @@ export const validateAndNormalizeUploadedGradeRow = (
     semester,
     academicYear,
     programType: row.programType,
-    grade: row.grade.trim(),
-    normalizedGrade: gradeEvaluation.normalizedGrade || row.grade.trim(),
-    numericGrade: gradeEvaluation.numericGrade ?? null,
-    evaluation: gradeEvaluation.evaluation || "Passed",
+    grade: trimmedGrade,
+    normalizedGrade: gradeEvaluation?.normalizedGrade || trimmedGrade,
+    numericGrade: gradeEvaluation?.numericGrade ?? null,
+    evaluation: gradeEvaluation?.evaluation || "Passed",
     updatedAt,
   };
 
@@ -551,6 +619,15 @@ export const writeStudentGradeRecordsForBranch = (
 export const upsertStudentGradeRecordsForBranch = (
   branch: string | null | undefined,
   records: StoredStudentGradeRecord[],
+) =>
+  applyStudentGradeUploadOperationsForBranch(
+    branch,
+    records.map((record) => ({ type: "upsert" as const, record })),
+  );
+
+export const applyStudentGradeUploadOperationsForBranch = (
+  branch: string | null | undefined,
+  operations: StudentGradeUploadOperation[],
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
   const existingRecords = readStudentGradeRecordsForBranch(resolvedBranch);
@@ -560,8 +637,18 @@ export const upsertStudentGradeRecordsForBranch = (
     recordMap.set(buildGradeRecordLookupKey(record, resolvedBranch), record);
   });
 
-  records.forEach((record) => {
-    recordMap.set(buildGradeRecordLookupKey(record, resolvedBranch), record);
+  operations.forEach((operation) => {
+    if (operation.type === "upsert") {
+      recordMap.set(
+        buildGradeRecordLookupKey(operation.record, resolvedBranch),
+        operation.record,
+      );
+      return;
+    }
+
+    recordMap.delete(
+      buildGradeRecordLookupKey(operation.identity, resolvedBranch),
+    );
   });
 
   const nextRecords = Array.from(recordMap.values());

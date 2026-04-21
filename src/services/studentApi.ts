@@ -3,6 +3,7 @@ import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 import {
   getStudentCredentialOverview,
   getStudentPortalSubjects,
+  getStudentPortalSubjectsForTerm,
   normalizeBranchName,
   readStoredStudents,
   writeStoredStudents,
@@ -11,12 +12,25 @@ import {
   type StudentPortalSubject,
   type StudentStorageRecord,
 } from "./adminStorage";
+import { getLatestApprovedEnrollmentRequestForStudent } from "./enrollmentRequests";
 
 export interface StudentPortalData {
   student: Student;
   subjects: StudentPortalSubject[];
   credentialItems: StudentPortalCredentialItem[];
   credentialSummary: StudentPortalCredentialSummary | null;
+  currentTerm: StudentPortalCurrentTerm;
+}
+
+export interface StudentPortalCurrentTerm {
+  yearLevel: string;
+  academicYear: string;
+  semester: string;
+  source:
+    | "approved_enrollment"
+    | "own_schedule"
+    | "subject_load"
+    | "fallback";
 }
 
 const mockStudent: Student = {
@@ -140,6 +154,95 @@ const wait = (durationMs: number) =>
 
 const getFallbackSubjects = (programType: Student["programType"]) =>
   programType === "SHS" ? fallbackSubjectsSHS : fallbackSubjectsCollege;
+
+const semesterSortOrder = ["1st Semester", "2nd Semester", "Summer"];
+
+const getAcademicYearSortValue = (academicYear?: string) => {
+  const match = academicYear?.match(/\d{4}/);
+  return match ? Number(match[0]) : 0;
+};
+
+const getSemesterSortValue = (semester?: string) => {
+  const index = semesterSortOrder.indexOf(semester || "");
+  return index >= 0 ? index : -1;
+};
+
+const mergePortalSubjects = (...groups: StudentPortalSubject[][]) => {
+  const mergedSubjects = new Map<string, StudentPortalSubject>();
+
+  groups.flat().forEach((subject) => {
+    const key = [
+      subject.id,
+      subject.code,
+      subject.title,
+      subject.academicYear,
+      subject.semester,
+    ].join("::");
+
+    if (!mergedSubjects.has(key)) {
+      mergedSubjects.set(key, subject);
+    }
+  });
+
+  return Array.from(mergedSubjects.values());
+};
+
+const buildProgressedBlockSectionCode = ({
+  currentSectionCode,
+  requestedYearLevel,
+}: {
+  currentSectionCode?: string;
+  requestedYearLevel: string;
+}) => {
+  const normalizedCode = currentSectionCode?.trim().toUpperCase();
+
+  if (!normalizedCode) {
+    return "";
+  }
+
+  const requestedYearCode = requestedYearLevel.trim().toLowerCase().includes("2nd")
+    ? "2"
+    : requestedYearLevel.trim().toLowerCase().includes("3rd")
+      ? "3"
+      : requestedYearLevel.trim().toLowerCase().includes("4th")
+        ? "4"
+        : requestedYearLevel.trim().toLowerCase().includes("grade 12")
+          ? "2"
+          : "1";
+  const codeParts = normalizedCode.match(/^(.*?)([1-4])([A-Z]+)$/);
+
+  if (!codeParts) {
+    return normalizedCode;
+  }
+
+  const [, prefix, , blockLabel] = codeParts;
+  return `${prefix}${requestedYearCode}${blockLabel}`;
+};
+
+const getLatestPortalTermFromSubjects = (
+  subjects: StudentPortalSubject[],
+  yearLevel: string,
+): StudentPortalCurrentTerm | null => {
+  const latestSubject = [...subjects].sort(
+    (left, right) =>
+      getAcademicYearSortValue(right.academicYear) -
+        getAcademicYearSortValue(left.academicYear) ||
+      getSemesterSortValue(right.semester) - getSemesterSortValue(left.semester) ||
+      right.academicYear.localeCompare(left.academicYear) ||
+      right.semester.localeCompare(left.semester),
+  )[0];
+
+  if (!latestSubject?.academicYear || !latestSubject.semester) {
+    return null;
+  }
+
+  return {
+    yearLevel,
+    academicYear: latestSubject.academicYear,
+    semester: latestSubject.semester,
+    source: "subject_load",
+  };
+};
 
 const getStudentSessionOverrides = (): Partial<Student> => {
   if (typeof window === "undefined") {
@@ -301,19 +404,82 @@ const getStudentPortalDataForCurrentSession = async (): Promise<StudentPortalDat
 
   const storedStudent = getStoredStudentRecordForCurrentSession();
   if (storedStudent) {
-    const student = mapStoredStudentToPortalStudent(storedStudent);
+    const approvedEnrollmentRequest = getLatestApprovedEnrollmentRequestForStudent({
+      branch: storedStudent.branch,
+      studentNumber: storedStudent.id,
+      trackingNumber: storedStudent.trackingNumber,
+    });
+    const resolvedYearLevel =
+      approvedEnrollmentRequest?.requestedYearLevel || storedStudent.yearLevel;
+    const resolvedStudentRecord: StudentStorageRecord = {
+      ...storedStudent,
+      yearLevel: resolvedYearLevel,
+      section:
+        approvedEnrollmentRequest?.irregularRequest?.mode === "own_schedule"
+          ? ""
+          : approvedEnrollmentRequest?.irregularRequest?.mode === "section_assignment"
+            ? approvedEnrollmentRequest.irregularRequest.requestedSectionCode ||
+              storedStudent.section
+            : approvedEnrollmentRequest
+              ? buildProgressedBlockSectionCode({
+                  currentSectionCode: storedStudent.section,
+                  requestedYearLevel: resolvedYearLevel,
+                }) || storedStudent.section
+              : storedStudent.section,
+    };
+    const student = {
+      ...mapStoredStudentToPortalStudent(resolvedStudentRecord),
+      yearLevel: resolvedYearLevel,
+    };
     const credentialOverview = getStudentCredentialOverview({
       branch: storedStudent.branch,
       studentNumber: storedStudent.id,
       trackingNumber: storedStudent.trackingNumber,
     });
-    const subjects = getStudentPortalSubjects(storedStudent);
+    const portalSubjects = getStudentPortalSubjects(resolvedStudentRecord);
+    const approvedTermSubjects =
+      approvedEnrollmentRequest &&
+      approvedEnrollmentRequest.irregularRequest?.mode !== "own_schedule"
+        ? getStudentPortalSubjectsForTerm({
+            branch: resolvedStudentRecord.branch,
+            program: resolvedStudentRecord.program,
+            yearLevel: resolvedYearLevel,
+            strandOrCourse: resolvedStudentRecord.strandOrCourse,
+            semester: approvedEnrollmentRequest.semester,
+            academicYear: approvedEnrollmentRequest.academicYear,
+          })
+        : [];
+    const subjects = mergePortalSubjects(approvedTermSubjects, portalSubjects);
+    const currentTerm =
+      approvedEnrollmentRequest
+        ? {
+            yearLevel: resolvedYearLevel,
+            academicYear: approvedEnrollmentRequest.academicYear,
+            semester: approvedEnrollmentRequest.semester,
+            source: "approved_enrollment" as const,
+          }
+        : student.ownScheduleRequestStatus === "Approved" &&
+            student.ownScheduleAcademicYear &&
+            student.ownScheduleSemester
+          ? {
+              yearLevel: student.yearLevel,
+              academicYear: student.ownScheduleAcademicYear,
+              semester: student.ownScheduleSemester,
+              source: "own_schedule" as const,
+            }
+          : getLatestPortalTermFromSubjects(subjects, student.yearLevel) || {
+              yearLevel: student.yearLevel,
+              academicYear: "2026-2027",
+              semester: "1st Semester",
+              source: "fallback" as const,
+            };
 
     return {
       student,
       subjects,
       credentialItems: credentialOverview?.items ?? [],
       credentialSummary: credentialOverview?.summary ?? null,
+      currentTerm,
     };
   }
 
@@ -323,6 +489,12 @@ const getStudentPortalDataForCurrentSession = async (): Promise<StudentPortalDat
     subjects: getFallbackSubjects(fallbackStudent.programType),
     credentialItems: [],
     credentialSummary: null,
+    currentTerm: {
+      yearLevel: fallbackStudent.yearLevel,
+      academicYear: "2026-2027",
+      semester: "1st Semester",
+      source: "fallback",
+    },
   };
 };
 

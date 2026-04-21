@@ -45,6 +45,13 @@
   color: #333;
 }
 
+.s-eligibility-note {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #475467;
+}
+
 /* Status Colors */
 .s-status-completed {
   color: #28a745 !important;
@@ -56,6 +63,10 @@
 
 .s-status-warning {
   color: #b42318 !important;
+}
+
+.s-status-neutral {
+  color: #475467 !important;
 }
 
 /* Student Info Card */
@@ -345,11 +356,463 @@
   color: #b42318;
 }
 
+.s-status-neutral {
+  background: #e5e7eb;
+  color: #475467;
+}
+
 .s-college-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
   margin-bottom: 24px;
+}
+
+.s-retake-advisory-card {
+  margin-bottom: 24px;
+}
+
+.s-retake-advisory-text {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #475467;
+}
+
+.s-retake-advisory-note {
+  padding: 12px 14px;
+  border: 1px solid #f5c542;
+  border-radius: 10px;
+  background: #fff8db;
+  color: #7a5d00;
+}
+
+.s-retake-advisory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.s-retake-advisory-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+
+.s-retake-advisory-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.s-retake-subject-code {
+  font-size: 13px;
+  font-weight: 700;
+  color: #9a3412;
+}
+
+.s-retake-subject-title {
+  font-size: 13px;
+  color: #7c2d12;
+}
+
+.s-retake-advisory-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.s-retake-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #b42318;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.s-retake-periods {
+  font-size: 12px;
+  color: #9a3412;
+  font-weight: 600;
+}
+
+.s-retake-plan-card {
+  margin-bottom: 24px;
+}
+
+.s-retake-plan-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.s-retake-plan-text,
+.s-retake-plan-modal-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #475467;
+}
+
+.s-retake-plan-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 10px;
+  background: #0f766e;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.s-retake-plan-btn:hover {
+  background: #115e59;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.18);
+}
+
+.s-retake-plan-warning {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fff7f7;
+}
+
+.s-retake-plan-warning strong {
+  color: #991b1b;
+  font-size: 13px;
+}
+
+.s-retake-plan-warning-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #7f1d1d;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.s-retake-plan-summary-list,
+.s-retake-plan-selection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.s-retake-plan-summary-item,
+.s-retake-plan-selection-item,
+.s-retake-plan-empty-state,
+.s-retake-plan-subject-card {
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.s-retake-plan-summary-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.s-retake-plan-summary-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.s-retake-plan-summary-copy strong,
+.s-retake-plan-selection-item strong,
+.s-retake-plan-subject-copy h3 {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.s-retake-plan-summary-copy span,
+.s-retake-plan-summary-status span,
+.s-retake-plan-selection-item span,
+.s-retake-plan-subject-copy p,
+.s-retake-plan-empty-option {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.s-retake-plan-summary-status {
+  max-width: 420px;
+}
+
+.s-retake-plan-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.s-retake-plan-modal {
+  width: min(1120px, 100%);
+  max-height: min(88vh, 920px);
+  overflow: hidden;
+  border-radius: 20px;
+  background: #f8fafc;
+  box-shadow: 0 32px 80px rgba(15, 23, 42, 0.28);
+}
+
+.s-retake-plan-modal-header,
+.s-retake-plan-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+  background: #ffffff;
+}
+
+.s-retake-plan-modal-header {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.s-retake-plan-modal-header h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 22px;
+}
+
+.s-retake-plan-modal-header p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.s-retake-plan-modal-close {
+  border: none;
+  background: transparent;
+  color: #475467;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.s-retake-plan-modal-body {
+  max-height: calc(88vh - 148px);
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.s-retake-plan-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
+  gap: 20px;
+}
+
+.s-retake-plan-subjects,
+.s-retake-plan-selection-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.s-retake-plan-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.s-retake-plan-field span {
+  color: #475467;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.s-retake-plan-field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.s-retake-plan-selection-panel h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.s-retake-plan-selection-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.s-retake-plan-selection-item.flagged {
+  border-color: #fca5a5;
+  background: #fff5f5;
+}
+
+.s-retake-plan-secondary-btn {
+  background: #066287;
+}
+
+.s-retake-plan-secondary-btn:hover {
+  background: #1a3d5c;
+}
+
+.s-irregular-request-card {
+  margin-bottom: 24px;
+}
+
+.s-irregular-request-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.s-irregular-request-text {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #475467;
+}
+
+.s-irregular-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.s-irregular-request-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.s-irregular-request-btn:hover {
+  border-color: #066287;
+  color: #066287;
+}
+
+.s-irregular-request-btn.selected {
+  border-color: #0f766e;
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.s-irregular-request-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.s-irregular-request-selection {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #f8fbff;
+  color: #0f4c81;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.s-irregular-request-selection strong {
+  color: #0f172a;
+}
+
+.s-section-request-modal {
+  width: min(760px, 100%);
+}
+
+.s-section-request-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.s-section-request-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #dbe4ee;
+  border-radius: 16px;
+  background: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.s-section-request-option:hover {
+  border-color: #94a3b8;
+}
+
+.s-section-request-option.selected {
+  border-color: #0f766e;
+  background: #ecfdf5;
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.12);
+}
+
+.s-section-request-control {
+  padding-top: 2px;
+}
+
+.s-section-request-control input {
+  width: 16px;
+  height: 16px;
+}
+
+.s-section-request-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.s-section-request-copy strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.s-section-request-copy span {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .s-finance-stat {
@@ -403,6 +866,13 @@
 .s-enroll-btn:hover {
   background: #1A3D5C;
   transform: translateY(-2px);
+}
+
+.s-enroll-btn:disabled {
+  background: #cbd5e1;
+  color: #64748b;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .s-download-confirmation-btn {
@@ -463,6 +933,53 @@
   
   .s-enrollment-actions {
     flex-direction: column;
+  }
+
+  .s-retake-advisory-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .s-retake-plan-header,
+  .s-retake-plan-summary-item,
+  .s-retake-plan-modal-header,
+  .s-retake-plan-modal-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .s-retake-plan-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .s-irregular-request-header,
+  .s-retake-plan-summary-status {
+    max-width: none;
+  }
+
+  .s-retake-plan-modal-overlay {
+    padding: 12px;
+  }
+
+  .s-retake-plan-modal-body {
+    padding: 18px;
+  }
+
+  .s-retake-advisory-meta {
+    justify-content: flex-start;
+  }
+
+  .s-irregular-request-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .s-irregular-request-actions {
+    flex-direction: column;
+  }
+
+  .s-irregular-request-btn {
+    width: 100%;
   }
   
   .s-enroll-btn, .s-download-confirmation-btn {

@@ -4,11 +4,13 @@ import type {
   StudentPortalCredentialSummary,
   StudentPortalSubject,
 } from "../services/adminStorage";
+import type { StudentPortalCurrentTerm } from "../services/studentApi";
 import type { Student } from "../types/student";
 
 export interface StudentContextType {
   student: Student | null;
   subjects: StudentPortalSubject[];
+  currentTerm: StudentPortalCurrentTerm | null;
   credentialItems: StudentPortalCredentialItem[];
   credentialSummary: StudentPortalCredentialSummary | null;
   isLoading: boolean;

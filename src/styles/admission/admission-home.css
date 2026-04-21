@@ -91,22 +91,72 @@
    margin: 5px 0 30px; /* Reduced margin */
 }
 
-.content a {
+.admission-primary-action {
   background-color: #6AE18C;
   color: white;
-  text-decoration: none;
   font-size: clamp(18px, 2.8vw, 24px);
   font-weight: bold;
   padding: 14px 60px; /* Reduced padding */
   border-radius: 10px;
   display: inline-block;
   letter-spacing: 1px;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
   transition: transform 0.2s ease; /* Smooth hover effect */
 }
 
-.content a:hover {
+.admission-primary-action:hover:not(:disabled) {
   transform: scale(1.02); /* Slight grow on hover */
   background-color: #5bc97a; /* Slightly darker on hover */
+}
+
+.admission-primary-action:disabled {
+  background: #94a3b8;
+  color: #e2e8f0;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.admission-portal-banner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.admission-portal-banner.is-open {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(187, 247, 208, 0.55);
+  color: #dcfce7;
+}
+
+.admission-portal-banner.is-closed {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(253, 224, 71, 0.65);
+  color: #fef3c7;
+}
+
+.content .admission-portal-note {
+  max-width: 620px;
+  margin-top: -4px;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.content .admission-portal-note.is-open {
+  color: #dcfce7;
+}
+
+.content .admission-portal-note.is-closed {
+  color: #f8fafc;
 }
 
 
@@ -124,7 +174,6 @@
 }
 
 .input-field {
-  flex: 1;
   min-width: 220px;
   max-width: 320px;
   padding: 12px 16px; /* Reduced padding */
@@ -145,20 +194,26 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;                        
-  width: 70px; /* Slightly smaller */                      
+  gap: 8px;
+  min-width: 124px;
   min-height: 50px;
+  padding: 10px 14px;
   background-color: #1064CB;
   border-radius: 10px;
   color: white;
   font-size: 13px;
   text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
+  text-align: center;
+  line-height: 1.2;
 }
 
 .track-container a:hover {
   background-color: #0a4a9e; /* Darker on hover */
+}
+
+.track-cont.disabled {
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .disabled-branch {
@@ -198,7 +253,7 @@
     margin: 5px 0 25px;
   }
   
-  .content a {
+  .admission-primary-action {
     padding: 12px 50px;
   }
   
@@ -207,7 +262,7 @@
   }
 
   .track-container .track-cont{
-    width: 120px;
+    min-width: 120px;
     font-size: 12px;
   }
 
@@ -216,10 +271,10 @@
 
 @media (max-width: 720px) {
   .track-container a {
-    width: 84px;
+    min-width: 110px;
     min-height: 64px;
     font-size: 12.5px;
-    padding: 6px 4px;
+    padding: 8px 10px;
   }
 
   .track-container a svg {
@@ -229,11 +284,11 @@
 
 @media (max-width: 480px) {
   .track-container a {
-    width: 78px;
+    min-width: 96px;
     min-height: 60px;
     font-size: 11.5px;             
     gap: 3px;
-    padding: 6px 4px;
+    padding: 8px 8px;
   }
 
   .track-container span {
@@ -265,7 +320,7 @@
   }
 
   .content h1 { font-size: clamp(32px, 8vw, 44px); }
-  .content a  { padding: 16px 60px; font-size: 20px; }
+  .admission-primary-action  { padding: 16px 60px; font-size: 20px; }
   #p2         { margin: 8px 0 40px; font-size: clamp(20px, 5.5vw, 28px); }
 
   .form-and-track-wrapper {
@@ -292,7 +347,7 @@
     padding-bottom: 200px;
   }
 
-  .content a { padding: 14px 50px; font-size: 18px; }
+  .admission-primary-action { padding: 14px 50px; font-size: 18px; }
 
   .form-and-track-wrapper {
     bottom: 24px;
@@ -305,8 +360,8 @@
   }
 
   .track-container a {
-    width: 50px;
-    height: 50px;
-    font-size: 1.4rem;
+    min-width: 96px;
+    min-height: 50px;
+    font-size: 11.5px;
   }
 }

@@ -37,10 +37,12 @@ import {
   promoteApplicantToStoredStudent,
   readBranchScopedData,
   readStoredStudents,
+  updateStoredStudentOwnScheduleState,
   writeBranchScopedData,
   writeStoredStudents,
 } from "../../services/adminStorage";
 import type {
+  StudentScheduledAssignmentItem,
   StudentSubjectPlanItem,
   StudentSubjectPlanRecord,
 } from "../../services/adminStorage";
@@ -50,6 +52,16 @@ import {
   updateAdmissionProgress,
 } from "../../services/admission";
 import { activateApprovedStudent } from "../../services/auth";
+import {
+  getRegularEnrollmentRequirementItems,
+  readEnrollmentRequestsForBranch,
+  type EnrollmentRequestRecord,
+  writeEnrollmentRequestsForBranch,
+} from "../../services/enrollmentRequests";
+import {
+  buildScheduledAssignmentConflicts,
+  formatScheduledAssignmentLabel,
+} from "../../services/enrollmentLoadPlanner";
 import "../../styles/admin/admin-enrolles.css";
 
 interface EnrolleesProps {
@@ -112,21 +124,7 @@ interface Enrollee {
   archivedByRole?: "Admin" | "Registrar";
 }
 
-interface EnrollmentRequest {
-  id: string;
-  studentNumber: string;
-  fullName: string;
-  program: string;
-  currentYearLevel: string;
-  requestedYearLevel: string;
-  academicYear: string;
-  semester: string;
-  enrollmentStatus: "Pending" | "Approved" | "Rejected";
-  requestDate: string;
-  enrollmentDate?: string;
-  notes?: string;
-  attachments?: Attachment[];
-}
+type EnrollmentRequest = EnrollmentRequestRecord;
 
 interface ClassSection {
   id: string;
@@ -327,6 +325,30 @@ const normalizeStringList = (value: unknown) =>
       )
     : [];
 
+const getUniqueTrimmedValues = (
+  values: Array<string | null | undefined>,
+): string[] => {
+  const seen = new Set<string>();
+
+  return values.reduce<string[]>((result, value) => {
+    const trimmedValue = value?.trim();
+
+    if (!trimmedValue) {
+      return result;
+    }
+
+    const normalizedValue = trimmedValue.toLowerCase();
+
+    if (seen.has(normalizedValue)) {
+      return result;
+    }
+
+    seen.add(normalizedValue);
+    result.push(trimmedValue);
+    return result;
+  }, []);
+};
+
 const normalizeTransfereeEvaluation = (
   enrollee: Pick<Enrollee, "id" | "yearLevel">,
   evaluation: Partial<TransfereeEvaluationRecord> | null | undefined,
@@ -377,6 +399,17 @@ const SCHEDULE_DAYS = [
   "Wednesday",
   "Thursday",
   "Friday",
+] as const;
+const DEFAULT_ASSIGNMENT_ROOMS = [
+  "RM101",
+  "RM102",
+  "RM103",
+  "RM104",
+  "RM205",
+  "Computer Lab 1",
+  "Computer Lab 2",
+  "Science Lab",
+  "Library",
 ] as const;
 const SEMESTER_SORT_ORDER = ["1st Semester", "2nd Semester", "Summer"] as const;
 const SCHEDULE_DURATION_OPTIONS = [60, 120, 180] as const;
@@ -586,9 +619,12 @@ const createAutoScheduleSlots = (subjectCount: number) => {
 // Get requirement items for enrollment requests based on current and requested level
 const getEnrollmentRequirementItems = (
   currentYearLevel: string,
-  requestedYearLevel: string,
-  program: string,
+  _requestedYearLevel: string,
+  _program: string,
 ) => {
+  void _requestedYearLevel;
+  void _program;
+
   if (!currentYearLevel) {
     // Default requirements for new admissions
     return [
@@ -598,66 +634,12 @@ const getEnrollmentRequirementItems = (
       { name: "Certificate of Completion", required: true, key: "coc" },
     ];
   }
-  const requirements = [];
 
-  if (
-    program === "SHS" &&
-    currentYearLevel === "Grade 11" &&
-    requestedYearLevel === "Grade 12"
-  ) {
-    requirements.push({
-      name: "Grade 11 Certificate of Grades",
-      required: true,
-      key: "grade11_certificate",
-    });
-    requirements.push({
-      name: "Clearance",
-      required: true,
-      key: "clearance",
-    });
-  } else if (program === "College") {
-    const yearMap: Record<string, string> = {
-      "1st Year": "1st Year Certificate of Grades",
-      "2nd Year": "2nd Year Certificate of Grades",
-      "3rd Year": "3rd Year Certificate of Grades",
-    };
-
-    if (yearMap[currentYearLevel]) {
-      requirements.push({
-        name: yearMap[currentYearLevel],
-        required: true,
-        key: "grades_certificate",
-      });
-    }
-    requirements.push({
-      name: "Clearance",
-      required: true,
-      key: "clearance",
-    });
-  } else if (
-    program === "SHS" &&
-    currentYearLevel === "Grade 12" &&
-    requestedYearLevel === "College"
-  ) {
-    requirements.push({
-      name: "Grade 12 Certificate of Completion",
-      required: true,
-      key: "grade12_completion",
-    });
-    requirements.push({
-      name: "Clearance",
-      required: true,
-      key: "clearance",
-    });
-  }
-
-  requirements.push({
-    name: "Certificate of Enrollment",
-    required: true,
-    key: "enrollment_certificate",
-  });
-
-  return requirements;
+  return getRegularEnrollmentRequirementItems().map((requirement) => ({
+    name: requirement.name,
+    required: requirement.required,
+    key: requirement.key,
+  }));
 };
 
 const mapAdminProgramToAdmissionProgram = (program: string) =>
@@ -927,6 +909,30 @@ const buildSectionCode = ({
   return `${prefix}${getSectionYearCode(yearLevel)}${normalizedSection}`;
 };
 
+const buildProgressedBlockSectionCode = ({
+  currentSectionCode,
+  requestedYearLevel,
+}: {
+  currentSectionCode?: string;
+  requestedYearLevel: string;
+}) => {
+  const normalizedCode = currentSectionCode?.trim().toUpperCase();
+
+  if (!normalizedCode) {
+    return "";
+  }
+
+  const requestedYearCode = getSectionYearCode(requestedYearLevel);
+  const codeParts = normalizedCode.match(/^(.*?)([1-4])([A-Z]+)$/);
+
+  if (!codeParts) {
+    return normalizedCode;
+  }
+
+  const [, prefix, , blockLabel] = codeParts;
+  return `${prefix}${requestedYearCode}${blockLabel}`;
+};
+
 export default function AdminEnrollees({
   onLogout,
   loggedInUsername,
@@ -1063,6 +1069,11 @@ export default function AdminEnrollees({
   >([]);
   const [showAssignmentDeleteModal, setShowAssignmentDeleteModal] =
     useState(false);
+  const [customAssignmentRooms, setCustomAssignmentRooms] = useState<string[]>(
+    [],
+  );
+  const [showRoomCreator, setShowRoomCreator] = useState(false);
+  const [newRoomName, setNewRoomName] = useState("");
   const [assignmentForm, setAssignmentForm] = useState<AssignmentFormState>(
     createDefaultAssignmentForm(),
   );
@@ -1125,6 +1136,7 @@ export default function AdminEnrollees({
     subjects: "subjects",
     instructors: "instructors",
     subjectAssignments: "subject-assignments",
+    assignmentRooms: "assignment-rooms",
     transfereeEvaluations: "transferee-evaluations",
     studentSubjectPlans: "student-subject-plans",
   } as const;
@@ -2337,9 +2349,24 @@ export default function AdminEnrollees({
     };
   };
 
+  const assignmentRoomOptions = getUniqueTrimmedValues([
+    ...DEFAULT_ASSIGNMENT_ROOMS,
+    ...customAssignmentRooms,
+    ...subjectAssignments.flatMap((assignment) =>
+      assignment.schedule.map((slot) => slot.room),
+    ),
+    assignmentForm.room,
+  ]);
+
+  const resetRoomCreator = () => {
+    setShowRoomCreator(false);
+    setNewRoomName("");
+  };
+
   const closeAssignmentModal = () => {
     setShowAssignmentModal(false);
     setEditingAssignment(null);
+    resetRoomCreator();
     setAssignmentForm(createDefaultAssignmentForm());
   };
 
@@ -2609,6 +2636,39 @@ export default function AdminEnrollees({
     closeAssignmentModal();
   };
 
+  const handleCreateRoomOption = () => {
+    const trimmedRoomName = newRoomName.trim();
+
+    if (!trimmedRoomName) {
+      addToast("Enter a room name first.", "warning");
+      return;
+    }
+
+    const matchingRoom = assignmentRoomOptions.find(
+      (room) => room.toLowerCase() === trimmedRoomName.toLowerCase(),
+    );
+
+    if (matchingRoom) {
+      setAssignmentForm((prev) => ({
+        ...prev,
+        room: matchingRoom,
+      }));
+      resetRoomCreator();
+      addToast(`${matchingRoom} is already in the room list.`, "info");
+      return;
+    }
+
+    setCustomAssignmentRooms((prev) =>
+      getUniqueTrimmedValues([...prev, trimmedRoomName]),
+    );
+    setAssignmentForm((prev) => ({
+      ...prev,
+      room: trimmedRoomName,
+    }));
+    resetRoomCreator();
+    addToast(`Room ${trimmedRoomName} added.`, "success");
+  };
+
   const handleRemoveAssignment = (assignmentId: string) => {
     openAssignmentDeleteModal([assignmentId]);
   };
@@ -2828,6 +2888,295 @@ export default function AdminEnrollees({
         subjectCode: subject.code,
         subjectName: subject.name,
       }));
+  };
+
+  const mapScheduledAssignmentsToStudentSubjectPlanItems = (
+    assignments: NonNullable<EnrollmentRequest["requestedLoad"]>["scheduledAssignments"],
+  ): StudentSubjectPlanItem[] =>
+    Array.from(
+      assignments.reduce((items, assignment) => {
+        const key = `${assignment.subjectId}:${assignment.subjectCode}`;
+
+        if (!items.has(key)) {
+          items.set(key, {
+            subjectId: assignment.subjectId,
+            subjectCode: assignment.subjectCode,
+            subjectName: assignment.subjectName,
+            units: assignment.units,
+          });
+        }
+
+        return items;
+      }, new Map<string, StudentSubjectPlanItem>()),
+    )
+      .map(([, item]) => item)
+      .sort(
+        (left, right) =>
+          left.subjectCode.localeCompare(right.subjectCode) ||
+          left.subjectName.localeCompare(right.subjectName),
+      );
+
+  const getMatchingStudentSubjectPlanEntry = (
+    request: Pick<EnrollmentRequest, "studentNumber" | "trackingNumber">,
+    plans: Record<string, StudentSubjectPlanRecord>,
+  ) =>
+    Object.entries(plans).find(([, plan]) => {
+      if (request.trackingNumber && plan.trackingNumber === request.trackingNumber) {
+        return true;
+      }
+
+      return Boolean(request.studentNumber) && plan.studentNumber === request.studentNumber;
+    }) ?? null;
+
+  const mapSubjectAssignmentToStudentScheduledAssignment = (
+    assignment: SubjectAssignment,
+  ): StudentScheduledAssignmentItem => ({
+    assignmentId: assignment.id,
+    subjectId: assignment.subjectId,
+    subjectCode: assignment.subjectCode,
+    subjectName: assignment.subjectName,
+    instructorId: assignment.instructorId,
+    instructorName: assignment.instructorName,
+    sectionId: assignment.sectionId,
+    sectionCode: assignment.sectionCode,
+    schedule: assignment.schedule,
+    academicYear: assignment.academicYear,
+    semester: assignment.semester,
+  });
+
+  const getRequestedSectionForEnrollmentRequest = (request: EnrollmentRequest) => {
+    if (request.irregularRequest?.mode !== "section_assignment") {
+      return null;
+    }
+
+    return (
+      classSections.find(
+        (section) =>
+          (request.irregularRequest?.requestedSectionId &&
+            section.id === request.irregularRequest.requestedSectionId) ||
+          (request.irregularRequest?.requestedSectionCode &&
+            section.code === request.irregularRequest.requestedSectionCode),
+      ) ?? null
+    );
+  };
+
+  const getEnrollmentRequestSectionPlanAssignments = (
+    request: EnrollmentRequest,
+  ): StudentScheduledAssignmentItem[] => {
+    if (request.irregularRequest?.mode !== "section_assignment") {
+      return [];
+    }
+
+    const requestedSectionId = request.irregularRequest.requestedSectionId;
+    const requestedSectionCode = request.irregularRequest.requestedSectionCode;
+    const matchingCatalogSubjects = subjects.filter(
+      (subject) =>
+        subject.program === request.program &&
+        subject.yearLevel === request.requestedYearLevel &&
+        subject.semester === normalizeSectionSemester(request.semester) &&
+        matchesAcademicDescriptor(
+          resolveSubjectStrandOrCourse(subject),
+          request.strandOrCourse,
+        ),
+    );
+    const matchingSubjectIds = new Set(
+      matchingCatalogSubjects.map((subject) => subject.id),
+    );
+    const matchingSubjectCodes = new Set(
+      matchingCatalogSubjects.map((subject) => subject.code),
+    );
+
+    return subjectAssignments
+      .filter(
+        (assignment) =>
+          assignment.academicYear === request.academicYear &&
+          assignment.semester === request.semester &&
+          ((requestedSectionId && assignment.sectionId === requestedSectionId) ||
+            (!requestedSectionId &&
+              requestedSectionCode &&
+              assignment.sectionCode === requestedSectionCode)) &&
+          (matchingSubjectIds.size === 0 ||
+            matchingSubjectIds.has(assignment.subjectId) ||
+            matchingSubjectCodes.has(assignment.subjectCode)),
+      )
+      .map(mapSubjectAssignmentToStudentScheduledAssignment)
+      .sort(
+        (left, right) =>
+          left.subjectCode.localeCompare(right.subjectCode) ||
+          (left.sectionCode || "").localeCompare(right.sectionCode || ""),
+      );
+  };
+
+  const getEnrollmentRequestScheduledAssignments = (
+    request: EnrollmentRequest,
+  ): StudentScheduledAssignmentItem[] =>
+    Array.from(
+      [
+        ...(request.requestedLoad?.mode === "retake"
+          ? request.requestedLoad.scheduledAssignments
+          : []),
+        ...getEnrollmentRequestSectionPlanAssignments(request),
+      ].reduce((items, assignment) => {
+        items.set(assignment.assignmentId, assignment);
+        return items;
+      }, new Map<string, StudentScheduledAssignmentItem>()),
+    )
+      .map(([, assignment]) => assignment)
+      .sort(
+        (left, right) =>
+          left.subjectCode.localeCompare(right.subjectCode) ||
+          (left.sectionCode || "").localeCompare(right.sectionCode || ""),
+      );
+
+  const syncEnrollmentRequestSubjectPlan = (
+    request: EnrollmentRequest,
+    updatedAt: string,
+  ) => {
+    const scheduledAssignments = getEnrollmentRequestScheduledAssignments(request);
+
+    setStudentSubjectPlans((prev) => {
+      const matchingEntry = getMatchingStudentSubjectPlanEntry(request, prev);
+      const planKey =
+        matchingEntry?.[0] || request.trackingNumber || request.studentNumber;
+      const existingPlan = matchingEntry?.[1];
+      const assignedSubjects =
+        scheduledAssignments.length > 0
+          ? mapScheduledAssignmentsToStudentSubjectPlanItems(scheduledAssignments)
+          : [];
+
+      if (!planKey) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [planKey]: {
+          id: planKey,
+          enrolleeId: existingPlan?.enrolleeId,
+          trackingNumber: request.trackingNumber || existingPlan?.trackingNumber,
+          studentNumber: request.studentNumber || existingPlan?.studentNumber,
+          semester: request.semester,
+          academicYear: request.academicYear,
+          assignedSubjects,
+          creditedSubjects: existingPlan?.creditedSubjects ?? [],
+          scheduledAssignments:
+            scheduledAssignments.length > 0 ? scheduledAssignments : undefined,
+          notes:
+            request.notes ||
+            existingPlan?.notes ||
+            "Approved from enrollment request.",
+          updatedAt,
+          source: "enrollment_request",
+        },
+      };
+    });
+  };
+
+  const syncEnrollmentRequestStudentState = (request: EnrollmentRequest) => {
+    const resolvedBranch = normalizeBranchName(request.branch);
+    const nextStudentsWithApprovedTerm = readStoredStudents().map((student) => {
+      const matchesBranch = normalizeBranchName(student.branch) === resolvedBranch;
+      const matchesStudentNumber =
+        request.studentNumber && student.id === request.studentNumber && matchesBranch;
+      const matchesTrackingNumber =
+        request.trackingNumber &&
+        student.trackingNumber === request.trackingNumber &&
+        matchesBranch;
+
+      if (!matchesStudentNumber && !matchesTrackingNumber) {
+        return student;
+      }
+
+      return {
+        ...student,
+        yearLevel: request.requestedYearLevel,
+        section:
+          request.irregularRequest?.mode === "own_schedule"
+            ? ""
+            : request.irregularRequest?.mode === "section_assignment"
+              ? student.section
+              : buildProgressedBlockSectionCode({
+                  currentSectionCode: student.section,
+                  requestedYearLevel: request.requestedYearLevel,
+                }) || student.section,
+      };
+    });
+
+    writeStoredStudents(nextStudentsWithApprovedTerm);
+
+    if (request.irregularRequest?.mode === "own_schedule") {
+      setStudentSubjectPlans((prev) => {
+        const matchingEntry = getMatchingStudentSubjectPlanEntry(request, prev);
+
+        if (!matchingEntry) {
+          return prev;
+        }
+
+        const nextPlans = { ...prev };
+        delete nextPlans[matchingEntry[0]];
+        return nextPlans;
+      });
+
+      updateStoredStudentOwnScheduleState({
+        branch: request.branch,
+        studentNumber: request.studentNumber,
+        trackingNumber: request.trackingNumber,
+        updates: {
+          requestedOwnSchedule: true,
+          ownScheduleRequestStatus: "Approved",
+          ownScheduleAcademicYear: request.academicYear,
+          ownScheduleSemester: request.semester,
+          ownScheduleSelectionStatus: "Not Submitted",
+        },
+      });
+      return;
+    }
+
+    updateStoredStudentOwnScheduleState({
+      branch: request.branch,
+      studentNumber: request.studentNumber,
+      trackingNumber: request.trackingNumber,
+      updates: {
+        requestedOwnSchedule: false,
+        ownScheduleRequestStatus: undefined,
+        ownScheduleAcademicYear: undefined,
+        ownScheduleSemester: undefined,
+        ownScheduleSelectionStatus: undefined,
+      },
+    });
+
+    if (request.irregularRequest?.mode !== "section_assignment") {
+      return;
+    }
+
+    const requestedSectionCode =
+      request.irregularRequest.requestedSectionCode ||
+      getRequestedSectionForEnrollmentRequest(request)?.code;
+
+    if (!requestedSectionCode) {
+      return;
+    }
+
+    const nextStudents = readStoredStudents().map((student) => {
+      const matchesBranch = normalizeBranchName(student.branch) === resolvedBranch;
+      const matchesStudentNumber =
+        request.studentNumber && student.id === request.studentNumber && matchesBranch;
+      const matchesTrackingNumber =
+        request.trackingNumber &&
+        student.trackingNumber === request.trackingNumber &&
+        matchesBranch;
+
+      if (!matchesStudentNumber && !matchesTrackingNumber) {
+        return student;
+      }
+
+      return {
+        ...student,
+        section: requestedSectionCode,
+      };
+    });
+
+    writeStoredStudents(nextStudents);
   };
 
   const syncStudentSubjectPlan = (
@@ -3338,12 +3687,9 @@ export default function AdminEnrollees({
   const loadEnrollmentRequests = async () => {
     setIsLoading(true);
     try {
-      const storedRequests = readBranchScopedData<EnrollmentRequest[]>(
-        storageScopes.enrollmentRequests,
-        currentBranch,
-      );
+      const storedRequests = readEnrollmentRequestsForBranch(currentBranch);
 
-      if (storedRequests?.length) {
+      if (storedRequests.length > 0) {
         setEnrollmentRequests(storedRequests);
         return;
       }
@@ -3352,19 +3698,24 @@ export default function AdminEnrollees({
       const mockEnrollmentRequests: EnrollmentRequest[] = [
         {
           id: "ER001",
+          branch: currentBranch,
           studentNumber: `${branchStudentPrefix}-261001`,
           fullName: "Kenneth Lyle Sohot",
+          trackingNumber: "TRK-ER001",
           program: "SHS",
+          strandOrCourse: "Technical Livelihood Track - ICT",
           currentYearLevel: "Grade 11",
+          currentSemester: "2nd Semester",
           requestedYearLevel: "Grade 12",
           academicYear: "2026-2027",
           semester: "1st Semester",
           enrollmentStatus: "Pending",
           requestDate: "2026-03-15",
+          updatedAt: "2026-03-15T09:00:00.000Z",
           notes: "Grade 11 completer, all requirements submitted",
           attachments: [
             {
-              name: "Grade 11 Certificate of Grades",
+              name: "Semester Grades Certificate",
               type: "pdf",
               url: "/documents/maria_grades.pdf",
               reviewStatus: "Pending",
@@ -3375,29 +3726,28 @@ export default function AdminEnrollees({
               url: "/documents/maria_clearance.pdf",
               reviewStatus: "Pending",
             },
-            {
-              name: "Certificate of Enrollment",
-              type: "pdf",
-              url: "/documents/maria_enrollment.pdf",
-              reviewStatus: "Pending",
-            },
           ],
         },
         {
           id: "ER002",
+          branch: currentBranch,
           studentNumber: `${branchStudentPrefix}-261002`,
           fullName: "Neil John Velasco",
+          trackingNumber: "TRK-ER002",
           program: "College",
+          strandOrCourse: "BSE - Bachelor of Entrepreneurship",
           currentYearLevel: "3rd Year",
+          currentSemester: "2nd Semester",
           requestedYearLevel: "4th Year",
           academicYear: "2026-2027",
           semester: "1st Semester",
           enrollmentStatus: "Pending",
           requestDate: "2026-03-14",
+          updatedAt: "2026-03-14T10:30:00.000Z",
           notes: "Good academic standing",
           attachments: [
             {
-              name: "3rd Year Certificate of Grades",
+              name: "Semester Grades Certificate",
               type: "pdf",
               url: "/documents/juan_grades.pdf",
               reviewStatus: "Approved",
@@ -3408,30 +3758,29 @@ export default function AdminEnrollees({
               url: "/documents/juan_clearance.pdf",
               reviewStatus: "Pending",
             },
-            {
-              name: "Certificate of Enrollment",
-              type: "pdf",
-              url: "/documents/juan_enrollment.pdf",
-              reviewStatus: "Pending",
-            },
           ],
         },
         {
           id: "ER003",
+          branch: currentBranch,
           studentNumber: `${branchStudentPrefix}-261003`,
           fullName: "Hener Verdida",
+          trackingNumber: "TRK-ER003",
           program: "SHS",
-          currentYearLevel: "Grade 12",
-          requestedYearLevel: "College",
+          strandOrCourse: "Technical Livelihood Track - ICT",
+          currentYearLevel: "Grade 11",
+          currentSemester: "2nd Semester",
+          requestedYearLevel: "Grade 12",
           academicYear: "2026-2027",
           semester: "1st Semester",
           enrollmentStatus: "Approved",
           requestDate: "2026-03-10",
           enrollmentDate: "2026-03-12",
+          updatedAt: "2026-03-12T13:45:00.000Z",
           notes: "Graduating with honors",
           attachments: [
             {
-              name: "Grade 12 Certificate of Completion",
+              name: "Semester Grades Certificate",
               type: "pdf",
               url: "/documents/ana_completion.pdf",
               reviewStatus: "Approved",
@@ -3440,12 +3789,6 @@ export default function AdminEnrollees({
               name: "Clearance",
               type: "pdf",
               url: "/documents/ana_clearance.pdf",
-              reviewStatus: "Approved",
-            },
-            {
-              name: "Certificate of Enrollment",
-              type: "pdf",
-              url: "/documents/ana_enrollment.pdf",
               reviewStatus: "Approved",
             },
           ],
@@ -3538,11 +3881,7 @@ export default function AdminEnrollees({
       return;
     }
 
-    writeBranchScopedData(
-      storageScopes.enrollmentRequests,
-      currentBranch,
-      enrollmentRequests,
-    );
+    writeEnrollmentRequestsForBranch(currentBranch, enrollmentRequests);
   }, [currentBranch, enrollmentRequests, hasInitializedBranchData]);
 
   useEffect(() => {
@@ -3580,10 +3919,15 @@ export default function AdminEnrollees({
       const storedStudentSubjectPlans = readBranchScopedData<
         Record<string, StudentSubjectPlanRecord>
       >(storageScopes.studentSubjectPlans, currentBranch);
+      const storedAssignmentRooms = readBranchScopedData<string[]>(
+        storageScopes.assignmentRooms,
+        currentBranch,
+      );
 
       setSectionAssignments(storedSectionAssignments ?? []);
       setTransfereeEvaluations(storedTransfereeEvaluations ?? {});
       setStudentSubjectPlans(storedStudentSubjectPlans ?? {});
+      setCustomAssignmentRooms(getUniqueTrimmedValues(storedAssignmentRooms ?? []));
       await loadEnrollmentRequests();
       await loadEnrollees();
       loadClassSections();
@@ -3654,6 +3998,18 @@ export default function AdminEnrollees({
   }, [currentBranch, subjectAssignments, hasInitializedBranchData]);
 
   useEffect(() => {
+    if (!hasInitializedBranchData) {
+      return;
+    }
+
+    writeBranchScopedData(
+      storageScopes.assignmentRooms,
+      currentBranch,
+      customAssignmentRooms,
+    );
+  }, [currentBranch, customAssignmentRooms, hasInitializedBranchData]);
+
+  useEffect(() => {
     updatePendingAssignments();
   }, [enrollees, sectionAssignments]);
 
@@ -3666,6 +4022,7 @@ export default function AdminEnrollees({
 
     const request = enrollmentRequests.find((r) => r.id === requestId);
     const enrollee = enrollees.find((record) => record.id === requestId);
+    const updatedAt = new Date().toISOString();
     const sourceAttachments = request?.attachments || enrollee?.attachments;
 
     if (!sourceAttachments) {
@@ -3679,21 +4036,6 @@ export default function AdminEnrollees({
         : attachment,
     );
 
-    const requirementItems = getEnrollmentRequirementItems(
-      request?.currentYearLevel || "",
-      request?.requestedYearLevel || "",
-      request?.program || enrollee?.program || "",
-    );
-
-    const allRequirementsApproved =
-      updatedAttachments.length >= requirementItems.length &&
-      updatedAttachments
-        .slice(0, requirementItems.length)
-        .every((attachment) => attachment.reviewStatus === "Approved");
-
-    const nextStatus: EnrollmentRequest["enrollmentStatus"] =
-      allRequirementsApproved ? "Approved" : "Pending";
-
     if (request) {
       setEnrollmentRequests((prevRequests) =>
         prevRequests.map((record) =>
@@ -3701,7 +4043,7 @@ export default function AdminEnrollees({
             ? {
                 ...record,
                 attachments: updatedAttachments,
-                enrollmentStatus: nextStatus,
+                updatedAt,
               }
             : record,
         ),
@@ -3727,7 +4069,7 @@ export default function AdminEnrollees({
           ? {
               ...prev,
               attachments: updatedAttachments,
-              ...(request ? { enrollmentStatus: nextStatus } : {}),
+              ...(request ? { updatedAt } : {}),
             }
           : null,
       );
@@ -3804,6 +4146,31 @@ export default function AdminEnrollees({
 
   const handleApproveRequest = (request: EnrollmentRequest | Enrollee) => {
     let scholarshipExamScore: number | null = null;
+
+    if (isEnrollmentRequest(request)) {
+      const requestedScheduleConflicts = buildScheduledAssignmentConflicts(
+        getEnrollmentRequestScheduledAssignments(request),
+      );
+
+      if (
+        request.irregularRequest?.mode === "section_assignment" &&
+        !getRequestedSectionForEnrollmentRequest(request)
+      ) {
+        addToast(
+          "The requested section is no longer available. Review the section request before approval.",
+          "warning",
+        );
+        return false;
+      }
+
+      if (requestedScheduleConflicts.length > 0) {
+        addToast(
+          "Resolve the requested enrollment load conflicts before approval.",
+          "warning",
+        );
+        return false;
+      }
+    }
 
     if (!isEnrollmentRequest(request) && isTransfereeAdmission(request)) {
       const evaluation = getTransfereeEvaluation(request);
@@ -4020,15 +4387,53 @@ export default function AdminEnrollees({
           addToast("Record not found.", "error");
         }
       } else {
+        if (selectedAction.action === "approve") {
+          const requestedSection = getRequestedSectionForEnrollmentRequest(
+            requestToUpdate,
+          );
+          const requestedScheduleConflicts = buildScheduledAssignmentConflicts(
+            getEnrollmentRequestScheduledAssignments(requestToUpdate),
+          );
+
+          if (
+            requestToUpdate.irregularRequest?.mode === "section_assignment" &&
+            !requestedSection
+          ) {
+            addToast(
+              "The requested section is no longer available for this enrollment request.",
+              "warning",
+            );
+            return;
+          }
+
+          if (requestedScheduleConflicts.length > 0) {
+            addToast(
+              "This enrollment request still has conflicting requested schedules.",
+              "warning",
+            );
+            return;
+          }
+        }
+
+        const reviewedAt = new Date();
         const updatedRequest: EnrollmentRequest = {
           ...requestToUpdate,
           enrollmentStatus:
             selectedAction.action === "approve" ? "Approved" : "Rejected",
           enrollmentDate:
             selectedAction.action === "approve"
-              ? new Date().toLocaleDateString()
+              ? reviewedAt.toLocaleDateString()
               : undefined,
+          updatedAt: reviewedAt.toISOString(),
         };
+
+        if (selectedAction.action === "approve") {
+          syncEnrollmentRequestSubjectPlan(
+            updatedRequest,
+            reviewedAt.toISOString(),
+          );
+          syncEnrollmentRequestStudentState(updatedRequest);
+        }
 
         setEnrollmentRequests((prevRequests) =>
           prevRequests.map((req) =>
@@ -4940,6 +5345,7 @@ export default function AdminEnrollees({
                     <th>PROGRAM</th>
                     <th>CURRENT LEVEL</th>
                     <th>REQUESTED LEVEL</th>
+                    <th>ENROLLING TERM</th>
                     <th>REQUEST DATE</th>
                     <th>STATUS</th>
                     <th>ACTION</th>
@@ -4960,6 +5366,10 @@ export default function AdminEnrollees({
                               ? "1st Year College"
                               : request.requestedYearLevel}
                           </span>
+                        </td>
+                        <td>
+                          <strong>{request.semester}</strong>
+                          <div>{request.academicYear}</div>
                         </td>
                         <td>{request.requestDate}</td>
                         <td>
@@ -4983,7 +5393,7 @@ export default function AdminEnrollees({
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={8} className="no-results">
+                      <td colSpan={9} className="no-results">
                         No enrollment requests found.
                       </td>
                     </tr>
@@ -5599,16 +6009,6 @@ export default function AdminEnrollees({
                             </button>
                             <button
                               type="button"
-                              className="action-btn add"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openCreateAssignmentModal(section.id);
-                              }}
-                            >
-                              Assign Subjects
-                            </button>
-                            <button
-                              type="button"
                               className="action-btn auto-assign"
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -5961,6 +6361,269 @@ export default function AdminEnrollees({
                   </div>
                 </div>
               </div>
+              {isEnrollmentRequest(selectedRequest) &&
+                selectedRequest.requestedLoad?.mode === "retake" && (
+                  <div className="requirements-section enrollment-retake-review-section">
+                    <h3>Requested Retake Load</h3>
+                    {(() => {
+                      const requestedLoad = selectedRequest.requestedLoad;
+                      const requestedLoadConflicts =
+                        buildScheduledAssignmentConflicts(
+                          requestedLoad.scheduledAssignments,
+                        );
+
+                      return (
+                        <>
+                          <div className="transferee-review-note">
+                            This enrollment request includes a student-selected
+                            retake load. Approving the request will publish the
+                            selected schedules as the student&apos;s official
+                            load when at least one schedule was chosen.
+                          </div>
+                          <div className="retake-request-summary-row">
+                            <div className="requirement-stat pending">
+                              <span>Retake subjects</span>
+                              <strong>{requestedLoad.subjects.length}</strong>
+                            </div>
+                            <div className="requirement-stat approved">
+                              <span>Selected schedules</span>
+                              <strong>
+                                {requestedLoad.scheduledAssignments.length}
+                              </strong>
+                            </div>
+                            <div className="requirement-stat redo">
+                              <span>Conflicts</span>
+                              <strong>{requestedLoadConflicts.length}</strong>
+                            </div>
+                          </div>
+                          {requestedLoadConflicts.length > 0 ? (
+                            <div className="retake-request-warning">
+                              <strong>Conflicting requested schedules.</strong>
+                              <ul className="retake-request-warning-list">
+                                {requestedLoadConflicts.map((conflict) => (
+                                  <li
+                                    key={`${conflict.leftAssignmentId}-${conflict.rightAssignmentId}`}
+                                  >
+                                    {conflict.message}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          <div className="retake-request-list">
+                            {requestedLoad.subjects.map((subject) => {
+                              const selectedAssignment =
+                                requestedLoad.scheduledAssignments.find(
+                                  (assignment) =>
+                                    assignment.subjectCode === subject.subjectCode ||
+                                    assignment.subjectId === subject.subjectId,
+                                );
+
+                              return (
+                                <div
+                                  key={`${subject.subjectCode}-${subject.subjectTitle}`}
+                                  className="retake-request-card"
+                                >
+                                  <div className="retake-request-card-head">
+                                    <div>
+                                      <strong>
+                                        {subject.subjectCode} -{" "}
+                                        {subject.subjectTitle}
+                                      </strong>
+                                      <p>
+                                        {subject.gradingPeriods.join(", ")}
+                                      </p>
+                                    </div>
+                                    <span className="retake-request-status-badge">
+                                      {subject.evaluation === "Incomplete"
+                                        ? "INC"
+                                        : "FAILED"}
+                                    </span>
+                                  </div>
+                                  <div className="retake-request-schedule">
+                                    {selectedAssignment ? (
+                                      <>
+                                        <span>Selected schedule</span>
+                                        <strong>
+                                          {formatScheduledAssignmentLabel(
+                                            selectedAssignment,
+                                          )}
+                                        </strong>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span>Selected schedule</span>
+                                        <strong>
+                                          No schedule offering was available at
+                                          submission time.
+                                        </strong>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+              {isEnrollmentRequest(selectedRequest) &&
+                selectedRequest.irregularRequest && (
+                  <div className="requirements-section enrollment-irregular-review-section">
+                    <h3>Irregular Enrollment Request</h3>
+                    {(() => {
+                      const irregularRequest = selectedRequest.irregularRequest;
+                      const requestedSection =
+                        getRequestedSectionForEnrollmentRequest(selectedRequest);
+                      const scheduledAssignments =
+                        getEnrollmentRequestScheduledAssignments(selectedRequest);
+                      const scheduledAssignmentConflicts =
+                        buildScheduledAssignmentConflicts(scheduledAssignments);
+
+                      return (
+                        <>
+                          <div className="transferee-review-note">
+                            {irregularRequest.mode === "own_schedule"
+                              ? "This student is asking to open the own schedule planner again for the next term. Approving the request will let the student submit a fresh schedule selection from the portal."
+                              : "This student asked to stay in a specific section for the next term. Approving the request will publish that section load as the student&apos;s official schedule when the section subjects are already available."}
+                          </div>
+                          <div className="retake-request-summary-row">
+                            <div className="requirement-stat pending">
+                              <span>Request type</span>
+                              <strong>
+                                {irregularRequest.mode === "own_schedule"
+                                  ? "Own Schedule"
+                                  : "Specific Section"}
+                              </strong>
+                            </div>
+                            <div className="requirement-stat approved">
+                              <span>
+                                {irregularRequest.mode === "own_schedule"
+                                  ? "Target term"
+                                  : "Requested section"}
+                              </span>
+                              <strong>
+                                {irregularRequest.mode === "own_schedule"
+                                  ? `${selectedRequest.semester}`
+                                  : requestedSection?.code ||
+                                    irregularRequest.requestedSectionCode ||
+                                    "Not available"}
+                              </strong>
+                            </div>
+                            <div className="requirement-stat redo">
+                              <span>Published schedules</span>
+                              <strong>{scheduledAssignments.length}</strong>
+                            </div>
+                          </div>
+                          {irregularRequest.mode === "section_assignment" &&
+                          !requestedSection ? (
+                            <div className="retake-request-warning">
+                              <strong>Requested section not found.</strong>
+                              <ul className="retake-request-warning-list">
+                                <li>
+                                  The section saved in this request is no longer
+                                  available in the current section list.
+                                </li>
+                              </ul>
+                            </div>
+                          ) : null}
+                          {scheduledAssignmentConflicts.length > 0 ? (
+                            <div className="retake-request-warning">
+                              <strong>Conflicting requested schedules.</strong>
+                              <ul className="retake-request-warning-list">
+                                {scheduledAssignmentConflicts.map((conflict) => (
+                                  <li
+                                    key={`${conflict.leftAssignmentId}-${conflict.rightAssignmentId}`}
+                                  >
+                                    {conflict.message}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          <div className="retake-request-list">
+                            <div className="retake-request-card enrollment-irregular-request-card">
+                              <div className="retake-request-card-head">
+                                <div>
+                                  <strong>
+                                    {irregularRequest.mode === "own_schedule"
+                                      ? "Portal own schedule request"
+                                      : `Section ${requestedSection?.code || irregularRequest.requestedSectionCode || "request"}`}
+                                  </strong>
+                                  <p>
+                                    {selectedRequest.requestedYearLevel} |{" "}
+                                    {selectedRequest.semester} |{" "}
+                                    {selectedRequest.academicYear}
+                                  </p>
+                                </div>
+                                <span className="retake-request-status-badge enrollment-irregular-badge">
+                                  {irregularRequest.mode === "own_schedule"
+                                    ? "OWN SCHEDULE"
+                                    : "SECTION"}
+                                </span>
+                              </div>
+                              <div className="retake-request-schedule">
+                                {irregularRequest.mode === "own_schedule" ? (
+                                  <>
+                                    <span>Approval result</span>
+                                    <strong>
+                                      Student can build and submit a new
+                                      schedule request in the portal for this
+                                      term.
+                                    </strong>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>Section details</span>
+                                    <strong>
+                                      {requestedSection
+                                        ? `${requestedSection.code} | ${requestedSection.currentEnrollees}/${requestedSection.maxCapacity} enrolled`
+                                        : "Section details are no longer available."}
+                                    </strong>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            {irregularRequest.mode === "section_assignment" &&
+                            scheduledAssignments.length > 0
+                              ? scheduledAssignments.map((assignment) => (
+                                  <div
+                                    key={assignment.assignmentId}
+                                    className="retake-request-card"
+                                  >
+                                    <div className="retake-request-card-head">
+                                      <div>
+                                        <strong>
+                                          {assignment.subjectCode} -{" "}
+                                          {assignment.subjectName}
+                                        </strong>
+                                        <p>
+                                          {assignment.sectionCode || "Section TBA"}
+                                        </p>
+                                      </div>
+                                      <span className="retake-request-status-badge enrollment-irregular-badge">
+                                        SECTION
+                                      </span>
+                                    </div>
+                                    <div className="retake-request-schedule">
+                                      <span>Published schedule on approve</span>
+                                      <strong>
+                                        {formatScheduledAssignmentLabel(
+                                          assignment,
+                                        )}
+                                      </strong>
+                                    </div>
+                                  </div>
+                                ))
+                              : null}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
               {!isEnrollmentRequest(selectedRequest) &&
                 selectedRequest.requestedOwnSchedule && (
                   <div className="requirements-section transferee-review-section">
@@ -6561,7 +7224,9 @@ export default function AdminEnrollees({
                           selectedRequest.documentsSubmitted;
                       const isSubmitted =
                         !!attachment &&
-                        (attachment.url !== "#" || isMockSubmitted);
+                        (enrollmentRequest ||
+                          attachment.url !== "#" ||
+                          isMockSubmitted);
 
                       return {
                         item,
@@ -7389,14 +8054,11 @@ export default function AdminEnrollees({
             <div className="review-modal-header">
               <div className="assignment-modal-heading">
                 <h2 id="assignment-modal-title">
-                  {editingAssignment
-                    ? "Edit Assignment"
-                    : "Assign Subjects to Section"}
+                  {editingAssignment ? "Edit Assignment" : "Create Assignment"}
                 </h2>
                 <p>
-                  Review the section, choose the subjects that should appear in
-                  the class assignment list, and add instructor or schedule
-                  details when they are ready.
+                  Choose the section, select the subjects to include, and set
+                  the instructor and schedule details for the class assignment.
                 </p>
               </div>
               <button
@@ -7586,55 +8248,128 @@ export default function AdminEnrollees({
                 </div>
                 <div className="assignment-schedule-panel">
                   <div className="assignment-schedule-heading">
-                    <label>Schedule (Optional)</label>
-                    <span></span>
+                    <label>Scheduling</label>
+                    <span>Set the day, time, and room for this assignment.</span>
                   </div>
                   <div className="schedule-inputs">
-                    <input
-                      type="text"
-                      placeholder="Day"
-                      value={assignmentForm.scheduleDay}
-                      onChange={(e) =>
-                        setAssignmentForm((prev) => ({
-                          ...prev,
-                          scheduleDay: e.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      type="time"
-                      placeholder="Start Time"
-                      value={assignmentForm.startTime}
-                      onChange={(e) =>
-                        setAssignmentForm((prev) => ({
-                          ...prev,
-                          startTime: e.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      type="time"
-                      placeholder="End Time"
-                      value={assignmentForm.endTime}
-                      onChange={(e) =>
-                        setAssignmentForm((prev) => ({
-                          ...prev,
-                          endTime: e.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      type="text"
-                      placeholder="Room"
-                      value={assignmentForm.room}
-                      onChange={(e) =>
-                        setAssignmentForm((prev) => ({
-                          ...prev,
-                          room: e.target.value,
-                        }))
-                      }
-                    />
+                    <div className="schedule-field">
+                      <span className="schedule-field-label">Day</span>
+                      <select
+                        value={assignmentForm.scheduleDay}
+                        onChange={(e) =>
+                          setAssignmentForm((prev) => ({
+                            ...prev,
+                            scheduleDay: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Select day</option>
+                        {SCHEDULE_DAYS.map((day) => (
+                          <option key={day} value={day}>
+                            {day}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="schedule-field">
+                      <span className="schedule-field-label">Start time</span>
+                      <input
+                        type="time"
+                        value={assignmentForm.startTime}
+                        onChange={(e) =>
+                          setAssignmentForm((prev) => ({
+                            ...prev,
+                            startTime: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="schedule-field">
+                      <span className="schedule-field-label">End time</span>
+                      <input
+                        type="time"
+                        value={assignmentForm.endTime}
+                        onChange={(e) =>
+                          setAssignmentForm((prev) => ({
+                            ...prev,
+                            endTime: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="schedule-field schedule-field-room">
+                      <span className="schedule-field-label">Room</span>
+                      <div className="room-select-row">
+                        <select
+                          value={assignmentForm.room}
+                          onChange={(e) =>
+                            setAssignmentForm((prev) => ({
+                              ...prev,
+                              room: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Select room</option>
+                          {assignmentRoomOptions.map((room) => (
+                            <option key={room} value={room}>
+                              {room}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="assignment-room-add-btn"
+                          onClick={() => {
+                            if (showRoomCreator) {
+                              resetRoomCreator();
+                              return;
+                            }
+
+                            setShowRoomCreator(true);
+                            setNewRoomName("");
+                          }}
+                          aria-label="Add room"
+                          title="Add room"
+                        >
+                          <FaPlus />
+                        </button>
+                      </div>
+                    </div>
                   </div>
+                  {showRoomCreator && (
+                    <div className="room-creator-panel">
+                      <input
+                        type="text"
+                        placeholder="Enter room name"
+                        value={newRoomName}
+                        onChange={(e) => setNewRoomName(e.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            handleCreateRoomOption();
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="assignment-selection-btn"
+                        onClick={handleCreateRoomOption}
+                      >
+                        Save room
+                      </button>
+                      <button
+                        type="button"
+                        className="assignment-selection-btn secondary"
+                        onClick={resetRoomCreator}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                  <p className="assignment-helper-text assignment-schedule-note">
+                    Leave the schedule blank if you want to assign the subject
+                    now and finalize the timing later.
+                  </p>
                 </div>
               </form>
             </div>

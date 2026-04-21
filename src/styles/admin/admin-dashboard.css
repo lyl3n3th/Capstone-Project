@@ -253,6 +253,103 @@
   font-weight: 600;
 }
 
+.admission-portal-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+  padding: 24px 28px;
+  border: 1px solid #bfdbfe;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+}
+
+.admission-portal-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.admission-portal-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  width: min(240px, 100%);
+}
+
+.admission-portal-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admission-portal-pill.is-open {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.admission-portal-pill.is-closed {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.admission-portal-card h3 {
+  margin: 0 0 10px;
+  color: #1a3d5c;
+  font-size: 20px;
+}
+
+.admission-portal-card p {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.admission-portal-meta {
+  margin-top: 10px !important;
+  color: #64748b !important;
+  font-size: 13px !important;
+}
+
+.admission-portal-toggle {
+  min-width: 220px;
+  padding: 14px 20px;
+  border: none;
+  border-radius: 14px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+
+.admission-portal-toggle:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16);
+}
+
+.admission-portal-toggle.is-open {
+  background: #15803d;
+}
+
+.admission-portal-toggle.is-close {
+  background: #b45309;
+}
+
 /* Program Details */
 .program-section {
   margin-bottom: 28px;
@@ -344,6 +441,20 @@
 
   .pie-center-value {
     font-size: 18px;
+  }
+
+  .admission-portal-card {
+    align-items: stretch;
+    padding: 20px;
+  }
+
+  .admission-portal-actions {
+    width: 100%;
+  }
+
+  .admission-portal-toggle {
+    width: 100%;
+    min-width: 0;
   }
 
   .stat-card {

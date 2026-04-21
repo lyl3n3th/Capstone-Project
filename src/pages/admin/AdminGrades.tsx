@@ -3,6 +3,8 @@ import { PiMicrosoftExcelLogo } from "react-icons/pi";
 import { IoMdCheckmarkCircleOutline } from "react-icons/io";
 import {
   FiAlertCircle,
+  FiChevronLeft,
+  FiChevronRight,
   FiCheck,
   FiDownload,
   FiMenu,
@@ -18,13 +20,18 @@ import {
   getCurrentBranch,
   getStudentsForBranch,
   readBranchScopedData,
+  type StudentScheduledAssignmentItem,
+  type StudentSubjectPlanRecord,
 } from "../../services/adminStorage";
 import {
-  upsertStudentGradeRecordsForBranch,
+  applyStudentGradeUploadOperationsForBranch,
+  readStudentGradeRecordsForBranch,
   validateAndNormalizeUploadedGradeRow,
   type StoredStudentGradeRecord,
   type StudentGradeEvaluation,
   type StudentGradeProgramType,
+  type StudentGradeRecordIdentity,
+  type StudentGradeUploadOperation,
 } from "../../services/studentGrades";
 import "../../styles/admin/admin-grades.css";
 
@@ -36,11 +43,13 @@ interface GradesProps {
 }
 
 interface UploadHistoryItem {
+  id?: string;
   fileName: string;
   dateUpload: string;
   records: number;
   errors: number;
   status: "Completed" | "Pending" | "Failed" | "Error";
+  redoneAt?: string;
   fileData?: PreviewGradeRow[]; // Store the actual file data
 }
 
@@ -56,10 +65,12 @@ interface PreviewGradeRow {
   semester: string;
   gradingPeriod: string;
   programType: StudentGradeProgramType | "";
-  evaluation: StudentGradeEvaluation | "Invalid";
+  evaluation: StudentGradeEvaluation | "Clear" | "Invalid";
+  action: "Upload" | "Clear";
   status: "Valid" | "Error";
   errorReason: string;
   normalizedRecord?: StoredStudentGradeRecord;
+  clearRecordIdentity?: StudentGradeRecordIdentity;
 }
 
 interface Toast {
@@ -106,6 +117,13 @@ interface GeneratedTemplateSheet {
   yearLevel: string;
 }
 
+interface TemplateStudentRowSeed {
+  id: string;
+  name: string;
+  strandOrCourse?: string;
+  assignments?: TemplateSubjectAssignment[];
+}
+
 type WorksheetRow = Array<string | number | boolean | null | undefined>;
 
 const UPLOAD_HISTORY_STORAGE_KEY = "aics-upload-history";
@@ -126,6 +144,8 @@ const TEMPLATE_FIRST_DATA_ROW_INDEX = 6;
 const TEMPLATE_DATA_CAPACITY = 19;
 const TEMPLATE_FILE_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const PREVIEW_PAGE_SIZE = 6;
+const UPLOAD_HISTORY_PAGE_SIZE = 6;
 const XML_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const XML_REL_NS =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -141,6 +161,24 @@ const WORKSHEET_RELATIONSHIP_TYPE =
 const WORKSHEET_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
 const TEMPLATE_DATA_COLUMNS = ["A", "B", "C", "D", "E", "F", "G", "H", "I"];
+const ERROR_EXPORT_HEADERS = [
+  "STUDENT ID",
+  "FULL NAME",
+  "SUBJECT CODE",
+  "SUBJECT TITLE",
+  "GRADE",
+  "UNIT",
+  "ACADEMIC YEAR",
+  "SEMESTER",
+  "GRADING PERIOD",
+  "PROGRAM TYPE",
+  "ACTION",
+  "ERROR REASON",
+];
+const ERROR_EXPORT_COLUMN_WIDTHS = [
+  18, 28, 16, 32, 12, 10, 18, 16, 18, 14, 12, 42,
+];
+const ERROR_HIGHLIGHT_FILL_RGB = "FFFFF2CC";
 
 const DEFAULT_UPLOAD_HISTORY: UploadHistoryItem[] = [
   {
@@ -173,11 +211,90 @@ const DEFAULT_UPLOAD_HISTORY: UploadHistoryItem[] = [
   },
 ];
 
+const formatHistoryTimestamp = (value: Date) =>
+  new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(value);
+
+const sanitizeHistoryIdPart = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const buildUploadHistoryItemId = (item: UploadHistoryItem, index: number) =>
+  item.id?.trim() ||
+  [
+    sanitizeHistoryIdPart(item.fileName),
+    sanitizeHistoryIdPart(item.dateUpload),
+    item.records,
+    item.errors,
+    index,
+  ]
+    .filter((value) => value !== "")
+    .join("__");
+
+const buildGradeIdentityFromStoredRecord = (
+  record: Pick<
+    StoredStudentGradeRecord,
+    | "studentId"
+    | "subjectCode"
+    | "academicYear"
+    | "semester"
+    | "gradingPeriod"
+    | "programType"
+  >,
+): StudentGradeRecordIdentity => ({
+  studentId: record.studentId,
+  subjectCode: record.subjectCode,
+  academicYear: record.academicYear,
+  semester: record.semester,
+  gradingPeriod: record.gradingPeriod,
+  programType: record.programType,
+});
+
+const buildGradeIdentityKey = (
+  record: Pick<
+    StudentGradeRecordIdentity,
+    | "studentId"
+    | "subjectCode"
+    | "academicYear"
+    | "semester"
+    | "gradingPeriod"
+    | "programType"
+  >,
+) =>
+  [
+    record.studentId.trim().toUpperCase(),
+    record.subjectCode.trim().toUpperCase(),
+    record.academicYear.trim().toUpperCase(),
+    record.semester.trim().toUpperCase(),
+    record.gradingPeriod.trim().toUpperCase(),
+    record.programType,
+  ].join("::");
+
+const getRedoableHistoryRecordCount = (item: UploadHistoryItem) =>
+  (item.fileData ?? []).filter((row) => Boolean(row.normalizedRecord)).length;
+
+const getErrorPreviewRows = (rows: PreviewGradeRow[]) =>
+  rows.filter((row) => row.status === "Error");
+
+const getDownloadableHistoryErrorCount = (item: UploadHistoryItem) =>
+  getErrorPreviewRows(item.fileData ?? []).length;
+
 const normalizeUploadHistory = (
   history: UploadHistoryItem[],
 ): UploadHistoryItem[] =>
-  history.map((item) => ({
+  history.map((item, index) => ({
     ...item,
+    id: buildUploadHistoryItemId(item, index),
+    redoneAt: item.redoneAt?.trim() || undefined,
     status:
       item.status === "Pending" || item.status === "Failed"
         ? item.status
@@ -201,6 +318,8 @@ export default function AdminGrades({
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [isReadyToUpload, setIsReadyToUpload] = useState(false);
+  const [previewPage, setPreviewPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -255,15 +374,52 @@ export default function AdminGrades({
   });
 
   const toggleFileNameSort = () => {
+    setHistoryPage(1);
     setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
   };
 
   const uploadedRecords = previewRows.filter(
-    (row) => row.status === "Valid",
+    (row) => row.status === "Valid" && row.action === "Upload",
   ).length;
-  const errorRecords = previewRows.filter(
-    (row) => row.status === "Error",
+  const clearedRecords = previewRows.filter(
+    (row) => row.status === "Valid" && row.action === "Clear",
   ).length;
+  const previewErrorRows = getErrorPreviewRows(previewRows);
+  const errorRecords = previewErrorRows.length;
+  const processedRecords = uploadedRecords + clearedRecords;
+  const previewPageCount = Math.max(
+    1,
+    Math.ceil(previewRows.length / PREVIEW_PAGE_SIZE),
+  );
+  const currentPreviewPage = Math.min(previewPage, previewPageCount);
+  const previewPageStartIndex = (currentPreviewPage - 1) * PREVIEW_PAGE_SIZE;
+  const previewPageRows = previewRows.slice(
+    previewPageStartIndex,
+    previewPageStartIndex + PREVIEW_PAGE_SIZE,
+  );
+  const previewRangeStart =
+    previewRows.length === 0 ? 0 : previewPageStartIndex + 1;
+  const previewRangeEnd = Math.min(
+    previewPageStartIndex + PREVIEW_PAGE_SIZE,
+    previewRows.length,
+  );
+  const historyPageCount = Math.max(
+    1,
+    Math.ceil(sortedUploadHistory.length / UPLOAD_HISTORY_PAGE_SIZE),
+  );
+  const currentHistoryPage = Math.min(historyPage, historyPageCount);
+  const historyPageStartIndex =
+    (currentHistoryPage - 1) * UPLOAD_HISTORY_PAGE_SIZE;
+  const historyPageRows = sortedUploadHistory.slice(
+    historyPageStartIndex,
+    historyPageStartIndex + UPLOAD_HISTORY_PAGE_SIZE,
+  );
+  const historyRangeStart =
+    sortedUploadHistory.length === 0 ? 0 : historyPageStartIndex + 1;
+  const historyRangeEnd = Math.min(
+    historyPageStartIndex + UPLOAD_HISTORY_PAGE_SIZE,
+    sortedUploadHistory.length,
+  );
 
   const normalizeHeader = (header: string) =>
     header
@@ -437,6 +593,33 @@ export default function AdminGrades({
       ?.strandOrCourse?.trim() ||
     "";
 
+  const mapScheduledAssignmentsToTemplateAssignments = (
+    assignments: StudentScheduledAssignmentItem[],
+  ): TemplateSubjectAssignment[] =>
+    assignments.map((assignment) => ({
+      id: assignment.assignmentId,
+      subjectId: assignment.subjectId,
+      subjectCode: assignment.subjectCode,
+      subjectName: assignment.subjectName,
+      instructorName: assignment.instructorName,
+      sectionId: assignment.sectionId || "",
+      sectionCode: assignment.sectionCode || "",
+      academicYear: assignment.academicYear,
+      semester: assignment.semester,
+    }));
+
+  const getMatchingStudentSubjectPlan = (
+    student: { id: string; trackingNumber?: string },
+    plans: Record<string, StudentSubjectPlanRecord>,
+  ) =>
+    Object.values(plans).find((plan) => {
+      if (student.trackingNumber && plan.trackingNumber === student.trackingNumber) {
+        return true;
+      }
+
+      return plan.studentNumber === student.id;
+    }) ?? null;
+
   const buildSectionTemplateRows = ({
     programType,
     students,
@@ -444,7 +627,7 @@ export default function AdminGrades({
     subjectCatalog,
   }: {
     programType: StudentGradeProgramType;
-    students: Array<{ id: string; name: string }>;
+    students: TemplateStudentRowSeed[];
     assignments: TemplateSubjectAssignment[];
     subjectCatalog: TemplateSubjectCatalogItem[];
   }) => {
@@ -480,7 +663,7 @@ export default function AdminGrades({
     }
 
     return students.flatMap((student) =>
-      assignments.map((assignment) => {
+      (student.assignments ?? assignments).map((assignment) => {
         const units =
           unitsBySubjectKey.get(`id:${assignment.subjectId}`) ||
           unitsBySubjectKey.get(`code:${assignment.subjectCode.toUpperCase()}`) ||
@@ -531,6 +714,11 @@ export default function AdminGrades({
       readBranchScopedData<TemplateSubjectCatalogItem[]>("subjects", currentBranch) ??
       [];
     const storedStudents = getStudentsForBranch(currentBranch);
+    const storedStudentSubjectPlans =
+      readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
+        "student-subject-plans",
+        currentBranch,
+      ) ?? {};
 
     return storedSections
       .filter(
@@ -539,11 +727,17 @@ export default function AdminGrades({
       )
       .sort(sortSectionsForTemplate)
       .map((section) => {
+        const normalizedSectionSemester = normalizeSemesterLabel(section.semester);
         const sectionStudents = storedStudents
           .filter(
             (student) =>
               student.program === templateType && student.section === section.code,
           )
+          .map<TemplateStudentRowSeed>((student) => ({
+            id: student.id,
+            name: student.name,
+            strandOrCourse: student.strandOrCourse,
+          }))
           .sort(sortStudentsForTemplate);
         const sectionAssignments = storedAssignments
           .filter(
@@ -552,31 +746,92 @@ export default function AdminGrades({
               assignment.sectionCode === section.code,
           )
           .sort(sortAssignmentsForTemplate);
-        const latestAcademicYear = getLatestAcademicYear(
-          sectionAssignments.map((assignment) => assignment.academicYear),
-        );
+        const irregularAssignmentsByStudent = storedStudents
+          .filter(
+            (student) =>
+              student.program === templateType && student.section !== section.code,
+          )
+          .map((student) => {
+            const matchingPlan = getMatchingStudentSubjectPlan(
+              {
+                id: student.id,
+                trackingNumber: student.trackingNumber,
+              },
+              storedStudentSubjectPlans,
+            );
+            const plannedAssignments = mapScheduledAssignmentsToTemplateAssignments(
+              matchingPlan?.scheduledAssignments ?? [],
+            ).filter(
+              (assignment) =>
+                assignment.sectionCode === section.code &&
+                (!normalizedSectionSemester ||
+                  normalizeSemesterLabel(assignment.semester) ===
+                    normalizedSectionSemester),
+            );
+
+            const uniqueAssignments = Array.from(
+              plannedAssignments.reduce((items, assignment) => {
+                const key =
+                  assignment.id ||
+                  `${assignment.subjectId}:${assignment.sectionCode}:${assignment.academicYear}:${assignment.semester}`;
+
+                if (!items.has(key)) {
+                  items.set(key, assignment);
+                }
+
+                return items;
+              }, new Map<string, TemplateSubjectAssignment>()),
+            )
+              .map(([, assignment]) => assignment)
+              .sort(sortAssignmentsForTemplate);
+
+            return {
+              student,
+              assignments: uniqueAssignments,
+            };
+          })
+          .filter((entry) => entry.assignments.length > 0);
+        const latestAcademicYear = getLatestAcademicYear([
+          ...sectionAssignments.map((assignment) => assignment.academicYear),
+          ...irregularAssignmentsByStudent.flatMap((entry) =>
+            entry.assignments.map((assignment) => assignment.academicYear),
+          ),
+        ]);
         const currentSectionAssignments = sectionAssignments.filter(
           (assignment) =>
             !assignment.academicYear ||
             assignment.academicYear.trim() === latestAcademicYear,
         );
+        const irregularSectionStudents = irregularAssignmentsByStudent
+          .map<TemplateStudentRowSeed>(({ student, assignments }) => ({
+            id: student.id,
+            name: student.name,
+            strandOrCourse: student.strandOrCourse,
+            assignments: assignments.filter(
+              (assignment) =>
+                !assignment.academicYear ||
+                assignment.academicYear.trim() === latestAcademicYear,
+            ),
+          }))
+          .filter((student) => (student.assignments?.length ?? 0) > 0)
+          .sort(sortStudentsForTemplate);
+        const templateStudents = [...sectionStudents, ...irregularSectionStudents];
 
         return {
           academicYear: latestAcademicYear,
-          descriptor: getSectionAcademicDescriptor(section, sectionStudents),
+          descriptor: getSectionAcademicDescriptor(section, templateStudents),
           rows: buildSectionTemplateRows({
             programType: templateType,
-            students: sectionStudents.map((student) => ({
-              id: student.id,
-              name: student.name,
-            })),
+            students: templateStudents,
             assignments: currentSectionAssignments,
             subjectCatalog: storedSubjects,
           }),
           sectionCode: section.code,
           semester:
             normalizeSemesterLabel(
-              section.semester || currentSectionAssignments[0]?.semester,
+              section.semester ||
+                currentSectionAssignments[0]?.semester ||
+                irregularSectionStudents[0]?.assignments?.[0]?.semester,
             ) || "1st Semester",
           sheetName: getUniqueSheetName(section.code, usedSheetNames),
           yearLevel: section.yearLevel,
@@ -800,6 +1055,210 @@ export default function AdminGrades({
     new XMLSerializer().serializeToString(document);
 
   const cloneBytes = (value: Uint8Array) => new Uint8Array(value);
+
+  const buildErrorExportFileName = (value: string) => {
+    const normalizedBaseName =
+      Array.from(value.trim().replace(/\.[^/.]+$/, ""))
+        .map((character) =>
+          (character.codePointAt(0) ?? 0) < 32 ? "_" : character,
+        )
+        .join("")
+        .replace(/[<>:"/\\|?*]+/g, "_")
+        .replace(/\s+/g, "_") || "grade_upload";
+
+    return `${normalizedBaseName}_errors.xlsx`;
+  };
+
+  const buildErrorExportRow = (row: PreviewGradeRow) => [
+    row.studentId,
+    row.fullName,
+    row.subjectCode,
+    row.subjectTitle,
+    row.grade,
+    row.unit,
+    row.academicYear,
+    row.semester,
+    row.gradingPeriod,
+    row.programType,
+    row.action,
+    row.errorReason,
+  ];
+
+  const ensureErrorHighlightStyle = (stylesXml: string) => {
+    const stylesDocument = parseXml(stylesXml);
+    const fills = stylesDocument.getElementsByTagNameNS(XML_MAIN_NS, "fills")[0];
+    const cellXfs =
+      stylesDocument.getElementsByTagNameNS(XML_MAIN_NS, "cellXfs")[0];
+
+    if (!fills || !cellXfs) {
+      throw new Error("The error workbook styles could not be prepared.");
+    }
+
+    const fillCount = Array.from(fills.childNodes).filter(
+      (node) =>
+        node.nodeType === Node.ELEMENT_NODE &&
+        (node as Element).localName === "fill",
+    ).length;
+    const errorFill = stylesDocument.createElementNS(XML_MAIN_NS, "fill");
+    const patternFill = stylesDocument.createElementNS(
+      XML_MAIN_NS,
+      "patternFill",
+    );
+    const foregroundColor = stylesDocument.createElementNS(
+      XML_MAIN_NS,
+      "fgColor",
+    );
+    const backgroundColor = stylesDocument.createElementNS(
+      XML_MAIN_NS,
+      "bgColor",
+    );
+
+    patternFill.setAttribute("patternType", "solid");
+    foregroundColor.setAttribute("rgb", ERROR_HIGHLIGHT_FILL_RGB);
+    backgroundColor.setAttribute("indexed", "64");
+    patternFill.appendChild(foregroundColor);
+    patternFill.appendChild(backgroundColor);
+    errorFill.appendChild(patternFill);
+    fills.appendChild(errorFill);
+    fills.setAttribute("count", String(fillCount + 1));
+
+    const existingXfs = Array.from(cellXfs.childNodes).filter(
+      (node) =>
+        node.nodeType === Node.ELEMENT_NODE &&
+        (node as Element).localName === "xf",
+    );
+    const errorStyleIndex = existingXfs.length;
+    const errorXf =
+      (existingXfs[0]?.cloneNode(true) as Element | undefined) ??
+      stylesDocument.createElementNS(XML_MAIN_NS, "xf");
+
+    errorXf.setAttribute("numFmtId", errorXf.getAttribute("numFmtId") || "0");
+    errorXf.setAttribute("fontId", errorXf.getAttribute("fontId") || "0");
+    errorXf.setAttribute("fillId", String(fillCount));
+    errorXf.setAttribute("borderId", errorXf.getAttribute("borderId") || "0");
+    errorXf.setAttribute("xfId", errorXf.getAttribute("xfId") || "0");
+    errorXf.setAttribute("applyFill", "1");
+    cellXfs.appendChild(errorXf);
+    cellXfs.setAttribute("count", String(errorStyleIndex + 1));
+
+    return {
+      styleIndex: errorStyleIndex,
+      xml: serializeXml(stylesDocument),
+    };
+  };
+
+  const buildStyledErrorWorksheetXml = ({
+    worksheetXml,
+    styleIndex,
+  }: {
+    worksheetXml: string;
+    styleIndex: number;
+  }) => {
+    const worksheetDocument = parseXml(worksheetXml);
+    const sheetData =
+      worksheetDocument.getElementsByTagNameNS(XML_MAIN_NS, "sheetData")[0];
+
+    if (!sheetData) {
+      return worksheetXml;
+    }
+
+    getSheetRows(sheetData).forEach((row) => {
+      if (getRowNumber(row) <= 1) {
+        return;
+      }
+
+      row.setAttribute("s", String(styleIndex));
+      row.setAttribute("customFormat", "1");
+
+      Array.from(row.childNodes).forEach((node) => {
+        if (node.nodeType !== Node.ELEMENT_NODE) {
+          return;
+        }
+
+        const cell = node as Element;
+
+        if (cell.localName !== "c") {
+          return;
+        }
+
+        cell.setAttribute("s", String(styleIndex));
+      });
+    });
+
+    return serializeXml(worksheetDocument);
+  };
+
+  const buildHighlightedErrorWorkbook = (rows: PreviewGradeRow[]) => {
+    const errorRows = getErrorPreviewRows(rows);
+
+    if (errorRows.length === 0) {
+      return null;
+    }
+
+    const workbook = XLSX.utils.book_new();
+    const errorRowsBySheet = errorRows.reduce((groups, row) => {
+      const sheetName = row.sheetName.trim() || "Errors";
+      const existingRows = groups.get(sheetName);
+
+      if (existingRows) {
+        existingRows.push(row);
+      } else {
+        groups.set(sheetName, [row]);
+      }
+
+      return groups;
+    }, new Map<string, PreviewGradeRow[]>());
+    const usedSheetNames = new Set<string>();
+
+    errorRowsBySheet.forEach((sheetRows, sheetName) => {
+      const worksheet = XLSX.utils.aoa_to_sheet([
+        ERROR_EXPORT_HEADERS,
+        ...sheetRows.map(buildErrorExportRow),
+      ]);
+
+      worksheet["!cols"] = ERROR_EXPORT_COLUMN_WIDTHS.map((width) => ({
+        wch: width,
+      }));
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        getUniqueSheetName(sheetName, usedSheetNames),
+      );
+    });
+
+    const workbookBytes = XLSX.write(workbook, {
+      bookType: "xlsx",
+      type: "array",
+    }) as ArrayBuffer;
+    const archiveEntries = unzipSync(new Uint8Array(workbookBytes)) as Record<
+      string,
+      Uint8Array
+    >;
+    const workbookStyles = archiveEntries["xl/styles.xml"];
+
+    if (!workbookStyles) {
+      return new Uint8Array(workbookBytes);
+    }
+
+    const highlightedStyles = ensureErrorHighlightStyle(strFromU8(workbookStyles));
+    archiveEntries["xl/styles.xml"] = strToU8(highlightedStyles.xml);
+
+    Object.keys(archiveEntries).forEach((entryName) => {
+      if (!/^xl\/worksheets\/sheet\d+\.xml$/.test(entryName)) {
+        return;
+      }
+
+      archiveEntries[entryName] = strToU8(
+        buildStyledErrorWorksheetXml({
+          worksheetXml: strFromU8(archiveEntries[entryName]),
+          styleIndex: highlightedStyles.styleIndex,
+        }),
+      );
+    });
+
+    return zipSync(archiveEntries);
+  };
 
   const updateWorksheetDimension = (worksheetDocument: Document, endRow: number) => {
     const dimension =
@@ -1395,9 +1854,13 @@ export default function AdminGrades({
                 gradingPeriod,
                 programType: normalizedProgramType,
                 branch: currentBranch,
+              }, undefined, {
+                allowBlankGradeClear: true,
               })
             : { errorReason: "Program Type must be SHS or College" };
           const normalizedRecord = validationResult.normalizedRecord;
+          const clearRecordIdentity = validationResult.clearRecordIdentity;
+          const action = clearRecordIdentity ? "Clear" : "Upload";
 
           return {
             sheetName,
@@ -1413,11 +1876,16 @@ export default function AdminGrades({
             programType: normalizedProgramType,
             evaluation: normalizedRecord
               ? normalizedRecord.evaluation
-              : "Invalid",
-            status: normalizedRecord ? "Valid" : "Error",
-            errorReason: normalizedRecord
-              ? ""
-              : validationResult.errorReason || "Invalid row",
+              : clearRecordIdentity
+                ? "Clear"
+                : "Invalid",
+            action,
+            status: normalizedRecord || clearRecordIdentity ? "Valid" : "Error",
+            clearRecordIdentity,
+            errorReason:
+              normalizedRecord || clearRecordIdentity
+                ? ""
+                : validationResult.errorReason || "Invalid row",
             normalizedRecord,
           };
         });
@@ -1441,6 +1909,7 @@ export default function AdminGrades({
       setPreviewRows([]);
       setPreviewFileName("");
       setIsPreviewModalOpen(false);
+      setPreviewPage(1);
       return;
     }
 
@@ -1450,6 +1919,7 @@ export default function AdminGrades({
     try {
       const parsedRows = await parsePreviewRowsFromFile(file);
       setPreviewRows(parsedRows);
+      setPreviewPage(1);
       setIsPreviewModalOpen(true);
       const sheetCount = new Set(parsedRows.map((row) => row.sheetName)).size;
       addToast(
@@ -1460,6 +1930,7 @@ export default function AdminGrades({
       console.error("Failed to parse selected Excel file", error);
       setPreviewRows([]);
       setIsPreviewModalOpen(false);
+      setPreviewPage(1);
       addToast(
         "Unable to read this Excel file. Please check the format and try again.",
         "error",
@@ -1503,6 +1974,138 @@ export default function AdminGrades({
     }
   };
 
+  const handleDownloadErrorRows = ({
+    rows,
+    fileName,
+  }: {
+    rows: PreviewGradeRow[];
+    fileName: string;
+  }) => {
+    const errorRows = getErrorPreviewRows(rows);
+
+    if (errorRows.length === 0) {
+      addToast("No error rows are available to download.", "info");
+      return;
+    }
+
+    try {
+      const errorWorkbook = buildHighlightedErrorWorkbook(errorRows);
+
+      if (!errorWorkbook) {
+        addToast("No error rows are available to download.", "info");
+        return;
+      }
+
+      downloadBlob(buildErrorExportFileName(fileName), errorWorkbook);
+
+      const worksheetCount = new Set(
+        errorRows.map((row) => row.sheetName.trim() || "Errors"),
+      ).size;
+      addToast(
+        `Downloaded ${errorRows.length} highlighted error row${errorRows.length === 1 ? "" : "s"} from ${worksheetCount} worksheet${worksheetCount === 1 ? "" : "s"}.`,
+        "success",
+      );
+    } catch (error) {
+      console.error("Failed to download highlighted error workbook", error);
+      addToast("Failed to download the highlighted error workbook.", "error");
+    }
+  };
+
+  const handleRedoUploadHistoryItem = (historyItem: UploadHistoryItem) => {
+    if (historyItem.redoneAt) {
+      addToast(
+        `"${historyItem.fileName}" was already redone on ${historyItem.redoneAt}.`,
+        "info",
+      );
+      return;
+    }
+
+    const uploadedRows = (historyItem.fileData ?? []).filter(
+      (
+        row,
+      ): row is PreviewGradeRow & { normalizedRecord: StoredStudentGradeRecord } =>
+        Boolean(row.normalizedRecord),
+    );
+
+    if (uploadedRows.length === 0) {
+      addToast(
+        "This history item does not have saved uploaded grades to redo.",
+        "warning",
+      );
+      return;
+    }
+
+    const shouldRedo = window.confirm(
+      `Redo "${historyItem.fileName}"?\n\nThis will clear ${uploadedRows.length} uploaded grade${
+        uploadedRows.length === 1 ? "" : "s"
+      } from the student portal if those grades have not been replaced by a newer upload.`,
+    );
+
+    if (!shouldRedo) {
+      return;
+    }
+
+    const currentRecords = readStudentGradeRecordsForBranch(currentBranch);
+    const currentRecordMap = new Map(
+      currentRecords.map((record) => [buildGradeIdentityKey(record), record]),
+    );
+    const redoOperations: Array<{
+      type: "clear";
+      identity: StudentGradeRecordIdentity;
+    }> = [];
+    let skippedRecords = 0;
+
+    uploadedRows.forEach((row) => {
+      const identity = buildGradeIdentityFromStoredRecord(row.normalizedRecord);
+      const currentRecord = currentRecordMap.get(buildGradeIdentityKey(identity));
+
+      if (!currentRecord) {
+        skippedRecords += 1;
+        return;
+      }
+
+      if (currentRecord.normalizedGrade !== row.normalizedRecord.normalizedGrade) {
+        skippedRecords += 1;
+        return;
+      }
+
+      redoOperations.push({ type: "clear", identity });
+    });
+
+    const redoneAt = formatHistoryTimestamp(new Date());
+    const updatedHistory = uploadHistory.map((item) =>
+      item.id === historyItem.id ? { ...item, redoneAt } : item,
+    );
+
+    if (redoOperations.length === 0) {
+      saveUploadHistory(updatedHistory);
+      addToast(
+        skippedRecords > 0
+          ? "No grades were cleared because those records were already changed or removed by a newer update."
+          : "No grades were cleared from this upload.",
+        "warning",
+      );
+      return;
+    }
+
+    applyStudentGradeUploadOperationsForBranch(currentBranch, redoOperations);
+    saveUploadHistory(updatedHistory);
+
+    const redoSummary = [
+      `${redoOperations.length} grade${redoOperations.length === 1 ? "" : "s"} cleared`,
+      skippedRecords > 0
+        ? `${skippedRecords} row${skippedRecords === 1 ? "" : "s"} skipped because newer grades already replaced them`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    addToast(
+      `Redo completed for "${historyItem.fileName}". ${redoSummary}.`,
+      skippedRecords > 0 ? "warning" : "success",
+    );
+  };
+
   const handleUploadGrades = () => {
     if (!selectedFile) {
       addToast("Please choose a grade file first.", "warning");
@@ -1514,31 +2117,33 @@ export default function AdminGrades({
       return;
     }
 
-    const uploadedAt = new Intl.DateTimeFormat("en-US", {
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    }).format(new Date());
+    const uploadedAt = formatHistoryTimestamp(new Date());
 
     const normalizedName = selectedFile.name.replace(/\.[^/.]+$/, "");
-    const gradeRecordsToStore = previewRows
-      .filter(
-        (
-          row,
-        ): row is PreviewGradeRow & { normalizedRecord: StoredStudentGradeRecord } =>
-          row.status === "Valid" && Boolean(row.normalizedRecord),
-      )
-      .map((row) => row.normalizedRecord);
+    const uploadOperations = previewRows.flatMap<StudentGradeUploadOperation>(
+      (row) => {
+        if (row.status !== "Valid") {
+          return [];
+        }
 
-    upsertStudentGradeRecordsForBranch(currentBranch, gradeRecordsToStore);
+        if (row.normalizedRecord) {
+          return [{ type: "upsert" as const, record: row.normalizedRecord }];
+        }
+
+        if (row.clearRecordIdentity) {
+          return [{ type: "clear" as const, identity: row.clearRecordIdentity }];
+        }
+
+        return [];
+      },
+    );
+
+    applyStudentGradeUploadOperationsForBranch(currentBranch, uploadOperations);
 
     const newHistoryItem: UploadHistoryItem = {
       fileName: normalizedName,
       dateUpload: uploadedAt,
-      records: uploadedRecords,
+      records: processedRecords,
       errors: errorRecords,
       status: errorRecords > 0 ? "Error" : "Completed",
       fileData: [...previewRows], // Store the actual file data
@@ -1546,6 +2151,7 @@ export default function AdminGrades({
 
     const updatedHistory = [newHistoryItem, ...uploadHistory];
     saveUploadHistory(updatedHistory);
+    setHistoryPage(1);
 
     setSelectedFile(null);
     setSelectedFileName("No file chosen");
@@ -1553,9 +2159,22 @@ export default function AdminGrades({
     setPreviewFileName("");
     setIsReadyToUpload(false);
     setIsPreviewModalOpen(false);
+    setPreviewPage(1);
+
+    const uploadSummary = [
+      uploadedRecords > 0
+        ? `${uploadedRecords} grade${uploadedRecords === 1 ? "" : "s"} saved`
+        : "",
+      clearedRecords > 0
+        ? `${clearedRecords} grade${clearedRecords === 1 ? "" : "s"} cleared`
+        : "",
+      `${errorRecords} error${errorRecords === 1 ? "" : "s"} found`,
+    ]
+      .filter(Boolean)
+      .join(", ");
 
     addToast(
-      `Grades uploaded successfully! ${uploadedRecords} records processed, ${errorRecords} errors found.`,
+      `Grades uploaded successfully! ${uploadSummary}.`,
       errorRecords > 0 ? "warning" : "success",
     );
   };
@@ -1567,6 +2186,7 @@ export default function AdminGrades({
     setPreviewFileName("");
     setIsPreviewModalOpen(false);
     setIsReadyToUpload(false);
+    setPreviewPage(1);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -1666,7 +2286,8 @@ export default function AdminGrades({
               <span>
                 Note: Uploaded grades from every worksheet will be reflected in
                 the student portal grades page for matching students in this
-                branch.
+                branch. Leaving a grade cell blank in a completed template row
+                will clear the matching posted grade.
               </span>
             </div>
             <div className="upload-note warning">
@@ -1726,7 +2347,12 @@ export default function AdminGrades({
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
                 College supports semester or final grade uploads, including
-                failed and INC grades
+                1.00 to 3.00 passing grades, 4.00 for INC, and 5.00 for FAILED
+              </li>
+              <li>
+                <IoMdCheckmarkCircleOutline className="list-icon success" />
+                Blank grade cells can be uploaded to clear previously posted
+                grades for matching rows
               </li>
             </ul>
 
@@ -1771,7 +2397,11 @@ export default function AdminGrades({
                       {previewFileName ||
                         selectedFileName.replace(/\.[^/.]+$/, "")}
                     </h3>
-                    <p>Review the grades before saving them for this branch</p>
+                    <p>
+                      Review the grades before saving them for this branch.
+                      Blank grade cells with complete row details will clear the
+                      matching posted grade.
+                    </p>
                   </div>
                 </div>
 
@@ -1781,8 +2411,18 @@ export default function AdminGrades({
                       <FiCheck />
                     </span>
                     <div>
-                      <strong>Valid Records</strong>
+                      <strong>Grades to Save</strong>
                       <p>{uploadedRecords}</p>
+                    </div>
+                  </div>
+
+                  <div className="summary-item info">
+                    <span className="summary-icon" aria-hidden="true">
+                      <FiX />
+                    </span>
+                    <div>
+                      <strong>Clear Requests</strong>
+                      <p>{clearedRecords}</p>
                     </div>
                   </div>
 
@@ -1808,56 +2448,106 @@ export default function AdminGrades({
                         <th>SUBJECT TITLE</th>
                         <th>GRADE</th>
                         <th>UNIT</th>
-                        <th>ACADEMIC YEAR</th>
                         <th>SEMESTER</th>
-                        <th>GRADING PERIOD</th>
-                        <th>PROGRAM</th>
-                        <th>RESULT</th>
-                        <th>STATUS</th>
-                        <th>ERROR REASON</th>
+                        <th>REMARKS</th>
                       </tr>
-                    </thead>
+                      </thead>
 
-                    <tbody>
+                      <tbody>
                       {previewRows.length > 0 ? (
-                        previewRows.map((row, index) => (
-                          <tr key={`${row.sheetName}-${row.studentId}-${index}`}>
+                        previewPageRows.map((row, index) => (
+                          <tr
+                            key={`${row.sheetName}-${row.studentId}-${previewPageStartIndex + index}`}
+                            className={
+                              row.status === "Error" ? "preview-row-error" : ""
+                            }
+                            title={row.errorReason || undefined}
+                          >
                             <td>{row.sheetName || "N/A"}</td>
                             <td>{row.studentId || "—"}</td>
                             <td>{row.fullName || "—"}</td>
                             <td>{row.subjectCode || "—"}</td>
                             <td>{row.subjectTitle || "—"}</td>
-                            <td>{row.grade || "—"}</td>
-                            <td>{row.unit || "—"}</td>
-                            <td>{row.academicYear || "—"}</td>
-                            <td>{row.semester || "—"}</td>
-                            <td>{row.gradingPeriod || "—"}</td>
-                            <td>{row.programType || "—"}</td>
-                            <td>{row.evaluation}</td>
                             <td>
-                              <span
-                                className={`grade-status-badge ${row.status.toLowerCase()}`}
-                              >
-                                {row.status}
-                              </span>
+                              {row.grade ||
+                                (row.action === "Clear"
+                                  ? "Blank (Clear)"
+                                  : "—")}
                             </td>
+                            <td>{row.unit || "—"}</td>
+                            <td>{row.semester || "—"}</td>
                             <td>
-                              {row.status === "Error" ? row.errorReason : "—"}
+                              {row.status === "Error"
+                                ? row.errorReason
+                                : row.action === "Clear"
+                                  ? "Will clear matching posted grade"
+                                  : "Ready to upload"}
                             </td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={14} className="no-results">
+                          <td colSpan={9} className="no-results">
                             No preview rows detected from this file.
                           </td>
                         </tr>
                       )}
-                    </tbody>
+                      </tbody>
                   </table>
                 </div>
 
+                <div className="preview-pagination" aria-label="Preview table pages">
+                  <div className="preview-pagination-summary">
+                    Showing {previewRangeStart}-{previewRangeEnd} of {previewRows.length} records
+                  </div>
+                  <div className="preview-pagination-controls">
+                    <button
+                      type="button"
+                      className="preview-page-btn"
+                      onClick={() =>
+                        setPreviewPage((prev) => Math.max(1, prev - 1))
+                      }
+                      disabled={currentPreviewPage === 1}
+                      aria-label="Previous preview page"
+                    >
+                      <FiChevronLeft />
+                    </button>
+                    <span className="preview-page-indicator">
+                      Page {currentPreviewPage} of {previewPageCount}
+                    </span>
+                    <button
+                      type="button"
+                      className="preview-page-btn"
+                      onClick={() =>
+                        setPreviewPage((prev) =>
+                          Math.min(previewPageCount, prev + 1),
+                        )
+                      }
+                      disabled={currentPreviewPage === previewPageCount}
+                      aria-label="Next preview page"
+                    >
+                      <FiChevronRight />
+                    </button>
+                  </div>
+                </div>
+
                 <div className="preview-modal-actions">
+                  {errorRecords > 0 && (
+                    <button
+                      type="button"
+                      className="download-errors-btn"
+                      onClick={() =>
+                        handleDownloadErrorRows({
+                          rows: previewRows,
+                          fileName:
+                            previewFileName ||
+                            selectedFileName.replace(/\.[^/.]+$/, ""),
+                        })
+                      }
+                    >
+                      <FiDownload /> Download Errors
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="cancel-preview-btn"
@@ -1903,30 +2593,119 @@ export default function AdminGrades({
                   <th>Records</th>
                   <th>Errors</th>
                   <th>Status</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedUploadHistory.map((item, index) => (
-                  <tr key={index}>
-                    <td>{item.fileName}</td>
-                    <td>{item.dateUpload}</td>
-                    <td>{item.records}</td>
-                    <td
-                      className={item.errors > 0 ? "error-count" : "ok-count"}
-                    >
-                      {item.errors}
-                    </td>
-                    <td>
-                      <span
-                        className={`upload-status-badge ${item.status.toLowerCase()}`}
+                {historyPageRows.map((item) => {
+                  const redoableRecordCount = getRedoableHistoryRecordCount(item);
+                  const downloadableErrorCount =
+                    getDownloadableHistoryErrorCount(item);
+                  const isRedoDisabled =
+                    Boolean(item.redoneAt) || redoableRecordCount === 0;
+                  const isDownloadErrorsDisabled = downloadableErrorCount === 0;
+
+                  return (
+                    <tr key={item.id}>
+                      <td>{item.fileName}</td>
+                      <td>{item.dateUpload}</td>
+                      <td>{item.records}</td>
+                      <td
+                        className={item.errors > 0 ? "error-count" : "ok-count"}
                       >
-                        {item.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                        {item.errors}
+                      </td>
+                      <td>
+                        <span
+                          className={`upload-status-badge ${item.status.toLowerCase()}`}
+                        >
+                          {item.status}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="history-action-group">
+                          <button
+                            type="button"
+                            className="view-history-btn download-errors-history-btn"
+                            onClick={() =>
+                              handleDownloadErrorRows({
+                                rows: item.fileData ?? [],
+                                fileName: item.fileName,
+                              })
+                            }
+                            disabled={isDownloadErrorsDisabled}
+                            title={
+                              isDownloadErrorsDisabled
+                                ? "This upload does not have saved error rows to download."
+                                : `Download ${downloadableErrorCount} highlighted error row${
+                                    downloadableErrorCount === 1 ? "" : "s"
+                                  }`
+                            }
+                          >
+                            <FiDownload />
+                            Errors
+                          </button>
+                          <button
+                            type="button"
+                            className="view-history-btn redo-history-btn"
+                            onClick={() => handleRedoUploadHistoryItem(item)}
+                            disabled={isRedoDisabled}
+                            title={
+                              item.redoneAt
+                                ? `Already redone on ${item.redoneAt}`
+                                : redoableRecordCount === 0
+                                  ? "This upload does not have saved grade rows to redo."
+                                  : `Clear ${redoableRecordCount} uploaded grade${
+                                      redoableRecordCount === 1 ? "" : "s"
+                                    } from the portal`
+                            }
+                          >
+                            {item.redoneAt ? "Redone" : "Redo"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          </div>
+
+          <div
+            className="preview-pagination history-pagination"
+            aria-label="Upload history pages"
+          >
+            <div className="preview-pagination-summary">
+              Showing {historyRangeStart}-{historyRangeEnd} of{" "}
+              {sortedUploadHistory.length} uploads
+            </div>
+            <div className="preview-pagination-controls">
+              <button
+                type="button"
+                className="preview-page-btn"
+                onClick={() => setHistoryPage((prev) => Math.max(1, prev - 1))}
+                disabled={currentHistoryPage === 1}
+                aria-label="Previous history page"
+              >
+                <FiChevronLeft />
+              </button>
+              <span className="preview-page-indicator">
+                Page {currentHistoryPage} of {historyPageCount}
+              </span>
+              <button
+                type="button"
+                className="preview-page-btn"
+                onClick={() =>
+                  setHistoryPage((prev) =>
+                    Math.min(historyPageCount, prev + 1),
+                  )
+                }
+                disabled={currentHistoryPage === historyPageCount}
+                aria-label="Next history page"
+              >
+                <FiChevronRight />
+              </button>
+            </div>
           </div>
         </div>
       </main>

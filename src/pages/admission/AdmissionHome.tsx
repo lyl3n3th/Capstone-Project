@@ -2,12 +2,18 @@ import { FaRegPaperPlane } from "react-icons/fa6";
 import "../../styles/admission/admission-home.css";
 import logow from "../../assets/images/logow.png";
 import { useState } from "react";
-import { getAdmissionDraft, getAdmissionProgress } from "../../services/admission";
+import { useAdmissionPortalStatus } from "../../hooks/useAdmissionPortalStatus";
+import {
+  getAdmissionDraft,
+  getAdmissionProgress,
+} from "../../services/admission";
 
 function AdmissionHome() {
   const [trackingNumber, setTrackingNumber] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const { isOpen: isAdmissionPortalOpen } = useAdmissionPortalStatus();
+  const admissionPortalDescription = isAdmissionPortalOpen;
 
   const handleTrackProgress = async () => {
     setError("");
@@ -29,7 +35,8 @@ function AdmissionHome() {
       const draft = getAdmissionDraft();
       if (
         draft?.trackingNumber &&
-        draft.trackingNumber.toUpperCase() === trackingNumber.trim().toUpperCase()
+        draft.trackingNumber.toUpperCase() ===
+          trackingNumber.trim().toUpperCase()
       ) {
         window.location.href = `/confirmation?trackingNumber=${encodeURIComponent(trackingNumber.trim())}`;
         return;
@@ -68,15 +75,29 @@ function AdmissionHome() {
         <p>Go Beyond Learning</p>
         <p id="p2">ADMISSION PORTAL</p>
 
-        <a
-          href="/enroll"
-          onClick={(e) => {
-            e.preventDefault();
+        <div
+          className={`admission-portal-banner ${isAdmissionPortalOpen ? "is-open" : "is-closed"}`}
+        >
+          {isAdmissionPortalOpen
+            ? "Admission Portal Open"
+            : "Admission Portal Closed"}
+        </div>
+
+        <button
+          type="button"
+          className="admission-primary-action"
+          onClick={() => {
             window.location.href = "/enroll";
           }}
+          disabled={!isAdmissionPortalOpen}
         >
           Enroll Now
-        </a>
+        </button>
+        <p
+          className={`admission-portal-note ${isAdmissionPortalOpen ? "is-open" : "is-closed"}`}
+        >
+          {admissionPortalDescription}
+        </p>
         <img src={logow} alt="logo" className="logo" />
 
         <div className="form-container">

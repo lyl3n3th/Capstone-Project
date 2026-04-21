@@ -63,6 +63,7 @@ function StudentHome() {
   const {
     student,
     subjects,
+    currentTerm,
     credentialItems,
     credentialSummary,
     isLoading,
@@ -284,9 +285,20 @@ function StudentHome() {
   };
 
   const currentAcademicYear =
-    subjects[0]?.academicYear || student?.ownScheduleAcademicYear || "2026-2027";
+    currentTerm?.academicYear ||
+    subjects[0]?.academicYear ||
+    student?.ownScheduleAcademicYear ||
+    "2026-2027";
   const currentSemester =
-    subjects[0]?.semester || student?.ownScheduleSemester || "1st Semester";
+    currentTerm?.semester ||
+    subjects[0]?.semester ||
+    student?.ownScheduleSemester ||
+    "1st Semester";
+  const currentTermSubjects = subjects.filter(
+    (subject) =>
+      subject.academicYear === currentAcademicYear &&
+      subject.semester === currentSemester,
+  );
   const pendingUploadCount = credentialItems.filter(
     (item) => selectedCredentialFiles[item.code],
   ).length;
@@ -297,7 +309,7 @@ function StudentHome() {
         trackingNumber: student.trackingNumber,
       })
     : null;
-  const totalUnits = subjects.reduce(
+  const totalUnits = currentTermSubjects.reduce(
     (sum, subject) => sum + (subject.units || 0),
     0,
   );
@@ -465,8 +477,8 @@ function StudentHome() {
                     : "Pending Assessment"}
                 </div>
                 <p>
-                  {subjects.length > 0
-                    ? `${subjects.length} official subject(s) loaded for ${currentSemester}.`
+                  {currentTermSubjects.length > 0
+                    ? `${currentTermSubjects.length} official subject(s) loaded for ${currentSemester}.`
                     : "No official subject load has been posted yet."}
                 </p>
                 {student?.programType !== "SHS" ? (

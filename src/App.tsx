@@ -43,6 +43,7 @@ import StaffLogin from "./pages/staff/StaffLogin.tsx";
 import TestSupabase from "./components/TestSupabase";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import PublicOnlyRoute from "./components/auth/PublicOnlyRoute";
+import { useAdmissionPortalStatus } from "./hooks/useAdmissionPortalStatus";
 import { useAuth } from "./hooks/useAuth";
 import { STAFF_PORTAL_ROLES } from "./types/user";
 
@@ -82,6 +83,16 @@ function AdminPortalRoute({ children }: { children: ReactNode }) {
   );
 }
 
+function AdmissionApplicationRoute({ children }: { children: ReactNode }) {
+  const { isOpen: isAdmissionPortalOpen } = useAdmissionPortalStatus();
+
+  if (!isAdmissionPortalOpen) {
+    return <Navigate to="/admission" replace />;
+  }
+
+  return <>{children}</>;
+}
+
 function AppRoutes() {
   const { currentUser, logout } = useAuth();
 
@@ -110,9 +121,30 @@ function AppRoutes() {
       {/* Public Admission Routes */}
       <Route path="/" element={<AdmissionHome />} />
       <Route path="/admission" element={<AdmissionHome />} />
-      <Route path="/enroll" element={<AdmissionStep1 />} />
-      <Route path="/information" element={<AdmissionStep2 />} />
-      <Route path="/requirements" element={<AdmissionStep3 />} />
+      <Route
+        path="/enroll"
+        element={
+          <AdmissionApplicationRoute>
+            <AdmissionStep1 />
+          </AdmissionApplicationRoute>
+        }
+      />
+      <Route
+        path="/information"
+        element={
+          <AdmissionApplicationRoute>
+            <AdmissionStep2 />
+          </AdmissionApplicationRoute>
+        }
+      />
+      <Route
+        path="/requirements"
+        element={
+          <AdmissionApplicationRoute>
+            <AdmissionStep3 />
+          </AdmissionApplicationRoute>
+        }
+      />
       <Route path="/confirmation" element={<AdmissionStep4 />} />
       <Route path="/scholarship-exam" element={<AdmissionStep5 />} />
 

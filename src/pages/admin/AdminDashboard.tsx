@@ -10,6 +10,7 @@ import {
 import { FaFileAlt, FaUsers } from "react-icons/fa";
 import { FiMenu, FiX } from "react-icons/fi";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import AdmissionPortalAccessCard from "../../components/common/AdmissionPortalAccessCard";
 import ChartNote from "../../components/common/ChartNote";
 import { useAuth } from "../../hooks/useAuth";
 import { getStudentsForBranch, normalizeBranchName } from "../../services/adminStorage";
@@ -203,6 +204,8 @@ export default function AdminDashboard({
           <h1>Dashboard</h1>
           <p>Asian Institute of Computer Studies - {currentBranch} Branch</p>
         </header>
+
+        <AdmissionPortalAccessCard />
 
         <div className="stats-grid">
           <div className="stat-card">

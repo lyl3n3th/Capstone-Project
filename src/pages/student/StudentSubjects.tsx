@@ -210,8 +210,13 @@ const getOwnScheduleStatusMessage = (
 
 function StudentSubjects() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { student, subjects: allSubjects, isLoading, refreshStudent } =
-    useStudent();
+  const {
+    student,
+    subjects: allSubjects,
+    currentTerm,
+    isLoading,
+    refreshStudent,
+  } = useStudent();
   const [selectedAcademicYear, setSelectedAcademicYear] = useState("");
   const [selectedSemester, setSelectedSemester] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -291,17 +296,29 @@ function StudentSubjects() {
       allSubjects.map((subject) => subject.academicYear).filter(Boolean),
     );
 
+    if (currentTerm?.academicYear) {
+      years.add(currentTerm.academicYear);
+    }
+
     if (supportsOwnSchedule) {
       years.add(ownScheduleAcademicYear);
     }
 
     return Array.from(years).sort();
-  }, [allSubjects, ownScheduleAcademicYear, supportsOwnSchedule]);
+  }, [
+    allSubjects,
+    currentTerm?.academicYear,
+    ownScheduleAcademicYear,
+    supportsOwnSchedule,
+  ]);
 
   const effectiveAcademicYear =
     selectedAcademicYear && availableAcademicYears.includes(selectedAcademicYear)
       ? selectedAcademicYear
-      : availableAcademicYears[0] || ownScheduleAcademicYear;
+      : currentTerm?.academicYear &&
+          availableAcademicYears.includes(currentTerm.academicYear)
+        ? currentTerm.academicYear
+        : availableAcademicYears[0] || ownScheduleAcademicYear;
 
   const availableSemesters = useMemo(() => {
     const semesters = new Set(
@@ -310,6 +327,13 @@ function StudentSubjects() {
         .map((subject) => subject.semester)
         .filter(Boolean),
     );
+
+    if (
+      currentTerm?.semester &&
+      currentTerm.academicYear === effectiveAcademicYear
+    ) {
+      semesters.add(currentTerm.semester);
+    }
 
     if (supportsOwnSchedule && effectiveAcademicYear === ownScheduleAcademicYear) {
       semesters.add(ownScheduleSemester);
@@ -327,7 +351,11 @@ function StudentSubjects() {
   const effectiveSemester =
     selectedSemester && availableSemesters.includes(selectedSemester)
       ? selectedSemester
-      : availableSemesters[0] || ownScheduleSemester;
+      : currentTerm?.academicYear === effectiveAcademicYear &&
+          currentTerm?.semester &&
+          availableSemesters.includes(currentTerm.semester)
+        ? currentTerm.semester
+        : availableSemesters[0] || ownScheduleSemester;
 
   const filteredSubjects: StudentPortalSubject[] = useMemo(
     () =>

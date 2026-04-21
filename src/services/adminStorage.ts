@@ -11,6 +11,11 @@ import {
   getHonorDiscountPercentage,
   normalizeBranchCode,
 } from "./admission";
+import {
+  buildEnrollmentSubjectKey,
+  type EnrollmentRetakeChoiceGroup,
+  type EnrollmentRetakeRequestItem,
+} from "./enrollmentLoadPlanner";
 import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 
 export type AdminBranchName = "Bacoor" | "Taytay" | "GMA";
@@ -180,7 +185,8 @@ export interface StudentSubjectPlanRecord {
   source:
     | "transferee_validation"
     | "irregular_assignment"
-    | "student_schedule_request";
+    | "student_schedule_request"
+    | "enrollment_request";
 }
 
 export interface StudentScheduleChoiceGroup {
@@ -189,6 +195,20 @@ export interface StudentScheduleChoiceGroup {
   subjectName: string;
   units?: number;
   assignmentOptions: StudentScheduledAssignmentItem[];
+}
+
+export interface EnrollmentSectionChoice {
+  id: string;
+  code: string;
+  program: string;
+  yearLevel: string;
+  semester: string;
+  strand?: string;
+  section?: string;
+  currentEnrollees: number;
+  maxCapacity: number;
+  availableSlots: number;
+  scheduledAssignmentCount: number;
 }
 
 export interface StudentScheduleSelectionRequestRecord {
@@ -245,7 +265,13 @@ type StoredSubjectAssignment = {
 type StoredClassSection = {
   id: string;
   code: string;
+  program?: string;
+  yearLevel?: string;
   semester?: string;
+  strand?: string;
+  section?: string;
+  currentEnrollees?: number;
+  maxCapacity?: number;
 };
 
 const STUDENT_STORAGE_KEY = "aics-students";
@@ -1743,6 +1769,204 @@ export const getStudentPortalSubjectsForTerm = ({
     ),
     resolvedAcademicYear,
   );
+};
+
+export const getEnrollmentSectionChoices = ({
+  branch,
+  program,
+  yearLevel,
+  strandOrCourse,
+  semester,
+  academicYear,
+}: {
+  branch?: string | null;
+  program: string;
+  yearLevel: string;
+  strandOrCourse?: string;
+  semester: string;
+  academicYear?: string;
+}): EnrollmentSectionChoice[] => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedSections =
+    readBranchScopedData<StoredClassSection[]>("class-sections", resolvedBranch) ??
+    [];
+  const storedAssignments =
+    readBranchScopedData<StoredSubjectAssignment[]>(
+      "subject-assignments",
+      resolvedBranch,
+    ) ?? [];
+  const resolvedAcademicYear =
+    academicYear || storedAssignments[0]?.academicYear || "2026-2027";
+
+  return storedSections
+    .filter((section) => {
+      const sectionProgram = section.program || program;
+      const sectionYearLevel = section.yearLevel || yearLevel;
+      const sectionSemester = normalizeStoredSemester(
+        section.semester ||
+          storedAssignments.find(
+            (assignment) =>
+              assignment.sectionId === section.id ||
+              assignment.sectionCode === section.code,
+          )?.semester,
+      );
+      const sectionStrandOrCourse =
+        sectionProgram === "College"
+          ? section.strand || DEFAULT_COLLEGE_COURSE
+          : section.strand || "All";
+
+      return (
+        sectionProgram === program &&
+        sectionYearLevel === yearLevel &&
+        sectionSemester === semester &&
+        matchesStrandOrCourse(sectionStrandOrCourse, strandOrCourse)
+      );
+    })
+    .map((section) => {
+      const currentEnrollees = Math.max(0, Number(section.currentEnrollees ?? 0));
+      const maxCapacity = Math.max(
+        currentEnrollees,
+        Number(section.maxCapacity ?? 0),
+      );
+      const scheduledAssignmentCount = storedAssignments.filter(
+        (assignment) =>
+          assignment.academicYear === resolvedAcademicYear &&
+          assignment.semester === semester &&
+          (assignment.sectionId === section.id ||
+            assignment.sectionCode === section.code),
+      ).length;
+
+      return {
+        id: section.id,
+        code: section.code,
+        program: section.program || program,
+        yearLevel: section.yearLevel || yearLevel,
+        semester,
+        strand: section.strand,
+        section: section.section,
+        currentEnrollees,
+        maxCapacity,
+        availableSlots: Math.max(maxCapacity - currentEnrollees, 0),
+        scheduledAssignmentCount,
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.code.localeCompare(right.code) ||
+        right.availableSlots - left.availableSlots,
+    );
+};
+
+export const getEnrollmentRetakeChoiceGroups = ({
+  branch,
+  program,
+  strandOrCourse,
+  semester,
+  academicYear,
+  subjects,
+}: {
+  branch?: string | null;
+  program: string;
+  strandOrCourse?: string;
+  semester: string;
+  academicYear?: string;
+  subjects: EnrollmentRetakeRequestItem[];
+}): EnrollmentRetakeChoiceGroup[] => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedSubjects =
+    readBranchScopedData<StoredAcademicSubject[]>("subjects", resolvedBranch) ?? [];
+  const storedAssignments =
+    readBranchScopedData<StoredSubjectAssignment[]>(
+      "subject-assignments",
+      resolvedBranch,
+    ) ?? [];
+  const resolvedAcademicYear =
+    academicYear || storedAssignments[0]?.academicYear || "2026-2027";
+  const normalizedSemester = normalizeStoredSemester(semester);
+
+  return subjects
+    .map((item) => {
+      const normalizedSubjectCode = item.subjectCode.trim().toUpperCase();
+      const subjectKey = buildEnrollmentSubjectKey({
+        code: item.subjectCode,
+        title: item.subjectTitle,
+      });
+      const matchingSubjects = storedSubjects.filter(
+        (subject) =>
+          subject.program === program &&
+          matchesStrandOrCourse(
+            resolveStoredSubjectStrandOrCourse(subject),
+            strandOrCourse,
+          ) &&
+          (subject.code.trim().toUpperCase() === normalizedSubjectCode ||
+            buildEnrollmentSubjectKey({
+              code: subject.code,
+              title: subject.name,
+            }) === subjectKey),
+      );
+      const preferredSubject =
+        matchingSubjects.find(
+          (subject) => normalizeStoredSemester(subject.semester) === normalizedSemester,
+        ) ?? matchingSubjects[0];
+      const matchingSubjectIds = new Set(
+        matchingSubjects.map((subject) => subject.id),
+      );
+      const assignmentOptions = storedAssignments
+        .filter(
+          (assignment) =>
+            assignment.academicYear === resolvedAcademicYear &&
+            assignment.semester === semester &&
+            (matchingSubjectIds.has(assignment.subjectId) ||
+              assignment.subjectCode.trim().toUpperCase() === normalizedSubjectCode),
+        )
+        .map((assignment) => {
+          const assignmentSubjectDetails =
+            matchingSubjects.find(
+              (subject) =>
+                assignment.subjectId === subject.id ||
+                assignment.subjectCode === subject.code,
+            ) ?? preferredSubject;
+
+          return {
+            assignmentId: assignment.id,
+            subjectId:
+              assignment.subjectId ||
+              assignmentSubjectDetails?.id ||
+              item.subjectId ||
+              item.subjectCode,
+            subjectCode: assignment.subjectCode,
+            subjectName: assignment.subjectName,
+            units: assignmentSubjectDetails?.units,
+            instructorId: assignment.instructorId,
+            instructorName: assignment.instructorName,
+            sectionId: assignment.sectionId,
+            sectionCode: assignment.sectionCode,
+            schedule: assignment.schedule,
+            academicYear: assignment.academicYear,
+            semester: assignment.semester,
+          };
+        })
+        .sort(
+          (left, right) =>
+            left.subjectCode.localeCompare(right.subjectCode) ||
+            (left.sectionCode || "").localeCompare(right.sectionCode || ""),
+        );
+
+      return {
+        subjectId: preferredSubject?.id || item.subjectId || item.subjectCode,
+        subjectCode: item.subjectCode,
+        subjectName: item.subjectTitle,
+        units: preferredSubject?.units,
+        assignmentOptions,
+        evaluation: item.evaluation,
+        gradingPeriods: item.gradingPeriods,
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.subjectCode.localeCompare(right.subjectCode) ||
+        left.subjectName.localeCompare(right.subjectName),
+    );
 };
 
 export const getStudentScheduleChoiceGroups = ({
