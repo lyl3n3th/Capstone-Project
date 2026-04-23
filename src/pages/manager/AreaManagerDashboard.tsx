@@ -433,7 +433,7 @@ const AreaManagerDashboard = ({
                       {branch.total_students} Students
                     </span>
                   </div>
-                  <ChartNote title="Branch pie guide" variant="compact">
+                  <ChartNote title="Overview" variant="compact">
                     Slice size shows each strand or course share inside{" "}
                     {branch.branch_name}. The percentages beside the chart are
                     based on this branch total only.

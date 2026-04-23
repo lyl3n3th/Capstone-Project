@@ -309,12 +309,21 @@
 }
 
 .delete-btn {
-  background: #fee2e2;
-  color: #dc2626;
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.delete-btn.icon-only {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 10px;
+  flex-shrink: 0;
 }
 
 .delete-btn:hover {
-  background: #dc2626;
+  background: #b91c1c;
   color: white;
   transform: translateY(-1px);
 }
@@ -468,6 +477,10 @@
   .delete-btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .delete-btn.icon-only {
+    width: 40px;
   }
 }
 

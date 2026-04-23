@@ -12,6 +12,10 @@ import {
   updateAdmissionProgress,
 } from "../../services/admission";
 import {
+  sendAdmissionSubmissionNotification,
+  type AdmissionSubmissionNotificationResponse,
+} from "../../services/admissionSubmissionNotificationApi";
+import {
   findStoredStudent,
   normalizeBranchName,
   upsertSubmittedApplicant,
@@ -30,6 +34,11 @@ interface Toast {
   type: "success" | "error" | "info" | "warning";
 }
 
+interface SubmissionDeliveryNotice {
+  type: "success" | "warning";
+  message: string;
+}
+
 function AdmissionStep4() {
   const urlTrackingNumber = getQueryParam("trackingNumber") || "";
   const [trackingNumber, setTrackingNumber] = useState("");
@@ -40,6 +49,8 @@ function AdmissionStep4() {
   const [isLoading, setIsLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [activatedStudentNumber, setActivatedStudentNumber] = useState("");
+  const [submissionDeliveryNotice, setSubmissionDeliveryNotice] =
+    useState<SubmissionDeliveryNotice | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = (message: string, type: Toast["type"]) => {
@@ -151,16 +162,49 @@ function AdmissionStep4() {
       });
 
       setApplicationData(updatedApplication);
-      addToast("Application submitted successfully.", "success");
+      setTrackingNumber(updatedApplication.trackingNumber);
 
-      setTimeout(() => {
-        if (shouldProceedToScholarshipExam) {
+      try {
+        const notificationResult = await sendAdmissionSubmissionNotification({
+          trackingNumber: updatedApplication.trackingNumber,
+          email: draft?.email,
+          mobile: draft?.contact,
+          firstName: draft?.fname || updatedApplication.firstName,
+          lastName: draft?.lname || updatedApplication.lastName,
+          applicationStatus: updatedApplication.applicationStatus,
+        });
+        const {
+          message: deliveryMessage,
+          type: deliveryType,
+        } = getSubmissionDeliveryFeedback(notificationResult);
+
+        setSubmissionDeliveryNotice({
+          message: deliveryMessage,
+          type: deliveryType,
+        });
+
+        addToast(deliveryMessage, deliveryType);
+      } catch (notificationError) {
+        console.warn(
+          "Automatic submission tracking notification failed",
+          notificationError,
+        );
+        setSubmissionDeliveryNotice({
+          type: "warning",
+          message:
+            "Application submitted successfully, but we could not send the tracking number automatically right now.",
+        });
+        addToast(
+          "Application submitted successfully, but we could not send the tracking number automatically right now.",
+          "warning",
+        );
+      }
+
+      if (shouldProceedToScholarshipExam) {
+        setTimeout(() => {
           window.location.href = `/scholarship-exam?trackingNumber=${encodeURIComponent(updatedApplication.trackingNumber)}`;
-          return;
-        }
-
-        window.location.href = "/";
-      }, 500);
+        }, 700);
+      }
     } catch (err) {
       console.error(err);
       addToast(
@@ -183,6 +227,54 @@ function AdmissionStep4() {
       month: "long",
       day: "numeric",
     });
+  };
+
+  const getSubmissionDeliveryFeedback = (
+    notificationResult: AdmissionSubmissionNotificationResponse,
+  ): SubmissionDeliveryNotice => {
+    const sentChannels = [
+      notificationResult.deliveries.email.status === "sent" ? "email" : "",
+      notificationResult.deliveries.sms.status === "sent" ? "SMS" : "",
+    ].filter(Boolean);
+    const failedChannels = [
+      notificationResult.deliveries.email.status === "failed" ? "email" : "",
+      notificationResult.deliveries.sms.status === "failed" ? "SMS" : "",
+    ].filter(Boolean);
+
+    if (sentChannels.length === 2) {
+      return {
+        type: "success",
+        message:
+          "Application submitted. Tracking number sent by email and SMS.",
+      };
+    }
+
+    if (sentChannels.length === 1 && failedChannels.length > 0) {
+      return {
+        type: "warning",
+        message: `Application submitted. Tracking number sent by ${sentChannels[0]}, but automatic ${failedChannels.join(" and ")} delivery failed.`,
+      };
+    }
+
+    if (sentChannels.length === 1) {
+      return {
+        type: "success",
+        message: `Application submitted. Tracking number sent by ${sentChannels[0]}.`,
+      };
+    }
+
+    if (failedChannels.length > 0) {
+      return {
+        type: "warning",
+        message: `Application submitted, but automatic ${failedChannels.join(" and ")} delivery could not be completed right now.`,
+      };
+    }
+
+    return {
+      type: "warning",
+      message:
+        "Application submitted successfully. Automatic email/SMS delivery is not configured yet, so keep your tracking number.",
+    };
   };
 
   const applicationStatusMessage = useMemo(() => {
@@ -395,6 +487,19 @@ function AdmissionStep4() {
             </div>
           )}
 
+          {!canEdit && submissionDeliveryNotice && (
+            <div
+              className={`conf-notice ${
+                submissionDeliveryNotice.type === "success"
+                  ? "conf-notice-success"
+                  : "conf-notice-warning"
+              }`}
+            >
+              <strong>Tracking Notification:</strong>{" "}
+              {submissionDeliveryNotice.message}
+            </div>
+          )}
+
           {isAccepted && (
             <div className="conf-notice conf-notice-success">
               <strong>Student Portal Ready:</strong> Your application has been
@@ -534,7 +639,9 @@ function AdmissionStep4() {
               <p className="conf-notes-title">Important Notes</p>
             </div>
             <p className="conf-notes-text">
-              Keep your tracking number for status updates and recovery.
+              Keep your tracking number for status updates. After submission, it
+              will also be sent to your registered email and mobile when
+              messaging is available.
             </p>
             <p className="conf-notes-text">
               Uploaded requirements and admission details are now submitted in

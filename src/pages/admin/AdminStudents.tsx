@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { FaTrash } from "react-icons/fa";
 import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { useAuth } from "../../hooks/useAuth";
@@ -13,7 +14,9 @@ import {
   fetchSupabaseAdmissionApplicants,
   getNextStudentNumber,
   getStudentRequirementSnapshot,
+  getStudentSectionChoices,
   updateStoredStudentOwnScheduleState,
+  updateStoredStudentSection,
   getStudentsForBranch,
   normalizeBranchName,
   promoteApplicantToStoredStudent,
@@ -25,6 +28,7 @@ import {
   type AdminAttachment,
   type AdminEnrolleeRecord,
   type StudentScheduledAssignmentItem,
+  type StudentSectionChoice,
   type StudentScheduleSelectionRequestRecord,
   type StudentSubjectPlanItem,
   type StudentSubjectPlanRecord,
@@ -277,137 +281,17 @@ interface ShsGradeSummaryRow {
   quarterGrades: Record<ShsQuarterLabel, string>;
 }
 
-interface PlannerSubject {
-  id: string;
-  code: string;
-  name: string;
-  units?: number;
-  program: string;
-  yearLevel: string;
-  semester: string;
-  strand?: string;
-}
-
-interface PlannerScheduleSlot {
-  day: string;
-  startTime: string;
-  endTime: string;
-  room: string;
-}
-
-interface PlannerAssignment {
-  id: string;
-  subjectId: string;
-  subjectCode: string;
-  subjectName: string;
-  instructorId: string;
-  instructorName: string;
-  sectionId: string;
-  sectionCode: string;
-  schedule: PlannerScheduleSlot[];
-  academicYear: string;
-  semester: string;
-}
-
-interface IrregularPlannerFormState {
-  academicYear: string;
-  semester: string;
-  selectedAssignmentIds: string[];
-  notes: string;
-}
-
 interface PlannerConflict {
   leftAssignmentId: string;
   rightAssignmentId: string;
   message: string;
 }
 
-interface PlannerSubjectSelectionGroup {
-  subject: PlannerSubject;
-  assignmentOptions: PlannerAssignment[];
-  selectedAssignmentId: string;
-}
-
-interface PlannerYearGroup {
-  yearLevel: string;
-  items: PlannerSubjectSelectionGroup[];
-  selectedCount: number;
-}
-
-const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
-const DEFAULT_PLANNING_SEMESTER = "1st Semester";
-const DEFAULT_PLANNING_ACADEMIC_YEAR = "2026-2027";
 const STUDENT_SUBJECT_PLAN_SCOPE = "student-subject-plans";
-const SUBJECT_CATALOG_SCOPE = "subjects";
-const SUBJECT_ASSIGNMENT_SCOPE = "subject-assignments";
 const STUDENT_SCHEDULE_REQUEST_SCOPE = "student-schedule-requests";
-
-const normalizePlanningSemester = (value?: string | null) =>
-  value?.trim().toLowerCase().includes("2nd")
-    ? "2nd Semester"
-    : value?.trim().toLowerCase().includes("summer")
-      ? "Summer"
-      : DEFAULT_PLANNING_SEMESTER;
-
-const normalizeAcademicDescriptor = (value?: string | null) =>
-  (value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
-const matchesPlannerStrandOrCourse = (
-  leftValue?: string | null,
-  rightValue?: string | null,
-) => {
-  const left = normalizeAcademicDescriptor(leftValue);
-  const right = normalizeAcademicDescriptor(rightValue);
-
-  if (!left || !right || left === "all" || right === "all") {
-    return true;
-  }
-
-  return left.includes(right) || right.includes(left);
-};
 
 const getStudentSubjectPlanKey = (student: Pick<Student, "id" | "trackingNumber">) =>
   student.trackingNumber || student.id;
-
-const mapSubjectsToPlanItems = (subjects: PlannerSubject[]): StudentSubjectPlanItem[] =>
-  subjects
-    .map((subject) => ({
-      subjectId: subject.id,
-      subjectCode: subject.code,
-      subjectName: subject.name,
-      units: subject.units,
-    }))
-    .sort(
-      (left, right) =>
-        left.subjectCode.localeCompare(right.subjectCode) ||
-        left.subjectName.localeCompare(right.subjectName),
-    );
-
-const mapAssignmentsToScheduledPlanItems = (
-  assignments: PlannerAssignment[],
-): StudentScheduledAssignmentItem[] =>
-  assignments
-    .map((assignment) => ({
-      assignmentId: assignment.id,
-      subjectId: assignment.subjectId,
-      subjectCode: assignment.subjectCode,
-      subjectName: assignment.subjectName,
-      instructorId: assignment.instructorId,
-      instructorName: assignment.instructorName,
-      sectionId: assignment.sectionId,
-      sectionCode: assignment.sectionCode,
-      schedule: assignment.schedule,
-      academicYear: assignment.academicYear,
-      semester: assignment.semester,
-    }))
-    .sort(
-      (left, right) =>
-        left.subjectCode.localeCompare(right.subjectCode) ||
-        left.sectionCode.localeCompare(right.sectionCode),
-    );
 
 const formatScheduleSlotTime = (value: string) => {
   if (!/^\d{2}:\d{2}$/.test(value)) {
@@ -420,7 +304,9 @@ const formatScheduleSlotTime = (value: string) => {
   return `${hour}:${rawMinute.toString().padStart(2, "0")} ${suffix}`;
 };
 
-const formatPlannerScheduleLabel = (schedule: PlannerScheduleSlot[]) =>
+const formatPlannerScheduleLabel = (
+  schedule: StudentScheduledAssignmentItem["schedule"],
+) =>
   schedule.length > 0
     ? schedule
         .map(
@@ -429,14 +315,6 @@ const formatPlannerScheduleLabel = (schedule: PlannerScheduleSlot[]) =>
         )
         .join(" / ")
     : "Schedule not set";
-
-const sortPlannerAssignments = (assignments: PlannerAssignment[]) =>
-  [...assignments].sort(
-    (left, right) =>
-      left.subjectCode.localeCompare(right.subjectCode) ||
-      left.sectionCode.localeCompare(right.sectionCode) ||
-      left.instructorName.localeCompare(right.instructorName),
-  );
 
 const parseClockToMinutes = (value: string) => {
   if (!/^\d{2}:\d{2}$/.test(value)) {
@@ -447,56 +325,6 @@ const parseClockToMinutes = (value: string) => {
   return hours * 60 + minutes;
 };
 
-const buildPlannerConflicts = (assignments: PlannerAssignment[]): PlannerConflict[] => {
-  const conflicts: PlannerConflict[] = [];
-
-  for (let leftIndex = 0; leftIndex < assignments.length; leftIndex += 1) {
-    for (
-      let rightIndex = leftIndex + 1;
-      rightIndex < assignments.length;
-      rightIndex += 1
-    ) {
-      const left = assignments[leftIndex];
-      const right = assignments[rightIndex];
-
-      const hasConflict = left.schedule.some((leftSlot) =>
-        right.schedule.some((rightSlot) => {
-          if (leftSlot.day !== rightSlot.day) {
-            return false;
-          }
-
-          const leftStart = parseClockToMinutes(leftSlot.startTime);
-          const leftEnd = parseClockToMinutes(leftSlot.endTime);
-          const rightStart = parseClockToMinutes(rightSlot.startTime);
-          const rightEnd = parseClockToMinutes(rightSlot.endTime);
-
-          if (
-            leftStart === null ||
-            leftEnd === null ||
-            rightStart === null ||
-            rightEnd === null
-          ) {
-            return false;
-          }
-
-          return leftStart < rightEnd && rightStart < leftEnd;
-        }),
-      );
-
-      if (!hasConflict) {
-        continue;
-      }
-
-      conflicts.push({
-        leftAssignmentId: left.id,
-        rightAssignmentId: right.id,
-        message: `${left.subjectCode} conflicts with ${right.subjectCode}.`,
-      });
-    }
-  }
-
-  return conflicts;
-};
 
 const buildScheduledAssignmentConflicts = (
   assignments: Pick<
@@ -594,25 +422,56 @@ const getOwnScheduleSelectionLabel = (
   return "Not Submitted";
 };
 
+const getSectionCapacityLabel = (
+  section: Pick<
+    StudentSectionChoice,
+    "currentEnrollees" | "maxCapacity" | "hasCapacityLimit"
+  >,
+) =>
+  section.hasCapacityLimit
+    ? `${section.currentEnrollees}/${section.maxCapacity} enrolled`
+    : `${section.currentEnrollees} enrolled`;
+
+const getSectionDescriptorLabel = (
+  section: Pick<StudentSectionChoice, "program" | "yearLevel" | "semester" | "strand">,
+) =>
+  [section.program, section.yearLevel, section.strand, section.semester]
+    .filter(Boolean)
+    .join(" | ");
+
+const buildStudentSectionOptionLabel = (section: StudentSectionChoice) =>
+  `${section.code} | ${section.semester} | ${getSectionCapacityLabel(section)}`;
+
+const buildGradeTermKey = (academicYear: string, semester: string) =>
+  `${academicYear}::${semester}`;
+
+const getGradeSearchHaystack = (
+  record: Pick<
+    StoredStudentGradeRecord,
+    | "subjectCode"
+    | "subjectTitle"
+    | "gradingPeriod"
+    | "normalizedGrade"
+    | "evaluation"
+    | "academicYear"
+    | "semester"
+  >,
+) =>
+  [
+    record.subjectCode,
+    record.subjectTitle,
+    record.gradingPeriod,
+    record.normalizedGrade,
+    record.evaluation,
+    record.academicYear,
+    record.semester,
+  ]
+    .join(" ")
+    .toLowerCase();
+
 const getSemesterOrderIndex = (value: string) => {
   const index = SEMESTER_DISPLAY_ORDER.indexOf(value);
   return index >= 0 ? index : SEMESTER_DISPLAY_ORDER.length;
-};
-
-const getPlannerYearGroupOrder = (value: string) => {
-  const normalized = value.trim().toLowerCase();
-  const numericMatch = normalized.match(/(\d+)/);
-  const numericValue = numericMatch ? Number.parseInt(numericMatch[1], 10) : null;
-
-  if (normalized.startsWith("grade") && numericValue !== null) {
-    return numericValue;
-  }
-
-  if (numericValue !== null) {
-    return 100 + numericValue;
-  }
-
-  return Number.MAX_SAFE_INTEGER;
 };
 
 const sortAcademicTerms = <T extends { academicYear: string; semester: string }>(
@@ -830,15 +689,8 @@ export default function AdminStudents({
   const [studentScheduleRequests, setStudentScheduleRequests] = useState<
     StudentScheduleSelectionRequestRecord[]
   >([]);
-  const [plannerSubjects, setPlannerSubjects] = useState<PlannerSubject[]>([]);
-  const [plannerAssignments, setPlannerAssignments] = useState<
-    PlannerAssignment[]
-  >([]);
-  const [hasLoadedPlannerData, setHasLoadedPlannerData] = useState(false);
-  const [planningStudent, setPlanningStudent] = useState<Student | null>(null);
-  const [expandedPlannerYearLevels, setExpandedPlannerYearLevels] = useState<
-    string[]
-  >([]);
+  const [hasLoadedStudentPlanData, setHasLoadedStudentPlanData] =
+    useState(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [isBulkMovingToAlumni, setIsBulkMovingToAlumni] = useState(false);
   const [pendingScholarshipScore, setPendingScholarshipScore] = useState("");
@@ -846,12 +698,12 @@ export default function AdminStudents({
     useState(false);
   const [scholarshipScoreFeedback, setScholarshipScoreFeedback] =
     useState<InlineFeedback | null>(null);
-  const [plannerForm, setPlannerForm] = useState<IrregularPlannerFormState>({
-    academicYear: DEFAULT_PLANNING_ACADEMIC_YEAR,
-    semester: DEFAULT_PLANNING_SEMESTER,
-    selectedAssignmentIds: [],
-    notes: "",
-  });
+  const [pendingSectionCode, setPendingSectionCode] = useState("");
+  const [isSavingSectionChange, setIsSavingSectionChange] = useState(false);
+  const [sectionChangeFeedback, setSectionChangeFeedback] =
+    useState<InlineFeedback | null>(null);
+  const [gradeTermFilter, setGradeTermFilter] = useState("all");
+  const [gradeSearchTerm, setGradeSearchTerm] = useState("");
 
   // Form state for add/edit
   const [formData, setFormData] = useState<Student>({
@@ -955,7 +807,7 @@ export default function AdminStudents({
   }, [currentBranch]);
 
   useEffect(() => {
-    setHasLoadedPlannerData(false);
+    setHasLoadedStudentPlanData(false);
     setSelectedStudentIds([]);
     setStudentSubjectPlans(
       readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
@@ -969,19 +821,7 @@ export default function AdminStudents({
         currentBranch,
       ) ?? [],
     );
-    setPlannerSubjects(
-      readBranchScopedData<PlannerSubject[]>(SUBJECT_CATALOG_SCOPE, currentBranch) ??
-        [],
-    );
-    setPlannerAssignments(
-      sortPlannerAssignments(
-        readBranchScopedData<PlannerAssignment[]>(
-          SUBJECT_ASSIGNMENT_SCOPE,
-          currentBranch,
-        ) ?? [],
-      ),
-    );
-    setHasLoadedPlannerData(true);
+    setHasLoadedStudentPlanData(true);
   }, [currentBranch]);
 
   useEffect(() => {
@@ -998,18 +838,6 @@ export default function AdminStudents({
           STUDENT_SCHEDULE_REQUEST_SCOPE,
           currentBranch,
         ) ?? [],
-      );
-      setPlannerSubjects(
-        readBranchScopedData<PlannerSubject[]>(SUBJECT_CATALOG_SCOPE, currentBranch) ??
-          [],
-      );
-      setPlannerAssignments(
-        sortPlannerAssignments(
-          readBranchScopedData<PlannerAssignment[]>(
-            SUBJECT_ASSIGNMENT_SCOPE,
-            currentBranch,
-          ) ?? [],
-        ),
       );
     };
 
@@ -1062,7 +890,7 @@ export default function AdminStudents({
   }, [students]);
 
   useEffect(() => {
-    if (!hasLoadedPlannerData) {
+    if (!hasLoadedStudentPlanData) {
       return;
     }
 
@@ -1071,7 +899,7 @@ export default function AdminStudents({
       currentBranch,
       studentSubjectPlans,
     );
-  }, [currentBranch, hasLoadedPlannerData, studentSubjectPlans]);
+  }, [currentBranch, hasLoadedStudentPlanData, studentSubjectPlans]);
 
   const studentAcademicStandingById = useMemo(
     () =>
@@ -1092,152 +920,6 @@ export default function AdminStudents({
       student,
       studentAcademicStandingById[student.id]?.label,
     );
-
-  const planningStudentPlan = planningStudent
-    ? studentSubjectPlans[getStudentSubjectPlanKey(planningStudent)] ?? null
-    : null;
-  const planningAvailableSubjects = useMemo(() => {
-    if (!planningStudent) {
-      return [];
-    }
-
-    return plannerSubjects
-      .filter(
-        (subject) =>
-          subject.program === planningStudent.program &&
-          normalizePlanningSemester(subject.semester) ===
-            normalizePlanningSemester(plannerForm.semester) &&
-          matchesPlannerStrandOrCourse(
-            subject.strand,
-            planningStudent.strandOrCourse || DEFAULT_COLLEGE_COURSE,
-          ),
-      )
-      .sort(
-        (left, right) =>
-          left.code.localeCompare(right.code) || left.name.localeCompare(right.name),
-      );
-  }, [plannerForm.semester, plannerSubjects, planningStudent]);
-  const planningAvailableAssignments = useMemo(() => {
-    if (!planningStudent) {
-      return [];
-    }
-
-    const matchingSubjectIds = new Set(planningAvailableSubjects.map((subject) => subject.id));
-
-    return sortPlannerAssignments(
-      plannerAssignments.filter(
-        (assignment) =>
-          matchingSubjectIds.has(assignment.subjectId) &&
-          normalizePlanningSemester(assignment.semester) ===
-            normalizePlanningSemester(plannerForm.semester) &&
-          assignment.academicYear === plannerForm.academicYear,
-      ),
-    );
-  }, [
-    plannerAssignments,
-    plannerForm.academicYear,
-    plannerForm.semester,
-    planningAvailableSubjects,
-    planningStudent,
-  ]);
-  const planningSubjectGroups = useMemo<PlannerSubjectSelectionGroup[]>(
-    () =>
-      planningAvailableSubjects.map((subject) => {
-        const assignmentOptions = planningAvailableAssignments.filter(
-          (assignment) =>
-            assignment.subjectId === subject.id ||
-            assignment.subjectCode === subject.code,
-        );
-        const selectedAssignmentId =
-          plannerForm.selectedAssignmentIds.find((assignmentId) =>
-            assignmentOptions.some((assignment) => assignment.id === assignmentId),
-          ) || "";
-
-        return {
-          subject,
-          assignmentOptions,
-          selectedAssignmentId,
-        };
-      }),
-    [
-      plannerForm.selectedAssignmentIds,
-      planningAvailableAssignments,
-      planningAvailableSubjects,
-    ],
-  );
-  const planningYearGroups = useMemo<PlannerYearGroup[]>(
-    () =>
-      Array.from(
-        planningSubjectGroups.reduce(
-          (groups, subjectGroup) => {
-            const yearLevel =
-              subjectGroup.subject.yearLevel?.trim() || "Other Subjects";
-            const existingItems = groups.get(yearLevel) ?? [];
-            existingItems.push(subjectGroup);
-            groups.set(yearLevel, existingItems);
-            return groups;
-          },
-          new Map<string, PlannerSubjectSelectionGroup[]>(),
-        ),
-      )
-        .sort(
-          ([leftYearLevel], [rightYearLevel]) =>
-            getPlannerYearGroupOrder(leftYearLevel) -
-              getPlannerYearGroupOrder(rightYearLevel) ||
-            leftYearLevel.localeCompare(rightYearLevel),
-        )
-        .map(([yearLevel, items]) => ({
-          yearLevel,
-          items,
-          selectedCount: items.filter((item) => Boolean(item.selectedAssignmentId))
-            .length,
-        })),
-    [planningSubjectGroups],
-  );
-  const selectedPlannerAssignments = useMemo(
-    () =>
-      sortPlannerAssignments(
-        planningAvailableAssignments.filter((assignment) =>
-          plannerForm.selectedAssignmentIds.includes(assignment.id),
-        ),
-      ),
-    [plannerForm.selectedAssignmentIds, planningAvailableAssignments],
-  );
-  const plannerConflicts = useMemo(
-    () => buildPlannerConflicts(selectedPlannerAssignments),
-    [selectedPlannerAssignments],
-  );
-
-  useEffect(() => {
-    if (!planningStudent || planningYearGroups.length === 0) {
-      setExpandedPlannerYearLevels([]);
-      return;
-    }
-
-    setExpandedPlannerYearLevels((prev) => {
-      const validYearLevels = new Set(
-        planningYearGroups.map((group) => group.yearLevel),
-      );
-      const preservedExpanded = prev.filter((yearLevel) =>
-        validYearLevels.has(yearLevel),
-      );
-
-      if (preservedExpanded.length > 0) {
-        return preservedExpanded;
-      }
-
-      const defaultExpanded = planningYearGroups
-        .filter(
-          (group) =>
-            group.selectedCount > 0 || group.yearLevel === planningStudent.yearLevel,
-        )
-        .map((group) => group.yearLevel);
-
-      return defaultExpanded.length > 0
-        ? defaultExpanded
-        : [planningYearGroups[0].yearLevel];
-    });
-  }, [planningStudent, planningYearGroups]);
 
   const filteredStudents = students.filter((student) => {
     const search = searchTerm.toLowerCase();
@@ -1342,9 +1024,6 @@ export default function AdminStudents({
   const areAllVisibleStudentsSelected =
     visibleStudentIds.length > 0 &&
     visibleStudentIds.every((studentId) => selectedStudentIds.includes(studentId));
-
-  const getDefaultPlannerAcademicYear = () =>
-    plannerAssignments[0]?.academicYear || DEFAULT_PLANNING_ACADEMIC_YEAR;
 
   // Validation
   const validateForm = () => {
@@ -1635,125 +1314,6 @@ export default function AdminStudents({
     }
   };
 
-  const openPlannerModal = (student: Student) => {
-    const existingPlan = studentSubjectPlans[getStudentSubjectPlanKey(student)];
-    setPlanningStudent(student);
-    setPlannerForm({
-      academicYear:
-        existingPlan?.academicYear ||
-        plannerAssignments[0]?.academicYear ||
-        DEFAULT_PLANNING_ACADEMIC_YEAR,
-      semester: normalizePlanningSemester(
-        existingPlan?.semester || DEFAULT_PLANNING_SEMESTER,
-      ),
-      selectedAssignmentIds:
-        existingPlan?.scheduledAssignments?.map(
-          (assignment) => assignment.assignmentId,
-        ) ?? [],
-      notes: existingPlan?.notes || "",
-    });
-  };
-
-  const closePlannerModal = () => {
-    setPlanningStudent(null);
-    setPlannerForm({
-      academicYear: DEFAULT_PLANNING_ACADEMIC_YEAR,
-      semester: DEFAULT_PLANNING_SEMESTER,
-      selectedAssignmentIds: [],
-      notes: "",
-    });
-  };
-
-  const handlePlannerAssignmentChange = (
-    subject: PlannerSubject,
-    nextAssignmentId: string,
-  ) => {
-    const assignmentIdsForSubject = planningAvailableAssignments
-      .filter(
-        (assignment) =>
-          assignment.subjectId === subject.id ||
-          assignment.subjectCode === subject.code,
-      )
-      .map((assignment) => assignment.id);
-
-    setPlannerForm((prev) => ({
-      ...prev,
-      selectedAssignmentIds: [
-        ...prev.selectedAssignmentIds.filter(
-          (assignmentId) => !assignmentIdsForSubject.includes(assignmentId),
-        ),
-        ...(nextAssignmentId ? [nextAssignmentId] : []),
-      ],
-    }));
-  };
-
-  const handleSavePlanner = () => {
-    if (!planningStudent) {
-      return;
-    }
-
-    const planKey = getStudentSubjectPlanKey(planningStudent);
-    const existingPlan = studentSubjectPlans[planKey];
-    const selectedAssignments = selectedPlannerAssignments;
-    const selectedSubjects = planningAvailableSubjects.filter((subject) =>
-      selectedAssignments.some(
-        (assignment) =>
-          assignment.subjectId === subject.id ||
-          assignment.subjectCode === subject.code,
-      ),
-    );
-
-    if (selectedAssignments.length === 0) {
-      if (existingPlan && existingPlan.creditedSubjects.length > 0) {
-        setStudentSubjectPlans((prev) => ({
-          ...prev,
-          [planKey]: {
-            ...existingPlan,
-            semester: normalizePlanningSemester(plannerForm.semester),
-            academicYear:
-              plannerForm.academicYear.trim() || getDefaultPlannerAcademicYear(),
-            assignedSubjects: [],
-            scheduledAssignments: [],
-            notes: plannerForm.notes.trim() || existingPlan?.notes,
-            updatedAt: new Date().toISOString(),
-          },
-        }));
-      } else {
-        setStudentSubjectPlans((prev) => {
-          if (!prev[planKey]) {
-            return prev;
-          }
-
-          const nextPlans = { ...prev };
-          delete nextPlans[planKey];
-          return nextPlans;
-        });
-      }
-      closePlannerModal();
-      return;
-    }
-
-    const nextPlan: StudentSubjectPlanRecord = {
-      id: planKey,
-      trackingNumber: planningStudent.trackingNumber,
-      studentNumber: planningStudent.id,
-      semester: normalizePlanningSemester(plannerForm.semester),
-      academicYear: plannerForm.academicYear.trim() || getDefaultPlannerAcademicYear(),
-      assignedSubjects: mapSubjectsToPlanItems(selectedSubjects),
-      creditedSubjects: existingPlan?.creditedSubjects ?? [],
-      scheduledAssignments: mapAssignmentsToScheduledPlanItems(selectedAssignments),
-      notes: plannerForm.notes.trim() || undefined,
-      updatedAt: new Date().toISOString(),
-      source: "irregular_assignment",
-    };
-
-    setStudentSubjectPlans((prev) => ({
-      ...prev,
-      [planKey]: nextPlan,
-    }));
-    closePlannerModal();
-  };
-
   // Open archive modal
   const openArchiveConfirm = (id: string) => {
     setStudentToArchive(id);
@@ -1817,6 +1377,10 @@ export default function AdminStudents({
   };
 
   const openViewModal = (student: Student) => {
+    setSectionChangeFeedback(null);
+    setPendingSectionCode(student.section || "");
+    setGradeTermFilter("all");
+    setGradeSearchTerm("");
     setViewingStudent(student);
   };
 
@@ -1824,14 +1388,10 @@ export default function AdminStudents({
     setViewingStudent(null);
     setPendingScholarshipScore("");
     setScholarshipScoreFeedback(null);
-  };
-
-  const togglePlannerYearGroup = (yearLevel: string) => {
-    setExpandedPlannerYearLevels((prev) =>
-      prev.includes(yearLevel)
-        ? prev.filter((value) => value !== yearLevel)
-        : [...prev, yearLevel],
-    );
+    setPendingSectionCode("");
+    setSectionChangeFeedback(null);
+    setGradeTermFilter("all");
+    setGradeSearchTerm("");
   };
 
   const toggleStudentSelection = (studentId: string) => {
@@ -1957,6 +1517,72 @@ export default function AdminStudents({
       });
     } finally {
       setIsSavingScholarshipScore(false);
+    }
+  };
+
+  const handleApplySectionChange = async () => {
+    if (!viewingStudent) {
+      return;
+    }
+
+    const normalizedSectionCode = pendingSectionCode.trim();
+    if (!normalizedSectionCode) {
+      setSectionChangeFeedback({
+        type: "warning",
+        message: "Choose a section before moving this student.",
+      });
+      return;
+    }
+
+    setIsSavingSectionChange(true);
+
+    try {
+      const updateResult = updateStoredStudentSection({
+        branch: viewingStudent.branch || currentBranch,
+        studentNumber: viewingStudent.id,
+        trackingNumber: viewingStudent.trackingNumber,
+        nextSectionCode: normalizedSectionCode,
+      });
+
+      if (!updateResult) {
+        throw new Error("No linked student record was found for this update.");
+      }
+
+      const refreshedStudents = getStudentsForBranch(currentBranch) as Student[];
+      const refreshedViewingStudent =
+        refreshedStudents.find(
+          (student) =>
+            student.id === viewingStudent.id ||
+            (viewingStudent.trackingNumber &&
+              student.trackingNumber === viewingStudent.trackingNumber),
+        ) ?? updateResult.student;
+
+      setStudents(refreshedStudents);
+      setViewingStudent(refreshedViewingStudent);
+      setSectionChangeFeedback(
+        updateResult.didChange
+          ? {
+              type: "success",
+              message: updateResult.previousSection
+                ? `Student moved from ${updateResult.previousSection} to ${updateResult.nextSection}.`
+                : `Student assigned to ${updateResult.nextSection}.`,
+            }
+          : {
+              type: "warning",
+              message: `${viewingStudent.name} is already assigned to ${updateResult.nextSection}.`,
+            },
+      );
+    } catch (error) {
+      console.error("Failed to update student section", error);
+      setSectionChangeFeedback({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to update the student's section.",
+      });
+    } finally {
+      setIsSavingSectionChange(false);
     }
   };
 
@@ -2172,9 +1798,6 @@ export default function AdminStudents({
   const viewingStudentOwnScheduleReason = hasApprovedOwnSchedule(viewingStudent)
     ? "This student was approved for own-schedule admission and is treated as irregular while the customized load is being managed."
     : "";
-  const viewingStudentSubjectPlan = viewingStudent
-    ? studentSubjectPlans[getStudentSubjectPlanKey(viewingStudent)] ?? null
-    : null;
   const viewingStudentScheduleRequest = viewingStudent
     ? studentScheduleRequests.find(
         (request) =>
@@ -2183,12 +1806,16 @@ export default function AdminStudents({
             request.trackingNumber === viewingStudent.trackingNumber),
       ) ?? null
     : null;
-  const viewingStudentGradeRecords = viewingStudent
-    ? getStudentGradeRecords({
-        branch: viewingStudent.branch || currentBranch,
-        studentId: viewingStudent.id,
-      })
-    : [];
+  const viewingStudentGradeRecords = useMemo(
+    () =>
+      viewingStudent
+        ? getStudentGradeRecords({
+            branch: viewingStudent.branch || currentBranch,
+            studentId: viewingStudent.id,
+          })
+        : [],
+    [currentBranch, viewingStudent],
+  );
   const viewingStudentGradeTerms = sortAcademicTerms(
     Array.from(
       new Map(
@@ -2197,7 +1824,7 @@ export default function AdminStudents({
             (record) => Boolean(record.academicYear) && Boolean(record.semester),
           )
           .map((record) => [
-            `${record.academicYear}::${record.semester}`,
+            buildGradeTermKey(record.academicYear, record.semester),
             {
               academicYear: record.academicYear,
               semester: record.semester,
@@ -2206,8 +1833,52 @@ export default function AdminStudents({
       ).values(),
     ),
   );
-  const viewingStudentGradeTriggerIds = new Set(
-    viewingStudentAcademicStanding?.triggerGrades.map((grade) => grade.id) ?? [],
+  const viewingStudentGradeTriggerIds = useMemo(
+    () =>
+      new Set(
+        viewingStudentAcademicStanding?.triggerGrades.map((grade) => grade.id) ??
+          [],
+      ),
+    [viewingStudentAcademicStanding],
+  );
+  const viewingStudentGradeTermOptions = viewingStudentGradeTerms.map(
+    ({ academicYear, semester }) => ({
+      key: buildGradeTermKey(academicYear, semester),
+      label: `${semester} • ${academicYear}`,
+    }),
+  );
+  const normalizedGradeSearchTerm = gradeSearchTerm.trim().toLowerCase();
+  const filteredViewingStudentGradeRecords = useMemo(
+    () =>
+      viewingStudentGradeRecords.filter((record) => {
+        const matchesTerm =
+          gradeTermFilter === "all" ||
+          gradeTermFilter ===
+            buildGradeTermKey(record.academicYear, record.semester);
+        const matchesSearch =
+          !normalizedGradeSearchTerm ||
+          getGradeSearchHaystack(record).includes(normalizedGradeSearchTerm);
+
+        return matchesTerm && matchesSearch;
+      }),
+    [gradeTermFilter, normalizedGradeSearchTerm, viewingStudentGradeRecords],
+  );
+  const filteredViewingStudentGradeTerms = sortAcademicTerms(
+    Array.from(
+      new Map(
+        filteredViewingStudentGradeRecords
+          .filter(
+            (record) => Boolean(record.academicYear) && Boolean(record.semester),
+          )
+          .map((record) => [
+            buildGradeTermKey(record.academicYear, record.semester),
+            {
+              academicYear: record.academicYear,
+              semester: record.semester,
+            },
+          ]),
+      ).values(),
+    ),
   );
   const viewingStudentApplicantRecord =
     viewingStudentRequirements?.applicantRecord ?? null;
@@ -2252,6 +1923,31 @@ export default function AdminStudents({
   const canEditViewingStudentScholarshipScore =
     isViewingCollegeStudent &&
     Boolean(viewingStudent && viewingStudentApplicantRecord?.trackingNumber);
+  const canManageViewingStudentSection =
+    Boolean(viewingStudent) &&
+    viewingStudent?.status !== "Archived" &&
+    viewingStudent?.status !== "Graduated";
+  const viewingStudentSectionChoices = viewingStudent
+    ? getStudentSectionChoices({
+        branch: viewingStudent.branch || currentBranch,
+        program: viewingStudent.program,
+        yearLevel: viewingStudent.yearLevel,
+        strandOrCourse: viewingStudent.strandOrCourse,
+        currentSectionCode: viewingStudent.section,
+      })
+    : [];
+  const viewingStudentCurrentSectionChoice = viewingStudent
+    ? viewingStudentSectionChoices.find(
+        (section) => section.code === (viewingStudent.section || "").trim(),
+      ) ?? null
+    : null;
+  const pendingSectionChoice =
+    viewingStudentSectionChoices.find((section) => section.code === pendingSectionCode) ??
+    null;
+  const canApplyViewingStudentSectionChange =
+    canManageViewingStudentSection &&
+    Boolean(pendingSectionCode.trim()) &&
+    pendingSectionCode.trim() !== (viewingStudent?.section || "").trim();
 
   useEffect(() => {
     if (!canEditViewingStudentScholarshipScore) {
@@ -2271,6 +1967,15 @@ export default function AdminStudents({
     viewingStudent?.id,
     viewingStudentApplicantRecord?.scholarshipExamScore,
   ]);
+
+  useEffect(() => {
+    if (!viewingStudent) {
+      setPendingSectionCode("");
+      return;
+    }
+
+    setPendingSectionCode((viewingStudent.section || "").trim());
+  }, [viewingStudent]);
 
   const requirementNotifications: StudentRequirementNotification[] = students
     .filter(
@@ -3033,11 +2738,14 @@ export default function AdminStudents({
                         {student.status !== "Archived" &&
                         student.status !== "Graduated" ? (
                           <button
-                            className="students-action-btn students-archive-btn"
+                            className="students-action-btn students-archive-btn students-icon-only-btn"
                             onClick={() => openArchiveConfirm(student.id)}
                             disabled={isAnyAlumniMovePending}
+                            type="button"
+                            aria-label={`Move ${student.name} to Trash`}
+                            title={`Move ${student.name} to Trash`}
                           >
-                            Trash
+                            <FaTrash />
                           </button>
                         ) : null}
                       </div>
@@ -3512,6 +3220,110 @@ export default function AdminStudents({
                       {viewingStudent.section || "N/A"}
                     </div>
                   </div>
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Section Management</label>
+                    <div className="students-profile-value students-profile-list-box students-section-management-box">
+                      <div className="students-section-management-current">
+                        <div className="students-section-management-copy">
+                          <strong>
+                            Current section: {viewingStudent.section || "Not assigned"}
+                          </strong>
+                          <span>
+                            {viewingStudentCurrentSectionChoice
+                              ? getSectionDescriptorLabel(
+                                  viewingStudentCurrentSectionChoice,
+                                )
+                              : "Review and move this student to another matching section when needed."}
+                          </span>
+                        </div>
+                        {viewingStudentCurrentSectionChoice ? (
+                          <span
+                            className={`students-section-capacity-badge ${
+                              viewingStudentCurrentSectionChoice.isFull
+                                ? "full"
+                                : "available"
+                            }`}
+                          >
+                            {getSectionCapacityLabel(
+                              viewingStudentCurrentSectionChoice,
+                            )}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {canManageViewingStudentSection ? (
+                        viewingStudentSectionChoices.length > 0 ? (
+                          <>
+                            <div className="students-section-management-controls">
+                              <select
+                                value={pendingSectionCode}
+                                onChange={(event) => {
+                                  setPendingSectionCode(event.target.value);
+                                  if (sectionChangeFeedback) {
+                                    setSectionChangeFeedback(null);
+                                  }
+                                }}
+                                disabled={isSavingSectionChange}
+                              >
+                                <option value="">Select section</option>
+                                {viewingStudentSectionChoices.map((sectionChoice) => (
+                                  <option
+                                    key={sectionChoice.id}
+                                    value={sectionChoice.code}
+                                  >
+                                    {buildStudentSectionOptionLabel(sectionChoice)}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                className="students-save-btn students-inline-save-btn"
+                                onClick={handleApplySectionChange}
+                                disabled={
+                                  !canApplyViewingStudentSectionChange ||
+                                  isSavingSectionChange
+                                }
+                              >
+                                {isSavingSectionChange
+                                  ? "Moving..."
+                                  : "Move Student"}
+                              </button>
+                            </div>
+                            {pendingSectionChoice ? (
+                              <p className="students-scholarship-score-hint">
+                                Move to {pendingSectionChoice.code}:{" "}
+                                {getSectionDescriptorLabel(pendingSectionChoice)}{" "}
+                                ({getSectionCapacityLabel(pendingSectionChoice)})
+                              </p>
+                            ) : (
+                              <p className="students-scholarship-score-hint">
+                                Select a section to move this student and keep the
+                                section count updated.
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <p className="students-scholarship-score-hint">
+                            No matching section is available yet. Create or assign
+                            sections in the enrollees section first.
+                          </p>
+                        )
+                      ) : (
+                        <p className="students-scholarship-score-hint">
+                          Section changes are only available for active
+                          undergraduate students.
+                        </p>
+                      )}
+
+                      {sectionChangeFeedback ? (
+                        <p
+                          className={`students-inline-feedback ${sectionChangeFeedback.type}`}
+                        >
+                          {sectionChangeFeedback.message}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
                   <div className="students-profile-field">
                     <label>Submitted Date</label>
                     <div className="students-profile-value">
@@ -3676,6 +3488,7 @@ export default function AdminStudents({
                       )}
                     </div>
                   </div>
+                  {/*
                   <div className="students-profile-field students-profile-field-full">
                     <label>Planned Load and Schedule</label>
                     <div className="students-profile-value students-profile-list-box">
@@ -3739,6 +3552,7 @@ export default function AdminStudents({
                       )}
                     </div>
                   </div>
+                  */}
                   <div className="students-profile-field students-profile-field-full">
                     <label>Standing Notes</label>
                     <div className="students-profile-value students-profile-list-box">
@@ -3772,13 +3586,49 @@ export default function AdminStudents({
                     <div className="students-profile-value students-profile-list-box">
                       {viewingStudentGradeRecords.length > 0 ? (
                         <div className="students-grade-sections">
-                          {viewingStudentGradeTerms.map(
+                          <div className="students-grade-toolbar">
+                            <div className="students-grade-filter-field">
+                              <label htmlFor="students-grade-term-filter">
+                                Term
+                              </label>
+                              <select
+                                id="students-grade-term-filter"
+                                value={gradeTermFilter}
+                                onChange={(event) =>
+                                  setGradeTermFilter(event.target.value)
+                                }
+                              >
+                                <option value="all">All Terms</option>
+                                {viewingStudentGradeTermOptions.map((option) => (
+                                  <option key={option.key} value={option.key}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="students-grade-filter-field students-grade-filter-search">
+                              <label htmlFor="students-grade-search-filter">
+                                Subject Filter
+                              </label>
+                              <input
+                                id="students-grade-search-filter"
+                                type="text"
+                                value={gradeSearchTerm}
+                                onChange={(event) =>
+                                  setGradeSearchTerm(event.target.value)
+                                }
+                                placeholder="Search subject code, title, period, or result"
+                              />
+                            </div>
+                          </div>
+                          {filteredViewingStudentGradeTerms.map(
                             ({ academicYear, semester }) => {
-                              const termGrades = viewingStudentGradeRecords.filter(
+                              const termGrades =
+                                filteredViewingStudentGradeRecords.filter(
                                 (record) =>
                                   record.academicYear === academicYear &&
                                   record.semester === semester,
-                              );
+                                );
 
                               if (isViewingCollegeStudent) {
                                 const sortedTermGrades =
@@ -3900,6 +3750,11 @@ export default function AdminStudents({
                               );
                             },
                           )}
+                          {filteredViewingStudentGradeTerms.length === 0 ? (
+                            <div className="students-grade-empty-state">
+                              No grades match the current filters.
+                            </div>
+                          ) : null}
                         </div>
                       ) : (
                         "No uploaded grades yet"
@@ -3910,6 +3765,7 @@ export default function AdminStudents({
               </div>
 
               <div className="students-modal-actions">
+                {/*
                 {viewingStudent.program === "College" ? (
                   <button
                     type="button"
@@ -3923,6 +3779,7 @@ export default function AdminStudents({
                     Plan Load
                   </button>
                 ) : null}
+                */}
                 <button
                   type="button"
                   className="students-save-btn"
@@ -3944,6 +3801,7 @@ export default function AdminStudents({
           </div>
         )}
 
+        {/*
         {planningStudent && (
           <div className="students-modal-overlay" onClick={closePlannerModal}>
             <div
@@ -4211,6 +4069,7 @@ export default function AdminStudents({
             </div>
           </div>
         )}
+        */}
 
         {isNotificationModalOpen && (
           <div
@@ -4638,10 +4497,12 @@ export default function AdminStudents({
                 </button>
                 <button
                   type="button"
-                  className="students-archive-confirm-btn"
+                  className="students-archive-confirm-btn students-icon-only-btn"
                   onClick={confirmArchive}
+                  aria-label="Confirm move to Trash"
+                  title="Confirm move to Trash"
                 >
-                  Yes, Move to Trash
+                  <FaTrash />
                 </button>
               </div>
             </div>

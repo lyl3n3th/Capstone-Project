@@ -308,10 +308,39 @@ const createDefaultTransfereeEvaluation = (
   updatedAt: new Date().toISOString(),
 });
 
-const normalizeSectionSemester = (value?: string | null) =>
-  value?.trim().toLowerCase().includes("2nd")
-    ? "2nd Semester"
-    : DEFAULT_SECTION_SEMESTER;
+const normalizeSectionSemester = (value?: string | null) => {
+  const normalized = value?.trim().toLowerCase() || "";
+
+  if (!normalized) {
+    return DEFAULT_SECTION_SEMESTER;
+  }
+
+  if (normalized.includes("summer")) {
+    return "Summer";
+  }
+
+  if (
+    normalized.includes("2nd") ||
+    normalized.includes("second") ||
+    normalized.includes("sem 2") ||
+    normalized.includes("sem2") ||
+    normalized.includes("semester 2")
+  ) {
+    return "2nd Semester";
+  }
+
+  if (
+    normalized.includes("1st") ||
+    normalized.includes("first") ||
+    normalized.includes("sem 1") ||
+    normalized.includes("sem1") ||
+    normalized.includes("semester 1")
+  ) {
+    return "1st Semester";
+  }
+
+  return DEFAULT_SECTION_SEMESTER;
+};
 
 const normalizeStringList = (value: unknown) =>
   Array.isArray(value)
@@ -774,8 +803,15 @@ const resolveSubjectStrandOrCourse = (
 const normalizeSubjectCatalog = (catalog: Subject[]) =>
   catalog.map((subject) =>
     subject.program === "College" && !subject.strand
-      ? { ...subject, strand: DEFAULT_COLLEGE_COURSE }
-      : subject,
+      ? {
+          ...subject,
+          semester: normalizeSectionSemester(subject.semester),
+          strand: DEFAULT_COLLEGE_COURSE,
+        }
+      : {
+          ...subject,
+          semester: normalizeSectionSemester(subject.semester),
+        },
   );
 
 const sectionMatchesEnrollee = (
@@ -1145,9 +1181,9 @@ export default function AdminEnrollees({
     subjectAssignments[0]?.academicYear ||
     "2026-2027";
   const reflectedSemester =
-    enrollmentRequests[0]?.semester ||
-    subjectAssignments[0]?.semester ||
-    "1st Semester";
+    normalizeSectionSemester(
+      enrollmentRequests[0]?.semester || subjectAssignments[0]?.semester,
+    ) || DEFAULT_SECTION_SEMESTER;
 
   // Load class sections
   const loadClassSections = () => {
@@ -2230,7 +2266,12 @@ export default function AdminEnrollees({
     );
 
     if (storedAssignments?.length) {
-      setSubjectAssignments(storedAssignments);
+      setSubjectAssignments(
+        storedAssignments.map((assignment) => ({
+          ...assignment,
+          semester: normalizeSectionSemester(assignment.semester),
+        })),
+      );
       return;
     }
 
@@ -2297,6 +2338,7 @@ export default function AdminEnrollees({
     assignmentIdToIgnore?: string,
   ) => {
     const section = classSections.find((item) => item.id === sectionId);
+    const normalizedSemester = normalizeSectionSemester(semester);
 
     if (!section) {
       return [];
@@ -2307,7 +2349,7 @@ export default function AdminEnrollees({
         .filter(
           (assignment) =>
             assignment.sectionId === sectionId &&
-            assignment.semester === semester &&
+            normalizeSectionSemester(assignment.semester) === normalizedSemester &&
             assignment.id !== assignmentIdToIgnore,
         )
         .map((assignment) => assignment.subjectId),
@@ -2317,7 +2359,7 @@ export default function AdminEnrollees({
       (subject) =>
         subject.program === section.program &&
         subject.yearLevel === section.yearLevel &&
-        subject.semester === semester &&
+        normalizeSectionSemester(subject.semester) === normalizedSemester &&
         matchesAcademicDescriptor(
           resolveSubjectStrandOrCourse(subject),
           section.strand,
@@ -2341,7 +2383,7 @@ export default function AdminEnrollees({
       instructorId: assignment.instructorId,
       subjectIds: [assignment.subjectId],
       academicYear: assignment.academicYear,
-      semester: assignment.semester,
+      semester: normalizeSectionSemester(assignment.semester),
       scheduleDay: firstSchedule?.day || "",
       startTime: firstSchedule?.startTime || "",
       endTime: firstSchedule?.endTime || "",
@@ -2417,7 +2459,7 @@ export default function AdminEnrollees({
               sectionId: value,
               semester: getSectionSemester(value),
             }
-          : { ...prev, semester: value };
+          : { ...prev, semester: normalizeSectionSemester(value) };
       const availableSubjects = getEligibleSubjectsForSection(
         nextForm.sectionId,
         nextForm.semester,
@@ -2600,7 +2642,7 @@ export default function AdminEnrollees({
                 sectionId: section.id,
                 sectionCode: section.code,
                 academicYear: assignmentForm.academicYear.trim() || "2026-2027",
-                semester: assignmentForm.semester,
+                semester: normalizeSectionSemester(assignmentForm.semester),
                 schedule,
               }
             : assignment,
@@ -2624,7 +2666,7 @@ export default function AdminEnrollees({
         sectionCode: section.code,
         schedule,
         academicYear: assignmentForm.academicYear.trim() || "2026-2027",
-        semester: assignmentForm.semester,
+        semester: normalizeSectionSemester(assignmentForm.semester),
       }),
     );
 
@@ -2867,7 +2909,8 @@ export default function AdminEnrollees({
         (subject) =>
           subject.program === enrollee.program &&
           subject.yearLevel === resolvedYearLevel &&
-          subject.semester === normalizeSectionSemester(semester) &&
+          normalizeSectionSemester(subject.semester) ===
+            normalizeSectionSemester(semester) &&
           matchesAcademicDescriptor(
             resolveSubjectStrandOrCourse(subject),
             enrollee.strandOrCourse,
@@ -2941,7 +2984,7 @@ export default function AdminEnrollees({
     sectionCode: assignment.sectionCode,
     schedule: assignment.schedule,
     academicYear: assignment.academicYear,
-    semester: assignment.semester,
+    semester: normalizeSectionSemester(assignment.semester),
   });
 
   const getRequestedSectionForEnrollmentRequest = (request: EnrollmentRequest) => {
@@ -2973,7 +3016,8 @@ export default function AdminEnrollees({
       (subject) =>
         subject.program === request.program &&
         subject.yearLevel === request.requestedYearLevel &&
-        subject.semester === normalizeSectionSemester(request.semester) &&
+        normalizeSectionSemester(subject.semester) ===
+          normalizeSectionSemester(request.semester) &&
         matchesAcademicDescriptor(
           resolveSubjectStrandOrCourse(subject),
           request.strandOrCourse,
@@ -2990,7 +3034,8 @@ export default function AdminEnrollees({
       .filter(
         (assignment) =>
           assignment.academicYear === request.academicYear &&
-          assignment.semester === request.semester &&
+          normalizeSectionSemester(assignment.semester) ===
+            normalizeSectionSemester(request.semester) &&
           ((requestedSectionId && assignment.sectionId === requestedSectionId) ||
             (!requestedSectionId &&
               requestedSectionCode &&
@@ -3055,7 +3100,7 @@ export default function AdminEnrollees({
           enrolleeId: existingPlan?.enrolleeId,
           trackingNumber: request.trackingNumber || existingPlan?.trackingNumber,
           studentNumber: request.studentNumber || existingPlan?.studentNumber,
-          semester: request.semester,
+          semester: normalizeSectionSemester(request.semester),
           academicYear: request.academicYear,
           assignedSubjects,
           creditedSubjects: existingPlan?.creditedSubjects ?? [],
@@ -3125,7 +3170,7 @@ export default function AdminEnrollees({
           requestedOwnSchedule: true,
           ownScheduleRequestStatus: "Approved",
           ownScheduleAcademicYear: request.academicYear,
-          ownScheduleSemester: request.semester,
+          ownScheduleSemester: normalizeSectionSemester(request.semester),
           ownScheduleSelectionStatus: "Not Submitted",
         },
       });
@@ -3690,7 +3735,15 @@ export default function AdminEnrollees({
       const storedRequests = readEnrollmentRequestsForBranch(currentBranch);
 
       if (storedRequests.length > 0) {
-        setEnrollmentRequests(storedRequests);
+        setEnrollmentRequests(
+          storedRequests.map((request) => ({
+            ...request,
+            semester: normalizeSectionSemester(request.semester),
+            currentSemester: request.currentSemester
+              ? normalizeSectionSemester(request.currentSemester)
+              : request.currentSemester,
+          })),
+        );
         return;
       }
 
@@ -4699,14 +4752,14 @@ export default function AdminEnrollees({
       subjectAssignments.find(
         (assignment) =>
           assignment.sectionId === section.id &&
-          assignment.semester === activeSemester,
+          normalizeSectionSemester(assignment.semester) === activeSemester,
       )?.academicYear || reflectedAcademicYear;
     const sectionSubjects = subjects
       .filter(
         (subject) =>
           subject.yearLevel === section.yearLevel &&
           subject.program === section.program &&
-          subject.semester === activeSemester &&
+          normalizeSectionSemester(subject.semester) === activeSemester &&
           matchesAcademicDescriptor(
             resolveSubjectStrandOrCourse(subject),
             section.strand,
@@ -4762,7 +4815,7 @@ export default function AdminEnrollees({
           !(
             (assignment.sectionId === section.id ||
               assignment.sectionCode === section.code) &&
-            assignment.semester === activeSemester
+            normalizeSectionSemester(assignment.semester) === activeSemester
           ),
       ),
       ...newAssignments,
@@ -5225,12 +5278,13 @@ export default function AdminEnrollees({
                               Review
                             </button>
                             <button
-                              className="action-btn archive"
+                              className="action-btn archive trash-icon-btn"
                               onClick={() => handleArchiveEnrollee(enrollee)}
-                              title="Archive enrollee"
+                              title={`Move ${enrollee.fullName} to Trash`}
+                              aria-label={`Move ${enrollee.fullName} to Trash`}
                               type="button"
                             >
-                              <FaTrash /> Trash
+                              <FaTrash />
                             </button>
                           </div>
                         </td>
@@ -5942,7 +5996,7 @@ export default function AdminEnrollees({
                     </button>
                     <button
                       type="button"
-                      className="action-btn delete assignment-delete-trigger"
+                      className="action-btn delete assignment-delete-trigger trash-icon-btn"
                       onClick={() =>
                         openAssignmentDeleteModal(
                           selectedAssignments.map(
@@ -5951,8 +6005,10 @@ export default function AdminEnrollees({
                         )
                       }
                       disabled={selectedAssignments.length === 0}
+                      aria-label={`Delete ${selectedAssignments.length} selected assignments`}
+                      title={`Delete ${selectedAssignments.length} selected assignments`}
                     >
-                      <FaTrash /> Delete Selected
+                      <FaTrash />
                     </button>
                   </div>
                 </div>
@@ -6061,11 +6117,14 @@ export default function AdminEnrollees({
                                       </button>
                                       <button
                                         type="button"
+                                        className="trash-icon-btn"
                                         onClick={() =>
                                           handleRemoveAssignment(assignment.id)
                                         }
+                                        aria-label={`Delete ${assignment.subjectCode} ${assignment.subjectName}`}
+                                        title={`Delete ${assignment.subjectCode} ${assignment.subjectName}`}
                                       >
-                                        <FaTrash /> Delete
+                                        <FaTrash />
                                       </button>
                                     </div>
                                   </div>
@@ -8445,10 +8504,12 @@ export default function AdminEnrollees({
               </button>
               <button
                 type="button"
-                className="action-btn delete"
+                className="action-btn delete trash-icon-btn"
                 onClick={handleConfirmAssignmentDelete}
+                aria-label={`Delete ${pendingAssignmentDeleteTargets.length} selected assignments`}
+                title={`Delete ${pendingAssignmentDeleteTargets.length} selected assignments`}
               >
-                <FaTrash /> Delete Selected
+                <FaTrash />
               </button>
             </div>
           </div>

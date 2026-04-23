@@ -777,11 +777,13 @@ export default function AdminTrash({
                         </button>
                         <button
                           type="button"
-                          className="delete-btn"
+                          className="delete-btn icon-only"
                           onClick={() => handleDeleteRecord(record)}
                           disabled={isProcessingTrash}
+                          aria-label={`Delete ${record.name}`}
+                          title={`Delete ${record.name}`}
                         >
-                          <FaTrash /> Delete
+                          <FaTrash />
                         </button>
                       </div>
                     </td>

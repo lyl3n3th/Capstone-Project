@@ -446,12 +446,47 @@
   color: #28a745;
 }
 
-/* Template Actions - Side by side buttons */
+/* Template Actions */
 .template-actions {
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-top: 8px;
+}
+
+.template-download-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.template-choice-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4b5563;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.template-choice-select {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 14px;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.template-choice-select:focus {
+  outline: none;
+  border-color: #1A3D5C;
+  box-shadow: 0 0 0 3px rgba(26, 61, 92, 0.12);
 }
 
 .template-btn {
@@ -459,7 +494,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  flex: 1;
+  width: 100%;
   height: 44px;
   padding: 0 20px;
   background: #28a745;
@@ -1172,7 +1207,7 @@
   }
 
   .template-actions {
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .template-btn {

@@ -20,8 +20,7 @@ import {
   getCurrentBranch,
   getStudentsForBranch,
   readBranchScopedData,
-  type StudentScheduledAssignmentItem,
-  type StudentSubjectPlanRecord,
+  type StudentPortalSubject,
 } from "../../services/adminStorage";
 import {
   applyStudentGradeUploadOperationsForBranch,
@@ -33,6 +32,10 @@ import {
   type StudentGradeRecordIdentity,
   type StudentGradeUploadOperation,
 } from "../../services/studentGrades";
+import {
+  resolveStudentPortalContext,
+  type ResolvedStudentPortalContext,
+} from "../../services/studentPortalResolver";
 import "../../styles/admin/admin-grades.css";
 
 interface GradesProps {
@@ -93,6 +96,7 @@ interface TemplateSubjectAssignment {
   subjectId: string;
   subjectCode: string;
   subjectName: string;
+  units?: number;
   instructorName?: string;
   sectionId: string;
   sectionCode: string;
@@ -124,7 +128,21 @@ interface TemplateStudentRowSeed {
   assignments?: TemplateSubjectAssignment[];
 }
 
+interface TemplateResolvedStudentContext {
+  id: string;
+  name: string;
+  strandOrCourse?: string;
+  portalContext: ResolvedStudentPortalContext;
+}
+
 type WorksheetRow = Array<string | number | boolean | null | undefined>;
+type CollegeTemplateSemester = "1st Semester" | "2nd Semester" | "Summer";
+type ShsTemplateQuarter =
+  | "1st Quarter"
+  | "2nd Quarter"
+  | "3rd Quarter"
+  | "4th Quarter";
+type TemplateDownloadChoice = CollegeTemplateSemester | ShsTemplateQuarter;
 
 const UPLOAD_HISTORY_STORAGE_KEY = "aics-upload-history";
 const TEMPLATE_DOWNLOADS: Record<
@@ -179,6 +197,17 @@ const ERROR_EXPORT_COLUMN_WIDTHS = [
   18, 28, 16, 32, 12, 10, 18, 16, 18, 14, 12, 42,
 ];
 const ERROR_HIGHLIGHT_FILL_RGB = "FFFFF2CC";
+const COLLEGE_TEMPLATE_SEMESTERS: CollegeTemplateSemester[] = [
+  "1st Semester",
+  "2nd Semester",
+  "Summer",
+];
+const SHS_TEMPLATE_QUARTERS: ShsTemplateQuarter[] = [
+  "1st Quarter",
+  "2nd Quarter",
+  "3rd Quarter",
+  "4th Quarter",
+];
 
 const DEFAULT_UPLOAD_HISTORY: UploadHistoryItem[] = [
   {
@@ -320,6 +349,10 @@ export default function AdminGrades({
   const [isReadyToUpload, setIsReadyToUpload] = useState(false);
   const [previewPage, setPreviewPage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
+  const [collegeTemplateSemester, setCollegeTemplateSemester] =
+    useState<CollegeTemplateSemester>("1st Semester");
+  const [shsTemplateQuarter, setShsTemplateQuarter] =
+    useState<ShsTemplateQuarter>("1st Quarter");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -520,11 +553,63 @@ export default function AdminGrades({
       return "Summer";
     }
 
-    if (normalized.includes("2nd") || normalized.includes("second")) {
+    if (
+      normalized.includes("2nd") ||
+      normalized.includes("second") ||
+      normalized === "sem 2" ||
+      normalized === "sem2"
+    ) {
       return "2nd Semester";
     }
 
-    return "1st Semester";
+    if (
+      normalized.includes("1st") ||
+      normalized.includes("first") ||
+      normalized === "sem 1" ||
+      normalized === "sem1"
+    ) {
+      return "1st Semester";
+    }
+
+    return "";
+  };
+
+  const getSelectedTemplateChoice = (
+    templateType: StudentGradeProgramType,
+  ): TemplateDownloadChoice =>
+    templateType === "College" ? collegeTemplateSemester : shsTemplateQuarter;
+
+  const resolveTemplateSemester = (
+    templateType: StudentGradeProgramType,
+    templateChoice: TemplateDownloadChoice,
+  ): CollegeTemplateSemester =>
+    templateType === "College"
+      ? (templateChoice as CollegeTemplateSemester)
+      : templateChoice === "1st Quarter" || templateChoice === "2nd Quarter"
+        ? "1st Semester"
+        : "2nd Semester";
+
+  const getTemplateGradingPeriod = (
+    templateType: StudentGradeProgramType,
+    templateChoice: TemplateDownloadChoice,
+  ) => (templateType === "SHS" ? (templateChoice as ShsTemplateQuarter) : "");
+
+  const sanitizeTemplateFileNameSegment = (value: string) =>
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+
+  const buildTemplateDownloadFileName = (
+    templateType: StudentGradeProgramType,
+    templateChoice: TemplateDownloadChoice,
+  ) => {
+    const template = TEMPLATE_DOWNLOADS[templateType];
+    const baseFileName = template.fileName.replace(/\.xlsx$/i, "");
+    const suffix = sanitizeTemplateFileNameSegment(templateChoice);
+
+    return suffix ? `${baseFileName}_${suffix}.xlsx` : template.fileName;
   };
 
   const sortStudentsForTemplate = (
@@ -593,47 +678,89 @@ export default function AdminGrades({
       ?.strandOrCourse?.trim() ||
     "";
 
-  const mapScheduledAssignmentsToTemplateAssignments = (
-    assignments: StudentScheduledAssignmentItem[],
-  ): TemplateSubjectAssignment[] =>
-    assignments.map((assignment) => ({
-      id: assignment.assignmentId,
-      subjectId: assignment.subjectId,
-      subjectCode: assignment.subjectCode,
-      subjectName: assignment.subjectName,
-      instructorName: assignment.instructorName,
-      sectionId: assignment.sectionId || "",
-      sectionCode: assignment.sectionCode || "",
-      academicYear: assignment.academicYear,
-      semester: assignment.semester,
-    }));
+  const mapPortalSubjectsToTemplateAssignments = ({
+    subjects,
+    fallbackSectionCode,
+  }: {
+    subjects: StudentPortalSubject[];
+    fallbackSectionCode: string;
+  }): TemplateSubjectAssignment[] =>
+    subjects
+      .map((subject) => ({
+        id: `${subject.id}:${subject.academicYear}:${subject.semester}`,
+        subjectId: subject.id,
+        subjectCode: subject.code,
+        subjectName: subject.title,
+        units: subject.units,
+        instructorName: subject.professor === "TBA" ? "" : subject.professor,
+        sectionId: "",
+        sectionCode: subject.section || fallbackSectionCode,
+        academicYear: subject.academicYear,
+        semester: subject.semester,
+      }))
+      .sort(sortAssignmentsForTemplate);
 
-  const getMatchingStudentSubjectPlan = (
-    student: { id: string; trackingNumber?: string },
-    plans: Record<string, StudentSubjectPlanRecord>,
-  ) =>
-    Object.values(plans).find((plan) => {
-      if (student.trackingNumber && plan.trackingNumber === student.trackingNumber) {
-        return true;
-      }
+  const getStudentTemplateAssignmentsForSemester = ({
+    portalContext,
+    fallbackSectionCode,
+    targetSemester,
+    targetAcademicYear,
+  }: {
+    portalContext: ResolvedStudentPortalContext;
+    fallbackSectionCode: string;
+    targetSemester: string;
+    targetAcademicYear?: string;
+  }) => {
+    const semesterMatchedSubjects = portalContext.subjects.filter(
+      (subject) => normalizeSemesterLabel(subject.semester) === targetSemester,
+    );
+    const currentTermMatchedSubjects =
+      normalizeSemesterLabel(portalContext.currentTerm.semester) === targetSemester
+        ? semesterMatchedSubjects.filter(
+            (subject) =>
+              !subject.academicYear ||
+              subject.academicYear.trim() ===
+                portalContext.currentTerm.academicYear.trim(),
+          )
+        : [];
+    const targetAcademicYearMatchedSubjects = targetAcademicYear
+      ? semesterMatchedSubjects.filter(
+          (subject) =>
+            !subject.academicYear ||
+            subject.academicYear.trim() === targetAcademicYear.trim(),
+        )
+      : [];
 
-      return plan.studentNumber === student.id;
-    }) ?? null;
+    return mapPortalSubjectsToTemplateAssignments({
+      subjects:
+        currentTermMatchedSubjects.length > 0
+          ? currentTermMatchedSubjects
+          : targetAcademicYearMatchedSubjects.length > 0
+            ? targetAcademicYearMatchedSubjects
+            : semesterMatchedSubjects,
+      fallbackSectionCode,
+    });
+  };
 
   const buildSectionTemplateRows = ({
     programType,
     students,
     assignments,
     subjectCatalog,
+    defaultGradingPeriod,
   }: {
     programType: StudentGradeProgramType;
     students: TemplateStudentRowSeed[];
     assignments: TemplateSubjectAssignment[];
     subjectCatalog: TemplateSubjectCatalogItem[];
+    defaultGradingPeriod?: string;
   }) => {
     if (students.length === 0) {
       return [] as string[][];
     }
+
+    const shsQuarterValue =
+      programType === "SHS" ? defaultGradingPeriod?.trim() || "" : "";
 
     const unitsBySubjectKey = new Map<string, string>();
 
@@ -653,7 +780,7 @@ export default function AdminGrades({
         student.name,
         "",
         "",
-        "",
+        shsQuarterValue,
         "",
         "",
         "",
@@ -665,6 +792,9 @@ export default function AdminGrades({
     return students.flatMap((student) =>
       (student.assignments ?? assignments).map((assignment) => {
         const units =
+          (assignment.units === undefined || assignment.units === null
+            ? ""
+            : String(assignment.units)) ||
           unitsBySubjectKey.get(`id:${assignment.subjectId}`) ||
           unitsBySubjectKey.get(`code:${assignment.subjectCode.toUpperCase()}`) ||
           "";
@@ -687,7 +817,7 @@ export default function AdminGrades({
               student.name,
               assignment.subjectCode,
               assignment.subjectName,
-              "",
+              shsQuarterValue,
               "",
               "",
               assignment.instructorName || "",
@@ -698,10 +828,48 @@ export default function AdminGrades({
     );
   };
 
+  const buildFallbackTemplateRows = (
+    templateType: StudentGradeProgramType,
+    templateChoice: TemplateDownloadChoice,
+  ) =>
+    templateType === "SHS"
+      ? Array.from({ length: TEMPLATE_DATA_CAPACITY }, () => [
+          "",
+          "",
+          "",
+          "",
+          getTemplateGradingPeriod(templateType, templateChoice),
+          "",
+          "",
+          "",
+          "",
+          "",
+        ])
+      : [];
+
+  const buildFallbackTemplateSheet = (
+    templateType: StudentGradeProgramType,
+    templateChoice: TemplateDownloadChoice,
+  ): GeneratedTemplateSheet => ({
+    academicYear: getDefaultAcademicYear(),
+    descriptor: "",
+    rows: buildFallbackTemplateRows(templateType, templateChoice),
+    sectionCode: "",
+    semester: resolveTemplateSemester(templateType, templateChoice),
+    sheetName: "Grades Template",
+    yearLevel: "",
+  });
+
   const getGeneratedTemplateSheets = (
     templateType: StudentGradeProgramType,
+    templateChoice: TemplateDownloadChoice,
   ): GeneratedTemplateSheet[] => {
     const usedSheetNames = new Set<string>();
+    const targetSemester = resolveTemplateSemester(templateType, templateChoice);
+    const defaultGradingPeriod = getTemplateGradingPeriod(
+      templateType,
+      templateChoice,
+    );
     const storedSections =
       readBranchScopedData<TemplateClassSection[]>("class-sections", currentBranch) ??
       [];
@@ -713,12 +881,52 @@ export default function AdminGrades({
     const storedSubjects =
       readBranchScopedData<TemplateSubjectCatalogItem[]>("subjects", currentBranch) ??
       [];
-    const storedStudents = getStudentsForBranch(currentBranch);
-    const storedStudentSubjectPlans =
-      readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
-        "student-subject-plans",
-        currentBranch,
-      ) ?? {};
+    const storedStudents = getStudentsForBranch(currentBranch).filter(
+      (student) =>
+        student.status !== "Archived" && student.status !== "Graduated",
+    );
+    const resolvedStudentContexts = storedStudents.map<TemplateResolvedStudentContext>(
+      (student) => ({
+        id: student.id,
+        name: student.name,
+        strandOrCourse: student.strandOrCourse,
+        portalContext: resolveStudentPortalContext(student),
+      }),
+    );
+    const selectedTermAcademicYear = getLatestAcademicYear([
+      ...resolvedStudentContexts
+        .filter(
+          ({ portalContext }) =>
+            portalContext.resolvedStudentRecord.program === templateType &&
+            normalizeSemesterLabel(portalContext.currentTerm.semester) ===
+              targetSemester,
+        )
+        .map(({ portalContext }) => portalContext.currentTerm.academicYear),
+      ...storedAssignments
+        .filter((assignment) => {
+          if (normalizeSemesterLabel(assignment.semester) !== targetSemester) {
+            return false;
+          }
+
+          return storedSections.some(
+            (section) =>
+              section.program === templateType &&
+              (assignment.sectionId === section.id ||
+                assignment.sectionCode === section.code),
+          );
+        })
+        .map((assignment) => assignment.academicYear),
+    ]);
+    const selectedTermStudentContexts = resolvedStudentContexts.filter(
+      ({ portalContext }) =>
+        portalContext.resolvedStudentRecord.program === templateType &&
+        normalizeSemesterLabel(portalContext.currentTerm.semester) ===
+          targetSemester &&
+        (!selectedTermAcademicYear ||
+          !portalContext.currentTerm.academicYear ||
+          portalContext.currentTerm.academicYear.trim() ===
+            selectedTermAcademicYear.trim()),
+    );
 
     return storedSections
       .filter(
@@ -726,47 +934,59 @@ export default function AdminGrades({
           section.program === templateType && Boolean(section.code.trim()),
       )
       .sort(sortSectionsForTemplate)
-      .map((section) => {
-        const normalizedSectionSemester = normalizeSemesterLabel(section.semester);
-        const sectionStudents = storedStudents
+      .map<GeneratedTemplateSheet | null>((section) => {
+        const normalizedSectionSemester =
+          normalizeSemesterLabel(section.semester) || targetSemester;
+        const sectionStudents = selectedTermStudentContexts
           .filter(
-            (student) =>
-              student.program === templateType && student.section === section.code,
+            ({ portalContext }) =>
+              portalContext.resolvedStudentRecord.section === section.code,
           )
-          .map<TemplateStudentRowSeed>((student) => ({
-            id: student.id,
-            name: student.name,
-            strandOrCourse: student.strandOrCourse,
-          }))
+          .map((studentContext) => {
+            const studentAssignments = getStudentTemplateAssignmentsForSemester({
+              portalContext: studentContext.portalContext,
+              fallbackSectionCode: section.code,
+              targetSemester,
+              targetAcademicYear: selectedTermAcademicYear,
+            });
+
+            return {
+              id: studentContext.id,
+              name: studentContext.name,
+              strandOrCourse: studentContext.strandOrCourse,
+              assignments:
+                studentAssignments.length > 0 ? studentAssignments : undefined,
+            };
+          })
           .sort(sortStudentsForTemplate);
         const sectionAssignments = storedAssignments
           .filter(
             (assignment) =>
-              assignment.sectionId === section.id ||
-              assignment.sectionCode === section.code,
+              (assignment.sectionId === section.id ||
+                assignment.sectionCode === section.code) &&
+              normalizeSemesterLabel(assignment.semester) === targetSemester &&
+              (!selectedTermAcademicYear ||
+                !assignment.academicYear ||
+                assignment.academicYear.trim() ===
+                  selectedTermAcademicYear.trim()),
           )
           .sort(sortAssignmentsForTemplate);
-        const irregularAssignmentsByStudent = storedStudents
+        const irregularAssignmentsByStudent = selectedTermStudentContexts
           .filter(
-            (student) =>
-              student.program === templateType && student.section !== section.code,
+            ({ portalContext }) =>
+              portalContext.resolvedStudentRecord.section !== section.code,
           )
-          .map((student) => {
-            const matchingPlan = getMatchingStudentSubjectPlan(
-              {
-                id: student.id,
-                trackingNumber: student.trackingNumber,
-              },
-              storedStudentSubjectPlans,
-            );
-            const plannedAssignments = mapScheduledAssignmentsToTemplateAssignments(
-              matchingPlan?.scheduledAssignments ?? [],
-            ).filter(
+          .map((studentContext) => {
+            const plannedAssignments = getStudentTemplateAssignmentsForSemester({
+              portalContext: studentContext.portalContext,
+              fallbackSectionCode: "",
+              targetSemester,
+              targetAcademicYear: selectedTermAcademicYear,
+            }).filter(
               (assignment) =>
                 assignment.sectionCode === section.code &&
-                (!normalizedSectionSemester ||
-                  normalizeSemesterLabel(assignment.semester) ===
-                    normalizedSectionSemester),
+                normalizeSemesterLabel(assignment.semester) ===
+                  normalizedSectionSemester,
             );
 
             const uniqueAssignments = Array.from(
@@ -786,36 +1006,88 @@ export default function AdminGrades({
               .sort(sortAssignmentsForTemplate);
 
             return {
-              student,
+              student: studentContext,
               assignments: uniqueAssignments,
             };
           })
           .filter((entry) => entry.assignments.length > 0);
+        const hasTargetSectionContext =
+          normalizeSemesterLabel(section.semester) === targetSemester ||
+          sectionAssignments.length > 0 ||
+          sectionStudents.some(
+            (student) => (student.assignments?.length ?? 0) > 0,
+          ) ||
+          irregularAssignmentsByStudent.length > 0;
+
+        if (!hasTargetSectionContext) {
+          return null;
+        }
         const latestAcademicYear = getLatestAcademicYear([
+          ...sectionStudents.flatMap((student) =>
+            (student.assignments ?? []).map((assignment) => assignment.academicYear),
+          ),
           ...sectionAssignments.map((assignment) => assignment.academicYear),
           ...irregularAssignmentsByStudent.flatMap((entry) =>
             entry.assignments.map((assignment) => assignment.academicYear),
           ),
         ]);
-        const currentSectionAssignments = sectionAssignments.filter(
-          (assignment) =>
-            !assignment.academicYear ||
-            assignment.academicYear.trim() === latestAcademicYear,
-        );
+        const currentSectionAssignments = (() => {
+          const matchingAssignments = sectionAssignments.filter(
+            (assignment) =>
+              !assignment.academicYear ||
+              assignment.academicYear.trim() === latestAcademicYear,
+          );
+
+          return matchingAssignments.length > 0
+            ? matchingAssignments
+            : sectionAssignments;
+        })();
+        const regularSectionStudents = sectionStudents
+          .map<TemplateStudentRowSeed>((student) => {
+            const matchingAssignments =
+              student.assignments?.filter(
+                (assignment) =>
+                  !assignment.academicYear ||
+                  assignment.academicYear.trim() === latestAcademicYear,
+              ) ?? [];
+            const filteredAssignments =
+              matchingAssignments.length > 0
+                ? matchingAssignments
+                : (student.assignments ?? []);
+
+            return {
+              id: student.id,
+              name: student.name,
+              strandOrCourse: student.strandOrCourse,
+              assignments:
+                filteredAssignments.length > 0 ? filteredAssignments : undefined,
+            };
+          })
+          .sort(sortStudentsForTemplate);
         const irregularSectionStudents = irregularAssignmentsByStudent
-          .map<TemplateStudentRowSeed>(({ student, assignments }) => ({
-            id: student.id,
-            name: student.name,
-            strandOrCourse: student.strandOrCourse,
-            assignments: assignments.filter(
+          .map<TemplateStudentRowSeed>(({ student, assignments }) => {
+            const matchingAssignments = assignments.filter(
               (assignment) =>
                 !assignment.academicYear ||
                 assignment.academicYear.trim() === latestAcademicYear,
-            ),
-          }))
+            );
+
+            return {
+              id: student.id,
+              name: student.name,
+              strandOrCourse: student.strandOrCourse,
+              assignments:
+                matchingAssignments.length > 0
+                  ? matchingAssignments
+                  : assignments,
+            };
+          })
           .filter((student) => (student.assignments?.length ?? 0) > 0)
           .sort(sortStudentsForTemplate);
-        const templateStudents = [...sectionStudents, ...irregularSectionStudents];
+        const templateStudents = [
+          ...regularSectionStudents,
+          ...irregularSectionStudents,
+        ];
 
         return {
           academicYear: latestAcademicYear,
@@ -825,18 +1097,15 @@ export default function AdminGrades({
             students: templateStudents,
             assignments: currentSectionAssignments,
             subjectCatalog: storedSubjects,
+            defaultGradingPeriod,
           }),
           sectionCode: section.code,
-          semester:
-            normalizeSemesterLabel(
-              section.semester ||
-                currentSectionAssignments[0]?.semester ||
-                irregularSectionStudents[0]?.assignments?.[0]?.semester,
-            ) || "1st Semester",
+          semester: targetSemester,
           sheetName: getUniqueSheetName(section.code, usedSheetNames),
           yearLevel: section.yearLevel,
         };
-      });
+      })
+      .filter(Boolean) as GeneratedTemplateSheet[];
   };
 
   const getSheetRows = (sheetData: Element) =>
@@ -1597,30 +1866,16 @@ export default function AdminGrades({
     URL.revokeObjectURL(downloadUrl);
   };
 
-  const downloadOriginalTemplate = (templateType: StudentGradeProgramType) => {
-    const template = TEMPLATE_DOWNLOADS[templateType];
-    const downloadLink = document.createElement("a");
-
-    downloadLink.href = template.href;
-    downloadLink.download = template.fileName;
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-    downloadLink.remove();
-  };
-
   const buildStyledTemplateArchive = async (
     templateType: StudentGradeProgramType,
+    templateChoice: TemplateDownloadChoice,
   ) => {
     const template = TEMPLATE_DOWNLOADS[templateType];
-    const generatedSheets = getGeneratedTemplateSheets(templateType);
-
-    if (generatedSheets.length === 0) {
-      return {
-        archive: null,
-        generatedSheetCount: 0,
-        matchedSectionCount: 0,
-      };
-    }
+    const matchedSheets = getGeneratedTemplateSheets(templateType, templateChoice);
+    const generatedSheets =
+      matchedSheets.length > 0
+        ? matchedSheets
+        : [buildFallbackTemplateSheet(templateType, templateChoice)];
 
     const templateResponse = await fetch(template.href);
 
@@ -1701,7 +1956,7 @@ export default function AdminGrades({
     return {
       archive: zipSync(archiveEntries),
       generatedSheetCount: generatedSheets.length,
-      matchedSectionCount: generatedSheets.length,
+      matchedSectionCount: matchedSheets.length,
     };
   };
 
@@ -1942,27 +2197,29 @@ export default function AdminGrades({
     templateType: StudentGradeProgramType,
   ) => {
     try {
-      const template = TEMPLATE_DOWNLOADS[templateType];
+      const templateChoice = getSelectedTemplateChoice(templateType);
       const { archive, generatedSheetCount, matchedSectionCount } =
-        await buildStyledTemplateArchive(templateType);
-
-      if (matchedSectionCount === 0) {
-        downloadOriginalTemplate(templateType);
-        addToast(
-          `No ${templateType} sections were found for ${currentBranch}, so the general template was downloaded.`,
-          "warning",
-        );
-        return;
-      }
+        await buildStyledTemplateArchive(templateType, templateChoice);
 
       if (!archive) {
         throw new Error("Template archive was not generated.");
       }
 
-      downloadBlob(template.fileName, archive);
+      downloadBlob(
+        buildTemplateDownloadFileName(templateType, templateChoice),
+        archive,
+      );
+
+      if (matchedSectionCount === 0) {
+        addToast(
+          `No ${templateType} sections matched ${templateChoice} for ${currentBranch}, so a blank template was downloaded with that setting.`,
+          "warning",
+        );
+        return;
+      }
 
       addToast(
-        `${templateType} template downloaded with ${generatedSheetCount} section worksheet${generatedSheetCount === 1 ? "" : "s"}.`,
+        `${templateType} ${templateChoice} template downloaded with ${generatedSheetCount} section worksheet${generatedSheetCount === 1 ? "" : "s"}.`,
         "success",
       );
     } catch (error) {
@@ -2315,7 +2572,8 @@ export default function AdminGrades({
 
             <p className="template-description">
               Download the Excel template with the correct format for uploading
-              grades. The template includes:
+              grades. Choose the target semester or quarter first. The template
+              includes:
             </p>
 
             <ul className="template-list">
@@ -2357,18 +2615,67 @@ export default function AdminGrades({
             </ul>
 
             <div className="template-actions">
-              <button
-                className="template-btn college"
-                onClick={() => handleDownloadTemplate("College")}
-              >
-                <FiDownload /> College Template
-              </button>
-              <button
-                className="template-btn shs"
-                onClick={() => handleDownloadTemplate("SHS")}
-              >
-                <FiDownload /> SHS Template
-              </button>
+              <div className="template-download-group">
+                <label
+                  className="template-choice-label"
+                  htmlFor="college-template-semester"
+                >
+                  College term
+                </label>
+                <select
+                  id="college-template-semester"
+                  className="template-choice-select"
+                  value={collegeTemplateSemester}
+                  onChange={(event) =>
+                    setCollegeTemplateSemester(
+                      event.target.value as CollegeTemplateSemester,
+                    )
+                  }
+                >
+                  {COLLEGE_TEMPLATE_SEMESTERS.map((semester) => (
+                    <option key={semester} value={semester}>
+                      {semester}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="template-btn college"
+                  onClick={() => handleDownloadTemplate("College")}
+                >
+                  <FiDownload /> College Template
+                </button>
+              </div>
+
+              <div className="template-download-group">
+                <label
+                  className="template-choice-label"
+                  htmlFor="shs-template-quarter"
+                >
+                  SHS quarter
+                </label>
+                <select
+                  id="shs-template-quarter"
+                  className="template-choice-select"
+                  value={shsTemplateQuarter}
+                  onChange={(event) =>
+                    setShsTemplateQuarter(
+                      event.target.value as ShsTemplateQuarter,
+                    )
+                  }
+                >
+                  {SHS_TEMPLATE_QUARTERS.map((quarter) => (
+                    <option key={quarter} value={quarter}>
+                      {quarter}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="template-btn shs"
+                  onClick={() => handleDownloadTemplate("SHS")}
+                >
+                  <FiDownload /> SHS Template
+                </button>
+              </div>
             </div>
           </div>
         </div>

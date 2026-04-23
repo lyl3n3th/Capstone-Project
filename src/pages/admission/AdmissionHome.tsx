@@ -1,12 +1,12 @@
-import { FaRegPaperPlane } from "react-icons/fa6";
-import "../../styles/admission/admission-home.css";
-import logow from "../../assets/images/logow.png";
 import { useState } from "react";
+import { FaRegPaperPlane } from "react-icons/fa6";
+import logow from "../../assets/images/logow.png";
 import { useAdmissionPortalStatus } from "../../hooks/useAdmissionPortalStatus";
 import {
   getAdmissionDraft,
   getAdmissionProgress,
 } from "../../services/admission";
+import "../../styles/admission/admission-home.css";
 
 function AdmissionHome() {
   const [trackingNumber, setTrackingNumber] = useState("");
@@ -93,45 +93,49 @@ function AdmissionHome() {
         >
           Enroll Now
         </button>
+
+        <div className="form-and-track-wrapper">
+          <div className="form-container">
+            <input
+              type="text"
+              placeholder="Input Tracking Number"
+              className={`input-field ${error ? "input-error" : ""}`}
+              value={trackingNumber}
+              onChange={(e) => {
+                setTrackingNumber(e.target.value);
+                setError("");
+              }}
+              onPaste={handlePaste}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading}
+            />
+            {error ? <div className="error-message">{error}</div> : null}
+          </div>
+
+          <div className="track-container">
+            <a
+              href="#"
+              className={`track-cont ${isLoading ? "disabled" : ""}`}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!isLoading) {
+                  void handleTrackProgress();
+                }
+              }}
+            >
+              <FaRegPaperPlane />
+              <span>{isLoading ? "Checking..." : "Track Progress"}</span>
+            </a>
+          </div>
+        </div>
+
         <p
           className={`admission-portal-note ${isAdmissionPortalOpen ? "is-open" : "is-closed"}`}
         >
           {admissionPortalDescription}
         </p>
+
         <img src={logow} alt="logo" className="logo" />
-
-        <div className="form-container">
-          <input
-            type="text"
-            placeholder="Input Tracking Number"
-            className={`input-field ${error ? "input-error" : ""}`}
-            value={trackingNumber}
-            onChange={(e) => {
-              setTrackingNumber(e.target.value);
-              setError("");
-            }}
-            onPaste={handlePaste}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading}
-          />
-          {error && <div className="error-message">{error}</div>}
-        </div>
-
-        <div className="track-container">
-          <a
-            href="#"
-            className={`track-cont ${isLoading ? "disabled" : ""}`}
-            onClick={(e) => {
-              e.preventDefault();
-              if (!isLoading) {
-                void handleTrackProgress();
-              }
-            }}
-          >
-            <FaRegPaperPlane />
-            <span>{isLoading ? "Checking..." : "Track Progress"}</span>
-          </a>
-        </div>
       </div>
     </section>
   );

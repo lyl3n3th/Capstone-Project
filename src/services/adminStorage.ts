@@ -211,6 +211,28 @@ export interface EnrollmentSectionChoice {
   scheduledAssignmentCount: number;
 }
 
+export interface StudentSectionChoice {
+  id: string;
+  code: string;
+  program: string;
+  yearLevel: string;
+  semester: string;
+  strand?: string;
+  section?: string;
+  currentEnrollees: number;
+  maxCapacity: number;
+  hasCapacityLimit: boolean;
+  availableSlots: number | null;
+  isFull: boolean;
+}
+
+export interface StudentSectionUpdateResult {
+  student: StudentStorageRecord;
+  previousSection: string;
+  nextSection: string;
+  didChange: boolean;
+}
+
 export interface StudentScheduleSelectionRequestRecord {
   id: string;
   studentNumber: string;
@@ -272,6 +294,15 @@ type StoredClassSection = {
   section?: string;
   currentEnrollees?: number;
   maxCapacity?: number;
+  enrolleeIds?: string[];
+};
+
+type StoredSectionAssignmentRecord = {
+  enrolleeId: string;
+  enrolleeName: string;
+  assignedSection: string;
+  assignedDate: string;
+  isManualOverride: boolean;
 };
 
 const STUDENT_STORAGE_KEY = "aics-students";
@@ -730,10 +761,39 @@ const matchesStrandOrCourse = (
   return left.includes(right) || right.includes(left);
 };
 
-const normalizeStoredSemester = (value?: string | null) =>
-  value?.trim().toLowerCase().includes("2nd")
-    ? "2nd Semester"
-    : DEFAULT_SECTION_SEMESTER;
+const normalizeStoredSemester = (value?: string | null) => {
+  const normalized = value?.trim().toLowerCase() || "";
+
+  if (!normalized) {
+    return DEFAULT_SECTION_SEMESTER;
+  }
+
+  if (normalized.includes("summer")) {
+    return "Summer";
+  }
+
+  if (
+    normalized.includes("2nd") ||
+    normalized.includes("second") ||
+    normalized.includes("sem 2") ||
+    normalized.includes("sem2") ||
+    normalized.includes("semester 2")
+  ) {
+    return "2nd Semester";
+  }
+
+  if (
+    normalized.includes("1st") ||
+    normalized.includes("first") ||
+    normalized.includes("sem 1") ||
+    normalized.includes("sem1") ||
+    normalized.includes("semester 1")
+  ) {
+    return "1st Semester";
+  }
+
+  return DEFAULT_SECTION_SEMESTER;
+};
 
 const formatClockTime = (value?: string) => {
   if (!value || !/^\d{2}:\d{2}$/.test(value)) {
@@ -795,7 +855,7 @@ const mapStoredSubjectsToPortalSubjects = (
       professor: "TBA",
       days: "TBA",
       time: "TBA",
-      semester: subject.semester,
+      semester: normalizeStoredSemester(subject.semester),
       academicYear,
     })),
   );
@@ -810,7 +870,8 @@ const mapStoredAssignmentsToPortalSubjects = (
         (subject) =>
           (subject.id === assignment.subjectId ||
             subject.code === assignment.subjectCode) &&
-          subject.semester === assignment.semester,
+          normalizeStoredSemester(subject.semester) ===
+            normalizeStoredSemester(assignment.semester),
       );
 
       return {
@@ -824,7 +885,7 @@ const mapStoredAssignmentsToPortalSubjects = (
         professor: assignment.instructorName || "TBA",
         days: formatScheduleDays(assignment.schedule),
         time: formatScheduleTime(assignment.schedule),
-        semester: assignment.semester,
+        semester: normalizeStoredSemester(assignment.semester),
         academicYear: assignment.academicYear,
       };
     }),
@@ -847,7 +908,7 @@ const mapPlanItemsToPortalSubjects = (
       professor: "TBA",
       days: "TBA",
       time: "TBA",
-      semester,
+      semester: normalizeStoredSemester(semester),
       academicYear,
     })),
   );
@@ -866,7 +927,8 @@ const mapScheduledAssignmentsToPortalSubjects = (
         (subject) =>
           (subject.id === assignment.subjectId ||
             subject.code === assignment.subjectCode) &&
-          subject.semester === assignment.semester,
+          normalizeStoredSemester(subject.semester) ===
+            normalizeStoredSemester(assignment.semester),
       );
 
       return {
@@ -883,7 +945,7 @@ const mapScheduledAssignmentsToPortalSubjects = (
         professor: assignment.instructorName || "TBA",
         days: formatScheduleDays(assignment.schedule),
         time: formatScheduleTime(assignment.schedule),
-        semester: assignment.semester,
+        semester: normalizeStoredSemester(assignment.semester),
         academicYear: assignment.academicYear,
       };
     }),
@@ -1503,10 +1565,20 @@ export const getStudentPortalSubjects = (
 ): StudentPortalSubject[] => {
   const branch = normalizeBranchName(student.branch);
   const storedSubjects =
-    readBranchScopedData<StoredAcademicSubject[]>("subjects", branch) ?? [];
+    (readBranchScopedData<StoredAcademicSubject[]>("subjects", branch) ?? []).map(
+      (subject) => ({
+        ...subject,
+        semester: normalizeStoredSemester(subject.semester),
+      }),
+    );
   const storedAssignments =
-    readBranchScopedData<StoredSubjectAssignment[]>("subject-assignments", branch) ??
-    [];
+    (
+      readBranchScopedData<StoredSubjectAssignment[]>("subject-assignments", branch) ??
+      []
+    ).map((assignment) => ({
+      ...assignment,
+      semester: normalizeStoredSemester(assignment.semester),
+    }));
   const storedSections =
     readBranchScopedData<StoredClassSection[]>("class-sections", branch) ?? [];
   const storedSubjectPlans =
@@ -1549,7 +1621,7 @@ export const getStudentPortalSubjects = (
   const effectiveSemester = plannedSemester || activeSectionSemester;
   const semesterScopedSubjects = effectiveSemester
     ? matchedSubjects.filter(
-        (subject) => subject.semester === effectiveSemester,
+        (subject) => normalizeStoredSemester(subject.semester) === effectiveSemester,
       )
     : matchedSubjects;
   const creditedPlanSubjects = studentSubjectPlan?.creditedSubjects ?? [];
@@ -1577,7 +1649,7 @@ export const getStudentPortalSubjects = (
       const scheduledAssignmentKeys = new Set(
         plannedScheduledAssignments.map(
           (assignment) =>
-            `${assignment.subjectId}:${assignment.subjectCode}:${assignment.semester}`,
+            `${assignment.subjectId}:${assignment.subjectCode}:${normalizeStoredSemester(assignment.semester)}`,
         ),
       );
       const unresolvedPlannedSubjects =
@@ -1619,7 +1691,8 @@ export const getStudentPortalSubjects = (
       const plannedAssignments = storedAssignments.filter(
         (assignment) =>
           assignment.sectionCode === student.section &&
-          (!effectiveSemester || assignment.semester === effectiveSemester) &&
+          (!effectiveSemester ||
+            normalizeStoredSemester(assignment.semester) === effectiveSemester) &&
           plannedSubjects.some((item) =>
             subjectPlanItemMatches(
               item,
@@ -1640,7 +1713,8 @@ export const getStudentPortalSubjects = (
               (assignment) =>
                 (assignment.subjectId === subject.id ||
                   assignment.subjectCode === subject.code) &&
-                assignment.semester === subject.semester,
+                normalizeStoredSemester(assignment.semester) ===
+                  normalizeStoredSemester(subject.semester),
             ),
         );
 
@@ -1673,7 +1747,8 @@ export const getStudentPortalSubjects = (
     const sectionAssignments = storedAssignments.filter(
       (assignment) =>
         assignment.sectionCode === student.section &&
-        (!effectiveSemester || assignment.semester === effectiveSemester) &&
+        (!effectiveSemester ||
+          normalizeStoredSemester(assignment.semester) === effectiveSemester) &&
         !creditedPlanSubjects.some((item) =>
           subjectPlanItemMatches(item, assignment.subjectId, assignment.subjectCode),
         ) &&
@@ -1682,7 +1757,8 @@ export const getStudentPortalSubjects = (
             (subject) =>
               (subject.id === assignment.subjectId ||
                 subject.code === assignment.subjectCode) &&
-              subject.semester === assignment.semester,
+              normalizeStoredSemester(subject.semester) ===
+                normalizeStoredSemester(assignment.semester),
           )),
     );
 
@@ -1755,13 +1831,14 @@ export const getStudentPortalSubjectsForTerm = ({
     ) ?? [];
   const resolvedAcademicYear =
     academicYear || storedAssignments[0]?.academicYear || "2026-2027";
+  const normalizedSemester = normalizeStoredSemester(semester);
 
   return mapStoredSubjectsToPortalSubjects(
     storedSubjects.filter(
       (subject) =>
         subject.program === program &&
         subject.yearLevel === yearLevel &&
-        subject.semester === semester &&
+        normalizeStoredSemester(subject.semester) === normalizedSemester &&
         matchesStrandOrCourse(
           resolveStoredSubjectStrandOrCourse(subject),
           strandOrCourse,
@@ -1797,6 +1874,7 @@ export const getEnrollmentSectionChoices = ({
     ) ?? [];
   const resolvedAcademicYear =
     academicYear || storedAssignments[0]?.academicYear || "2026-2027";
+  const normalizedSemester = normalizeStoredSemester(semester);
 
   return storedSections
     .filter((section) => {
@@ -1818,7 +1896,7 @@ export const getEnrollmentSectionChoices = ({
       return (
         sectionProgram === program &&
         sectionYearLevel === yearLevel &&
-        sectionSemester === semester &&
+        sectionSemester === normalizedSemester &&
         matchesStrandOrCourse(sectionStrandOrCourse, strandOrCourse)
       );
     })
@@ -1831,7 +1909,7 @@ export const getEnrollmentSectionChoices = ({
       const scheduledAssignmentCount = storedAssignments.filter(
         (assignment) =>
           assignment.academicYear === resolvedAcademicYear &&
-          assignment.semester === semester &&
+          normalizeStoredSemester(assignment.semester) === normalizedSemester &&
           (assignment.sectionId === section.id ||
             assignment.sectionCode === section.code),
       ).length;
@@ -1841,7 +1919,7 @@ export const getEnrollmentSectionChoices = ({
         code: section.code,
         program: section.program || program,
         yearLevel: section.yearLevel || yearLevel,
-        semester,
+        semester: normalizedSemester,
         strand: section.strand,
         section: section.section,
         currentEnrollees,
@@ -1855,6 +1933,312 @@ export const getEnrollmentSectionChoices = ({
         left.code.localeCompare(right.code) ||
         right.availableSlots - left.availableSlots,
     );
+};
+
+export const getStudentSectionChoices = ({
+  branch,
+  program,
+  yearLevel,
+  strandOrCourse,
+  currentSectionCode,
+}: {
+  branch?: string | null;
+  program: string;
+  yearLevel: string;
+  strandOrCourse?: string | null;
+  currentSectionCode?: string | null;
+}): StudentSectionChoice[] => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const normalizedCurrentSectionCode = currentSectionCode?.trim() || "";
+  const storedSections =
+    readBranchScopedData<StoredClassSection[]>("class-sections", resolvedBranch) ??
+    [];
+  const storedAssignments =
+    readBranchScopedData<StoredSubjectAssignment[]>(
+      "subject-assignments",
+      resolvedBranch,
+    ) ?? [];
+
+  return storedSections
+    .filter((section) => {
+      const sectionProgram = section.program || program;
+      const sectionYearLevel = section.yearLevel || yearLevel;
+      const sectionStrandOrCourse =
+        sectionProgram === "College"
+          ? section.strand || DEFAULT_COLLEGE_COURSE
+          : section.strand || "All";
+
+      return (
+        section.code === normalizedCurrentSectionCode ||
+        (sectionProgram === program &&
+          sectionYearLevel === yearLevel &&
+          matchesStrandOrCourse(sectionStrandOrCourse, strandOrCourse))
+      );
+    })
+    .map((section) => {
+      const currentEnrollees = Math.max(0, Number(section.currentEnrollees ?? 0));
+      const parsedMaxCapacity = Number(section.maxCapacity ?? 0);
+      const hasCapacityLimit =
+        Number.isFinite(parsedMaxCapacity) && parsedMaxCapacity > 0;
+      const maxCapacity = hasCapacityLimit
+        ? Math.max(currentEnrollees, parsedMaxCapacity)
+        : currentEnrollees;
+      const semester = normalizeStoredSemester(
+        section.semester ||
+          storedAssignments.find(
+            (assignment) =>
+              assignment.sectionId === section.id ||
+              assignment.sectionCode === section.code,
+          )?.semester,
+      );
+
+      return {
+        id: section.id,
+        code: section.code,
+        program: section.program || program,
+        yearLevel: section.yearLevel || yearLevel,
+        semester,
+        strand: section.strand,
+        section: section.section,
+        currentEnrollees,
+        maxCapacity,
+        hasCapacityLimit,
+        availableSlots: hasCapacityLimit
+          ? Math.max(maxCapacity - currentEnrollees, 0)
+          : null,
+        isFull: hasCapacityLimit && currentEnrollees >= maxCapacity,
+      };
+    })
+    .sort((left, right) => {
+      const leftIsCurrent = left.code === normalizedCurrentSectionCode;
+      const rightIsCurrent = right.code === normalizedCurrentSectionCode;
+
+      if (leftIsCurrent !== rightIsCurrent) {
+        return leftIsCurrent ? -1 : 1;
+      }
+
+      if (left.semester !== right.semester) {
+        return left.semester.localeCompare(right.semester);
+      }
+
+      return left.code.localeCompare(right.code);
+    });
+};
+
+export const updateStoredStudentSection = ({
+  branch,
+  studentNumber,
+  trackingNumber,
+  nextSectionCode,
+}: {
+  branch?: string | null;
+  studentNumber?: string | null;
+  trackingNumber?: string | null;
+  nextSectionCode: string;
+}): StudentSectionUpdateResult | null => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const normalizedNextSectionCode = nextSectionCode.trim();
+
+  if (!normalizedNextSectionCode) {
+    throw new Error("Choose a section before saving.");
+  }
+
+  const storedStudents = readStoredStudents();
+  const targetStudent = storedStudents.find((student) => {
+    const matchesBranch = normalizeBranchName(student.branch) === resolvedBranch;
+    const matchesStudentNumber =
+      Boolean(studentNumber) && student.id === studentNumber;
+    const matchesTrackingNumber =
+      Boolean(trackingNumber) && student.trackingNumber === trackingNumber;
+
+    return matchesBranch && (matchesStudentNumber || matchesTrackingNumber);
+  });
+
+  if (!targetStudent) {
+    return null;
+  }
+
+  const previousSection = targetStudent.section?.trim() || "";
+  if (previousSection === normalizedNextSectionCode) {
+    return {
+      student: targetStudent,
+      previousSection,
+      nextSection: normalizedNextSectionCode,
+      didChange: false,
+    };
+  }
+
+  const storedSections =
+    readBranchScopedData<StoredClassSection[]>("class-sections", resolvedBranch) ??
+    [];
+  const targetSection = storedSections.find(
+    (section) => section.code === normalizedNextSectionCode,
+  );
+
+  if (!targetSection) {
+    throw new Error(
+      `Section ${normalizedNextSectionCode} is not available for ${resolvedBranch}.`,
+    );
+  }
+
+  const targetSectionProgram = targetSection.program || targetStudent.program;
+  const targetSectionYearLevel =
+    targetSection.yearLevel || targetStudent.yearLevel;
+  const targetSectionStrandOrCourse =
+    targetSectionProgram === "College"
+      ? targetSection.strand || DEFAULT_COLLEGE_COURSE
+      : targetSection.strand || "All";
+
+  if (targetSectionProgram !== targetStudent.program) {
+    throw new Error(
+      `${normalizedNextSectionCode} does not match the student's program.`,
+    );
+  }
+
+  if (targetSectionYearLevel !== targetStudent.yearLevel) {
+    throw new Error(
+      `${normalizedNextSectionCode} does not match the student's year level.`,
+    );
+  }
+
+  if (
+    !matchesStrandOrCourse(
+      targetSectionStrandOrCourse,
+      targetStudent.strandOrCourse,
+    )
+  ) {
+    throw new Error(
+      `${normalizedNextSectionCode} does not match the student's strand or course.`,
+    );
+  }
+
+  const branchEnrollees =
+    readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ?? [];
+  const linkedEnrollee =
+    branchEnrollees.find(
+      (record) =>
+        Boolean(trackingNumber) && record.trackingNumber === trackingNumber,
+    ) ??
+    branchEnrollees.find(
+      (record) =>
+        Boolean(studentNumber) &&
+        (record.studentNumber === studentNumber || record.studentNumber === targetStudent.id),
+    ) ??
+    null;
+  const linkedEnrolleeId = linkedEnrollee?.id || "";
+  const targetEnrolleeIds = targetSection.enrolleeIds ?? [];
+  const isAlreadyLinkedToTarget =
+    Boolean(linkedEnrolleeId) && targetEnrolleeIds.includes(linkedEnrolleeId);
+  const targetCurrentEnrollees = Math.max(
+    0,
+    Number(targetSection.currentEnrollees ?? 0),
+  );
+  const parsedTargetCapacity = Number(targetSection.maxCapacity ?? 0);
+  const hasTargetCapacityLimit =
+    Number.isFinite(parsedTargetCapacity) && parsedTargetCapacity > 0;
+  const targetCapacity = hasTargetCapacityLimit
+    ? Math.max(targetCurrentEnrollees, parsedTargetCapacity)
+    : Number.POSITIVE_INFINITY;
+
+  if (!isAlreadyLinkedToTarget && targetCurrentEnrollees >= targetCapacity) {
+    throw new Error(`${normalizedNextSectionCode} is already full.`);
+  }
+
+  const updatedStudent: StudentStorageRecord = {
+    ...targetStudent,
+    section: normalizedNextSectionCode,
+  };
+  const nextStudents = storedStudents.map((student) =>
+    student === targetStudent ? updatedStudent : student,
+  );
+  writeStoredStudents(nextStudents);
+
+  const nextSections = storedSections.map((section) => {
+    if (section.code === previousSection) {
+      const existingEnrolleeIds = section.enrolleeIds ?? [];
+      const nextEnrolleeIds =
+        linkedEnrolleeId && existingEnrolleeIds.includes(linkedEnrolleeId)
+          ? existingEnrolleeIds.filter((enrolleeId) => enrolleeId !== linkedEnrolleeId)
+          : existingEnrolleeIds;
+
+      return {
+        ...section,
+        currentEnrollees: Math.max(
+          0,
+          Number(section.currentEnrollees ?? 0) - 1,
+        ),
+        enrolleeIds: nextEnrolleeIds,
+      };
+    }
+
+    if (section.code === normalizedNextSectionCode) {
+      const existingEnrolleeIds = section.enrolleeIds ?? [];
+      const shouldAddLinkedEnrollee =
+        Boolean(linkedEnrolleeId) &&
+        !existingEnrolleeIds.includes(linkedEnrolleeId);
+
+      return {
+        ...section,
+        currentEnrollees: isAlreadyLinkedToTarget
+          ? Math.max(0, Number(section.currentEnrollees ?? 0))
+          : Math.max(0, Number(section.currentEnrollees ?? 0)) + 1,
+        enrolleeIds: shouldAddLinkedEnrollee
+          ? [...existingEnrolleeIds, linkedEnrolleeId]
+          : existingEnrolleeIds,
+      };
+    }
+
+    return section;
+  });
+  writeBranchScopedData("class-sections", resolvedBranch, nextSections);
+
+  if (linkedEnrolleeId) {
+    const storedSectionAssignments =
+      readBranchScopedData<StoredSectionAssignmentRecord[]>(
+        "section-assignments",
+        resolvedBranch,
+      ) ?? [];
+    const assignmentDate = new Date().toLocaleDateString();
+    const existingAssignmentIndex = storedSectionAssignments.findIndex(
+      (assignment) => assignment.enrolleeId === linkedEnrolleeId,
+    );
+    const nextSectionAssignments =
+      existingAssignmentIndex >= 0
+        ? storedSectionAssignments.map((assignment, index) =>
+            index === existingAssignmentIndex
+              ? {
+                  ...assignment,
+                  assignedSection: normalizedNextSectionCode,
+                  assignedDate: assignmentDate,
+                  isManualOverride: true,
+                }
+              : assignment,
+          )
+        : [
+            {
+              enrolleeId: linkedEnrolleeId,
+              enrolleeName:
+                linkedEnrollee?.fullName || targetStudent.name || "Student",
+              assignedSection: normalizedNextSectionCode,
+              assignedDate: assignmentDate,
+              isManualOverride: true,
+            },
+            ...storedSectionAssignments,
+          ];
+
+    writeBranchScopedData(
+      "section-assignments",
+      resolvedBranch,
+      nextSectionAssignments,
+    );
+  }
+
+  return {
+    student: updatedStudent,
+    previousSection,
+    nextSection: normalizedNextSectionCode,
+    didChange: true,
+  };
 };
 
 export const getEnrollmentRetakeChoiceGroups = ({
@@ -1915,7 +2299,7 @@ export const getEnrollmentRetakeChoiceGroups = ({
         .filter(
           (assignment) =>
             assignment.academicYear === resolvedAcademicYear &&
-            assignment.semester === semester &&
+            normalizeStoredSemester(assignment.semester) === normalizedSemester &&
             (matchingSubjectIds.has(assignment.subjectId) ||
               assignment.subjectCode.trim().toUpperCase() === normalizedSubjectCode),
         )
@@ -1943,7 +2327,7 @@ export const getEnrollmentRetakeChoiceGroups = ({
             sectionCode: assignment.sectionCode,
             schedule: assignment.schedule,
             academicYear: assignment.academicYear,
-            semester: assignment.semester,
+            semester: normalizeStoredSemester(assignment.semester),
           };
         })
         .sort(
@@ -1994,13 +2378,14 @@ export const getStudentScheduleChoiceGroups = ({
     ) ?? [];
   const resolvedAcademicYear =
     academicYear || storedAssignments[0]?.academicYear || "2026-2027";
+  const normalizedSemester = normalizeStoredSemester(semester);
 
   return storedSubjects
     .filter(
       (subject) =>
         subject.program === program &&
         subject.yearLevel === yearLevel &&
-        subject.semester === semester &&
+        normalizeStoredSemester(subject.semester) === normalizedSemester &&
         matchesStrandOrCourse(
           resolveStoredSubjectStrandOrCourse(subject),
           strandOrCourse,
@@ -2015,7 +2400,7 @@ export const getStudentScheduleChoiceGroups = ({
         .filter(
           (assignment) =>
             assignment.academicYear === resolvedAcademicYear &&
-            assignment.semester === semester &&
+            normalizeStoredSemester(assignment.semester) === normalizedSemester &&
             (assignment.subjectId === subject.id ||
               assignment.subjectCode === subject.code),
         )
@@ -2031,7 +2416,7 @@ export const getStudentScheduleChoiceGroups = ({
           sectionCode: assignment.sectionCode,
           schedule: assignment.schedule,
           academicYear: assignment.academicYear,
-          semester: assignment.semester,
+          semester: normalizeStoredSemester(assignment.semester),
         }))
         .sort(
           (left, right) =>

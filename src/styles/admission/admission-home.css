@@ -159,18 +159,13 @@
   color: #f8fafc;
 }
 
-
 .form-and-track-wrapper {
-  position: fixed;
-  bottom: 30px; /* Adjusted for better visibility */          
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 12px;
-  width: 90%;
-  max-width: 360px; /* Slightly smaller */
+  width: min(92vw, 540px);
+  margin-top: 18px;
 }
 
 .input-field {
@@ -216,6 +211,22 @@
   pointer-events: none;
 }
 
+.form-container {
+  width: 100%;
+}
+
+.input-field.input-error {
+  border: 2px solid #fca5a5;
+}
+
+.error-message {
+  margin-top: 10px;
+  color: #fee2e2;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
 .disabled-branch {
   opacity: 0.4;
   pointer-events: none; 
@@ -255,10 +266,6 @@
   
   .admission-primary-action {
     padding: 12px 50px;
-  }
-  
-  .form-and-track-wrapper {
-    bottom: 25px;
   }
 
   .track-container .track-cont{
@@ -324,10 +331,8 @@
   #p2         { margin: 8px 0 40px; font-size: clamp(20px, 5.5vw, 28px); }
 
   .form-and-track-wrapper {
-    bottom: 30px;
-    width: 94%;
-    flex-direction: row;
-    gap: 10px;
+    width: min(94vw, 540px);
+    align-items: center;
   }
 
   .input-field {
@@ -350,17 +355,17 @@
   .admission-primary-action { padding: 14px 50px; font-size: 18px; }
 
   .form-and-track-wrapper {
-    bottom: 24px;
-    flex-wrap: nowrap;
+    width: min(92vw, 360px);
+    align-items: stretch;
   }
 
   .input-field {
-    min-width: 180px;
+    min-width: 100%;
     font-size: 14.5px;
   }
 
   .track-container a {
-    min-width: 96px;
+    min-width: 100%;
     min-height: 50px;
     font-size: 11.5px;
   }

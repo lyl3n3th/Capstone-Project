@@ -498,6 +498,17 @@
   color: #dc2626;
 }
 
+.students-icon-only-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.students-icon-only-btn svg {
+  font-size: 14px;
+}
+
 .students-archive-btn:hover {
   background: #dc2626;
   color: #ffffff;
@@ -636,8 +647,7 @@
 
 .students-cancel-btn,
 .students-save-btn,
-.students-archive-confirm-btn,
-.students-plan-btn {
+.students-archive-confirm-btn {
   padding: 10px 20px;
   border: none;
   border-radius: 8px;
@@ -666,15 +676,6 @@
   transform: translateY(-1px);
 }
 
-.students-plan-btn {
-  background: #e0f2fe;
-  color: #075985;
-}
-
-.students-plan-btn:hover {
-  background: #bae6fd;
-}
-
 .students-archive-confirm-btn {
   background: #dc2626;
   color: #ffffff;
@@ -686,7 +687,8 @@
 
 /* View Modal */
 .students-view-modal {
-  max-width: 620px;
+  width: min(1080px, calc(100vw - 40px));
+  max-width: 1080px;
 }
 
 .students-profile-modal {
@@ -1023,10 +1025,136 @@
   color: #b91c1c;
 }
 
+.students-section-management-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.students-section-management-current {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.students-section-management-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.students-section-management-copy strong {
+  color: #0f172a;
+}
+
+.students-section-management-copy span {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.students-section-management-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.students-section-management-controls select {
+  flex: 1;
+  min-width: 220px;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+}
+
+.students-section-management-controls select:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+}
+
+.students-section-capacity-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.students-section-capacity-badge.available {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.students-section-capacity-badge.full {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 .students-grade-sections {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.students-grade-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.students-grade-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.students-grade-filter-field label {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.students-grade-filter-field input,
+.students-grade-filter-field select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.students-grade-filter-field input:focus,
+.students-grade-filter-field select:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+}
+
+.students-grade-empty-state {
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  padding: 18px 16px;
+  background: #f8fafc;
+  color: #64748b;
+  text-align: center;
+  font-size: 13px;
 }
 
 .students-grade-section {
@@ -1094,93 +1222,6 @@
   background: #fff7f7;
 }
 
-.students-planner-modal {
-  max-width: 1040px;
-}
-
-.students-planner-header {
-  align-items: flex-start;
-}
-
-.students-planner-body {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.students-planner-controls {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.students-planner-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.students-planner-field span {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.students-planner-field input,
-.students-planner-field select,
-.students-planner-field textarea {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 11px 12px;
-  border: 1px solid #dbe4ee;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #1e293b;
-  font: inherit;
-}
-
-.students-planner-field textarea {
-  resize: vertical;
-  min-height: 104px;
-}
-
-.students-planner-field input:focus,
-.students-planner-field select:focus,
-.students-planner-field textarea:focus {
-  outline: none;
-  border-color: #066287;
-  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
-}
-
-.students-planner-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.students-planner-stat {
-  padding: 14px 16px;
-  border: 1px solid #dbe4ee;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-}
-
-.students-planner-stat span {
-  display: block;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.students-planner-stat strong {
-  display: block;
-  margin-top: 6px;
-  color: #0f172a;
-  font-size: 22px;
-}
-
 .students-planner-warning {
   padding: 14px 16px;
   border: 1px solid #fca5a5;
@@ -1196,146 +1237,6 @@
 .students-planner-warning-list {
   margin: 8px 0 0;
   padding-left: 18px;
-}
-
-.students-planner-existing-note {
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: #f8fafc;
-  border: 1px solid #dbe4ee;
-  color: #475569;
-  font-size: 13px;
-}
-
-.students-planner-year-group {
-  border: 1px solid #dbe4ee;
-  border-radius: 16px;
-  background: #f8fafc;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.students-planner-year-toggle {
-  width: 100%;
-  border: none;
-  background: transparent;
-  padding: 4px 2px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.students-planner-year-toggle div {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.students-planner-year-toggle strong {
-  color: #0f172a;
-  font-size: 15px;
-}
-
-.students-planner-year-toggle span {
-  color: #64748b;
-  font-size: 13px;
-}
-
-.students-planner-year-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.students-planner-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
-  gap: 18px;
-}
-
-.students-planner-subjects,
-.students-planner-selection-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.students-planner-selection-panel h3 {
-  margin: 0;
-  color: #0f172a;
-  font-size: 16px;
-}
-
-.students-planner-subject-card,
-.students-planner-selection-item,
-.students-planner-empty-state {
-  border: 1px solid #dbe4ee;
-  border-radius: 14px;
-  background: #ffffff;
-}
-
-.students-planner-subject-card {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.students-planner-subject-copy h4 {
-  margin: 0;
-  color: #0f172a;
-  font-size: 15px;
-}
-
-.students-planner-subject-copy p {
-  margin: 6px 0 0;
-  color: #64748b;
-  font-size: 13px;
-}
-
-.students-planner-empty-option {
-  margin: 0;
-  color: #b45309;
-  font-size: 12px;
-}
-
-.students-planner-selection-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.students-planner-selection-item {
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.students-planner-selection-item strong {
-  color: #0f172a;
-}
-
-.students-planner-selection-item span {
-  color: #475569;
-  font-size: 13px;
-}
-
-.students-planner-selection-item.flagged {
-  border-color: #fca5a5;
-  background: #fff7f7;
-}
-
-.students-planner-empty-state {
-  padding: 18px 16px;
-  color: #64748b;
-  font-size: 13px;
-  line-height: 1.5;
 }
 
 .students-modal-body {
@@ -1722,10 +1623,8 @@
     flex: 1;
   }
 
-  .students-planner-controls,
-  .students-planner-summary,
-  .students-planner-grid {
-    grid-template-columns: 1fr;
+  .students-view-modal {
+    width: min(960px, calc(100vw - 32px));
   }
 
   .students-header h1 {
@@ -1787,10 +1686,9 @@
     grid-column: span 1;
   }
 
-  .students-planner-modal {
-    max-width: calc(100% - 32px);
+  .students-grade-toolbar {
+    grid-template-columns: 1fr;
   }
-  
   .students-detail-item {
     flex-direction: column;
     gap: 4px;
@@ -1833,6 +1731,10 @@
   .students-bulk-clear-btn,
   .students-inline-save-btn {
     width: 100%;
+  }
+
+  .students-section-management-controls select {
+    min-width: 100%;
   }
 
   .students-scholarship-score-editor input {

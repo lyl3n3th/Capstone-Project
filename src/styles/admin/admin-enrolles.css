@@ -569,6 +569,32 @@
   color: #ffffff;
 }
 
+.action-btn.trash-icon-btn,
+.mini-actions button.trash-icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  justify-content: center;
+  gap: 0;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.action-btn.trash-icon-btn:hover:not(:disabled),
+.mini-actions button.trash-icon-btn:hover:not(:disabled) {
+  background: #dc2626;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.action-btn.trash-icon-btn svg,
+.mini-actions button.trash-icon-btn svg {
+  font-size: 14px;
+}
+
 .table-pagination {
   display: flex;
   align-items: center;
@@ -2948,6 +2974,10 @@
   .assignment-bulk-actions .action-btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .assignment-bulk-actions .trash-icon-btn {
+    width: 36px;
   }
 
   .assignment-modal-summary,

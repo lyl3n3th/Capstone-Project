@@ -10,7 +10,7 @@ interface ChartNoteProps {
 
 export default function ChartNote({
   children,
-  title = "How to read this chart",
+  title = "Overview",
   variant = "default",
 }: ChartNoteProps) {
   return (

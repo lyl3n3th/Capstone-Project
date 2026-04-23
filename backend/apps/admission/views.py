@@ -1,6 +1,8 @@
 import secrets
 import string
 
+from apps.core.supabase_rest import SupabaseRestError
+from django.core.exceptions import ImproperlyConfigured
 from django.core.validators import validate_email
 from django.utils import timezone
 from rest_framework import status
@@ -10,6 +12,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import AdmissionApplication, AdmissionRequirement
+from .tracking_recovery import (
+    build_tracking_notification_target,
+    deliver_submission_tracking_notification,
+    deliver_tracking_recovery,
+    find_matching_admission_applications,
+    find_tracking_notification_target,
+    normalize_phone_number,
+    normalize_tracking_number,
+)
 
 REQUIRED_STEP2_FIELDS = (
     "first_name",
@@ -51,6 +62,85 @@ def parse_bool(value):
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def validate_tracking_recovery_payload(payload):
+    errors = {}
+    cleaned = {}
+
+    email = normalize_text(payload.get("email", ""))
+    mobile = normalize_text(
+        payload.get("mobile", payload.get("phone_number", payload.get("phoneNumber", "")))
+    )
+
+    if not email:
+        errors.setdefault("email", []).append("Email address is required.")
+    else:
+        try:
+            validate_email(email)
+        except Exception:
+            errors.setdefault("email", []).append("Enter a valid email address.")
+        cleaned["email"] = email
+
+    normalized_mobile = normalize_phone_number(mobile)
+    if not normalized_mobile:
+        errors.setdefault("mobile", []).append("Mobile number is required.")
+    elif len(normalized_mobile) < 10:
+        errors.setdefault("mobile", []).append("Enter a valid mobile number.")
+    cleaned["mobile"] = normalized_mobile
+
+    return cleaned, errors
+
+
+def validate_tracking_number_payload(payload):
+    errors = {}
+    tracking_number = normalize_tracking_number(
+        payload.get("tracking_number", payload.get("trackingNumber", ""))
+    )
+
+    if not tracking_number:
+        errors.setdefault("tracking_number", []).append(
+            "Tracking number is required."
+        )
+
+    return tracking_number, errors
+
+
+def validate_submission_notification_payload(payload):
+    tracking_number, errors = validate_tracking_number_payload(payload)
+    cleaned = {
+        "tracking_number": tracking_number,
+        "email": normalize_text(payload.get("email", "")) or "",
+        "mobile": normalize_text(
+            payload.get("mobile", payload.get("phone_number", payload.get("phoneNumber", "")))
+        )
+        or "",
+        "first_name": normalize_text(
+            payload.get("first_name", payload.get("firstName", ""))
+        )
+        or "",
+        "last_name": normalize_text(
+            payload.get("last_name", payload.get("lastName", ""))
+        )
+        or "",
+        "application_status": normalize_text(
+            payload.get("application_status", payload.get("applicationStatus", "submitted"))
+        )
+        or "submitted",
+    }
+
+    if cleaned["email"]:
+        try:
+            validate_email(cleaned["email"])
+        except Exception:
+            errors.setdefault("email", []).append("Enter a valid email address.")
+
+    normalized_mobile = normalize_phone_number(cleaned["mobile"])
+    if cleaned["mobile"] and len(normalized_mobile) < 10:
+        errors.setdefault("mobile", []).append("Enter a valid mobile number.")
+    cleaned["mobile"] = normalized_mobile
+
+    return cleaned, errors
 
 
 def validate_step2_payload(payload):
@@ -185,4 +275,119 @@ class RequirementsUploadView(APIView):
                 "uploaded": uploaded_files,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class AdmissionTrackingRecoveryView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser]
+
+    def post(self, request):
+        cleaned, errors = validate_tracking_recovery_payload(request.data)
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            matches = find_matching_admission_applications(
+                email=cleaned["email"],
+                phone_number=cleaned["mobile"],
+            )
+        except (ImproperlyConfigured, SupabaseRestError) as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        if not matches:
+            return Response(
+                {
+                    "detail": "No active admission record matched the provided email and mobile number."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        deliveries = deliver_tracking_recovery(
+            email=cleaned["email"],
+            phone_number=cleaned["mobile"],
+            matches=matches,
+        )
+
+        any_delivery_sent = any(
+            delivery.get("status") == "sent" for delivery in deliveries.values()
+        )
+        message = (
+            "Tracking number recovered and sent to your registered contact details."
+            if any_delivery_sent
+            else "Tracking number recovered. Messaging is not configured, so the matching record is shown below."
+        )
+
+        return Response(
+            {
+                "message": message,
+                "tracking_numbers": [match.to_dict() for match in matches],
+                "deliveries": deliveries,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AdmissionSubmissionNotificationView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser]
+
+    def post(self, request):
+        cleaned, errors = validate_submission_notification_payload(request.data)
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        notification_target = None
+
+        if cleaned["email"] or cleaned["mobile"]:
+            notification_target = build_tracking_notification_target(
+                tracking_number=cleaned["tracking_number"],
+                email=cleaned["email"],
+                phone_number=cleaned["mobile"],
+                first_name=cleaned["first_name"],
+                last_name=cleaned["last_name"],
+                application_status=cleaned["application_status"],
+            )
+
+        if notification_target is None:
+            try:
+                notification_target = find_tracking_notification_target(
+                    cleaned["tracking_number"],
+                )
+            except (ImproperlyConfigured, SupabaseRestError) as exc:
+                return Response(
+                    {"detail": str(exc)},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+        if not notification_target:
+            return Response(
+                {"detail": "No admission record matched this tracking number."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        deliveries = deliver_submission_tracking_notification(
+            notification_target,
+        )
+        any_delivery_sent = any(
+            delivery.get("status") == "sent" for delivery in deliveries.values()
+        )
+        message = (
+            "Tracking number confirmation sent to the registered contact details."
+            if any_delivery_sent
+            else "Tracking number confirmation prepared, but messaging is not configured."
+        )
+
+        return Response(
+            {
+                "message": message,
+                "tracking_number": notification_target.tracking_number,
+                "deliveries": deliveries,
+            },
+            status=status.HTTP_200_OK,
         )
