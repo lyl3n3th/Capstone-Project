@@ -484,7 +484,7 @@ export const getAdmissionRequirements = (
       {
         code: "honor_certificate",
         name: "Honor Certificate",
-        optional: false,
+        optional: true,
       },
     ];
   }

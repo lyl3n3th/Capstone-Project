@@ -43,6 +43,7 @@ interface StaffLoginApiResponse {
   branch: StaffBranch;
   full_name: string;
   role: "admin" | "registrar";
+  password_change_required?: boolean;
 }
 
 export interface StaffLoginResult {
@@ -50,6 +51,7 @@ export interface StaffLoginResult {
   branch: StaffBranch;
   fullName: string;
   role: Extract<AppStaffRole, "admin" | "registrar">;
+  passwordChangeRequired: boolean;
 }
 
 export interface StaffPasswordResetPayload {
@@ -57,6 +59,12 @@ export interface StaffPasswordResetPayload {
   role: Extract<AppStaffRole, "admin" | "registrar">;
   email: string;
   contactNumber: string;
+  newPassword: string;
+}
+
+export interface CompleteStaffPasswordSetupPayload {
+  employeeId: string;
+  currentPassword: string;
   newPassword: string;
 }
 
@@ -148,11 +156,16 @@ export async function createStaffMember(staff: StaffMember) {
   return mapStaffRecord(row);
 }
 
-export async function updateStaffMember(staffId: string, staff: StaffMember) {
+export async function updateStaffMember(
+  staffId: string,
+  staff: StaffMember,
+  options?: { requirePasswordChange?: boolean },
+) {
   const { data, error } = await supabase
     .rpc("update_staff_account", {
       p_employee_id: staffId,
       ...buildStaffPayload(staff),
+      p_require_password_change: options?.requirePasswordChange ?? false,
     })
     .returns<StaffApiRecord[]>();
 
@@ -245,6 +258,7 @@ export async function authenticateStaffLogin(
     branch: row.branch,
     fullName: row.full_name,
     role: row.role,
+    passwordChangeRequired: Boolean(row.password_change_required),
   };
 }
 
@@ -276,5 +290,36 @@ export async function resetStaffPassword(
     branch: row.branch,
     fullName: row.full_name,
     role: row.role,
+    passwordChangeRequired: Boolean(row.password_change_required),
+  };
+}
+
+export async function completeStaffPasswordSetup(
+  payload: CompleteStaffPasswordSetupPayload,
+): Promise<StaffLoginResult> {
+  const { data, error } = await supabase
+    .rpc("complete_staff_password_setup", {
+      p_employee_id: payload.employeeId.trim().toUpperCase(),
+      p_current_password: payload.currentPassword,
+      p_new_password: payload.newPassword,
+    })
+    .returns<StaffLoginApiResponse[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<StaffLoginApiResponse>(data);
+
+  if (!row) {
+    throw new Error("Unable to update the password right now.");
+  }
+
+  return {
+    employeeId: row.employee_id,
+    branch: row.branch,
+    fullName: row.full_name,
+    role: row.role,
+    passwordChangeRequired: Boolean(row.password_change_required),
   };
 }

@@ -24,6 +24,7 @@ import {
   FaFilter,
   FaTrash,
 } from "react-icons/fa";
+import { MdArchive } from "react-icons/md";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
 import { useAuth } from "../../hooks/useAuth";
@@ -2770,7 +2771,7 @@ export default function AdminEnrollees({
 
   const handleArchiveEnrollee = (enrollee: Enrollee) => {
     const confirmed = window.confirm(
-      `Archive ${enrollee.fullName}? You can restore this record from Trash later.`,
+      `Archive ${enrollee.fullName}? You can restore this record from Archive later.`,
     );
 
     if (!confirmed) {
@@ -2800,7 +2801,7 @@ export default function AdminEnrollees({
       setIsConfirmModalOpen(false);
     }
 
-    addToast(`${enrollee.fullName} moved to Trash.`, "success");
+    addToast(`${enrollee.fullName} moved to Archive.`, "success");
   };
 
   // Update pending assignments
@@ -5280,11 +5281,11 @@ export default function AdminEnrollees({
                             <button
                               className="action-btn archive trash-icon-btn"
                               onClick={() => handleArchiveEnrollee(enrollee)}
-                              title={`Move ${enrollee.fullName} to Trash`}
-                              aria-label={`Move ${enrollee.fullName} to Trash`}
+                              title={`Move ${enrollee.fullName} to Archive`}
+                              aria-label={`Move ${enrollee.fullName} to Archive`}
                               type="button"
                             >
-                              <FaTrash />
+                              <MdArchive />
                             </button>
                           </div>
                         </td>

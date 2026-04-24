@@ -46,6 +46,8 @@ function AdmissionStep4() {
     useState<AdmissionApplicationSummary | null>(null);
   const [applyScholarship, setApplyScholarship] = useState(false);
   const [requestOwnSchedule, setRequestOwnSchedule] = useState(false);
+  const [isScheduleWarningModalOpen, setIsScheduleWarningModalOpen] =
+    useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [activatedStudentNumber, setActivatedStudentNumber] = useState("");
@@ -60,6 +62,33 @@ function AdmissionStep4() {
 
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  };
+
+  const persistOwnScheduleRequest = (nextValue: boolean) => {
+    setRequestOwnSchedule(nextValue);
+    mergeAdmissionDraft({
+      requestOwnSchedule: nextValue,
+    });
+  };
+
+  const handleScheduleRequestClick = () => {
+    if (requestOwnSchedule) {
+      persistOwnScheduleRequest(false);
+      addToast("Own schedule request removed.", "info");
+      return;
+    }
+
+    setIsScheduleWarningModalOpen(true);
+  };
+
+  const handleConfirmScheduleRequest = () => {
+    persistOwnScheduleRequest(true);
+    setIsScheduleWarningModalOpen(false);
+    addToast("Own schedule request saved.", "warning");
+  };
+
+  const handleCloseScheduleWarningModal = () => {
+    setIsScheduleWarningModalOpen(false);
   };
 
   useEffect(() => {
@@ -456,27 +485,12 @@ function AdmissionStep4() {
                 className={`conf-schedule-request-btn ${
                   requestOwnSchedule ? "active" : ""
                 }`}
-                onClick={() => {
-                  const nextValue = !requestOwnSchedule;
-                  setRequestOwnSchedule(nextValue);
-                  mergeAdmissionDraft({
-                    requestOwnSchedule: nextValue,
-                  });
-                }}
+                onClick={handleScheduleRequestClick}
               >
                 {requestOwnSchedule
                   ? "Own Schedule Requested"
                   : "Request Own Schedule"}
               </button>
-            </div>
-          )}
-
-          {requestOwnSchedule && (
-            <div className="conf-notice conf-notice-warning">
-              <strong>Warning:</strong> If this request is approved together
-              with your admission, your student record will be tagged as
-              irregular and you will choose from available schedules in the
-              student portal before final subject approval.
             </div>
           )}
 
@@ -690,6 +704,65 @@ function AdmissionStep4() {
           </div>
         </div>
       </div>
+
+      {isScheduleWarningModalOpen && (
+        <div
+          className="conf-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="own-schedule-warning-title"
+          onClick={handleCloseScheduleWarningModal}
+        >
+          <div
+            className="conf-modal-card"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="conf-modal-header">
+              <h2 id="own-schedule-warning-title">Request Own Schedule?</h2>
+              <button
+                type="button"
+                className="conf-modal-close"
+                onClick={handleCloseScheduleWarningModal}
+                aria-label="Close warning"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="conf-modal-body">
+              <p>
+                If this request is approved together with your admission, your
+                student record will be tagged as irregular.
+              </p>
+              <p>
+                You will choose from available schedules in the Student Portal
+                before final subject approval.
+              </p>
+              <p className="conf-modal-note">
+                Continue only if you want the registrar or admin to review your
+                admission for self-scheduling.
+              </p>
+            </div>
+
+            <div className="conf-modal-actions">
+              <button
+                type="button"
+                className="conf-modal-btn conf-modal-btn-secondary"
+                onClick={handleCloseScheduleWarningModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="conf-modal-btn conf-modal-btn-primary"
+                onClick={handleConfirmScheduleRequest}
+              >
+                Continue Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

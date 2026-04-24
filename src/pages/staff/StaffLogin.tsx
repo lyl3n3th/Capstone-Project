@@ -7,22 +7,33 @@ import { useAuth } from "../../hooks/useAuth";
 import { authenticateManager } from "../../services/mockStaffAuth";
 import {
   authenticateStaffLogin,
+  completeStaffPasswordSetup,
   resetStaffPassword,
   type StaffBranch,
 } from "../../services/staffApi";
-import type { StaffRole } from "../../types/user";
+import { STAFF_ROLE_LABELS, type StaffRole } from "../../types/user";
 import "../../styles/staff/staff-login.css";
 
-type StaffAccessRole = Extract<StaffRole, "admin" | "registrar">;
+type StaffLoginAccessRole = StaffRole;
+type StaffResetAccessRole = Extract<StaffRole, "admin" | "registrar">;
 
 function StaffLogin() {
   const navigate = useNavigate();
   const location = useLocation();
   const { loginStaff, getDefaultRouteForRole } = useAuth();
-  const [selectedBranch, setSelectedBranch] = useState("");
-  const [isAreaManager, setIsAreaManager] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [isSetupModalOpen, setIsSetupModalOpen] = useState(false);
+  const [showSetupPassword, setShowSetupPassword] = useState(false);
+  const [showSetupConfirmPassword, setShowSetupConfirmPassword] =
+    useState(false);
+  const [isSetupSubmitting, setIsSetupSubmitting] = useState(false);
+  const [setupFeedback, setSetupFeedback] = useState<{
+    type: "error" | "success";
+    message: string;
+  } | null>(null);
+
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showResetConfirmPassword, setShowResetConfirmPassword] =
@@ -38,34 +49,37 @@ function StaffLogin() {
     password: "",
     role: "admin" as StaffRole,
   });
+  const [setupData, setSetupData] = useState({
+    employeeId: "",
+    branch: "",
+    role: "admin" as StaffResetAccessRole,
+    fullName: "",
+    temporaryPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
   const [resetData, setResetData] = useState({
     branch: "",
-    role: "admin" as StaffAccessRole,
+    role: "admin" as StaffResetAccessRole,
     email: "",
     contactNumber: "",
     newPassword: "",
     confirmPassword: "",
   });
 
-  const handleAreaManagerToggle = (checked: boolean) => {
-    setIsAreaManager(checked);
-    setLoginData((current) => ({
-      ...current,
-      branch: checked ? "" : current.branch,
-      role: checked
-        ? "manager"
-        : current.role === "manager"
-          ? "admin"
-          : current.role,
-    }));
+  const isAreaManager = loginData.role === "manager";
+  const resolveRedirectPath = (role: StaffRole) => {
+    const redirectPath = (
+      location.state as { from?: { pathname?: string } } | null
+    )?.from?.pathname;
 
-    if (checked) {
-      setSelectedBranch("");
-    }
+    return redirectPath && redirectPath !== "/staff/login"
+      ? redirectPath
+      : getDefaultRouteForRole(role);
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
 
     if (!isAreaManager && !loginData.branch) {
       alert("Please select a branch!");
@@ -81,10 +95,6 @@ function StaffLogin() {
       alert("Please enter your password!");
       return;
     }
-
-    const redirectPath = (
-      location.state as { from?: { pathname?: string } } | null
-    )?.from?.pathname;
 
     try {
       setIsSubmitting(true);
@@ -104,12 +114,7 @@ function StaffLogin() {
           role: managerAccount.role,
         });
 
-        const nextPath =
-          redirectPath && redirectPath !== "/staff/login"
-            ? redirectPath
-            : getDefaultRouteForRole(managerAccount.role);
-
-        navigate(nextPath, { replace: true });
+        navigate(resolveRedirectPath(managerAccount.role), { replace: true });
         return;
       }
 
@@ -119,6 +124,23 @@ function StaffLogin() {
         loginData.password,
       );
 
+      if (staffAccount.passwordChangeRequired) {
+        setSetupFeedback(null);
+        setShowSetupPassword(false);
+        setShowSetupConfirmPassword(false);
+        setSetupData({
+          employeeId: staffAccount.employeeId,
+          branch: staffAccount.branch,
+          role: staffAccount.role,
+          fullName: staffAccount.fullName,
+          temporaryPassword: loginData.password,
+          newPassword: "",
+          confirmPassword: "",
+        });
+        setIsSetupModalOpen(true);
+        return;
+      }
+
       await loginStaff({
         branch: staffAccount.branch,
         fullName: staffAccount.fullName,
@@ -126,12 +148,7 @@ function StaffLogin() {
         role: staffAccount.role,
       });
 
-      const nextPath =
-        redirectPath && redirectPath !== "/staff/login"
-          ? redirectPath
-          : getDefaultRouteForRole(staffAccount.role);
-
-      navigate(nextPath, { replace: true });
+      navigate(resolveRedirectPath(staffAccount.role), { replace: true });
     } catch (error) {
       console.error("Staff login failed", error);
       const message =
@@ -141,6 +158,75 @@ function StaffLogin() {
       alert(message);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCloseSetupModal = () => {
+    if (isSetupSubmitting) {
+      return;
+    }
+
+    setIsSetupModalOpen(false);
+    setSetupFeedback(null);
+    setShowSetupPassword(false);
+    setShowSetupConfirmPassword(false);
+  };
+
+  const handleCompletePasswordSetup = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSetupFeedback(null);
+
+    if (setupData.newPassword.length < 8) {
+      setSetupFeedback({
+        type: "error",
+        message: "Password must be at least 8 characters long.",
+      });
+      return;
+    }
+
+    if (setupData.newPassword !== setupData.confirmPassword) {
+      setSetupFeedback({
+        type: "error",
+        message: "The password confirmation does not match.",
+      });
+      return;
+    }
+
+    try {
+      setIsSetupSubmitting(true);
+
+      const result = await completeStaffPasswordSetup({
+        employeeId: setupData.employeeId,
+        currentPassword: setupData.temporaryPassword,
+        newPassword: setupData.newPassword,
+      });
+
+      setLoginData({
+        branch: result.branch,
+        password: setupData.newPassword,
+        role: result.role,
+      });
+      setIsSetupModalOpen(false);
+
+      await loginStaff({
+        branch: result.branch,
+        fullName: result.fullName,
+        employeeId: result.employeeId,
+        role: result.role,
+      });
+
+      navigate(resolveRedirectPath(result.role), { replace: true });
+    } catch (error) {
+      console.error("Staff first-login password setup failed", error);
+      setSetupFeedback({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to update the password right now.",
+      });
+    } finally {
+      setIsSetupSubmitting(false);
     }
   };
 
@@ -156,7 +242,7 @@ function StaffLogin() {
     setResetData((current) => ({
       ...current,
       branch: loginData.branch || current.branch,
-      role: (loginData.role || current.role) as StaffAccessRole,
+      role: (loginData.role || current.role) as StaffResetAccessRole,
     }));
     setIsResetModalOpen(true);
   };
@@ -219,7 +305,6 @@ function StaffLogin() {
         newPassword: resetData.newPassword,
       });
 
-      setSelectedBranch(result.branch);
       setLoginData((current) => ({
         ...current,
         branch: result.branch,
@@ -260,108 +345,85 @@ function StaffLogin() {
               <h1 className="login-title">Login</h1>
               <p className="pent">Enter your credentials to continue</p>
               <p className="selected-branch-display">
-                {isAreaManager ? "Access: " : "Branch: "}
-                <strong
-                  className={
-                    !selectedBranch && !isAreaManager ? "placeholder" : ""
-                  }
-                >
-                  {isAreaManager
-                    ? "Area Manager"
-                    : selectedBranch || "Not selected"}
-                </strong>
+                Access Role: <strong>{STAFF_ROLE_LABELS[loginData.role]}</strong>
               </p>
+              {!isAreaManager ? (
+                <p className="selected-branch-display">
+                  Branch:{" "}
+                  <strong className={!loginData.branch ? "placeholder" : ""}>
+                    {loginData.branch || "Not selected"}
+                  </strong>
+                </p>
+              ) : null}
             </div>
 
             <form className="login-form" onSubmit={handleLogin}>
-              <div className="manager-toggle-row">
-                <label
-                  className={`manager-toggle ${isAreaManager ? "active" : ""}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={isAreaManager}
-                    onChange={(e) => handleAreaManagerToggle(e.target.checked)}
-                  />
-                  <span>Login as Area Manager</span>
-                </label>
+              <div className="form-groups">
+                <label htmlFor="role">Access Role</label>
+                <div className="staff-select-wrapper">
+                  <select
+                    id="role"
+                    name="role"
+                    value={loginData.role}
+                    onChange={(event) => {
+                      const role = event.target.value as StaffLoginAccessRole;
+                      setLoginData((current) => ({
+                        ...current,
+                        role,
+                        branch: role === "manager" ? "" : current.branch,
+                      }));
+                    }}
+                  >
+                    <option value="admin">Administrator</option>
+                    <option value="registrar">Registrar</option>
+                    <option value="manager">Area Manager</option>
+                  </select>
+                  <span className="staff-select-arrow" aria-hidden="true">
+                    <MdKeyboardArrowDown size={18} />
+                  </span>
+                </div>
               </div>
 
-              {isAreaManager ? (
-                <div className="manager-mode-card">
-                  <span className="manager-mode-label">Access Mode</span>
-                  <strong>Area Manager</strong>
-                  <p className="manager-mode-copy">
-                    Branch and staff role selection are skipped in this mode.
-                    Continue directly with your manager password.
-                  </p>
+              {!isAreaManager ? (
+                <div className="form-groups">
+                  <label htmlFor="branch">Select Branch</label>
+                  <div className="staff-select-wrapper">
+                    <select
+                      id="branch"
+                      name="branch"
+                      value={loginData.branch}
+                      onChange={(event) => {
+                        const branch = event.target.value;
+                        setLoginData((current) => ({ ...current, branch }));
+                      }}
+                      required
+                    >
+                      <option value="">Select Branch</option>
+                      <option value="Bacoor">Bacoor</option>
+                      <option value="GMA">GMA</option>
+                      <option value="Taytay">Taytay</option>
+                    </select>
+                    <span className="staff-select-arrow" aria-hidden="true">
+                      <MdKeyboardArrowDown size={18} />
+                    </span>
+                  </div>
                 </div>
-              ) : (
-                <>
-                  <div className="form-groups">
-                    <label htmlFor="branch">Select Branch</label>
-                    <div className="staff-select-wrapper">
-                      <select
-                        id="branch"
-                        name="branch"
-                        value={loginData.branch}
-                        onChange={(e) => {
-                          const branch = e.target.value;
-                          setSelectedBranch(branch);
-                          setLoginData((current) => ({ ...current, branch }));
-                        }}
-                        required
-                      >
-                        <option value="">Select Branch</option>
-                        <option value="Bacoor">Bacoor</option>
-                        <option value="GMA">GMA</option>
-                        <option value="Taytay">Taytay</option>
-                      </select>
-                      <span className="staff-select-arrow" aria-hidden="true">
-                        <MdKeyboardArrowDown size={18} />
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="form-groups">
-                    <label htmlFor="role">Access Role</label>
-                    <div className="staff-select-wrapper">
-                      <select
-                        id="role"
-                        name="role"
-                        value={loginData.role}
-                        onChange={(e) =>
-                          setLoginData((current) => ({
-                            ...current,
-                            role: e.target.value as StaffAccessRole,
-                          }))
-                        }
-                      >
-                        <option value="admin">Administrator</option>
-                        <option value="registrar">Registrar</option>
-                      </select>
-                      <span className="staff-select-arrow" aria-hidden="true">
-                        <MdKeyboardArrowDown size={18} />
-                      </span>
-                    </div>
-                  </div>
-                </>
-              )}
+              ) : null}
 
               <div className="divider"></div>
 
               <div className="form-groups">
+                <label htmlFor="password">Password</label>
                 <div className="password-wrapper">
-                  <label htmlFor="password">Password</label>
                   <input
                     id="password"
                     type={showPassword ? "text" : "password"}
                     name="password"
                     value={loginData.password}
-                    onChange={(e) =>
+                    onChange={(event) =>
                       setLoginData((current) => ({
                         ...current,
-                        password: e.target.value,
+                        password: event.target.value,
                       }))
                     }
                     autoComplete="current-password"
@@ -401,6 +463,106 @@ function StaffLogin() {
       </div>
 
       <AuthModal
+        isOpen={isSetupModalOpen}
+        title="Change Temporary Password"
+        description="This account is still using the password assigned by the Area Manager. Create your own password before continuing."
+        onClose={handleCloseSetupModal}
+        footer={
+          <>
+            <button
+              type="button"
+              className="reset-cancel-btn"
+              onClick={handleCloseSetupModal}
+              disabled={isSetupSubmitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="staff-setup-form"
+              className="reset-submit-btn"
+              disabled={isSetupSubmitting}
+            >
+              {isSetupSubmitting ? "Updating..." : "Continue"}
+            </button>
+          </>
+        }
+      >
+        <form
+          id="staff-setup-form"
+          className="reset-form"
+          onSubmit={handleCompletePasswordSetup}
+        >
+          <div className="staff-login-setup-summary">
+            <strong>{setupData.fullName || "Staff Account"}</strong>
+            <span>
+              {STAFF_ROLE_LABELS[setupData.role]} | {setupData.branch}
+            </span>
+          </div>
+
+          <div className="form-groups">
+            <label htmlFor="setup-password">New Password</label>
+            <div className="password-wrapper reset-password-wrapper">
+              <input
+                id="setup-password"
+                type={showSetupPassword ? "text" : "password"}
+                value={setupData.newPassword}
+                onChange={(event) =>
+                  setSetupData((current) => ({
+                    ...current,
+                    newPassword: event.target.value,
+                  }))
+                }
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                className="toggle-password"
+                onClick={() =>
+                  setShowSetupPassword((previousValue) => !previousValue)
+                }
+              >
+                {showSetupPassword ? <FaEyeSlash /> : <FaEye />}
+              </button>
+            </div>
+          </div>
+
+          <div className="form-groups">
+            <label htmlFor="setup-confirm-password">Confirm Password</label>
+            <div className="password-wrapper reset-password-wrapper">
+              <input
+                id="setup-confirm-password"
+                type={showSetupConfirmPassword ? "text" : "password"}
+                value={setupData.confirmPassword}
+                onChange={(event) =>
+                  setSetupData((current) => ({
+                    ...current,
+                    confirmPassword: event.target.value,
+                  }))
+                }
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                className="toggle-password"
+                onClick={() =>
+                  setShowSetupConfirmPassword((previousValue) => !previousValue)
+                }
+              >
+                {showSetupConfirmPassword ? <FaEyeSlash /> : <FaEye />}
+              </button>
+            </div>
+          </div>
+
+          {setupFeedback ? (
+            <p className={`reset-feedback ${setupFeedback.type}`}>
+              {setupFeedback.message}
+            </p>
+          ) : null}
+        </form>
+      </AuthModal>
+
+      <AuthModal
         isOpen={isResetModalOpen}
         title="Reset Staff Password"
         description="Confirm the branch account details, then set a new password for the staff login."
@@ -426,7 +588,11 @@ function StaffLogin() {
           </>
         }
       >
-        <form id="staff-reset-form" className="reset-form" onSubmit={handleResetPassword}>
+        <form
+          id="staff-reset-form"
+          className="reset-form"
+          onSubmit={handleResetPassword}
+        >
           <div className="reset-grid">
             <div className="form-groups">
               <label htmlFor="reset-branch">Branch</label>
@@ -434,10 +600,10 @@ function StaffLogin() {
                 <select
                   id="reset-branch"
                   value={resetData.branch}
-                  onChange={(e) =>
+                  onChange={(event) =>
                     setResetData((current) => ({
                       ...current,
-                      branch: e.target.value,
+                      branch: event.target.value,
                     }))
                   }
                 >
@@ -458,10 +624,10 @@ function StaffLogin() {
                 <select
                   id="reset-role"
                   value={resetData.role}
-                  onChange={(e) =>
+                  onChange={(event) =>
                     setResetData((current) => ({
                       ...current,
-                      role: e.target.value as StaffAccessRole,
+                      role: event.target.value as StaffResetAccessRole,
                     }))
                   }
                 >
@@ -481,10 +647,10 @@ function StaffLogin() {
               id="reset-email"
               type="email"
               value={resetData.email}
-              onChange={(e) =>
+              onChange={(event) =>
                 setResetData((current) => ({
                   ...current,
-                  email: e.target.value,
+                  email: event.target.value,
                 }))
               }
               placeholder="Enter the staff email"
@@ -498,10 +664,10 @@ function StaffLogin() {
               id="reset-contact"
               type="text"
               value={resetData.contactNumber}
-              onChange={(e) =>
+              onChange={(event) =>
                 setResetData((current) => ({
                   ...current,
-                  contactNumber: e.target.value,
+                  contactNumber: event.target.value,
                 }))
               }
               placeholder="Enter the registered mobile number"
@@ -516,10 +682,10 @@ function StaffLogin() {
                 id="reset-password"
                 type={showResetPassword ? "text" : "password"}
                 value={resetData.newPassword}
-                onChange={(e) =>
+                onChange={(event) =>
                   setResetData((current) => ({
                     ...current,
-                    newPassword: e.target.value,
+                    newPassword: event.target.value,
                   }))
                 }
                 autoComplete="new-password"
@@ -543,10 +709,10 @@ function StaffLogin() {
                 id="reset-confirm-password"
                 type={showResetConfirmPassword ? "text" : "password"}
                 value={resetData.confirmPassword}
-                onChange={(e) =>
+                onChange={(event) =>
                   setResetData((current) => ({
                     ...current,
-                    confirmPassword: e.target.value,
+                    confirmPassword: event.target.value,
                   }))
                 }
                 autoComplete="new-password"

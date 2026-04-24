@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { FaSearch, FaTrash, FaUndo } from "react-icons/fa";
+import { MdArchive } from "react-icons/md";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
 import { useAuth } from "../../hooks/useAuth";
@@ -132,7 +133,7 @@ export default function AdminTrash({
       );
     } catch (error) {
       console.error("Failed to load archived records", error);
-      addToast("Unable to load Trash records for this branch.", "error");
+      addToast("Unable to load Archive records for this branch.", "error");
       setStudents(getStudentsForBranch(currentBranch) as Student[]);
       setEnrollees(
         readBranchScopedData<Enrollee[]>("enrollees", currentBranch) ?? [],
@@ -480,7 +481,7 @@ export default function AdminTrash({
       const result = await deleteStudentRecord(student);
       addToast(
         result.warnings.length > 0
-          ? `${student.name} was deleted from Trash, but the legacy student API still needs cleanup.`
+          ? `${student.name} was deleted from Archive, but the legacy student API still needs cleanup.`
           : `${student.name} has been permanently deleted.`,
         result.warnings.length > 0 ? "warning" : "success",
       );
@@ -548,7 +549,7 @@ export default function AdminTrash({
     }
 
     const confirmed = window.confirm(
-      "Clear Trash and permanently delete all archived records? This action cannot be undone.",
+      "Clear Archive and permanently delete all archived records? This action cannot be undone.",
     );
 
     if (!confirmed) {
@@ -582,16 +583,16 @@ export default function AdminTrash({
       const deletedLabel = `${deletedCount} record${deletedCount === 1 ? "" : "s"}`;
       const message =
         warningCount > 0
-          ? `${deletedLabel} removed from Trash, but ${warningCount} legacy student record${warningCount === 1 ? "" : "s"} still need API cleanup.`
-          : `${deletedLabel} permanently deleted from Trash.`;
+          ? `${deletedLabel} removed from Archive, but ${warningCount} legacy student record${warningCount === 1 ? "" : "s"} still need API cleanup.`
+          : `${deletedLabel} permanently deleted from Archive.`;
       addToast(message, warningCount > 0 ? "warning" : "success");
     }
 
     if (failedCount > 0) {
       addToast(
         firstFailureMessage
-          ? `Failed to delete ${failedCount} record${failedCount === 1 ? "" : "s"} from Trash. ${firstFailureMessage}`
-          : `Failed to delete ${failedCount} record${failedCount === 1 ? "" : "s"} from Trash.`,
+          ? `Failed to delete ${failedCount} record${failedCount === 1 ? "" : "s"} from Archive. ${firstFailureMessage}`
+          : `Failed to delete ${failedCount} record${failedCount === 1 ? "" : "s"} from Archive.`,
         "error",
       );
     }
@@ -645,7 +646,10 @@ export default function AdminTrash({
 
       <main className="archive-content">
         <header className="page-header">
-          <h1>Trash</h1>
+          <h1>
+            <MdArchive />
+            Archive
+          </h1>
           <p>
             {isLoading
               ? "Loading archived records..."
@@ -723,8 +727,8 @@ export default function AdminTrash({
             }}
             disabled={isProcessingTrash || archivedRecords.length === 0}
           >
-            <FaTrash />
-            {isProcessingTrash ? "Processing..." : "Clear Trash"}
+            <MdArchive />
+            {isProcessingTrash ? "Processing..." : "Clear Archive"}
           </button>
         </div>
 

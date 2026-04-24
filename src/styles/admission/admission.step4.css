@@ -206,6 +206,124 @@
   box-shadow: 0 4px 12px rgba(180, 83, 9, 0.2);
 }
 
+.conf-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(3px);
+}
+
+.conf-modal-card {
+  width: min(100%, 520px);
+  border-radius: 16px;
+  border: 1px solid #f5c26b;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+  overflow: hidden;
+}
+
+.conf-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid #f4e2bb;
+  background: #fff8e8;
+}
+
+.conf-modal-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #7c4a03;
+}
+
+.conf-modal-close {
+  border: none;
+  background: transparent;
+  color: #8a5a12;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.conf-modal-close:hover {
+  color: #b45309;
+}
+
+.conf-modal-body {
+  padding: 20px 22px 8px;
+}
+
+.conf-modal-body p {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #5f4b27;
+}
+
+.conf-modal-note {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff8e8;
+  border: 1px solid #f4e2bb;
+  color: #7c4a03;
+  font-weight: 500;
+}
+
+.conf-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 0 22px 22px;
+}
+
+.conf-modal-btn {
+  border-radius: 10px;
+  padding: 11px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.conf-modal-btn:hover {
+  transform: translateY(-1px);
+}
+
+.conf-modal-btn-secondary {
+  border: 1px solid #d8e1e8;
+  background: #ffffff;
+  color: #23384b;
+}
+
+.conf-modal-btn-secondary:hover {
+  border-color: #8daabd;
+  background: #f8fafc;
+}
+
+.conf-modal-btn-primary {
+  border: 1px solid #b45309;
+  background: #f59e0b;
+  color: #ffffff;
+}
+
+.conf-modal-btn-primary:hover {
+  background: #d97706;
+  border-color: #92400e;
+}
+
 .conf-discount-detail {
   margin-top: 6px;
   font-weight: 500;
@@ -413,5 +531,24 @@
   
   .conf-notes-text {
     padding-left: 20px;
+  }
+
+  .conf-modal-overlay {
+    padding: 16px;
+  }
+
+  .conf-modal-header,
+  .conf-modal-body,
+  .conf-modal-actions {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .conf-modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .conf-modal-btn {
+    width: 100%;
   }
 }

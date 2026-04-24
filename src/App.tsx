@@ -29,7 +29,7 @@ import AdminEnrollees from "./pages/admin/AdminEnrollees.tsx";
 import AdminAlumni from "./pages/admin/AdminAlumni.tsx";
 import AdminReports from "./pages/admin/AdminReports.tsx";
 import AdminBackup from "./pages/admin/AdminBackup.tsx";
-import AdminTrash from "./pages/admin/AdminTrash.tsx";
+import AdminArchive from "./pages/admin/AdminTrash.tsx";
 
 import RegistrarDashboard from "./pages/registrar/RegistrarDashboard.tsx";
 
@@ -230,7 +230,11 @@ function AppRoutes() {
           }
         />
         <Route path="backup" element={<AdminBackup {...adminProps} />} />
-        <Route path="trash" element={<AdminTrash {...adminProps} />} />
+        <Route path="archive" element={<AdminArchive {...adminProps} />} />
+        <Route
+          path="trash"
+          element={<Navigate to="/admin/archive" replace />}
+        />
       </Route>
 
       {/* Registrar Routes with Layout */}

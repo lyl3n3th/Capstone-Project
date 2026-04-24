@@ -37,6 +37,42 @@
 @import "./manager/area-managerStaff.css";
 @import "./manager/area-manageStudents.css";
 
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100svh;
+  box-sizing: border-box;
+}
+
+.admission-step1-page,
+.admission-step2-page,
+.admission-req-container,
+.confirmation-page-wrapper,
+.entrance-exam-page {
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    sans-serif;
+}
 
 /* Toast Animation */
 @keyframes slideIn {

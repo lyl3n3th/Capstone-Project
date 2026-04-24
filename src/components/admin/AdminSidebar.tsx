@@ -6,7 +6,7 @@ import { FaDatabase, FaGraduationCap, FaUserCheck } from "react-icons/fa";
 import { FiLogOut } from "react-icons/fi";
 import { IoPeopleSharp } from "react-icons/io5";
 import {
-  MdDeleteOutline,
+  MdArchive,
   MdOutlineAssessment,
   MdSettings,
 } from "react-icons/md";
@@ -161,9 +161,9 @@ export default function AdminSidebar({
       show: canAccessBackup,
     },
     {
-      icon: <MdDeleteOutline />,
-      label: "Trash",
-      path: "/admin/trash",
+      icon: <MdArchive />,
+      label: "Archive",
+      path: "/admin/archive",
     },
   ];
 

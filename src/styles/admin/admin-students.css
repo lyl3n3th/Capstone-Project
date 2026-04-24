@@ -494,8 +494,9 @@
 }
 
 .students-archive-btn {
-  background: #fee2e2;
-  color: #dc2626;
+  background: #ffffff;
+  color: #c2410c;
+  border: 1px solid #fdba74;
 }
 
 .students-icon-only-btn {
@@ -509,9 +510,15 @@
   font-size: 14px;
 }
 
+.students-action-btn.students-archive-btn.students-icon-only-btn svg {
+  font-size: 16px;
+}
+
 .students-archive-btn:hover {
-  background: #dc2626;
-  color: #ffffff;
+  background: #ffffff;
+  color: #9a3412;
+  border-color: #fb923c;
+  transform: translateY(-1px);
 }
 
 .students-no-results {
@@ -677,12 +684,16 @@
 }
 
 .students-archive-confirm-btn {
-  background: #dc2626;
-  color: #ffffff;
+  background: #ffffff;
+  color: #c2410c;
+  border: 1px solid #fdba74;
 }
 
 .students-archive-confirm-btn:hover {
-  background: #b91c1c;
+  background: #ffffff;
+  color: #9a3412;
+  border-color: #fb923c;
+  transform: translateY(-1px);
 }
 
 /* View Modal */

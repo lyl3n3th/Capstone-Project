@@ -3,6 +3,7 @@
   min-height: 100vh;
   background: #f1f5f9;
   overflow: hidden;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
 
 .area-manager-sidebar {

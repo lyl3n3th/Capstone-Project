@@ -1,22 +1,18 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  BsSearch,
+  BsArrowCounterclockwise,
   BsCaretDownFill,
   BsCaretUpFill,
   BsEye,
   BsEyeSlash,
-  BsTrash3,
-  BsArrowCounterclockwise,
   BsPersonPlusFill,
+  BsSearch,
 } from "react-icons/bs";
-import { MdDeleteSweep } from "react-icons/md";
+import { MdBlock } from "react-icons/md";
 import {
   buildEmployeeIdPreview,
   createStaffMember,
   fetchStaffMembers,
-  moveStaffMemberToTrash,
-  permanentlyDeleteStaffMember,
-  restoreStaffMember,
   updateStaffMember,
   type StaffMember,
 } from "../../services/staffApi";
@@ -26,11 +22,10 @@ type SortKeys = "staff_id" | "full_name" | "role" | "branch" | "email";
 
 const AreaManagerStaffAccounts: React.FC = () => {
   const [staff, setStaff] = useState<StaffMember[]>([]);
-  const [trash, setTrash] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [showModal, setShowModal] = useState(false);
-  const [showTrashModal, setShowTrashModal] = useState(false);
+  const [showDisabledModal, setShowDisabledModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -38,18 +33,15 @@ const AreaManagerStaffAccounts: React.FC = () => {
   const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null);
   const [editMode, setEditMode] = useState(false);
 
-  // Filter states
   const [filterRole, setFilterRole] = useState("");
   const [filterBranch, setFilterBranch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
 
-  // Sort states
   const [sortConfig, setSortConfig] = useState<{
     key: SortKeys;
     direction: "asc" | "desc";
   } | null>(null);
 
-  // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
@@ -65,9 +57,14 @@ const AreaManagerStaffAccounts: React.FC = () => {
     password: "",
     status: "active",
   });
+
   const employeeIdPreview = useMemo(
     () => buildEmployeeIdPreview(formData.branch),
     [formData.branch],
+  );
+  const disabledAccounts = useMemo(
+    () => staff.filter((member) => member.status === "inactive"),
+    [staff],
   );
 
   useEffect(() => {
@@ -77,12 +74,8 @@ const AreaManagerStaffAccounts: React.FC = () => {
   const loadStaffDirectory = async () => {
     setLoading(true);
     try {
-      const [activeStaff, trashedStaff] = await Promise.all([
-        fetchStaffMembers(),
-        fetchStaffMembers({ trash: true }),
-      ]);
-      setStaff(activeStaff);
-      setTrash(trashedStaff);
+      const staffMembers = await fetchStaffMembers();
+      setStaff(staffMembers);
       setError("");
     } catch (err) {
       console.error("Error fetching staff:", err);
@@ -94,17 +87,19 @@ const AreaManagerStaffAccounts: React.FC = () => {
     }
   };
 
-  // Get unique filter values
   const uniqueRoles = Array.from(
-    new Set(staff.map((s) => s.role).filter(Boolean)),
+    new Set(staff.map((member) => member.role).filter(Boolean)),
   ).sort();
-  const uniqueBranches = Array.from(new Set(staff.map((s) => s.branch))).sort();
+  const uniqueBranches = Array.from(
+    new Set(staff.map((member) => member.branch)),
+  ).sort();
   const uniqueStatuses = ["active", "inactive"];
 
-  // Stats for header
   const totalStaff = staff.length;
-  const activeStaff = staff.filter((s) => s.status === "active").length;
-  const registrars = staff.filter((s) => s.role === "Registrar").length;
+  const activeStaffCount = staff.filter(
+    (member) => member.status === "active",
+  ).length;
+  const disabledStaffCount = disabledAccounts.length;
 
   const validateForm = () => {
     const {
@@ -116,6 +111,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
       address,
       password,
     } = formData;
+    const normalizedPassword = password?.trim() || "";
 
     if (
       !first_name ||
@@ -124,7 +120,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
       !address ||
       !email ||
       !contact_number ||
-      (!isEditing && !password)
+      (!isEditing && !normalizedPassword)
     ) {
       setError("Error: All fields are required.");
       return false;
@@ -135,18 +131,25 @@ const AreaManagerStaffAccounts: React.FC = () => {
       return false;
     }
 
-    const existingStaff = [...staff, ...trash];
-    const isDuplicateEmail = existingStaff.some(
-      (s) =>
-        s.email.toLowerCase() === email.toLowerCase() &&
-        (isEditing ? s.staff_id !== formData.staff_id : true),
+    if (normalizedPassword && normalizedPassword.length < 8) {
+      setError("Error: Password must be at least 8 characters long.");
+      return false;
+    }
+
+    const isDuplicateEmail = staff.some(
+      (member) =>
+        member.email.toLowerCase() === email.toLowerCase() &&
+        (isEditing ? member.staff_id !== formData.staff_id : true),
     );
-    const isDuplicateBranchRole = staff.some(
-      (s) =>
-        s.branch === formData.branch &&
-        s.role === formData.role &&
-        (isEditing ? s.staff_id !== formData.staff_id : true),
-    );
+    const isDuplicateBranchRole =
+      formData.status === "active" &&
+      staff.some(
+        (member) =>
+          member.branch === formData.branch &&
+          member.role === formData.role &&
+          member.status === "active" &&
+          (isEditing ? member.staff_id !== formData.staff_id : true),
+      );
 
     if (isDuplicateEmail) {
       setError("Error: Email already exists.");
@@ -166,20 +169,28 @@ const AreaManagerStaffAccounts: React.FC = () => {
 
   const handleSave = async () => {
     setSubmitted(true);
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      return;
+    }
+
+    const hasManagerSetPassword = Boolean(formData.password?.trim());
 
     try {
       if (isEditing) {
-        await updateStaffMember(formData.staff_id, formData);
+        await updateStaffMember(formData.staff_id, formData, {
+          requirePasswordChange: hasManagerSetPassword,
+        });
       } else {
         await createStaffMember(formData);
       }
+
       await loadStaffDirectory();
       setShowModal(false);
       setSelectedStaff(null);
       setEditMode(false);
       setIsEditing(false);
       setSubmitted(false);
+      setShowPassword(false);
       setError("");
     } catch (err) {
       setError(
@@ -191,115 +202,131 @@ const AreaManagerStaffAccounts: React.FC = () => {
     }
   };
 
-  const handleMoveToTrash = async (member: StaffMember) => {
+  const handleDisableAccount = async (member: StaffMember) => {
     if (
-      window.confirm(`Move ${member.first_name} ${member.last_name} to trash?`)
+      !window.confirm(
+        `Disable ${member.first_name} ${member.last_name}'s account?`,
+      )
     ) {
-      try {
-        await moveStaffMemberToTrash(member.staff_id);
-        await loadStaffDirectory();
-        setShowModal(false);
-        setSelectedStaff(null);
-        setEditMode(false);
-        setIsEditing(false);
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to move this account to trash.",
-        );
-      }
+      return;
+    }
+
+    try {
+      await updateStaffMember(member.staff_id, {
+        ...member,
+        password: "",
+        status: "inactive",
+      });
+      await loadStaffDirectory();
+      setShowModal(false);
+      setSelectedStaff(null);
+      setEditMode(false);
+      setIsEditing(false);
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to disable this staff account.",
+      );
     }
   };
 
-  const handleRestore = async (member: StaffMember) => {
-    if (window.confirm(`Restore ${member.first_name} to active staff?`)) {
-      try {
-        await restoreStaffMember(member.staff_id);
-        await loadStaffDirectory();
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to restore this staff account.",
-        );
-      }
-    }
-  };
-
-  const handlePermanentDelete = async (staffId: string) => {
+  const handleEnableAccount = async (member: StaffMember) => {
     if (
-      window.confirm("Permanently delete this account? This cannot be undone.")
+      !window.confirm(
+        `Enable ${member.first_name} ${member.last_name}'s account again?`,
+      )
     ) {
-      try {
-        await permanentlyDeleteStaffMember(staffId);
-        await loadStaffDirectory();
-      } catch (err) {
-        alert("Error deleting from server.");
-      }
+      return;
     }
-  };
 
-  const handleEmptyTrash = async () => {
-    if (window.confirm("Permanently delete all accounts in trash?")) {
-      try {
-        await Promise.all(
-          trash.map((item) => permanentlyDeleteStaffMember(item.staff_id)),
-        );
-        await loadStaffDirectory();
-      } catch (err) {
-        alert("Error deleting from server.");
-      }
+    try {
+      await updateStaffMember(member.staff_id, {
+        ...member,
+        password: "",
+        status: "active",
+      });
+      await loadStaffDirectory();
+      setShowModal(false);
+      setSelectedStaff(null);
+      setEditMode(false);
+      setIsEditing(false);
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to enable this staff account.",
+      );
     }
   };
 
   const getInputClass = (fieldName: keyof StaffMember) => {
     const value = formData[fieldName]?.toString() || "";
-    if (!submitted) return "stf-input";
+
+    if (!submitted) {
+      return "stf-input";
+    }
+
     if (fieldName === "password" && isEditing) {
       return "stf-input";
     }
+
     return value.trim() === "" ? "stf-input error-field" : "stf-input";
   };
 
-  // Processed staff with filters and sorting
   const processedStaff = useMemo(() => {
-    let filtered = staff.filter((s) => {
-      const fullName = `${s.first_name} ${s.last_name}`.toLowerCase();
+    const filtered = staff.filter((member) => {
+      const fullName =
+        `${member.first_name} ${member.last_name}`.toLowerCase();
       const matchesSearch =
         fullName.includes(searchTerm.toLowerCase()) ||
-        s.staff_id.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesRole = filterRole ? s.role === filterRole : true;
-      const matchesBranch = filterBranch ? s.branch === filterBranch : true;
-      const matchesStatus = filterStatus ? s.status === filterStatus : true;
+        member.staff_id.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesRole = filterRole ? member.role === filterRole : true;
+      const matchesBranch = filterBranch ? member.branch === filterBranch : true;
+      const matchesStatus = filterStatus ? member.status === filterStatus : true;
+
       return matchesSearch && matchesRole && matchesBranch && matchesStatus;
     });
 
-    if (sortConfig !== null) {
-      filtered.sort((a, b) => {
-        let aVal: any;
-        let bVal: any;
-        if (sortConfig.key === "full_name") {
-          aVal = `${a.first_name} ${a.last_name}`.toLowerCase();
-          bVal = `${b.first_name} ${b.last_name}`.toLowerCase();
-        } else {
-          aVal = (a[sortConfig.key as keyof StaffMember] || "")
-            .toString()
-            .toLowerCase();
-          bVal = (b[sortConfig.key as keyof StaffMember] || "")
-            .toString()
-            .toLowerCase();
-        }
-        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
-        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
-        return 0;
-      });
+    if (!sortConfig) {
+      return filtered;
     }
-    return filtered;
+
+    return [...filtered].sort((leftMember, rightMember) => {
+      let leftValue: string;
+      let rightValue: string;
+
+      if (sortConfig.key === "full_name") {
+        leftValue =
+          `${leftMember.first_name} ${leftMember.last_name}`.toLowerCase();
+        rightValue =
+          `${rightMember.first_name} ${rightMember.last_name}`.toLowerCase();
+      } else {
+        leftValue = (leftMember[sortConfig.key as keyof StaffMember] || "")
+          .toString()
+          .toLowerCase();
+        rightValue = (rightMember[sortConfig.key as keyof StaffMember] || "")
+          .toString()
+          .toLowerCase();
+      }
+
+      if (leftValue < rightValue) {
+        return sortConfig.direction === "asc" ? -1 : 1;
+      }
+
+      if (leftValue > rightValue) {
+        return sortConfig.direction === "asc" ? 1 : -1;
+      }
+
+      return 0;
+    });
   }, [staff, searchTerm, filterRole, filterBranch, filterStatus, sortConfig]);
 
   const requestSort = (key: SortKeys) => {
     let direction: "asc" | "desc" = "asc";
+
     if (
       sortConfig &&
       sortConfig.key === key &&
@@ -307,11 +334,15 @@ const AreaManagerStaffAccounts: React.FC = () => {
     ) {
       direction = "desc";
     }
+
     setSortConfig({ key, direction });
   };
 
   const getSortIcon = (key: SortKeys) => {
-    if (sortConfig?.key !== key) return null;
+    if (sortConfig?.key !== key) {
+      return null;
+    }
+
     return sortConfig.direction === "asc" ? (
       <BsCaretUpFill />
     ) : (
@@ -319,7 +350,6 @@ const AreaManagerStaffAccounts: React.FC = () => {
     );
   };
 
-  // Pagination
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
   const currentStaff = processedStaff.slice(indexOfFirstItem, indexOfLastItem);
@@ -353,17 +383,21 @@ const AreaManagerStaffAccounts: React.FC = () => {
   };
 
   const handleEditFromView = () => {
-    if (selectedStaff) {
-      setFormData({ ...selectedStaff, password: "" });
-      setIsEditing(true);
-      setEditMode(true);
-      setSubmitted(false);
-      setError("");
+    if (!selectedStaff) {
+      return;
     }
+
+    setFormData({ ...selectedStaff, password: "" });
+    setIsEditing(true);
+    setEditMode(true);
+    setSubmitted(false);
+    setShowPassword(false);
+    setError("");
   };
 
-  if (loading)
+  if (loading) {
     return <div className="stf-loading">Loading Staff Directory...</div>;
+  }
 
   return (
     <div className="stf-root">
@@ -372,7 +406,8 @@ const AreaManagerStaffAccounts: React.FC = () => {
           <h1 className="stf-page-title">Staff Management</h1>
           <p className="stf-page-description">
             Manage registrar and branch administrator accounts for each branch,
-            track roles, and keep staff login access in sync with Supabase.
+            control active and inactive access, and keep staff logins in sync
+            with Supabase.
           </p>
         </div>
       </div>
@@ -384,11 +419,11 @@ const AreaManagerStaffAccounts: React.FC = () => {
         </div>
         <div className="stf-stat-badge">
           <span className="stf-stat-label">Active</span>
-          <span className="stf-stat-value">{activeStaff}</span>
+          <span className="stf-stat-value">{activeStaffCount}</span>
         </div>
         <div className="stf-stat-badge">
-          <span className="stf-stat-label">Registrars</span>
-          <span className="stf-stat-value">{registrars}</span>
+          <span className="stf-stat-label">Disabled</span>
+          <span className="stf-stat-value">{disabledStaffCount}</span>
         </div>
       </div>
 
@@ -400,8 +435,8 @@ const AreaManagerStaffAccounts: React.FC = () => {
               type="text"
               placeholder="Search by name or employee ID..."
               value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
+              onChange={(event) => {
+                setSearchTerm(event.target.value);
                 setCurrentPage(1);
               }}
             />
@@ -409,51 +444,51 @@ const AreaManagerStaffAccounts: React.FC = () => {
           <div className="stf-filters-row">
             <select
               value={filterRole}
-              onChange={(e) => {
-                setFilterRole(e.target.value);
+              onChange={(event) => {
+                setFilterRole(event.target.value);
                 setCurrentPage(1);
               }}
             >
               <option value="">All Roles</option>
-              {uniqueRoles.map((r) => (
-                <option key={r} value={r}>
-                  {r}
+              {uniqueRoles.map((role) => (
+                <option key={role} value={role}>
+                  {role}
                 </option>
               ))}
             </select>
             <select
               value={filterBranch}
-              onChange={(e) => {
-                setFilterBranch(e.target.value);
+              onChange={(event) => {
+                setFilterBranch(event.target.value);
                 setCurrentPage(1);
               }}
             >
               <option value="">All Branches</option>
-              {uniqueBranches.map((b) => (
-                <option key={b} value={b}>
-                  {b}
+              {uniqueBranches.map((branch) => (
+                <option key={branch} value={branch}>
+                  {branch}
                 </option>
               ))}
             </select>
             <select
               value={filterStatus}
-              onChange={(e) => {
-                setFilterStatus(e.target.value);
+              onChange={(event) => {
+                setFilterStatus(event.target.value);
                 setCurrentPage(1);
               }}
             >
               <option value="">All Status</option>
-              {uniqueStatuses.map((s) => (
-                <option key={s} value={s}>
-                  {s.charAt(0).toUpperCase() + s.slice(1)}
+              {uniqueStatuses.map((status) => (
+                <option key={status} value={status}>
+                  {status.charAt(0).toUpperCase() + status.slice(1)}
                 </option>
               ))}
             </select>
             <button
               className="stf-trash-toggle"
-              onClick={() => setShowTrashModal(true)}
+              onClick={() => setShowDisabledModal(true)}
             >
-              <BsTrash3 /> Trash ({trash.length})
+              <MdBlock size={16} /> Disabled Accounts ({disabledAccounts.length})
             </button>
             <button className="stf-add-btn" onClick={handleAddNewStaff}>
               <BsPersonPlusFill /> Add Staff
@@ -532,18 +567,18 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   </td>
                 </tr>
               ))}
-              {currentStaff.length === 0 && (
+              {currentStaff.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="stf-empty-state">
                     No staff members found.
                   </td>
                 </tr>
-              )}
+              ) : null}
             </tbody>
           </table>
         </div>
 
-        {totalPages > 1 && (
+        {totalPages > 1 ? (
           <div className="stf-pagination">
             <button
               onClick={() => paginate(currentPage - 1)}
@@ -565,11 +600,10 @@ const AreaManagerStaffAccounts: React.FC = () => {
               Next
             </button>
           </div>
-        )}
+        ) : null}
       </div>
 
-      {/* Staff Profile Modal - View Mode */}
-      {showModal && selectedStaff && !editMode && (
+      {showModal && selectedStaff && !editMode ? (
         <div
           className="stf-modal-overlay"
           onClick={() => {
@@ -578,7 +612,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
             setEditMode(false);
           }}
         >
-          <div className="stf-modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="stf-modal-card" onClick={(event) => event.stopPropagation()}>
             <div className="stf-modal-header">
               <h3 className="stf-modal-title">Staff Profile</h3>
               <button
@@ -593,7 +627,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
               </button>
             </div>
             <div className="stf-modal-body">
-              {error && <div className="stf-error-msg">{error}</div>}
+              {error ? <div className="stf-error-msg">{error}</div> : null}
               <div className="stf-info-grid">
                 <div className="stf-field full">
                   <label>Full Name</label>
@@ -642,12 +676,21 @@ const AreaManagerStaffAccounts: React.FC = () => {
               </div>
             </div>
             <div className="stf-modal-footer">
-              <button
-                className="stf-action-btn stf-remove-btn"
-                onClick={() => handleMoveToTrash(selectedStaff)}
-              >
-                <BsTrash3 /> Move to Trash
-              </button>
+              {selectedStaff.status === "inactive" ? (
+                <button
+                  className="stf-action-btn stf-save-btn"
+                  onClick={() => handleEnableAccount(selectedStaff)}
+                >
+                  <BsArrowCounterclockwise /> Enable Account
+                </button>
+              ) : (
+                <button
+                  className="stf-action-btn stf-remove-btn"
+                  onClick={() => handleDisableAccount(selectedStaff)}
+                >
+                  <MdBlock size={16} /> Disable Account
+                </button>
+              )}
               <button
                 className="stf-action-btn stf-edit-btn"
                 onClick={handleEditFromView}
@@ -657,10 +700,9 @@ const AreaManagerStaffAccounts: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Edit/Create Modal */}
-      {showModal && (!selectedStaff || editMode) && (
+      {showModal && (!selectedStaff || editMode) ? (
         <div
           className="stf-modal-overlay"
           onClick={() => {
@@ -670,7 +712,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
             setIsEditing(false);
           }}
         >
-          <div className="stf-modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="stf-modal-card" onClick={(event) => event.stopPropagation()}>
             <div className="stf-modal-header">
               <h3 className="stf-modal-title">
                 {isEditing ? "Edit Staff" : "Register New Staff"}
@@ -688,9 +730,8 @@ const AreaManagerStaffAccounts: React.FC = () => {
               </button>
             </div>
             <div className="stf-modal-body">
-              {error && <div className="stf-error-msg">{error}</div>}
+              {error ? <div className="stf-error-msg">{error}</div> : null}
               <div className="stf-input-grid">
-                {/* Keep all your input fields here - they are fine */}
                 <div className="stf-field">
                   <label>Employee ID</label>
                   <input
@@ -699,21 +740,21 @@ const AreaManagerStaffAccounts: React.FC = () => {
                     disabled
                     className="stf-input disabled"
                   />
-                  {!isEditing && (
+                  {!isEditing ? (
                     <small>
                       Generated automatically from the selected branch when you
                       save this account.
                     </small>
-                  )}
+                  ) : null}
                 </div>
                 <div className="stf-field">
                   <label>Branch</label>
                   <select
                     value={formData.branch}
-                    onChange={(e) =>
+                    onChange={(event) =>
                       setFormData({
                         ...formData,
-                        branch: e.target.value as "GMA" | "Bacoor" | "Taytay",
+                        branch: event.target.value as "GMA" | "Bacoor" | "Taytay",
                       })
                     }
                     className={getInputClass("branch")}
@@ -728,8 +769,11 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   <input
                     type="text"
                     value={formData.first_name}
-                    onChange={(e) =>
-                      setFormData({ ...formData, first_name: e.target.value })
+                    onChange={(event) =>
+                      setFormData({
+                        ...formData,
+                        first_name: event.target.value,
+                      })
                     }
                     className={getInputClass("first_name")}
                   />
@@ -739,8 +783,11 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   <input
                     type="text"
                     value={formData.last_name}
-                    onChange={(e) =>
-                      setFormData({ ...formData, last_name: e.target.value })
+                    onChange={(event) =>
+                      setFormData({
+                        ...formData,
+                        last_name: event.target.value,
+                      })
                     }
                     className={getInputClass("last_name")}
                   />
@@ -749,10 +796,10 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   <label>Role</label>
                   <select
                     value={formData.role}
-                    onChange={(e) =>
+                    onChange={(event) =>
                       setFormData({
                         ...formData,
-                        role: e.target.value as
+                        role: event.target.value as
                           | "Registrar"
                           | "Branch Administrator",
                       })
@@ -770,10 +817,10 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   <input
                     type="text"
                     value={formData.contact_number}
-                    onChange={(e) =>
+                    onChange={(event) =>
                       setFormData({
                         ...formData,
-                        contact_number: e.target.value,
+                        contact_number: event.target.value,
                       })
                     }
                     className={getInputClass("contact_number")}
@@ -784,8 +831,11 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   <input
                     type="email"
                     value={formData.email}
-                    onChange={(e) =>
-                      setFormData({ ...formData, email: e.target.value })
+                    onChange={(event) =>
+                      setFormData({
+                        ...formData,
+                        email: event.target.value,
+                      })
                     }
                     className={getInputClass("email")}
                   />
@@ -795,8 +845,11 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   <input
                     type="text"
                     value={formData.address}
-                    onChange={(e) =>
-                      setFormData({ ...formData, address: e.target.value })
+                    onChange={(event) =>
+                      setFormData({
+                        ...formData,
+                        address: event.target.value,
+                      })
                     }
                     className={getInputClass("address")}
                   />
@@ -807,8 +860,11 @@ const AreaManagerStaffAccounts: React.FC = () => {
                     <input
                       type={showPassword ? "text" : "password"}
                       value={formData.password || ""}
-                      onChange={(e) =>
-                        setFormData({ ...formData, password: e.target.value })
+                      onChange={(event) =>
+                        setFormData({
+                          ...formData,
+                          password: event.target.value,
+                        })
                       }
                       className={`${getInputClass("password")} stf-pass-input`}
                       placeholder={
@@ -818,7 +874,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
                     <button
                       type="button"
                       className="stf-pass-toggle"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() => setShowPassword((current) => !current)}
                       tabIndex={-1}
                     >
                       {showPassword ? (
@@ -828,6 +884,11 @@ const AreaManagerStaffAccounts: React.FC = () => {
                       )}
                     </button>
                   </div>
+                  <small>
+                    {isEditing
+                      ? "If you set a new password here, it becomes a temporary password and the staff member must change it on their next login."
+                      : "The password you set here becomes a temporary password and must be changed by the staff member on first login."}
+                  </small>
                 </div>
               </div>
             </div>
@@ -852,22 +913,22 @@ const AreaManagerStaffAccounts: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* TRASH MODAL */}
-      {showTrashModal && (
+      {showDisabledModal ? (
         <div
           className="stf-modal-overlay"
-          onClick={() => setShowTrashModal(false)}
+          onClick={() => setShowDisabledModal(false)}
         >
-          <div className="stf-trash-card" onClick={(e) => e.stopPropagation()}>
+          <div className="stf-trash-card" onClick={(event) => event.stopPropagation()}>
             <div className="stf-modal-header">
               <div className="stf-modal-title-wrap">
-                <BsTrash3 size={18} /> <h3 style={{ margin: 0 }}>Trash Bin</h3>
+                <MdBlock size={18} />
+                <h3 style={{ margin: 0 }}>Disabled Accounts</h3>
               </div>
               <button
                 className="stf-modal-close"
-                onClick={() => setShowTrashModal(false)}
+                onClick={() => setShowDisabledModal(false)}
               >
                 &times;
               </button>
@@ -875,20 +936,14 @@ const AreaManagerStaffAccounts: React.FC = () => {
             <div className="stf-modal-body">
               <div className="stf-trash-top-row">
                 <p className="stf-trash-count">
-                  {trash.length} deleted account(s)
+                  {disabledAccounts.length} disabled account(s)
                 </p>
-                {trash.length > 0 && (
-                  <button
-                    className="stf-empty-trash"
-                    onClick={handleEmptyTrash}
-                  >
-                    <MdDeleteSweep size={16} /> Empty Trash
-                  </button>
-                )}
               </div>
               <div className="stf-table-wrapper">
-                {trash.length === 0 ? (
-                  <div className="stf-empty-state">No staff in trash.</div>
+                {disabledAccounts.length === 0 ? (
+                  <div className="stf-empty-state">
+                    No disabled staff accounts.
+                  </div>
                 ) : (
                   <table className="stf-table">
                     <thead>
@@ -900,34 +955,28 @@ const AreaManagerStaffAccounts: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {trash.map((m) => (
-                        <tr key={m.staff_id}>
+                      {disabledAccounts.map((member) => (
+                        <tr key={member.staff_id}>
                           <td>
                             <strong>
-                              {m.first_name} {m.last_name}
+                              {member.first_name} {member.last_name}
                             </strong>
                             <br />
-                            <small>{m.staff_id}</small>
+                            <small>{member.staff_id}</small>
                           </td>
-                          <td>{m.role}</td>
+                          <td>{member.role}</td>
                           <td>
-                            <span className="stf-branch-badge">{m.branch}</span>
+                            <span className="stf-branch-badge">
+                              {member.branch}
+                            </span>
                           </td>
                           <td style={{ textAlign: "right" }}>
                             <div className="stf-trash-btns-wrapper">
                               <button
                                 className="stf-btn-restore"
-                                onClick={() => handleRestore(m)}
+                                onClick={() => handleEnableAccount(member)}
                               >
-                                <BsArrowCounterclockwise /> Restore
-                              </button>
-                              <button
-                                className="stf-btn-delete-perm"
-                                onClick={() =>
-                                  handlePermanentDelete(m.staff_id)
-                                }
-                              >
-                                <BsTrash3 /> Delete
+                                <BsArrowCounterclockwise /> Enable
                               </button>
                             </div>
                           </td>
@@ -940,7 +989,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 };

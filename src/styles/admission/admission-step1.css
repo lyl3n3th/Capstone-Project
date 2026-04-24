@@ -221,3 +221,145 @@
     font-size: 12px;
   }
 }
+
+/* ===== STEP 1 SCOPED FIXES ===== */
+.admission-step1-page {
+  min-height: 100svh;
+  height: auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 24px;
+  padding: 32px 20px 48px;
+}
+
+.admission-step1-progress {
+  width: min(100%, 800px);
+  max-width: 800px;
+  position: static;
+}
+
+.admission-step1-content {
+  position: static;
+  width: min(100%, 840px);
+  margin-top: 0;
+  padding: 0;
+}
+
+.admission-step1-card {
+  box-sizing: border-box;
+  width: min(100%, 800px);
+  max-width: none;
+  bottom: auto;
+  padding: 32px 36px 40px;
+}
+
+.admission-step1-title {
+  margin-bottom: 8px;
+}
+
+.admission-step1-title > p {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #333;
+  opacity: 0.7;
+  text-align: center;
+}
+
+.admission-step1-card .choices {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  top: auto;
+  margin-top: 16px;
+}
+
+.admission-step1-card .choices .location-text {
+  align-items: flex-start;
+  text-align: left;
+}
+
+.admission-step1-card .choices .location,
+.admission-step1-card .choices .campus {
+  display: block;
+  position: static;
+  margin: 0;
+  text-align: left;
+}
+
+.admission-step1-card .choices .location {
+  font-size: 18px;
+  font-weight: 700;
+  color: #333;
+  opacity: 1;
+}
+
+.admission-step1-card .choices .campus {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #666;
+  opacity: 1;
+}
+
+.admission-step1-card .choices2 {
+  margin-top: 40px;
+}
+
+@media (max-width: 1200px) {
+  .admission-step1-page {
+    padding-top: 28px;
+  }
+}
+
+@media (max-width: 768px) {
+  .admission-step1-page {
+    gap: 20px;
+    padding: 24px 16px 40px;
+  }
+
+  .admission-step1-progress {
+    width: 100%;
+    position: static;
+    top: auto;
+  }
+
+  .admission-step1-card {
+    padding: 28px 22px 32px;
+  }
+
+  .admission-step1-card .choices {
+    padding: 14px;
+  }
+
+  .admission-step1-card .choices2 {
+    margin-top: 28px;
+  }
+}
+
+@media (max-width: 480px) {
+  .admission-step1-page {
+    padding: 20px 12px 32px;
+  }
+
+  .admission-step1-progress {
+    position: static;
+    top: auto;
+  }
+
+  .admission-step1-card {
+    margin-top: 0;
+    padding: 24px 16px 28px;
+  }
+
+  .admission-step1-card .choices {
+    height: auto;
+    min-height: 84px;
+    margin-top: 14px;
+  }
+
+  .admission-step1-card .choices2 {
+    margin-top: 24px;
+  }
+}

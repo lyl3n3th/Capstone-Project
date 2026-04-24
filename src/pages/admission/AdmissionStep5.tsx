@@ -97,10 +97,57 @@ function AdmissionStep5() {
   }, [trackingNumberFromUrl]);
 
   const handleDownloadPermit = () => {
-    addToast("Exam permit prepared.", "success");
-    alert(
-      `Exam permit for ${application?.firstName ?? "Applicant"} ${application?.lastName ?? ""}`.trim(),
-    );
+    if (!application) {
+      return;
+    }
+
+    const applicantName =
+      `${application.firstName} ${application.lastName}`.trim() || "Applicant";
+    const generatedOn = new Date().toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+
+    const permitText = `
+ASIAN INSTITUTE OF COMPUTER STUDIES
+SCHOLARSHIP EXAMINATION PERMIT
+
+${"=".repeat(52)}
+
+Applicant Name : ${applicantName}
+Tracking Number: ${application.trackingNumber}
+Program        : ${application.programName}
+Branch         : ${application.branchName}
+Exam Location  : ${examLocation.location} - ${examLocation.room}
+Schedule       : Walk-in basis. Coordinate directly with the selected branch.
+
+${"=".repeat(52)}
+
+IMPORTANT REMINDERS
+
+1. Bring this permit during your branch visit.
+2. Bring your school ID and tracking number.
+3. Bring a black pen for the scholarship examination.
+4. Coordinate with your branch first because there is no fixed exam schedule.
+
+Applicant Signature      : ______________________________
+Branch / Proctor Signature: _____________________________
+
+Generated on: ${generatedOn}
+`.trim();
+
+    const blob = new Blob([permitText], { type: "text/plain" });
+    const downloadUrl = URL.createObjectURL(blob);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = downloadUrl;
+    downloadLink.download = `scholarship_exam_permit_${application.trackingNumber}.txt`;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+    URL.revokeObjectURL(downloadUrl);
+
+    addToast("Scholarship exam permit downloaded.", "success");
   };
 
   const handleBackToHome = () => {

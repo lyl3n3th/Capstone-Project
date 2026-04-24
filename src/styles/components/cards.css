@@ -54,6 +54,17 @@
   box-shadow: 0 2px 4px rgb(0, 0, 0, 0.3);
 }
 
+.choices.disabled-branch {
+  opacity: 0.48;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.choices.disabled-branch:hover {
+  border-color: #e0e0e0;
+  box-shadow: 0 1px 2px rgb(0, 0, 0, 0.2);
+}
+
 /* selected choice styles */
 .choices.selected {
   border-color: #066287;

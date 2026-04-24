@@ -1,9 +1,11 @@
-import { MdOutlineDriveFolderUpload } from "react-icons/md";
+import {
+  MdOutlineAttachFile,
+  MdOutlineDriveFolderUpload,
+} from "react-icons/md";
 import { FaCircleExclamation } from "react-icons/fa6";
 import "../../styles/main.css";
 import Progress from "../../components/Progress";
-import React, { useState, useEffect } from "react";
-import { MdOutlineAttachFile } from "react-icons/md";
+import React, { useEffect, useRef, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
 import {
   getAdmissionRequirements,
@@ -22,6 +24,11 @@ interface Toast {
   type: "success" | "error" | "info" | "warning";
 }
 
+interface UploadedRequirementFile {
+  name: string;
+  previewUrl: string;
+}
+
 function AdmissionStep3() {
   const selectedBranch = getQueryParam("branch") || "";
   const studentStatus = getQueryParam("status") || "";
@@ -29,10 +36,11 @@ function AdmissionStep3() {
   const program = getQueryParam("program") || "";
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<Record<string, string>>(
-    {},
-  );
+  const [uploadedFiles, setUploadedFiles] = useState<
+    Record<string, UploadedRequirementFile>
+  >({});
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const previewUrlsRef = useRef<Record<string, string>>({});
 
   // State for honor selection from draft
   const [studentHonor, setStudentHonor] = useState<string>("No Honor");
@@ -102,29 +110,22 @@ function AdmissionStep3() {
     }
   }, [program]); // Re-run when program changes
 
+  useEffect(() => {
+    return () => {
+      Object.values(previewUrlsRef.current).forEach((previewUrl) => {
+        URL.revokeObjectURL(previewUrl);
+      });
+    };
+  }, []);
+
   const currentRequirements = getAdmissionRequirements(
     studentStatus,
     program,
     studentHonor,
   );
-  const hasHonor = currentRequirements.some(
-    (requirement) =>
-      requirement.code === "honor_certificate" && !requirement.optional,
+  const hasHonorCertificateRequirement = currentRequirements.some(
+    (requirement) => requirement.code === "honor_certificate",
   );
-
-  // Function to arrange items in rows (2 per row, last row centered)
-  const getArrangedRows = () => {
-    const rows = [];
-    const items = [...currentRequirements];
-
-    for (let i = 0; i < items.length; i += 2) {
-      const row = items.slice(i, i + 2);
-      rows.push(row);
-    }
-    return rows;
-  };
-
-  const arrangedRows = getArrangedRows();
 
   // Handle file selection
   const handleFileChange = (
@@ -134,11 +135,22 @@ function AdmissionStep3() {
   ) => {
     const file = e.target.files?.[0];
     if (file) {
+      const previousPreviewUrl = previewUrlsRef.current[requirementCode];
+      if (previousPreviewUrl) {
+        URL.revokeObjectURL(previousPreviewUrl);
+      }
+
+      const previewUrl = URL.createObjectURL(file);
+      previewUrlsRef.current[requirementCode] = previewUrl;
+
       setUploadedFiles((prev) => ({
         ...prev,
-        [requirementCode]: file.name,
+        [requirementCode]: {
+          name: file.name,
+          previewUrl,
+        },
       }));
-      addToast(`${requirementName} uploaded successfully!`, "success");
+      addToast(`${requirementName} selected successfully!`, "success");
     }
   };
 
@@ -181,20 +193,6 @@ function AdmissionStep3() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Check if required honor certificate is missing
-    if (hasHonor) {
-      const honorInput = document.getElementById(
-        "honor_certificate",
-      ) as HTMLInputElement | null;
-      if (!honorInput?.files?.[0]) {
-        addToast(
-          "Honor Certificate is required to verify your academic honors.",
-          "warning",
-        );
-        return;
-      }
-    }
-
     const hasFiles = currentRequirements.some((requirement) => {
       const input = document.getElementById(
         requirement.code,
@@ -203,7 +201,10 @@ function AdmissionStep3() {
     });
 
     if (!hasFiles) {
-      addToast("No files selected. Continuing without upload.", "info");
+      addToast(
+        "No files selected. You can follow up these documents later in the Student Portal once enrolled.",
+        "info",
+      );
       await handleContinueWithoutUpload();
       return;
     }
@@ -295,13 +296,13 @@ function AdmissionStep3() {
   // If no requirements for this status
   if (currentRequirements.length === 0) {
     return (
-      <div className="container admission-req-container">
+      <div className="container admission-req-container admission-step3-page">
         <ToastContainer toasts={toasts} removeToast={removeToast} />
-        <div className="container1">
+        <div className="container1 admission-step3-progress">
           <Progress current={3} />
         </div>
-        <div className="mcontainer mcnt">
-          <div className="header2">
+        <div className="mcontainer mcnt admission-step3-content">
+          <div className="header2 admission-step3-card">
             <div className="syb">
               Upload Requirements
               <p>No requirements found for {studentStatus} status.</p>
@@ -321,125 +322,122 @@ function AdmissionStep3() {
   }
 
   return (
-    <div className="container admission-req-container">
+    <div className="container admission-req-container admission-step3-page">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
-      <div className="container1">
+      <div className="container1 admission-step3-progress">
         <Progress current={3} />
       </div>
 
-      <div className="mcontainer mcnt">
-        <div className="header2">
+      <div className="mcontainer mcnt admission-step3-content">
+        <div className="header2 admission-step3-card">
           <div className="syb">
             <h2>Upload Requirements</h2>
-            <p>Upload the necessary documents to complete your application.</p>
-            {hasHonor && (
-              <div
-                className="honor-notice"
-                style={{
-                  background: "#e3f2fd",
-                  borderLeft: "4px solid #066287",
-                  padding: "12px 16px",
-                  borderRadius: "8px",
-                  marginTop: "12px",
-                }}
-              >
-                <p style={{ margin: 0, color: "#066287" }}>
-                  <strong>Honor Certificate Required</strong>
+            <p>
+              You may upload any available documents now. Missing files can be
+              followed up later in the Student Portal once you are enrolled.
+            </p>
+            {hasHonorCertificateRequirement && (
+              <div className="honor-notice">
+                <p>
+                  <strong>Honor Certificate Follow-up</strong>
                 </p>
-                <p
-                  style={{
-                    margin: "4px 0 0 0",
-                    fontSize: "13px",
-                    color: "#066287",
-                  }}
-                >
-                  You indicated: <strong>{studentHonor}</strong>. Please upload
-                  your Honor Certificate to verify your academic honors and
-                  qualify for tuition discounts.
+                <p>
+                  You indicated: <strong>{studentHonor}</strong>. You may upload
+                  your Honor Certificate now, or submit it later in the Student
+                  Portal once enrolled to validate your academic honor and
+                  tuition discount eligibility.
                 </p>
               </div>
             )}
           </div>
 
-          <form className="Upload-form" onSubmit={handleSubmit}>
-            {arrangedRows.map((row, rowIndex) => (
-              <div
-                key={rowIndex}
-                className="upload-row"
-                style={{
-                  display: "flex",
-                  justifyContent: row.length === 1 ? "center" : "flex-start",
-                  gap: "30px",
-                  marginBottom: "30px",
-                  flexWrap: "wrap",
-                }}
-              >
-                {row.map((requirement) => {
-                  const inputId = requirement.code;
-                  const isHonorCert = requirement.code === "honor_certificate";
-                  const hasFile = uploadedFiles[requirement.code];
-                  return (
-                    <div
-                      key={requirement.code}
-                      className="upload-group"
-                      style={{
-                        flex: row.length === 1 ? "0 1 auto" : "1",
-                        minWidth: "280px",
-                        maxWidth: row.length === 1 ? "350px" : "100%",
-                      }}
-                    >
-                      <label htmlFor={inputId}>
-                        {requirement.name}{" "}
-                        {isHonorCert && hasHonor && (
-                          <span style={{ color: "red", fontSize: "12px" }}>
-                            *
-                          </span>
-                        )}
-                        <span style={{ color: "#666", fontSize: "12px" }}>
-                          {requirement.optional && " (optional)"}
-                        </span>
-                      </label>
-                      <label className="file-wrapper">
-                        <span className="upload-text">
-                          {hasFile ? (
-                            <span
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                gap: "2px",
-                              }}
-                            >
-                              <MdOutlineAttachFile /> {uploadedFiles[requirement.code]}
-                            </span>
-                          ) : (
-                            `Click to upload ${requirement.name}${requirement.optional ? " (optional)" : " (required)"}`
-                          )}
-                        </span>
-                        <div className="cont-icon">
-                          <MdOutlineDriveFolderUpload className="icon" />
-                        </div>
-                        <input
-                          className="file-input"
-                          type="file"
-                          id={inputId}
-                          name={inputId}
-                          accept=".pdf,.jpg,.jpeg,.png"
-                          onChange={(e) =>
-                            handleFileChange(
-                              requirement.code,
-                              requirement.name,
-                              e,
-                            )
-                          }
-                          required={!requirement.optional}
-                        />
-                      </label>
+          <form className="upload-form" onSubmit={handleSubmit}>
+            <div className="upload-grid">
+              {currentRequirements.map((requirement) => {
+                const inputId = requirement.code;
+                const hasFile = uploadedFiles[requirement.code];
+                const statusClass = hasFile
+                  ? "ready"
+                  : requirement.optional
+                    ? "optional"
+                    : "required";
+
+                return (
+                  <div
+                    key={requirement.code}
+                    className={`upload-group ${hasFile ? "has-file" : ""}`}
+                  >
+                    <div className="upload-group-head">
+                      <div>
+                        <label htmlFor={inputId} className="upload-label">
+                          {requirement.name}
+                        </label>
+                        <p className="upload-caption">
+                          {requirement.optional
+                            ? "Optional document"
+                            : "Required document"}
+                        </p>
+                      </div>
+                      <span className={`upload-badge ${statusClass}`}>
+                        {hasFile
+                          ? "Selected"
+                          : requirement.optional
+                            ? "Optional"
+                            : "Required"}
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
-            ))}
+
+                    <label htmlFor={inputId} className="file-wrapper">
+                      <span className="file-trigger">
+                        <MdOutlineDriveFolderUpload className="icon" />
+                        {hasFile ? "Replace file" : "Choose file"}
+                      </span>
+                      <span className="upload-text">
+                        {hasFile ? (
+                          <>
+                            <MdOutlineAttachFile />
+                            {uploadedFiles[requirement.code].name}
+                          </>
+                        ) : (
+                          "No file selected"
+                        )}
+                      </span>
+                      <input
+                        className="file-input"
+                        type="file"
+                        id={inputId}
+                        name={inputId}
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={(e) =>
+                          handleFileChange(
+                            requirement.code,
+                            requirement.name,
+                            e,
+                          )
+                        }
+                      />
+                    </label>
+
+                    {hasFile && (
+                      <div className="selected-file-bar">
+                        <span className="selected-file-name">
+                          <MdOutlineAttachFile />
+                          {uploadedFiles[requirement.code].name}
+                        </span>
+                        <a
+                          className="view-file-link"
+                          href={uploadedFiles[requirement.code].previewUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View file
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
 
             <div className="choices-note">
               <div className="note-header">
@@ -447,31 +445,34 @@ function AdmissionStep3() {
                 <p className="note">Important Notes:</p>
               </div>
 
-              <p className="notice-text">
-                All Documents must be clear and readable
-              </p>
-              <p className="notice-text">
-                Files should be in PDF or image format (JPG, PNG)
-              </p>
-              <p className="notice-text">Maximum file size: 5MB per document</p>
-              <p className="notice-text">
-                You will need to bring physical copies on your schedule visit
-              </p>
-
-              <p className="notice-text">
-                If College Honor Certificate is required to verify your academic
-                honors and qualify for tuition discounts.
-              </p>
+              <div className="notice-list">
+                <p className="notice-text">
+                  All document uploads on this step are optional.
+                </p>
+                <p className="notice-text">Upload clear and readable files.</p>
+                <p className="notice-text">
+                  Accepted formats: PDF, JPG, and PNG.
+                </p>
+                <p className="notice-text">
+                  Maximum file size is 5MB per document.
+                </p>
+                <p className="notice-text">
+                  Missing files can be followed up and uploaded later in the
+                  Student Portal once you are enrolled.
+                </p>
+                <p className="notice-text">
+                  Bring the physical copies during your scheduled visit.
+                </p>
+                {hasHonorCertificateRequirement && (
+                  <p className="notice-text">
+                    Your Honor Certificate may also be submitted later to follow
+                    up your discount eligibility.
+                  </p>
+                )}
+              </div>
             </div>
 
-            <div
-              className="choices2 reqcho"
-              style={{
-                display: "flex",
-                gap: "10px",
-                justifyContent: "flex-end",
-              }}
-            >
+            <div className="choices2 reqcho">
               <button
                 type="button"
                 className="btn5"
@@ -482,12 +483,11 @@ function AdmissionStep3() {
               </button>
               <button
                 type="button"
-                className="btn6"
+                className="btn5 btn-quiet"
                 onClick={handleContinueWithoutUpload}
                 disabled={isSubmitting}
-                style={{ backgroundColor: "#1A3D5C" }}
               >
-                Continue without uploading
+                Continue without files
               </button>
               <button type="submit" className="btn6" disabled={isSubmitting}>
                 {isSubmitting ? "Uploading..." : "Upload & Continue"}

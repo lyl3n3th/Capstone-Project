@@ -163,14 +163,14 @@ function AdmissionStep1() {
   };
 
   return (
-    <div className="container">
+    <div className="container admission-step1-page">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
-      <div className="container1">
+      <div className="container1 admission-step1-progress">
         <Progress current={1} />
       </div>
 
-      <div className="mcontainer">
-        <div className="header">
+      <div className="mcontainer admission-step1-content">
+        <div className="header admission-step1-card">
           <StatusDropdown
             label="Student Status"
             options={[...admissionStatusOptions]}
@@ -181,7 +181,7 @@ function AdmissionStep1() {
 
           <hr style={{ opacity: 0.1, margin: "20px 0" }} />
 
-          <div className="syb">
+          <div className="syb admission-step1-title">
             Select Your Branch
             <p>Choose the branch you wish to enroll in</p>
           </div>

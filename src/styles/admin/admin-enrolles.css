@@ -559,18 +559,19 @@
 }
 
 .action-btn.archive {
-  background: #fff7ed;
+  background: #ffffff;
   color: #c2410c;
   border-color: #fdba74;
 }
 
 .action-btn.archive:hover {
-  background: #c2410c;
-  color: #ffffff;
+  background: #ffffff;
+  color: #9a3412;
+  border-color: #fb923c;
 }
 
-.action-btn.trash-icon-btn,
-.mini-actions button.trash-icon-btn {
+.action-btn.trash-icon-btn:not(.archive),
+.mini-actions button.trash-icon-btn:not(.archive) {
   width: 36px;
   height: 36px;
   padding: 0;
@@ -583,16 +584,43 @@
   color: #dc2626;
 }
 
-.action-btn.trash-icon-btn:hover:not(:disabled),
-.mini-actions button.trash-icon-btn:hover:not(:disabled) {
+.action-btn.trash-icon-btn:not(.archive):hover:not(:disabled),
+.mini-actions button.trash-icon-btn:not(.archive):hover:not(:disabled) {
   background: #dc2626;
   color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.action-btn.archive.trash-icon-btn,
+.mini-actions button.archive.trash-icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  justify-content: center;
+  gap: 0;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #c2410c;
+  border: 1px solid #fdba74;
+}
+
+.action-btn.archive.trash-icon-btn:hover:not(:disabled),
+.mini-actions button.archive.trash-icon-btn:hover:not(:disabled) {
+  background: #ffffff;
+  color: #9a3412;
+  border-color: #fb923c;
   transform: translateY(-1px);
 }
 
 .action-btn.trash-icon-btn svg,
 .mini-actions button.trash-icon-btn svg {
   font-size: 14px;
+}
+
+.action-btn.archive.trash-icon-btn svg,
+.mini-actions button.archive.trash-icon-btn svg {
+  font-size: 16px;
 }
 
 .table-pagination {

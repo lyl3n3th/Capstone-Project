@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ADMISSION_PORTAL_STATUS_UPDATED_EVENT,
   getAdmissionPortalStatus,
+  setAdmissionPortalStatus as persistAdmissionPortalStatus,
   setAdmissionPortalOpen as persistAdmissionPortalOpen,
 } from "../services/admissionPortal";
 
@@ -40,8 +41,24 @@ export function useAdmissionPortalStatus() {
     return nextStatus;
   };
 
+  const setAdmissionPortalStatus = ({
+    isOpen,
+    closeOnDate = "",
+  }: {
+    isOpen: boolean;
+    closeOnDate?: string | null;
+  }) => {
+    const nextStatus = persistAdmissionPortalStatus({
+      isOpen,
+      closeOnDate,
+    });
+    setPortalStatus(nextStatus);
+    return nextStatus;
+  };
+
   return {
     ...portalStatus,
     setAdmissionPortalOpen,
+    setAdmissionPortalStatus,
   };
 }

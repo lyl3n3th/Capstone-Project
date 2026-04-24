@@ -23,6 +23,7 @@ create table if not exists public.staff_accounts (
   address text not null,
   password_hash text not null,
   status text not null default 'active',
+  password_change_required boolean not null default false,
   is_trashed boolean not null default false,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
@@ -35,9 +36,13 @@ create table if not exists public.staff_accounts (
 alter table public.staff_accounts
 alter column id set default extensions.gen_random_uuid();
 
+alter table public.staff_accounts
+add column if not exists password_change_required boolean not null default false;
+
+drop index if exists staff_accounts_branch_role_active_unique_idx;
 create unique index if not exists staff_accounts_branch_role_active_unique_idx
   on public.staff_accounts (branch_id, role)
-  where is_trashed = false;
+  where status = 'active' and is_trashed = false;
 
 create index if not exists staff_accounts_employee_id_idx
   on public.staff_accounts (employee_id);
@@ -211,6 +216,10 @@ begin
     raise exception 'All staff account fields are required.';
   end if;
 
+  if char_length(trim(p_password)) < 8 then
+    raise exception 'Password must be at least 8 characters long.';
+  end if;
+
   v_role := public.resolve_staff_role(p_role);
   if v_role is null then
     raise exception 'Role "%" is not supported.', p_role;
@@ -240,14 +249,15 @@ begin
     raise exception 'Email "%" is already used by another staff account.', p_email;
   end if;
 
-  if exists (
+  if v_status = 'active' and exists (
     select 1
     from public.staff_accounts account
     where account.branch_id = v_branch_id
       and account.role = v_role
+      and account.status = 'active'
       and account.is_trashed = false
   ) then
-    raise exception 'The % branch already has a % account.', v_branch_name, v_role;
+    raise exception 'The % branch already has an active % account.', v_branch_name, v_role;
   end if;
 
   v_employee_id := public.generate_staff_employee_id(v_branch_name);
@@ -262,7 +272,8 @@ begin
     contact_number,
     address,
     password_hash,
-    status
+    status,
+    password_change_required
   )
   values (
     v_employee_id,
@@ -274,7 +285,8 @@ begin
     regexp_replace(trim(p_contact_number), '\D', '', 'g'),
     trim(p_address),
     extensions.crypt(trim(p_password), extensions.gen_salt('bf')),
-    v_status
+    v_status,
+    true
   );
 
   return query
@@ -283,6 +295,19 @@ begin
   where account.employee_id = v_employee_id;
 end;
 $$;
+
+drop function if exists public.update_staff_account(
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text
+);
 
 create or replace function public.update_staff_account(
   p_employee_id text,
@@ -294,7 +319,8 @@ create or replace function public.update_staff_account(
   p_contact_number text,
   p_address text,
   p_password text default null,
-  p_status text default 'active'
+  p_status text default 'active',
+  p_require_password_change boolean default false
 )
 returns table (
   employee_id text,
@@ -343,6 +369,11 @@ begin
     raise exception 'All staff account fields except password are required.';
   end if;
 
+  if trim(coalesce(p_password, '')) <> ''
+    and char_length(trim(p_password)) < 8 then
+    raise exception 'Password must be at least 8 characters long.';
+  end if;
+
   v_role := public.resolve_staff_role(p_role);
   if v_role is null then
     raise exception 'Role "%" is not supported.', p_role;
@@ -373,15 +404,16 @@ begin
     raise exception 'Email "%" is already used by another staff account.', p_email;
   end if;
 
-  if exists (
+  if v_status = 'active' and exists (
     select 1
     from public.staff_accounts account
     where account.branch_id = v_branch_id
       and account.role = v_role
+      and account.status = 'active'
       and account.is_trashed = false
       and account.id <> v_account_id
   ) then
-    raise exception 'The % branch already has a % account.', v_branch_name, v_role;
+    raise exception 'The % branch already has an active % account.', v_branch_name, v_role;
   end if;
 
   if v_existing_branch_name <> v_branch_name then
@@ -402,6 +434,11 @@ begin
       password_hash = case
         when trim(coalesce(p_password, '')) = '' then account.password_hash
         else extensions.crypt(trim(p_password), extensions.gen_salt('bf'))
+      end,
+      password_change_required = case
+        when trim(coalesce(p_password, '')) = '' then account.password_change_required
+        when p_require_password_change then true
+        else false
       end,
       status = v_status
   where account.id = v_account_id;
@@ -455,8 +492,14 @@ begin
     from public.staff_accounts account
     where account.branch_id = v_branch_id
       and account.role = v_role
+      and account.status = 'active'
       and account.is_trashed = false
       and account.id <> v_account_id
+  ) and exists (
+    select 1
+    from public.staff_accounts account
+    where account.id = v_account_id
+      and account.status = 'active'
   ) then
     raise exception 'Restore failed because this branch already has an active account for that role.';
   end if;
@@ -490,6 +533,12 @@ begin
 end;
 $$;
 
+drop function if exists public.staff_login(
+  text,
+  text,
+  text
+);
+
 create or replace function public.staff_login(
   p_branch text,
   p_role text,
@@ -499,7 +548,8 @@ returns table (
   employee_id text,
   branch text,
   full_name text,
-  role text
+  role text,
+  password_change_required boolean
 )
 language plpgsql
 security definer
@@ -536,7 +586,8 @@ begin
     account.employee_id,
     branch.name as branch,
     concat_ws(' ', account.first_name, account.last_name) as full_name,
-    account.role
+    account.role,
+    account.password_change_required
   from public.staff_accounts account
   join public.admission_branches branch
     on branch.id = account.branch_id
@@ -547,9 +598,23 @@ begin
     and account.password_hash = extensions.crypt(trim(p_password), account.password_hash)
   limit 1;
 
-  if not found then
-    raise exception 'Invalid login credentials.';
+  if found then
+    return;
   end if;
+
+  if exists (
+    select 1
+    from public.staff_accounts account
+    where account.branch_id = v_branch_id
+      and account.role = v_role
+      and account.status = 'inactive'
+      and account.is_trashed = false
+      and account.password_hash = extensions.crypt(trim(p_password), account.password_hash)
+  ) then
+    raise exception 'This staff account is disabled. Please contact the Area Manager.';
+  end if;
+
+  raise exception 'Invalid login credentials.';
 end;
 $$;
 
@@ -613,7 +678,8 @@ begin
   ),
   updated_account as (
     update public.staff_accounts account
-    set password_hash = extensions.crypt(trim(p_new_password), extensions.gen_salt('bf'))
+    set password_hash = extensions.crypt(trim(p_new_password), extensions.gen_salt('bf')),
+        password_change_required = false
     where account.branch_id in (
         select branch_id
         from resolved_branch
@@ -646,6 +712,94 @@ begin
 end;
 $$;
 
+create or replace function public.complete_staff_password_setup(
+  p_employee_id text,
+  p_current_password text,
+  p_new_password text
+)
+returns table (
+  employee_id text,
+  branch text,
+  full_name text,
+  role text,
+  password_change_required boolean
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if trim(coalesce(p_employee_id, '')) = ''
+    or trim(coalesce(p_current_password, '')) = ''
+    or trim(coalesce(p_new_password, '')) = '' then
+    raise exception 'Employee ID, current password, and new password are required.';
+  end if;
+
+  if char_length(trim(p_new_password)) < 8 then
+    raise exception 'Password must be at least 8 characters long.';
+  end if;
+
+  if trim(p_current_password) = trim(p_new_password) then
+    raise exception 'Please choose a new password different from the temporary password.';
+  end if;
+
+  return query
+  with updated_account as (
+    update public.staff_accounts account
+    set password_hash = extensions.crypt(trim(p_new_password), extensions.gen_salt('bf')),
+        password_change_required = false
+    where account.employee_id = upper(trim(p_employee_id))
+      and account.status = 'active'
+      and account.is_trashed = false
+      and account.password_change_required = true
+      and account.password_hash = extensions.crypt(trim(p_current_password), account.password_hash)
+    returning
+      account.employee_id,
+      account.branch_id,
+      account.first_name,
+      account.last_name,
+      account.role,
+      account.password_change_required
+  )
+  select
+    updated_account.employee_id,
+    branch.name as branch,
+    concat_ws(' ', updated_account.first_name, updated_account.last_name) as full_name,
+    updated_account.role,
+    updated_account.password_change_required
+  from updated_account
+  join public.admission_branches branch
+    on branch.id = updated_account.branch_id;
+
+  if found then
+    return;
+  end if;
+
+  if exists (
+    select 1
+    from public.staff_accounts account
+    where account.employee_id = upper(trim(p_employee_id))
+      and account.status = 'inactive'
+      and account.is_trashed = false
+  ) then
+    raise exception 'This staff account is disabled. Please contact the Area Manager.';
+  end if;
+
+  if exists (
+    select 1
+    from public.staff_accounts account
+    where account.employee_id = upper(trim(p_employee_id))
+      and account.status = 'active'
+      and account.is_trashed = false
+      and account.password_change_required = false
+  ) then
+    raise exception 'Password setup has already been completed for this account.';
+  end if;
+
+  raise exception 'Unable to update the password with the provided credentials.';
+end;
+$$;
+
 alter table public.staff_accounts enable row level security;
 
 grant execute on function public.generate_staff_employee_id(text) to anon, authenticated;
@@ -671,11 +825,13 @@ grant execute on function public.update_staff_account(
   text,
   text,
   text,
-  text
+  text,
+  boolean
 ) to anon, authenticated;
 grant execute on function public.set_staff_account_trashed(text, boolean) to anon, authenticated;
 grant execute on function public.delete_staff_account(text) to anon, authenticated;
 grant execute on function public.staff_login(text, text, text) to anon, authenticated;
+grant execute on function public.complete_staff_password_setup(text, text, text) to anon, authenticated;
 grant execute on function public.reset_staff_account_password(
   text,
   text,

@@ -12,6 +12,17 @@ import {
   sexOptions,
 } from "../../services/admission";
 
+const EDUCATIONAL_LEVEL_PLACEHOLDER = "Educational Level";
+const TRACK_SELECTION_PLACEHOLDER = "Strand / Program";
+const LEGACY_LEVEL_PLACEHOLDER = "Program";
+const LEGACY_TRACK_PLACEHOLDER = "Strand/Course";
+
+const isEducationalLevelPlaceholder = (value: string) =>
+  value === EDUCATIONAL_LEVEL_PLACEHOLDER || value === LEGACY_LEVEL_PLACEHOLDER;
+
+const isTrackSelectionPlaceholder = (value: string) =>
+  value === TRACK_SELECTION_PLACEHOLDER || value === LEGACY_TRACK_PLACEHOLDER;
+
 // get query
 function getQueryParam(name: string): string | null {
   const params = new URLSearchParams(window.location.search);
@@ -29,12 +40,12 @@ function AdmissionStep2() {
 
   // Program dropdown menu
   const [menuOpen, setIsMenuOpen] = useState(false);
-  const [program, setProgram] = useState("Program");
+  const [program, setProgram] = useState(EDUCATIONAL_LEVEL_PLACEHOLDER);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Strand/Course second dropdown menu
   const [menuOpen1, setIsMenuOpen1] = useState(false);
-  const [program1, setProgram1] = useState("Strand/Course");
+  const [program1, setProgram1] = useState(TRACK_SELECTION_PLACEHOLDER);
   const wrapperRef1 = useRef<HTMLDivElement>(null);
 
   // Civil Drop down
@@ -90,6 +101,12 @@ function AdmissionStep2() {
 
   const availablePrograms = getAvailablePrograms(selectedBranch, studentStatus);
   const trackOptions = getTrackOptions(program);
+  const trackSelectionLabel =
+    program === "College"
+      ? "Program selection"
+      : program === "Senior High School"
+        ? "Strand selection"
+        : "Strand / Program selection";
 
   // Format contact number (adds space after 4th and 7th digits)
   const formatContactNumber = (value: string) => {
@@ -130,7 +147,12 @@ function AdmissionStep2() {
 
   // Form validation
   const isFormValid = (): boolean => {
-    if (program === "Program" || program1 === "Strand/Course") return false;
+    if (
+      isEducationalLevelPlaceholder(program) ||
+      isTrackSelectionPlaceholder(program1)
+    ) {
+      return false;
+    }
     if (sex === "Sex") return false;
     if (civilStatus === "Civil Status") return false;
 
@@ -206,9 +228,12 @@ function AdmissionStep2() {
       if (draft.honor) setHonor(draft.honor);
       if (draft.apply_scholarship !== undefined)
         setApplyScholarship(draft.apply_scholarship);
-      if (draft.program) {
+      if (draft.program && !isEducationalLevelPlaceholder(draft.program)) {
         setProgram(draft.program);
-        if (draft.strand_or_course) {
+        if (
+          draft.strand_or_course &&
+          !isTrackSelectionPlaceholder(draft.strand_or_course)
+        ) {
           setTimeout(() => {
             setProgram1(draft.strand_or_course);
           }, 100);
@@ -377,7 +402,7 @@ function AdmissionStep2() {
   // Reset if non-bacoor
   useEffect(() => {
     if (program === "College" && selectedBranch.toLowerCase() !== "bacoor") {
-      setProgram("Program");
+      setProgram(EDUCATIONAL_LEVEL_PLACEHOLDER);
       addToast(
         "College programs are only available at Bacoor branch.",
         "warning",
@@ -386,7 +411,7 @@ function AdmissionStep2() {
   }, [program, selectedBranch]);
 
   useEffect(() => {
-    setProgram1("Strand/Course");
+    setProgram1(TRACK_SELECTION_PLACEHOLDER);
   }, [program]);
 
   // Close dropdown menus
@@ -423,13 +448,13 @@ function AdmissionStep2() {
   }, []);
 
   if (isLoadingDraft) {
-    return <div className="container">Loading saved data...</div>;
+    return <div className="container admission-step2-page">Loading saved data...</div>;
   }
 
   const isCollege = program === "College";
 
   return (
-    <div className="container">
+    <div className="container admission-step2-page">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
       <div className="container1">
         <Progress current={2} />
@@ -694,7 +719,7 @@ function AdmissionStep2() {
             <div className="form-row dropdown-row">
               <div className="dropdown" ref={wrapperRef}>
                 <label>
-                  Program selection <span style={{ color: "red" }}>*</span>
+                  Educational Level <span style={{ color: "red" }}>*</span>
                 </label>
                 <div
                   className="select"
@@ -728,7 +753,7 @@ function AdmissionStep2() {
 
               <div className="dropdown" ref={wrapperRef1}>
                 <label>
-                  Strand / Course selection{" "}
+                  {trackSelectionLabel}{" "}
                   <span style={{ color: "red" }}>*</span>
                 </label>
                 <div

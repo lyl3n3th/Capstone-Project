@@ -1,53 +1,174 @@
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
+import { useAuth } from "../../hooks/useAuth";
 import { useAdmissionPortalStatus } from "../../hooks/useAdmissionPortalStatus";
-import { ADMISSION_PORTAL_OPEN_DESCRIPTION } from "../../services/admissionPortal";
+import {
+  ADMISSION_PORTAL_CLOSED_DESCRIPTION,
+  ADMISSION_PORTAL_OPEN_DESCRIPTION,
+  formatAdmissionCloseDate,
+} from "../../services/admissionPortal";
+
+const getTodayDateInputValue = () => {
+  const currentDate = new Date();
+  const year = currentDate.getFullYear();
+  const month = String(currentDate.getMonth() + 1).padStart(2, "0");
+  const day = String(currentDate.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
 
 export default function AdmissionPortalAccessCard() {
+  const { currentUser } = useAuth();
+  const canManageAdmission = currentUser?.role === "registrar";
   const {
-    isOpen: isAdmissionPortalOpen,
-    updatedAt: admissionPortalUpdatedAt,
+    isOpen: isAdmissionOpen,
+    closeOnDate,
+    updatedAt,
+    isAutoClosed,
     setAdmissionPortalOpen,
+    setAdmissionPortalStatus,
   } = useAdmissionPortalStatus();
+  const [scheduledCloseDate, setScheduledCloseDate] = useState(closeOnDate);
+  const [validationMessage, setValidationMessage] = useState("");
+  const formattedCloseDate = formatAdmissionCloseDate(closeOnDate);
+  const todayDateInputValue = getTodayDateInputValue();
 
-  const admissionPortalMeta = useMemo(() => {
-    if (!admissionPortalUpdatedAt) {
-      return "Currently using the default open setting.";
+  useEffect(() => {
+    const nextScheduledCloseDate =
+      !isAdmissionOpen && closeOnDate && closeOnDate < todayDateInputValue
+        ? ""
+        : closeOnDate;
+
+    setScheduledCloseDate(nextScheduledCloseDate);
+    setValidationMessage("");
+  }, [closeOnDate, isAdmissionOpen, todayDateInputValue]);
+
+  const updatedAtLabel = (() => {
+    if (!updatedAt) {
+      return "";
     }
 
-    const parsedTimestamp = Date.parse(admissionPortalUpdatedAt);
+    const parsedTimestamp = Date.parse(updatedAt);
+
     if (!Number.isFinite(parsedTimestamp)) {
-      return "Portal status was updated recently.";
+      return "";
     }
 
-    return `Last updated: ${new Date(parsedTimestamp).toLocaleString()}`;
-  }, [admissionPortalUpdatedAt]);
+    return new Date(parsedTimestamp).toLocaleString();
+  })();
+
+  const admissionDescription = (() => {
+    if (isAdmissionOpen && formattedCloseDate) {
+      return `New admission forms are available until ${formattedCloseDate}. Applicants can use the Enroll Now button to start a new submission.`;
+    }
+
+    if (isAdmissionOpen) {
+      return ADMISSION_PORTAL_OPEN_DESCRIPTION;
+    }
+
+    if (isAutoClosed && formattedCloseDate) {
+      return `Admissions closed automatically after ${formattedCloseDate}. Applicants can still track an existing application below.`;
+    }
+
+    return ADMISSION_PORTAL_CLOSED_DESCRIPTION;
+  })();
+
+  const admissionMeta = (() => {
+    const details: string[] = [];
+
+    if (isAdmissionOpen && formattedCloseDate) {
+      details.push(`Closes on ${formattedCloseDate}.`);
+    } else if (formattedCloseDate) {
+      details.push(`Closed on ${formattedCloseDate}.`);
+    }
+
+    if (updatedAtLabel) {
+      details.push(`Updated ${updatedAtLabel}.`);
+    }
+
+    return details.join(" ");
+  })();
+
+  const handleSaveAdmissionSchedule = () => {
+    const nextCloseDate = scheduledCloseDate.trim();
+
+    if (!nextCloseDate) {
+      setValidationMessage("Please select the admission closing date.");
+      return;
+    }
+
+    if (nextCloseDate < todayDateInputValue) {
+      setValidationMessage("Please select today's date or a future date.");
+      return;
+    }
+
+    setAdmissionPortalStatus({
+      isOpen: true,
+      closeOnDate: nextCloseDate,
+    });
+    setValidationMessage("");
+  };
+
+  const handleCloseAdmission = () => {
+    setAdmissionPortalOpen(false);
+    setScheduledCloseDate("");
+    setValidationMessage("");
+  };
 
   return (
-    <section className="admission-portal-card">
+    <section
+      className={`admission-portal-card${canManageAdmission ? " is-manageable" : " is-readonly"}`}
+    >
       <div className="admission-portal-copy">
         <span
-          className={`admission-portal-pill ${isAdmissionPortalOpen ? "is-open" : "is-closed"}`}
+          className={`admission-portal-pill ${isAdmissionOpen ? "is-open" : "is-closed"}`}
         >
-          {isAdmissionPortalOpen ? "Portal Open" : "Portal Closed"}
+          {isAdmissionOpen ? "Admissions Open" : "Admissions Closed"}
         </span>
-        <h3>New Admission Access</h3>
-        <p>{ADMISSION_PORTAL_OPEN_DESCRIPTION}</p>
-        <p className="admission-portal-meta">{admissionPortalMeta}</p>
+        <h3>{canManageAdmission ? "Admission Access" : "Admission Status"}</h3>
+        <p>{admissionDescription}</p>
+        {admissionMeta ? (
+          <p className="admission-portal-meta">{admissionMeta}</p>
+        ) : null}
       </div>
 
-      <div className="admission-portal-actions">
-        <button
-          type="button"
-          className={`admission-portal-toggle ${isAdmissionPortalOpen ? "is-close" : "is-open"}`}
-          onClick={() => {
-            setAdmissionPortalOpen(!isAdmissionPortalOpen);
-          }}
-        >
-          {isAdmissionPortalOpen
-            ? "Close Admission Portal"
-            : "Open Admission Portal"}
-        </button>
-      </div>
+      {canManageAdmission ? (
+        <div className="admission-portal-actions">
+          <label className="admission-portal-date-field">
+            <span>Admission closes on</span>
+            <input
+              type="date"
+              className="admission-portal-date-input"
+              value={scheduledCloseDate}
+              min={todayDateInputValue}
+              onChange={(event) => {
+                setScheduledCloseDate(event.target.value);
+                setValidationMessage("");
+              }}
+            />
+          </label>
+          {validationMessage ? (
+            <p className="admission-portal-helper is-error">
+              {validationMessage}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            className="admission-portal-toggle is-open"
+            onClick={handleSaveAdmissionSchedule}
+          >
+            {isAdmissionOpen ? "Update Closing Date" : "Open Admission"}
+          </button>
+          {isAdmissionOpen ? (
+            <button
+              type="button"
+              className="admission-portal-secondary"
+              onClick={handleCloseAdmission}
+            >
+              Close Admission Now
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -21,6 +21,17 @@
   font-family: Arial, Helvetica, sans-serif;
 }
 
+.staff-login-page input,
+.staff-login-page select,
+.staff-login-page button,
+.staff-login-page textarea {
+  font: inherit;
+}
+
+.staff-login-page option {
+  font-family: inherit;
+}
+
 /* Scoped box-sizing for the login page content only */
 .staff-login-page > :not(.auth-modal-overlay),
 .staff-login-page > :not(.auth-modal-overlay) *,
@@ -114,6 +125,10 @@
   margin-top: 15px;
 }
 
+.staff-login-page .selected-branch-display + .selected-branch-display {
+  margin-top: 6px;
+}
+
 .staff-login-page .selected-branch-display strong {
   color: #1A3D5C;
   font-weight: 600;
@@ -157,73 +172,6 @@
 
 .staff-login-page .branch-label-row .lbel {
   margin-bottom: 0;
-}
-
-.staff-login-page .manager-toggle-row {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.staff-login-page .manager-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #1A3D5C;
-  cursor: pointer;
-  user-select: none;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(26, 61, 92, 0.12);
-  background: #f8fafc;
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-}
-
-.staff-login-page .manager-toggle:hover {
-  background: #eff6ff;
-  border-color: rgba(26, 61, 92, 0.24);
-}
-
-.staff-login-page .manager-toggle.active {
-  background: rgba(26, 61, 92, 0.1);
-  border-color: rgba(26, 61, 92, 0.24);
-}
-
-.staff-login-page .manager-toggle input {
-  width: 16px;
-  height: 16px;
-  accent-color: #1A3D5C;
-}
-
-.staff-login-page .manager-mode-card {
-  text-align: left;
-  border: 1px solid rgba(26, 61, 92, 0.12);
-  background: #f8fafc;
-  border-radius: 16px;
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.staff-login-page .manager-mode-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #64748b;
-}
-
-.staff-login-page .manager-mode-card strong {
-  font-size: 18px;
-  color: #1A3D5C;
-}
-
-.staff-login-page .manager-mode-copy {
-  font-size: 13px;
-  line-height: 1.5;
-  color: #475569;
 }
 
 .staff-login-page .selectlog {
@@ -399,13 +347,6 @@
   line-height: 1.4;
 }
 
-.staff-login-page .login-mode-hint {
-  font-size: 12px;
-  color: #666;
-  text-align: left;
-  margin-top: -4px;
-}
-
 .staff-login-page .manager-badge {
   display: inline-flex;
   align-items: center;
@@ -474,6 +415,27 @@
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+}
+
+.staff-login-page .staff-login-setup-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.staff-login-page .staff-login-setup-summary strong {
+  color: #1A3D5C;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.staff-login-page .staff-login-setup-summary span {
+  color: #64748b;
+  font-size: 12px;
 }
 
 .staff-login-page .reset-grid {
@@ -647,15 +609,6 @@
   .staff-login-page .branch-label-row {
     align-items: flex-start;
     flex-direction: column;
-  }
-
-  .staff-login-page .manager-toggle-row {
-    justify-content: stretch;
-  }
-
-  .staff-login-page .manager-toggle {
-    width: 100%;
-    justify-content: center;
   }
 
   .staff-login-page .reset-grid {

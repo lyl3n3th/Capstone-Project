@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { FaTrash } from "react-icons/fa";
+import { MdArchive } from "react-icons/md";
 import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { useAuth } from "../../hooks/useAuth";
@@ -1356,7 +1356,7 @@ export default function AdminStudents({
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
-          errorData?.detail || "Failed to move student to Trash.",
+          errorData?.detail || "Failed to move student to Archive.",
         );
       }
 
@@ -1366,7 +1366,7 @@ export default function AdminStudents({
       const message =
         error instanceof Error
           ? error.message
-          : "Unable to move student to Trash.";
+          : "Unable to move student to Archive.";
       alert(message);
     }
   };
@@ -2742,10 +2742,10 @@ export default function AdminStudents({
                             onClick={() => openArchiveConfirm(student.id)}
                             disabled={isAnyAlumniMovePending}
                             type="button"
-                            aria-label={`Move ${student.name} to Trash`}
-                            title={`Move ${student.name} to Trash`}
+                            aria-label={`Move ${student.name} to Archive`}
+                            title={`Move ${student.name} to Archive`}
                           >
-                            <FaTrash />
+                            <MdArchive />
                           </button>
                         ) : null}
                       </div>
@@ -4466,7 +4466,7 @@ export default function AdminStudents({
           <div className="students-modal-overlay">
             <div className="students-modal students-archive-confirm-modal">
               <div className="students-modal-header">
-                <h2>Confirm Trash</h2>
+                <h2>Confirm Archive</h2>
                 <button
                   className="students-modal-close"
                   onClick={cancelArchive}
@@ -4476,7 +4476,7 @@ export default function AdminStudents({
               </div>
 
               <div className="students-modal-body">
-                <p>Are you sure you want to move this student to Trash?</p>
+                <p>Are you sure you want to move this student to Archive?</p>
                 <p className="students-student-info">
                   <strong>
                     {students.find((s) => s.id === studentToArchive)?.name}
@@ -4499,10 +4499,10 @@ export default function AdminStudents({
                   type="button"
                   className="students-archive-confirm-btn students-icon-only-btn"
                   onClick={confirmArchive}
-                  aria-label="Confirm move to Trash"
-                  title="Confirm move to Trash"
+                  aria-label="Confirm move to Archive"
+                  title="Confirm move to Archive"
                 >
-                  <FaTrash />
+                  <MdArchive />
                 </button>
               </div>
             </div>
