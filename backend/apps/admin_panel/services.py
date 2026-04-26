@@ -3,6 +3,7 @@ import json
 import zipfile
 from collections import defaultdict, deque
 from datetime import datetime
+from pathlib import Path
 
 from django.apps import apps
 from django.core.exceptions import FieldDoesNotExist
@@ -298,6 +299,182 @@ def _build_snapshot_manifest(branch_id, backup_type, snapshot_data):
         "snapshot_format": "json",
     }
     return manifest, students, alumni, dataset_counts
+
+
+def _read_archive_manifest(archive):
+    try:
+        manifest_payload = archive.read("metadata/manifest.json").decode("utf-8")
+    except KeyError as exc:
+        raise ValueError("Backup ZIP must include metadata/manifest.json.") from exc
+
+    try:
+        manifest = json.loads(manifest_payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Backup ZIP contains an invalid manifest file.") from exc
+
+    if not isinstance(manifest, dict):
+        raise ValueError("Backup ZIP manifest must be a JSON object.")
+
+    return manifest
+
+
+def _read_archive_json_member(archive, member_name, *, required=False):
+    try:
+        payload = archive.read(member_name).decode("utf-8")
+    except KeyError:
+        if required:
+            raise ValueError(f"Backup ZIP is missing {member_name}.") from None
+        return []
+
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Backup ZIP contains invalid JSON in {member_name}.") from exc
+
+    if not isinstance(parsed, list):
+        raise ValueError(f"Backup ZIP member {member_name} must contain a JSON array.")
+
+    return parsed
+
+
+def inspect_uploaded_backup_archive(*, payload, branch_id):
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(payload), "r")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Upload a valid ZIP backup file.") from exc
+
+    with archive:
+        manifest = _read_archive_manifest(archive)
+        manifest_branch = str(manifest.get("branch") or "").strip()
+        if manifest_branch and manifest_branch != branch_id:
+            raise ValueError(
+                f'This backup belongs to branch "{manifest_branch}", not "{branch_id}".',
+            )
+
+        snapshot_format = str(manifest.get("snapshot_format") or "sql").strip().lower()
+        if snapshot_format not in {"json", "sql"}:
+            raise ValueError("Backup ZIP manifest has an unsupported snapshot format.")
+
+        backup_type = str(manifest.get("backup_type") or BackupHistory.TYPE_MANUAL).strip().lower()
+        if backup_type not in {BackupHistory.TYPE_MANUAL, BackupHistory.TYPE_AUTOMATED}:
+            backup_type = BackupHistory.TYPE_MANUAL
+
+        students = []
+        alumni = []
+        if snapshot_format == "json":
+            students = _read_archive_json_member(
+                archive,
+                "data/students.json",
+                required=True,
+            )
+            alumni = _read_archive_json_member(
+                archive,
+                "data/alumni.json",
+                required=True,
+            )
+        else:
+            sql_members = [
+                member_name
+                for member_name in archive.namelist()
+                if member_name.startswith("sql/") and member_name.endswith(".sql")
+            ]
+            if not sql_members:
+                raise ValueError("Backup ZIP must include at least one SQL export.")
+
+        dataset_counts = manifest.get("dataset_counts") or {}
+        student_count = (
+            int(dataset_counts.get("students", 0))
+            if isinstance(dataset_counts, dict)
+            else 0
+        )
+        alumni_count = (
+            int(dataset_counts.get("alumni", 0))
+            if isinstance(dataset_counts, dict)
+            else 0
+        )
+
+        if snapshot_format == "json":
+            student_count = student_count or len(students)
+            alumni_count = alumni_count or len(alumni)
+
+        model_counts = manifest.get("model_counts") or {}
+        if isinstance(model_counts, dict):
+            record_count = student_count + alumni_count
+            if record_count == 0:
+                record_count = sum(
+                    int(count)
+                    for count in model_counts.values()
+                    if isinstance(count, (int, float))
+                )
+        else:
+            model_counts = {}
+            record_count = student_count + alumni_count
+
+        media_entries = manifest.get("media_entries") or []
+        media_count = len(media_entries) if isinstance(media_entries, list) else 0
+        models = manifest.get("models") or []
+
+    return {
+        "branch": manifest_branch or branch_id,
+        "backup_type": backup_type,
+        "snapshot_format": snapshot_format,
+        "student_count": student_count,
+        "alumni_count": alumni_count,
+        "record_count": record_count,
+        "media_count": media_count,
+        "models": models if isinstance(models, list) else [],
+        "model_counts": model_counts,
+        "manifest": manifest,
+    }
+
+
+def store_uploaded_backup_archive(*, branch_id, uploaded_file_name, payload, created_by=None, created_by_name=""):
+    archive_summary = inspect_uploaded_backup_archive(payload=payload, branch_id=branch_id)
+
+    original_name = Path(uploaded_file_name or "uploaded-backup.zip").name or "uploaded-backup.zip"
+    if not original_name.lower().endswith(".zip"):
+        original_name = f"{original_name}.zip"
+
+    branch_slug = slugify(branch_id) or "branch"
+    timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+    archive_stem = slugify(Path(original_name).stem) or "uploaded-backup"
+    archive_name = f"{archive_stem}_{timestamp}.zip"
+    archive_storage_path = (
+        f"branches/{branch_slug}/uploads/{timezone.now():%Y/%m/%d}/{archive_name}"
+    )
+
+    bucket, stored_archive_path = upload_backup_blob(
+        object_path=archive_storage_path,
+        payload=payload,
+        content_type="application/zip",
+    )
+
+    history = create_backup_history(
+        branch=branch_id,
+        backup_type=archive_summary["backup_type"],
+        file_path=stored_archive_path,
+        sql_file_path="",
+        backup_filename=original_name,
+        storage_bucket=bucket,
+        created_by=created_by,
+        created_by_name=created_by_name,
+        status=BackupHistory.STATUS_COMPLETED,
+        progress=100,
+        metadata={
+            "branch": branch_id,
+            "models": archive_summary["models"],
+            "model_counts": archive_summary["model_counts"],
+            "student_count": archive_summary["student_count"],
+            "alumni_count": archive_summary["alumni_count"],
+            "record_count": archive_summary["record_count"],
+            "media_count": archive_summary["media_count"],
+            "snapshot_format": archive_summary["snapshot_format"],
+            "upload_source": "uploaded_archive",
+            "uploaded_archive_name": original_name,
+        },
+        error_message="",
+    )
+    return history
 
 
 def create_branch_backup(*, branch_id, backup_type, created_by=None, history=None, snapshot_data=None):

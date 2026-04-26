@@ -836,12 +836,20 @@ function StudentEnrollment() {
   );
   const retakeSubjectAlerts = useMemo(
     () =>
-      getEnrollmentRetakeRequestItems({
-        program: storageProgram,
-        semester: currentSemester,
-        gradeRecords: currentTermGradeRecords,
-      }),
-    [currentSemester, currentTermGradeRecords, storageProgram],
+      student && nextPlacement.hasNextTerm
+        ? getEnrollmentRetakeRequestItems({
+            program: storageProgram,
+            semester: nextPlacement.semester,
+            gradeRecords: studentGradeRecords,
+          })
+        : [],
+    [
+      nextPlacement.hasNextTerm,
+      nextPlacement.semester,
+      storageProgram,
+      student,
+      studentGradeRecords,
+    ],
   );
   const activeEnrollmentRequest = useMemo(
     () => {

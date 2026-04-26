@@ -1,0 +1,327 @@
+.s-evaluation-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.s-evaluation-hero {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 30px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #1a3d5c 0%, #066287 100%);
+  color: #ffffff;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+}
+
+.s-evaluation-hero-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+}
+
+.s-evaluation-kicker {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  backdrop-filter: blur(5px);
+}
+
+.s-evaluation-hero h1 {
+  margin: 16px 0 12px;
+  font-size: clamp(32px, 5vw, 42px);
+  line-height: 1.05;
+}
+
+.s-evaluation-hero p {
+  margin: 0;
+  max-width: 620px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.s-evaluation-term-card {
+  position: relative;
+  z-index: 1;
+  min-width: 220px;
+  align-self: flex-start;
+  padding: 18px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.s-evaluation-term-card span,
+.s-evaluation-term-card strong {
+  display: block;
+}
+
+.s-evaluation-term-card span {
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.s-evaluation-term-card strong {
+  font-size: 20px;
+  line-height: 1.4;
+}
+
+.s-evaluation-summary .s-summary-card {
+  border-color: #dbeafe;
+}
+
+.s-evaluation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
+}
+
+.s-evaluation-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100%;
+  padding: 22px;
+  border: 1px solid #dbe5ef;
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 250, 252, 0.98) 100%);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
+}
+
+.s-evaluation-card-open {
+  border-color: #bfdbfe;
+}
+
+.s-evaluation-card-closed {
+  border-color: #dbeafe;
+}
+
+.s-evaluation-card-unavailable {
+  border-color: #e5e7eb;
+}
+
+.s-evaluation-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.s-evaluation-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  color: #1a3d5c;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.s-evaluation-card-copy {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.s-evaluation-card-copy h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.s-evaluation-card-copy p {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.s-evaluation-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.s-evaluation-state-open {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.s-evaluation-state-closed {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.s-evaluation-state-unavailable {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.s-evaluation-subject-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.s-evaluation-subject-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.s-evaluation-card-note {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.s-evaluation-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 44px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1a3d5c 0%, #066287 100%);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.s-evaluation-action:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(6, 98, 135, 0.24);
+  filter: saturate(1.04);
+}
+
+.s-evaluation-placeholder-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #bfdbfe;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(239, 246, 255, 0.96) 0%, rgba(248, 250, 252, 0.96) 100%);
+}
+
+.s-evaluation-placeholder-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.s-evaluation-placeholder-head strong {
+  color: #1a3d5c;
+  font-size: 14px;
+}
+
+.s-evaluation-placeholder-head span {
+  color: #066287;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.s-evaluation-placeholder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.s-evaluation-placeholder-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(6, 98, 135, 0.12);
+}
+
+.s-evaluation-placeholder-item span {
+  color: #1a3d5c;
+  font-size: 13px;
+}
+
+.s-evaluation-placeholder-item strong {
+  color: #066287;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.s-evaluation-empty-state {
+  padding: 48px 24px;
+}
+
+@media (max-width: 768px) {
+  .s-evaluation-hero {
+    padding: 22px;
+    border-radius: 16px;
+  }
+
+  .s-evaluation-term-card {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .s-evaluation-card {
+    padding: 18px;
+  }
+
+  .s-evaluation-card-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .s-evaluation-state {
+    align-self: flex-start;
+  }
+
+  .s-evaluation-action {
+    width: 100%;
+  }
+
+  .s-evaluation-placeholder-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

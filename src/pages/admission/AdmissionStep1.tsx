@@ -5,11 +5,13 @@ import { BranchCard } from "../../components/common/BranchCard";
 import { ActionButtons } from "../../components/common/ActionButtons";
 import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
+import { useAdmissionPortalOverview } from "../../hooks/useAdmissionPortalStatus";
 import {
   admissionBranches,
   admissionStatusOptions,
   generateAicsTrackingNumber,
 } from "../../services/admission";
+import { formatAdmissionCloseDate } from "../../services/admissionPortal";
 
 // Data
 const branchRules: Record<string, string[]> = {
@@ -62,6 +64,7 @@ function AdmissionStep1() {
   const [status, setStatus] = useState(initialDraft.status);
   const [loading, setLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const { branches: branchStatuses } = useAdmissionPortalOverview();
 
   const addToast = (message: string, type: Toast["type"]) => {
     const id = Date.now().toString();
@@ -72,10 +75,43 @@ function AdmissionStep1() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
+  const getBranchStatus = (branchCode: string) =>
+    branchStatuses.find((branch) => branch.branchCode === branchCode);
+
+  const isBranchClosed = (branchCode: string) =>
+    !(getBranchStatus(branchCode)?.isOpen ?? true);
+
   const isBranchDisabled = (branchCode: string) => {
-    if (status === "Select Status") return true;
-    return !branchRules[status]?.includes(branchCode);
+    if (status === "Select Status") {
+      return true;
+    }
+
+    if (!branchRules[status]?.includes(branchCode)) {
+      return true;
+    }
+
+    return isBranchClosed(branchCode);
   };
+
+  const getBranchHelperText = (branchCode: string, branchName: string) => {
+    const branchStatus = getBranchStatus(branchCode);
+    const formattedCloseDate = formatAdmissionCloseDate(
+      branchStatus?.closeOnDate ?? "",
+    );
+
+    if (!branchStatus?.isOpen) {
+      return formattedCloseDate
+        ? `${branchName} branch - Admissions closed on ${formattedCloseDate}`
+        : `${branchName} branch - Admissions closed`;
+    }
+
+    return formattedCloseDate
+      ? `${branchName} branch - Scheduled to close on ${formattedCloseDate}`
+      : `${branchName} branch - Admissions open`;
+  };
+
+  const activeSelectedBranch =
+    selectedBranch && !isBranchDisabled(selectedBranch) ? selectedBranch : "";
 
   const handleStatusChange = (newStatus: string) => {
     setStatus(newStatus);
@@ -110,8 +146,16 @@ function AdmissionStep1() {
   };
 
   const handleContinue = () => {
-    if (!selectedBranch || status === "Select Status") {
+    if (!activeSelectedBranch || status === "Select Status") {
       addToast("Please select student status and branch.", "error");
+      return;
+    }
+
+    if (isBranchDisabled(activeSelectedBranch)) {
+      addToast(
+        "The selected branch is currently unavailable for new admissions.",
+        "warning",
+      );
       return;
     }
 
@@ -127,7 +171,7 @@ function AdmissionStep1() {
         draftData = {
           ...parsed,
           trackingNumber: trackingNum,
-          branch: selectedBranch,
+          branch: activeSelectedBranch,
           status,
           step: 1,
           lastUpdated: new Date().toISOString(),
@@ -135,7 +179,7 @@ function AdmissionStep1() {
       } catch {
         draftData = {
           trackingNumber: generateAicsTrackingNumber(),
-          branch: selectedBranch,
+          branch: activeSelectedBranch,
           status,
           step: 1,
           createdAt: new Date().toISOString(),
@@ -144,7 +188,7 @@ function AdmissionStep1() {
     } else {
       draftData = {
         trackingNumber: generateAicsTrackingNumber(),
-        branch: selectedBranch,
+        branch: activeSelectedBranch,
         status,
         step: 1,
         createdAt: new Date().toISOString(),
@@ -154,7 +198,7 @@ function AdmissionStep1() {
     sessionStorage.setItem("enrollmentDraft", JSON.stringify(draftData));
     setTimeout(() => {
       setLoading(false);
-      window.location.href = `/information?branch=${encodeURIComponent(selectedBranch)}&status=${encodeURIComponent(status)}&trackingNumber=${draftData.trackingNumber}`;
+      window.location.href = `/information?branch=${encodeURIComponent(activeSelectedBranch)}&status=${encodeURIComponent(status)}&trackingNumber=${draftData.trackingNumber}`;
     }, 600);
   };
 
@@ -190,7 +234,8 @@ function AdmissionStep1() {
             <BranchCard
               key={branch.code}
               branch={branch}
-              isSelected={selectedBranch === branch.code}
+              helperText={getBranchHelperText(branch.code, branch.name)}
+              isSelected={activeSelectedBranch === branch.code}
               isDisabled={isBranchDisabled(branch.code)}
               onClick={() => handleBranchSelect(branch.code)}
             />
@@ -199,7 +244,11 @@ function AdmissionStep1() {
           <ActionButtons
             onCancel={handleCancel}
             onContinue={handleContinue}
-            isContinueDisabled={!selectedBranch || status === "Select Status"}
+            isContinueDisabled={
+              !activeSelectedBranch ||
+              status === "Select Status" ||
+              isBranchDisabled(activeSelectedBranch)
+            }
             isLoading={loading}
           />
         </div>

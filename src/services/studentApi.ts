@@ -248,6 +248,7 @@ const mapStoredStudentToPortalStudent = (
     gender: storedStudent.gender || mockStudent.gender,
     birthday: storedStudent.birthDate || mockStudent.birthday,
     status:
+      storedStudent.requestedOwnSchedule === true ||
       storedStudent.ownScheduleRequestStatus === "Approved"
         ? "Irregular"
         : storedStudent.studentStatus === "Transferee"

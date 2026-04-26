@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { FaRegPaperPlane } from "react-icons/fa6";
 import logow from "../../assets/images/logow.png";
-import { useAdmissionPortalStatus } from "../../hooks/useAdmissionPortalStatus";
-import { formatAdmissionCloseDate } from "../../services/admissionPortal";
+import { useAdmissionPortalOverview } from "../../hooks/useAdmissionPortalStatus";
 import {
   getAdmissionDraft,
   getAdmissionProgress,
@@ -13,21 +12,32 @@ function AdmissionHome() {
   const [trackingNumber, setTrackingNumber] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { isOpen: isAdmissionPortalOpen, closeOnDate } =
-    useAdmissionPortalStatus();
-  const formattedCloseDate = formatAdmissionCloseDate(closeOnDate);
-  const admissionStatusLabel = isAdmissionPortalOpen
-    ? formattedCloseDate
-      ? `Admission is ongoing until ${formattedCloseDate}`
-      : "Admission is ongoing"
-    : "Admission is currently closed";
-  const admissionPortalDescription = isAdmissionPortalOpen
-    ? formattedCloseDate
-      ? `Online applications are ongoing until ${formattedCloseDate}. Start your admission journey or use your tracking number to check your progress.`
-      : "Online applications are open. Start your admission journey or use your tracking number to check your progress."
-    : formattedCloseDate
-      ? `Admissions closed after ${formattedCloseDate}. You can still track an existing application below.`
-      : "Online applications are currently unavailable. You can still track an existing application below.";
+  const { branches, openBranches, closedBranches, isAnyOpen } =
+    useAdmissionPortalOverview();
+
+  const formatBranchList = (branchNames: string[]) => {
+    if (branchNames.length === 0) {
+      return "";
+    }
+
+    return new Intl.ListFormat(undefined, {
+      style: "long",
+      type: "conjunction",
+    }).format(branchNames);
+  };
+
+  const openBranchNames = openBranches.map((branch) => branch.branchName);
+  const closedBranchNames = closedBranches.map((branch) => branch.branchName);
+  const admissionStatusLabel = !isAnyOpen
+    ? "Admissions are currently closed in all branches"
+    : openBranches.length === branches.length
+      ? "Admissions are ongoing in all branches"
+      : `Admissions are open for ${formatBranchList(openBranchNames)}`;
+  const admissionPortalDescription = !isAnyOpen
+    ? `Online applications are currently unavailable in ${formatBranchList(closedBranchNames)}. You can still track an existing application below.`
+    : openBranches.length === branches.length
+      ? "Online applications are open in all branches. Start your admission journey or use your tracking number to check your progress."
+      : `Online applications are currently available for ${formatBranchList(openBranchNames)}. Admissions for ${formatBranchList(closedBranchNames)} remain unavailable until reopened.`;
 
   const handleTrackProgress = async () => {
     setError("");
@@ -106,19 +116,13 @@ function AdmissionHome() {
             <p id="p2">{admissionStatusLabel}</p>
           </div>
 
-          {!isAdmissionPortalOpen ? (
-            <div className="admission-portal-banner is-closed">
-              Admissions closed
-            </div>
-          ) : null}
-
           <button
             type="button"
             className="admission-primary-action"
             onClick={() => {
               window.location.href = "/enroll";
             }}
-            disabled={!isAdmissionPortalOpen}
+            disabled={!isAnyOpen}
           >
             Enroll Now
           </button>
@@ -163,7 +167,7 @@ function AdmissionHome() {
           </div>
 
           <p
-            className={`admission-portal-note ${isAdmissionPortalOpen ? "is-open" : "is-closed"}`}
+            className={`admission-portal-note ${isAnyOpen ? "is-open" : "is-closed"}`}
           >
             {admissionPortalDescription}
           </p>

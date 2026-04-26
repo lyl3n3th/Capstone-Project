@@ -1,10 +1,13 @@
 import {
   getStudentPortalSubjects,
+  getStudentPortalSubjectsFromScheduledAssignments,
+  getStudentPortalSubjectsForSectionTerm,
   getStudentPortalSubjectsForTerm,
   type StudentPortalSubject,
   type StudentStorageRecord,
 } from "./adminStorage";
 import { getLatestApprovedEnrollmentRequestForStudent } from "./enrollmentRequests";
+import type { EnrollmentRequestedLoadRecord } from "./enrollmentLoadPlanner";
 
 export interface StudentPortalCurrentTerm {
   yearLevel: string;
@@ -120,30 +123,48 @@ const getApprovedEnrollmentSubjects = ({
   approvedAcademicYear,
   approvedSemester,
   approvedMode,
-  portalSubjects,
+  approvedRequestedLoadMode,
+  approvedRequestedLoad,
   resolvedStudentRecord,
   resolvedYearLevel,
 }: {
   approvedAcademicYear: string;
   approvedSemester: string;
   approvedMode?: "own_schedule" | "section_assignment";
-  portalSubjects: StudentPortalSubject[];
+  approvedRequestedLoadMode?: "retake";
+  approvedRequestedLoad?: EnrollmentRequestedLoadRecord;
   resolvedStudentRecord: StudentStorageRecord;
   resolvedYearLevel: string;
 }) => {
-  const matchingResolvedSubjects = portalSubjects.filter(
-    (subject) =>
-      subject.academicYear.trim() === approvedAcademicYear.trim() &&
-      normalizeSemesterValue(subject.semester) ===
-        normalizeSemesterValue(approvedSemester),
-  );
-
-  if (matchingResolvedSubjects.length > 0) {
-    return matchingResolvedSubjects;
-  }
-
   if (approvedMode === "own_schedule") {
     return [];
+  }
+
+  if (approvedRequestedLoadMode !== "retake") {
+    return getStudentPortalSubjectsForSectionTerm({
+      branch: resolvedStudentRecord.branch,
+      program: resolvedStudentRecord.program,
+      yearLevel: resolvedYearLevel,
+      strandOrCourse: resolvedStudentRecord.strandOrCourse,
+      sectionCode: resolvedStudentRecord.section,
+      semester: approvedSemester,
+      academicYear: approvedAcademicYear,
+    });
+  }
+
+  if (
+    approvedRequestedLoadMode === "retake" &&
+    approvedRequestedLoad?.scheduledAssignments.length
+  ) {
+    return getStudentPortalSubjectsFromScheduledAssignments({
+      branch: resolvedStudentRecord.branch,
+      assignments: approvedRequestedLoad.scheduledAssignments,
+      plannedSubjects: approvedRequestedLoad.subjects.map((subject) => ({
+        subjectId: subject.subjectId || subject.subjectCode,
+        subjectCode: subject.subjectCode,
+        subjectName: subject.subjectTitle,
+      })),
+    });
   }
 
   return getStudentPortalSubjectsForTerm({
@@ -164,6 +185,8 @@ export const resolveStudentPortalContext = (
     studentNumber: storedStudent.id,
     trackingNumber: storedStudent.trackingNumber,
   });
+  const hasApprovedOwnScheduleRequest =
+    approvedEnrollmentRequest?.irregularRequest?.mode === "own_schedule";
   const resolvedYearLevel =
     approvedEnrollmentRequest?.requestedYearLevel || storedStudent.yearLevel;
   const resolvedStudentRecord: StudentStorageRecord = {
@@ -181,6 +204,20 @@ export const resolveStudentPortalContext = (
                 requestedYearLevel: resolvedYearLevel,
               }) || storedStudent.section
             : storedStudent.section,
+    requestedOwnSchedule:
+      hasApprovedOwnScheduleRequest || storedStudent.requestedOwnSchedule,
+    ownScheduleRequestStatus: hasApprovedOwnScheduleRequest
+      ? "Approved"
+      : storedStudent.ownScheduleRequestStatus,
+    ownScheduleAcademicYear: hasApprovedOwnScheduleRequest
+      ? approvedEnrollmentRequest?.academicYear
+      : storedStudent.ownScheduleAcademicYear,
+    ownScheduleSemester: hasApprovedOwnScheduleRequest
+      ? approvedEnrollmentRequest?.semester
+      : storedStudent.ownScheduleSemester,
+    ownScheduleSelectionStatus: hasApprovedOwnScheduleRequest
+      ? storedStudent.ownScheduleSelectionStatus || "Not Submitted"
+      : storedStudent.ownScheduleSelectionStatus,
   };
   const portalSubjects = getStudentPortalSubjects(resolvedStudentRecord);
 
@@ -189,10 +226,21 @@ export const resolveStudentPortalContext = (
       approvedAcademicYear: approvedEnrollmentRequest.academicYear,
       approvedSemester: approvedEnrollmentRequest.semester,
       approvedMode: approvedEnrollmentRequest.irregularRequest?.mode,
-      portalSubjects,
+      approvedRequestedLoadMode: approvedEnrollmentRequest.requestedLoad?.mode,
+      approvedRequestedLoad: approvedEnrollmentRequest.requestedLoad,
       resolvedStudentRecord,
       resolvedYearLevel,
     });
+    const nonCurrentTermPortalSubjects =
+      approvedEnrollmentRequest.irregularRequest?.mode === "own_schedule"
+        ? portalSubjects
+        : portalSubjects.filter(
+            (subject) =>
+              subject.academicYear.trim() !==
+                approvedEnrollmentRequest.academicYear.trim() ||
+              normalizeSemesterValue(subject.semester) !==
+                normalizeSemesterValue(approvedEnrollmentRequest.semester),
+          );
 
     return {
       resolvedStudentRecord,
@@ -202,7 +250,10 @@ export const resolveStudentPortalContext = (
         semester: approvedEnrollmentRequest.semester,
         source: "approved_enrollment",
       },
-      subjects: mergePortalSubjects(approvedEnrollmentSubjects, portalSubjects),
+      subjects: mergePortalSubjects(
+        approvedEnrollmentSubjects,
+        nonCurrentTermPortalSubjects,
+      ),
     };
   }
 

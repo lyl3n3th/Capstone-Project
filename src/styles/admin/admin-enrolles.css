@@ -205,12 +205,17 @@
   grid-template-columns: repeat(3, 1fr);
 }
 
+.stats-cards.academic-stats .stat-card {
+  padding: 8px 14px;
+  min-height: 56px;
+}
+
 .stat-card {
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
-  padding: 14px 18px;
-  min-height: 70px;
+  padding: 9px 18px;
+  min-height: 58px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -722,7 +727,42 @@
 
 .section-actions-buttons {
   display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
   gap: 12px;
+}
+
+.auto-assign-semester-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.auto-assign-semester-field span {
+  color: #0f172a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auto-assign-semester-field select {
+  min-width: 180px;
+  height: 40px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 14px;
+  padding: 0 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.auto-assign-semester-field select:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
 }
 
 .action-btn.auto-assign {
@@ -750,6 +790,28 @@
 
 .action-btn.section-manager:hover {
   background: #1A3D5C;
+  transform: translateY(-1px);
+}
+
+.action-btn.section-requests {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.action-btn.section-requests:hover {
+  background: #dbeafe;
+  transform: translateY(-1px);
+}
+
+.action-btn.move-students {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fdba74;
+}
+
+.action-btn.move-students:hover {
+  background: #ffedd5;
   transform: translateY(-1px);
 }
 
@@ -873,6 +935,53 @@
 
 .review-modal-body {
   padding: 20px;
+}
+
+.confirmation-note {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.confirmation-note.warning {
+  color: #b45309;
+}
+
+.confirmation-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.confirmation-field label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a3d5c;
+}
+
+.confirmation-field select {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #1f2937;
+  background: #ffffff;
+}
+
+.confirmation-field select:focus {
+  outline: none;
+  border-color: #1a3d5c;
+  box-shadow: 0 0 0 3px rgba(26, 61, 92, 0.12);
+}
+
+.confirmation-help {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
 }
 
 .review-modal-footer {
@@ -1496,6 +1605,44 @@
   background: #f8fafc;
 }
 
+.section-manager-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  padding: 16px 18px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%);
+}
+
+.section-manager-toolbar-copy {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.section-manager-toolbar-copy strong {
+  display: block;
+  color: #1d4ed8;
+  font-size: 14px;
+}
+
+.section-manager-toolbar-copy p {
+  margin: 6px 0 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.section-manager-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 /* ==========================================================================
    15. SECTIONS GRID
    ========================================================================== */
@@ -1682,8 +1829,9 @@
   flex-shrink: 0;
 }
 
-.pending-alert div {
-  flex: 1;
+.pending-alert-copy {
+  flex: 1 1 240px;
+  min-width: 0;
 }
 
 .pending-alert strong {
@@ -1696,6 +1844,14 @@
   margin: 4px 0 0;
   font-size: 13px;
   color: #78350f;
+}
+
+.pending-alert-actions {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-left: auto;
 }
 
 /* ==========================================================================
@@ -2202,6 +2358,19 @@
   color: #066287;
 }
 
+.subject-prerequisite-cell {
+  color: #475569;
+  min-width: 180px;
+}
+
+.subject-actions-cell {
+  white-space: nowrap;
+}
+
+.subject-actions-cell .trash-icon-btn {
+  margin-left: 8px;
+}
+
 .strand-badge {
   display: inline-block;
   padding: 2px 8px;
@@ -2362,6 +2531,41 @@
   font-weight: 600;
 }
 
+.instructor-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.instructor-evaluation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.instructor-evaluation-badge.open {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.instructor-evaluation-badge.closed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.instructor-evaluation-note {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .instructor-actions {
   display: flex;
   gap: 8px;
@@ -2478,7 +2682,7 @@
 }
 
 .assignment-config-modal {
-  max-width: 860px;
+  max-width: 920px;
 }
 
 .assignment-modal-heading {
@@ -2685,6 +2889,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 12px;
 }
@@ -2696,15 +2901,21 @@
 }
 
 .assignment-schedule-heading span {
+  flex: 1 1 320px;
   max-width: 560px;
   color: #64748b;
   font-size: 13px;
   line-height: 1.5;
+  text-align: right;
 }
 
 .schedule-inputs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns:
+    minmax(150px, 0.95fr)
+    minmax(160px, 1fr)
+    minmax(160px, 1fr)
+    minmax(220px, 1.2fr);
   gap: 12px;
   margin-top: 8px;
   align-items: end;
@@ -2730,6 +2941,7 @@
 .room-creator-panel input {
   width: 100%;
   min-height: 44px;
+  box-sizing: border-box;
   padding: 10px 12px;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
@@ -2748,20 +2960,72 @@
   box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
 }
 
-.room-select-row {
+.schedule-inputs input[type="time"] {
+  min-width: 0;
+  padding-right: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-inputs input[type="time"]::-webkit-calendar-picker-indicator {
+  margin: 0;
+  cursor: pointer;
+}
+
+.schedule-inputs input[type="time"]::-webkit-datetime-edit,
+.schedule-inputs input[type="time"]::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+.assignment-auto-assign-modal {
+  max-width: 500px;
+}
+
+.assignment-auto-assign-body {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.assignment-auto-assign-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.assignment-auto-assign-copy p {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.assignment-auto-assign-copy strong {
+  color: #0f172a;
+}
+
+.assignment-auto-assign-field,
+.assignment-auto-assign-field select {
+  width: 100%;
+  min-width: 0;
+}
+
+.room-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
   gap: 10px;
+  width: 100%;
 }
 
 .room-select-row select {
-  flex: 1;
+  min-width: 0;
 }
 
 .assignment-room-add-btn {
-  width: 44px;
-  min-width: 44px;
+  width: 46px;
+  min-width: 46px;
   height: 44px;
+  padding: 0;
   border: 1px solid #0f766e;
   border-radius: 12px;
   background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
@@ -2854,6 +3118,210 @@
 .assignment-delete-item span {
   color: #64748b;
   font-size: 12px;
+}
+
+.section-request-modal,
+.student-move-modal {
+  max-width: 760px;
+}
+
+.section-request-body,
+.student-move-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.section-request-intro p {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.section-request-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.section-request-card,
+.student-move-panel {
+  padding: 16px;
+  border: 1px solid #dbe4ee;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.section-request-card-head,
+.student-move-current {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.section-request-card-head strong,
+.student-move-copy strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.section-request-card-head p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.section-request-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.section-request-meta span,
+.student-move-copy span {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.section-request-meta strong,
+.student-move-copy span strong {
+  color: #0f172a;
+}
+
+.section-request-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.section-request-empty,
+.student-move-empty {
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  padding: 18px 16px;
+  background: #f8fafc;
+  color: #64748b;
+  text-align: center;
+  font-size: 13px;
+}
+
+.student-move-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.student-move-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.student-move-field span {
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.student-move-field input,
+.student-move-field select,
+.student-move-controls select {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.student-move-field input:focus,
+.student-move-field select:focus,
+.student-move-controls select:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+}
+
+.student-move-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.student-move-capacity-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.student-move-capacity-badge.available {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.student-move-capacity-badge.full {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.student-move-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.student-move-controls select {
+  flex: 1;
+  min-width: 220px;
+}
+
+.student-move-hint {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.student-move-feedback {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.student-move-feedback.success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.student-move-feedback.warning {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.student-move-feedback.error {
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
 .enrollment-retake-review-section {
@@ -2970,7 +3438,11 @@
   }
 
   .schedule-inputs {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .schedule-field-room {
+    grid-column: span 2;
   }
 }
 
@@ -3008,6 +3480,11 @@
     width: 36px;
   }
 
+  .student-move-toolbar,
+  .section-request-meta {
+    grid-template-columns: 1fr;
+  }
+
   .assignment-modal-summary,
   .assignment-form-grid {
     grid-template-columns: 1fr;
@@ -3017,8 +3494,16 @@
     flex-direction: column;
   }
 
+  .assignment-schedule-heading span {
+    text-align: left;
+  }
+
   .schedule-inputs {
     grid-template-columns: 1fr;
+  }
+
+  .schedule-field-room {
+    grid-column: auto;
   }
 
   .retake-request-summary-row {
@@ -3064,6 +3549,24 @@
   .add-section-actions .action-btn {
     flex: 1;
     justify-content: center;
+  }
+
+  .section-actions-buttons,
+  .section-manager-toolbar-actions,
+  .pending-alert-actions,
+  .student-move-controls {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .auto-assign-semester-field,
+  .auto-assign-semester-field select,
+  .section-actions-buttons .action-btn,
+  .section-manager-toolbar-actions .action-btn,
+  .pending-alert-actions .action-btn,
+  .student-move-controls .action-btn {
+    width: 100%;
   }
   
   .personal-info-grid {

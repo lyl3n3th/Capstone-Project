@@ -14,9 +14,7 @@ import {
   fetchSupabaseAdmissionApplicants,
   getNextStudentNumber,
   getStudentRequirementSnapshot,
-  getStudentSectionChoices,
   updateStoredStudentOwnScheduleState,
-  updateStoredStudentSection,
   getStudentsForBranch,
   normalizeBranchName,
   promoteApplicantToStoredStudent,
@@ -28,11 +26,16 @@ import {
   type AdminAttachment,
   type AdminEnrolleeRecord,
   type StudentScheduledAssignmentItem,
-  type StudentSectionChoice,
   type StudentScheduleSelectionRequestRecord,
   type StudentSubjectPlanItem,
   type StudentSubjectPlanRecord,
 } from "../../services/adminStorage";
+import {
+  fetchAdminStudents,
+  getNextAdminStudentNumber,
+  saveAdminStudent,
+  updateAdminStudentStatus,
+} from "../../services/adminStudentsApi";
 import {
   getEstimatedCollegeTuition,
   updateAdmissionProgress,
@@ -42,6 +45,8 @@ import {
   getStudentGradeRecords,
   type StoredStudentGradeRecord,
 } from "../../services/studentGrades";
+import { getLatestApprovedEnrollmentRequestForStudent } from "../../services/enrollmentRequests";
+import { stripLegacyMockAdmissionRecords } from "../../services/legacyMockData";
 import "../../styles/admin/admin-students.css";
 
 interface StudentsProps {
@@ -116,7 +121,6 @@ interface StudentScheduleSelectionNotification {
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
 const ALUMNI_API_URL = `${API_BASE_URL}/api/alumni/`;
 const ENROLLEE_STORAGE_SCOPE = "enrollees";
 const RECOVERABLE_BRANCHES = ["Bacoor", "Taytay", "GMA"] as const;
@@ -172,11 +176,6 @@ const splitFullName = (fullName: string) => {
   const middleName = parts.slice(1, -1).join(" ");
 
   return { firstName, middleName, lastName };
-};
-
-const mapUiStatusToApiStatus = (status: Student["status"]): string => {
-  if (status === "Archived") return "Inactive";
-  return status;
 };
 
 const getAttachmentReviewRank = (reviewStatus?: AdminAttachment["reviewStatus"]) => {
@@ -393,6 +392,13 @@ const hasApprovedOwnSchedule = (
       student.ownScheduleRequestStatus === "Approved",
   );
 
+const hasRequestedOwnSchedule = (
+  student:
+    | Pick<Student, "requestedOwnSchedule" | "ownScheduleRequestStatus">
+    | null
+    | undefined,
+) => Boolean(student?.requestedOwnSchedule || student?.ownScheduleRequestStatus);
+
 const getDisplayedAcademicStandingLabel = (
   student:
     | Pick<Student, "requestedOwnSchedule" | "ownScheduleRequestStatus">
@@ -400,9 +406,54 @@ const getDisplayedAcademicStandingLabel = (
     | undefined,
   fallbackLabel?: string | null,
 ): "Regular" | "Irregular" =>
-  hasApprovedOwnSchedule(student) || fallbackLabel === "Irregular"
+  hasRequestedOwnSchedule(student) || fallbackLabel === "Irregular"
     ? "Irregular"
     : "Regular";
+
+const mergeStudentOwnScheduleState = <
+  T extends Pick<
+    Student,
+    | "requestedOwnSchedule"
+    | "ownScheduleRequestStatus"
+    | "ownScheduleAcademicYear"
+    | "ownScheduleSemester"
+    | "ownScheduleSelectionStatus"
+  >,
+>(
+  primaryStudent: T,
+  fallbackStudent:
+    | Pick<
+        Student,
+        | "requestedOwnSchedule"
+        | "ownScheduleRequestStatus"
+        | "ownScheduleAcademicYear"
+        | "ownScheduleSemester"
+        | "ownScheduleSelectionStatus"
+      >
+    | null
+    | undefined,
+) => {
+  const ownScheduleRequestStatus =
+    primaryStudent.ownScheduleRequestStatus ??
+    fallbackStudent?.ownScheduleRequestStatus;
+
+  return {
+    requestedOwnSchedule: Boolean(
+      primaryStudent.requestedOwnSchedule ||
+        fallbackStudent?.requestedOwnSchedule ||
+        ownScheduleRequestStatus,
+    ),
+    ownScheduleRequestStatus,
+    ownScheduleAcademicYear:
+      primaryStudent.ownScheduleAcademicYear ||
+      fallbackStudent?.ownScheduleAcademicYear,
+    ownScheduleSemester:
+      primaryStudent.ownScheduleSemester || fallbackStudent?.ownScheduleSemester,
+    ownScheduleSelectionStatus:
+      primaryStudent.ownScheduleSelectionStatus ??
+      fallbackStudent?.ownScheduleSelectionStatus,
+  };
+};
 
 const getOwnScheduleSelectionLabel = (
   status?: Student["ownScheduleSelectionStatus"],
@@ -421,26 +472,6 @@ const getOwnScheduleSelectionLabel = (
 
   return "Not Submitted";
 };
-
-const getSectionCapacityLabel = (
-  section: Pick<
-    StudentSectionChoice,
-    "currentEnrollees" | "maxCapacity" | "hasCapacityLimit"
-  >,
-) =>
-  section.hasCapacityLimit
-    ? `${section.currentEnrollees}/${section.maxCapacity} enrolled`
-    : `${section.currentEnrollees} enrolled`;
-
-const getSectionDescriptorLabel = (
-  section: Pick<StudentSectionChoice, "program" | "yearLevel" | "semester" | "strand">,
-) =>
-  [section.program, section.yearLevel, section.strand, section.semester]
-    .filter(Boolean)
-    .join(" | ");
-
-const buildStudentSectionOptionLabel = (section: StudentSectionChoice) =>
-  `${section.code} | ${section.semester} | ${getSectionCapacityLabel(section)}`;
 
 const buildGradeTermKey = (academicYear: string, semester: string) =>
   `${academicYear}::${semester}`;
@@ -557,26 +588,6 @@ const buildShsGradeSummaryRows = (records: StoredStudentGradeRecord[]) => {
   );
 };
 
-const mapStudentToApiPayload = (student: Student) => {
-  const { firstName, middleName, lastName } = splitFullName(student.name);
-
-  return {
-    student_id: student.id,
-    first_name: firstName,
-    middle_name: middleName || "",
-    last_name: lastName,
-    email: student.email,
-    phone: student.contact,
-    contact: student.contact,
-    program: student.program,
-    year_level: student.yearLevel,
-    strand_or_course: student.strandOrCourse || null,
-    address: student.address,
-    status: mapUiStatusToApiStatus(student.status),
-    document_submitted_date: student.documentSubmitted || null,
-  };
-};
-
 const mergeApprovedEnrollees = (records: AdminEnrolleeRecord[]) => {
   const mergedRecords = new Map<string, AdminEnrolleeRecord>();
 
@@ -617,11 +628,12 @@ const recoverApprovedStudentsForBranch = async (
   branch: string,
 ): Promise<number> => {
   const resolvedBranch = normalizeBranchName(branch);
-  const storedApprovedEnrollees =
+  const storedApprovedEnrollees = stripLegacyMockAdmissionRecords(
     readBranchScopedData<AdminEnrolleeRecord[]>(
       ENROLLEE_STORAGE_SCOPE,
       resolvedBranch,
-    ) ?? [];
+    ) ?? [],
+  );
 
   let supabaseApprovedEnrollees: AdminEnrolleeRecord[] = [];
   try {
@@ -648,6 +660,274 @@ const recoverApprovedStudentsForBranch = async (
   });
 
   return recoverableEnrollees.length;
+};
+
+const studentsMatch = (
+  left: Pick<Student, "id" | "trackingNumber">,
+  right: Pick<Student, "id" | "trackingNumber">,
+) =>
+  left.id === right.id ||
+  Boolean(
+    left.trackingNumber &&
+      right.trackingNumber &&
+      left.trackingNumber === right.trackingNumber,
+  );
+
+const getStudentSyncKey = (student: Pick<Student, "id" | "trackingNumber">) =>
+  student.trackingNumber || student.id;
+
+const normalizeComparableText = (value?: string | null) =>
+  (value || "").trim().toLowerCase();
+
+const buildProgressedBlockSectionCode = ({
+  currentSectionCode,
+  requestedYearLevel,
+}: {
+  currentSectionCode?: string;
+  requestedYearLevel: string;
+}) => {
+  const normalizedCode = currentSectionCode?.trim().toUpperCase();
+
+  if (!normalizedCode) {
+    return "";
+  }
+
+  const normalizedYearLevel = requestedYearLevel.trim().toLowerCase();
+  const requestedYearCode = normalizedYearLevel.includes("2nd")
+    ? "2"
+    : normalizedYearLevel.includes("3rd")
+      ? "3"
+      : normalizedYearLevel.includes("4th")
+        ? "4"
+        : normalizedYearLevel.includes("grade 12")
+          ? "2"
+          : "1";
+  const codeParts = normalizedCode.match(/^(.*?)([1-4])([A-Z]+)$/);
+
+  if (!codeParts) {
+    return normalizedCode;
+  }
+
+  const [, prefix, , blockLabel] = codeParts;
+  return `${prefix}${requestedYearCode}${blockLabel}`;
+};
+
+const resolveStudentWithApprovedEnrollment = (student: Student): Student => {
+  const approvedEnrollmentRequest = getLatestApprovedEnrollmentRequestForStudent({
+    branch: student.branch,
+    studentNumber: student.id,
+    trackingNumber: student.trackingNumber,
+  });
+
+  if (!approvedEnrollmentRequest) {
+    return student;
+  }
+
+  const hasApprovedOwnScheduleRequest =
+    approvedEnrollmentRequest.irregularRequest?.mode === "own_schedule";
+  const resolvedYearLevel =
+    approvedEnrollmentRequest.requestedYearLevel || student.yearLevel;
+
+  return {
+    ...student,
+    yearLevel: resolvedYearLevel,
+    section:
+      approvedEnrollmentRequest.irregularRequest?.mode === "own_schedule"
+        ? ""
+        : approvedEnrollmentRequest.irregularRequest?.mode === "section_assignment"
+          ? approvedEnrollmentRequest.irregularRequest.requestedSectionCode ||
+            student.section
+          : buildProgressedBlockSectionCode({
+                currentSectionCode: student.section,
+                requestedYearLevel: resolvedYearLevel,
+              }) || student.section,
+    requestedOwnSchedule:
+      hasApprovedOwnScheduleRequest || student.requestedOwnSchedule,
+    ownScheduleRequestStatus: hasApprovedOwnScheduleRequest
+      ? "Approved"
+      : student.ownScheduleRequestStatus,
+    ownScheduleAcademicYear: hasApprovedOwnScheduleRequest
+      ? approvedEnrollmentRequest.academicYear
+      : student.ownScheduleAcademicYear,
+    ownScheduleSemester: hasApprovedOwnScheduleRequest
+      ? approvedEnrollmentRequest.semester
+      : student.ownScheduleSemester,
+    ownScheduleSelectionStatus: hasApprovedOwnScheduleRequest
+      ? student.ownScheduleSelectionStatus || "Not Submitted"
+      : student.ownScheduleSelectionStatus,
+  };
+};
+
+const needsStudentRecordSync = (
+  localStudent: Pick<Student, "yearLevel" | "section">,
+  fetchedStudent: Pick<Student, "yearLevel" | "section">,
+) =>
+  normalizeComparableText(localStudent.yearLevel) !==
+    normalizeComparableText(fetchedStudent.yearLevel) ||
+  normalizeComparableText(localStudent.section) !==
+    normalizeComparableText(fetchedStudent.section);
+
+type StoredSectionAssignmentRecord = {
+  enrolleeId: string;
+  assignedSection: string;
+};
+
+const getRecoveredStudentSection = (
+  student: Pick<Student, "id" | "trackingNumber" | "branch">,
+) => {
+  const resolvedBranch = normalizeBranchName(student.branch);
+  const linkedEnrollee =
+    (
+      readBranchScopedData<AdminEnrolleeRecord[]>(
+        ENROLLEE_STORAGE_SCOPE,
+        resolvedBranch,
+      ) ?? []
+    ).find((record) => {
+      if (
+        student.trackingNumber &&
+        record.trackingNumber === student.trackingNumber
+      ) {
+        return true;
+      }
+
+      return record.studentNumber === student.id;
+    }) ?? null;
+
+  if (!linkedEnrollee) {
+    return "";
+  }
+
+  return (
+    (
+      readBranchScopedData<StoredSectionAssignmentRecord[]>(
+        "section-assignments",
+        resolvedBranch,
+      ) ?? []
+    ).find((assignment) => assignment.enrolleeId === linkedEnrollee.id)
+      ?.assignedSection || ""
+  );
+};
+
+const mergeFetchedStudentsWithLocalState = (
+  fetchedStudents: Student[],
+  localStudents: Student[],
+  preferLocalStudentKeys: Set<string> = new Set(),
+) => {
+  const mergedFetchedStudents = fetchedStudents.map((student) => {
+    const resolvedFetchedStudent = resolveStudentWithApprovedEnrollment(student);
+    const localStudent = localStudents.find((candidate) =>
+      studentsMatch(candidate, resolvedFetchedStudent),
+    );
+
+    if (!localStudent) {
+      return {
+        ...resolvedFetchedStudent,
+        section:
+          resolvedFetchedStudent.section ||
+          getRecoveredStudentSection(resolvedFetchedStudent),
+      };
+    }
+
+    const resolvedLocalStudent = resolveStudentWithApprovedEnrollment(localStudent);
+    const shouldPreferLocalStudentState = preferLocalStudentKeys.has(
+      getStudentSyncKey(resolvedLocalStudent),
+    );
+
+    return {
+      ...resolvedFetchedStudent,
+      yearLevel: shouldPreferLocalStudentState
+        ? resolvedLocalStudent.yearLevel || resolvedFetchedStudent.yearLevel
+        : resolvedFetchedStudent.yearLevel,
+      section:
+        shouldPreferLocalStudentState
+          ? resolvedLocalStudent.section ||
+            resolvedFetchedStudent.section ||
+            getRecoveredStudentSection(resolvedLocalStudent)
+          : resolvedFetchedStudent.section ||
+            resolvedLocalStudent.section ||
+            getRecoveredStudentSection(resolvedLocalStudent),
+      ...mergeStudentOwnScheduleState(
+        resolvedFetchedStudent,
+        resolvedLocalStudent,
+      ),
+    };
+  });
+
+  const localOnlyStudents = localStudents.filter(
+    (student) =>
+      !fetchedStudents.some((candidate) => studentsMatch(candidate, student)),
+  );
+
+  return [
+    ...mergedFetchedStudents,
+    ...localOnlyStudents.map((student) => ({
+      ...student,
+      section: student.section || getRecoveredStudentSection(student),
+    })),
+  ];
+};
+
+const buildStudentSyncMessage = (
+  _syncedCount: number,
+  failedStudents: string[],
+) => {
+  if (failedStudents.length === 0) {
+    return null;
+  }
+
+  const failedLabel =
+    failedStudents.length > 0
+      ? `${failedStudents.length} student${failedStudents.length === 1 ? "" : "s"} stayed on this device only because Supabase rejected the record.`
+      : "";
+
+  return failedLabel.trim();
+};
+
+const syncLocalStudentsToSupabase = async (
+  branch: string,
+  localStudents: Student[],
+  fetchedStudents: Student[],
+) => {
+  const branchStudents = localStudents.filter(
+    (student) => normalizeBranchName(student.branch) === normalizeBranchName(branch),
+  );
+  const studentsToSync = branchStudents.filter(
+    (student) => {
+      const resolvedLocalStudent = resolveStudentWithApprovedEnrollment(student);
+      const fetchedStudent = fetchedStudents.find((candidate) =>
+        studentsMatch(candidate, resolvedLocalStudent),
+      );
+
+      if (!fetchedStudent) {
+        return true;
+      }
+
+      return needsStudentRecordSync(
+        resolvedLocalStudent,
+        resolveStudentWithApprovedEnrollment(fetchedStudent),
+      );
+    },
+  );
+  const failedStudents: string[] = [];
+  const failedStudentKeys = new Set<string>();
+  let syncedCount = 0;
+
+  for (const student of studentsToSync) {
+    try {
+      await saveAdminStudent(resolveStudentWithApprovedEnrollment(student));
+      syncedCount += 1;
+    } catch (error) {
+      console.warn("Unable to sync local student to Supabase.", student, error);
+      failedStudents.push(student.name || student.id);
+      failedStudentKeys.add(getStudentSyncKey(student));
+    }
+  }
+
+  return {
+    syncedCount,
+    failedStudents,
+    failedStudentKeys,
+  };
 };
 
 export default function AdminStudents({
@@ -698,10 +978,6 @@ export default function AdminStudents({
     useState(false);
   const [scholarshipScoreFeedback, setScholarshipScoreFeedback] =
     useState<InlineFeedback | null>(null);
-  const [pendingSectionCode, setPendingSectionCode] = useState("");
-  const [isSavingSectionChange, setIsSavingSectionChange] = useState(false);
-  const [sectionChangeFeedback, setSectionChangeFeedback] =
-    useState<InlineFeedback | null>(null);
   const [gradeTermFilter, setGradeTermFilter] = useState("all");
   const [gradeSearchTerm, setGradeSearchTerm] = useState("");
 
@@ -740,57 +1016,89 @@ export default function AdminStudents({
       setStudentRecoveryMessage(null);
 
       try {
-        let branchStudents = getStudentsForBranch(currentBranch) as Student[];
+        const localBranchStudents = getStudentsForBranch(currentBranch) as Student[];
+        let fetchedBranchStudents = (await fetchAdminStudents(
+          currentBranch,
+        )) as Student[];
+        const syncSummary = await syncLocalStudentsToSupabase(
+          currentBranch,
+          localBranchStudents,
+          fetchedBranchStudents,
+        );
 
-        if (branchStudents.length === 0) {
-          const storedStudentCount = readStoredStudents().length;
-          const branchesToRecover =
-            storedStudentCount === 0
-              ? [...RECOVERABLE_BRANCHES]
-              : [currentBranch];
+        if (syncSummary.syncedCount > 0) {
+          fetchedBranchStudents = (await fetchAdminStudents(
+            currentBranch,
+          )) as Student[];
+        }
 
-          let recoveredBranches = 0;
+        const branchStudents = mergeFetchedStudentsWithLocalState(
+          fetchedBranchStudents,
+          localBranchStudents,
+          syncSummary.failedStudentKeys,
+        );
 
-          for (const branch of branchesToRecover) {
-            const existingBranchStudents = getStudentsForBranch(branch);
+        if (!isCancelled) {
+          setStudents(branchStudents);
 
-            if (existingBranchStudents.length > 0) {
-              continue;
-            }
+          const syncMessage = buildStudentSyncMessage(
+            syncSummary.syncedCount,
+            syncSummary.failedStudents,
+          );
 
-            const recoveredCount = await recoverApprovedStudentsForBranch(
-              branch,
-            );
-
-            if (recoveredCount > 0) {
-              recoveredBranches += 1;
-            }
+          if (syncMessage) {
+            setStudentRecoveryMessage(syncMessage);
           }
+        }
+      } catch (error) {
+        console.error("Failed to load branch students", error);
+        let branchStudents = getStudentsForBranch(currentBranch) as Student[];
+        let recoveryMessage: string | null = null;
 
-          branchStudents = getStudentsForBranch(currentBranch) as Student[];
+        try {
+          if (branchStudents.length === 0) {
+            const storedStudentCount = readStoredStudents().length;
+            const branchesToRecover =
+              storedStudentCount === 0
+                ? [...RECOVERABLE_BRANCHES]
+                : [currentBranch];
 
-          if (!isCancelled) {
+            let recoveredBranches = 0;
+
+            for (const branch of branchesToRecover) {
+              const existingBranchStudents = getStudentsForBranch(branch);
+
+              if (existingBranchStudents.length > 0) {
+                continue;
+              }
+
+              const recoveredCount = await recoverApprovedStudentsForBranch(
+                branch,
+              );
+
+              if (recoveredCount > 0) {
+                recoveredBranches += 1;
+              }
+            }
+
+            branchStudents = getStudentsForBranch(currentBranch) as Student[];
+
             if (branchStudents.length > 0) {
-              setStudentRecoveryMessage(
+              recoveryMessage =
                 storedStudentCount === 0
                   ? `Recovered approved students for ${recoveredBranches} branch${recoveredBranches === 1 ? "" : "es"}.`
-                  : `Recovered ${branchStudents.length} approved student${branchStudents.length === 1 ? "" : "s"} for ${currentBranch}.`,
-              );
+                  : `Recovered ${branchStudents.length} approved student${branchStudents.length === 1 ? "" : "s"} for ${currentBranch}.`;
             } else if (recoveredBranches === 0) {
-              setStudentRecoveryMessage(
-                `No approved students were found to restore for ${currentBranch}.`,
-              );
+              recoveryMessage = `No approved students were found to restore for ${currentBranch}.`;
             }
           }
+        } catch (recoveryError) {
+          console.error("Failed to recover local branch students", recoveryError);
         }
 
         if (!isCancelled) {
           setStudents(branchStudents);
-        }
-      } catch (error) {
-        console.error("Failed to load branch students", error);
-        if (!isCancelled) {
-          setStudents(getStudentsForBranch(currentBranch) as Student[]);
+          setStudentRecoveryMessage(recoveryMessage);
         }
       } finally {
         if (!isCancelled) {
@@ -1066,12 +1374,20 @@ export default function AdminStudents({
     return Object.keys(errors).length === 0;
   };
 
-  const generateNextStudentId = () => {
-    return getNextStudentNumber(currentBranch);
+  const generateNextStudentId = async () => {
+    try {
+      return await getNextAdminStudentNumber(currentBranch);
+    } catch (error) {
+      console.warn(
+        "Unable to get the next student number from Supabase. Falling back to local generation.",
+        error,
+      );
+      return getNextStudentNumber(currentBranch);
+    }
   };
 
   // Open add/edit modal
-  const openAddEditModal = (student?: Student) => {
+  const openAddEditModal = async (student?: Student) => {
     if (student) {
       if (student.program === "SHS") {
         let resolvedTrackType = student.shsTrackType || "";
@@ -1142,9 +1458,10 @@ export default function AdminStudents({
         }
       }
     } else {
+      const nextStudentId = await generateNextStudentId();
       setEditingStudent(null);
       setFormData({
-        id: generateNextStudentId(),
+        id: nextStudentId,
         name: "",
         program: "",
         yearLevel: "",
@@ -1257,55 +1574,43 @@ export default function AdminStudents({
     };
 
     try {
-      if (editingStudent?.recordId) {
-        const response = await fetch(
-          `${STUDENTS_API_URL}${editingStudent.recordId}/`,
-          {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(mapStudentToApiPayload(normalizedStudent)),
-          },
+      let savedStudent = normalizedStudent;
+      let syncFailed = false;
+
+      try {
+        savedStudent = (await saveAdminStudent(normalizedStudent)) as Student;
+      } catch (syncError) {
+        console.warn(
+          "Falling back to local student storage for save because Supabase sync failed.",
+          syncError,
         );
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData?.detail || "Failed to update student.");
-        }
-      } else {
-        try {
-          const response = await fetch(STUDENTS_API_URL, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(mapStudentToApiPayload(normalizedStudent)),
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            const firstError = Object.values(errorData).find((value) =>
-              Array.isArray(value),
-            ) as string[] | undefined;
-            throw new Error(firstError?.[0] || "Failed to create student.");
-          }
-        } catch (networkError) {
-          console.warn(
-            "Falling back to local student storage for save",
-            networkError,
-          );
-        }
+        syncFailed = true;
       }
+
+      const mergedSavedStudent = {
+        ...savedStudent,
+        ...mergeStudentOwnScheduleState(savedStudent, editingStudent || normalizedStudent),
+      };
 
       setStudents((prev) =>
         editingStudent
           ? prev.map((student) =>
-              student.id === editingStudent.id ? normalizedStudent : student,
+              studentsMatch(student, editingStudent) ? mergedSavedStudent : student,
             )
-          : [normalizedStudent, ...prev.filter((student) => student.id !== normalizedStudent.id)],
+          : [
+              mergedSavedStudent,
+              ...prev.filter((student) => !studentsMatch(student, mergedSavedStudent)),
+            ],
       );
       setIsAddEditModalOpen(false);
+
+      if (syncFailed) {
+        setStudentRecoveryMessage(
+          "Student changes were saved only on this device because Supabase sync failed.",
+        );
+      } else {
+        setStudentRecoveryMessage(null);
+      }
     } catch (error) {
       console.error("Failed to save student", error);
       const message =
@@ -1339,35 +1644,25 @@ export default function AdminStudents({
       setStudentToArchive(null);
     };
 
-    if (!student?.recordId) {
-      archiveStudentLocally();
-      return;
-    }
-
     try {
-      const response = await fetch(`${STUDENTS_API_URL}${student.recordId}/`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: "Inactive" }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData?.detail || "Failed to move student to Archive.",
-        );
+      if (student) {
+        await updateAdminStudentStatus({
+          branch: student.branch || currentBranch,
+          studentNumber: student.id,
+          status: "Archived",
+        });
       }
 
       archiveStudentLocally();
     } catch (error) {
-      console.error("Failed to archive student", error);
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unable to move student to Archive.";
-      alert(message);
+      console.warn(
+        "Unable to sync archived student to Supabase. Keeping the archived state on this device only.",
+        error,
+      );
+      archiveStudentLocally();
+      setStudentRecoveryMessage(
+        "Student was archived only on this device because Supabase sync failed.",
+      );
     }
   };
 
@@ -1377,8 +1672,6 @@ export default function AdminStudents({
   };
 
   const openViewModal = (student: Student) => {
-    setSectionChangeFeedback(null);
-    setPendingSectionCode(student.section || "");
     setGradeTermFilter("all");
     setGradeSearchTerm("");
     setViewingStudent(student);
@@ -1388,8 +1681,6 @@ export default function AdminStudents({
     setViewingStudent(null);
     setPendingScholarshipScore("");
     setScholarshipScoreFeedback(null);
-    setPendingSectionCode("");
-    setSectionChangeFeedback(null);
     setGradeTermFilter("all");
     setGradeSearchTerm("");
   };
@@ -1520,72 +1811,6 @@ export default function AdminStudents({
     }
   };
 
-  const handleApplySectionChange = async () => {
-    if (!viewingStudent) {
-      return;
-    }
-
-    const normalizedSectionCode = pendingSectionCode.trim();
-    if (!normalizedSectionCode) {
-      setSectionChangeFeedback({
-        type: "warning",
-        message: "Choose a section before moving this student.",
-      });
-      return;
-    }
-
-    setIsSavingSectionChange(true);
-
-    try {
-      const updateResult = updateStoredStudentSection({
-        branch: viewingStudent.branch || currentBranch,
-        studentNumber: viewingStudent.id,
-        trackingNumber: viewingStudent.trackingNumber,
-        nextSectionCode: normalizedSectionCode,
-      });
-
-      if (!updateResult) {
-        throw new Error("No linked student record was found for this update.");
-      }
-
-      const refreshedStudents = getStudentsForBranch(currentBranch) as Student[];
-      const refreshedViewingStudent =
-        refreshedStudents.find(
-          (student) =>
-            student.id === viewingStudent.id ||
-            (viewingStudent.trackingNumber &&
-              student.trackingNumber === viewingStudent.trackingNumber),
-        ) ?? updateResult.student;
-
-      setStudents(refreshedStudents);
-      setViewingStudent(refreshedViewingStudent);
-      setSectionChangeFeedback(
-        updateResult.didChange
-          ? {
-              type: "success",
-              message: updateResult.previousSection
-                ? `Student moved from ${updateResult.previousSection} to ${updateResult.nextSection}.`
-                : `Student assigned to ${updateResult.nextSection}.`,
-            }
-          : {
-              type: "warning",
-              message: `${viewingStudent.name} is already assigned to ${updateResult.nextSection}.`,
-            },
-      );
-    } catch (error) {
-      console.error("Failed to update student section", error);
-      setSectionChangeFeedback({
-        type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Unable to update the student's section.",
-      });
-    } finally {
-      setIsSavingSectionChange(false);
-    }
-  };
-
   const moveStudentsToAlumni = async (studentsToMove: Student[]) => {
     const movedStudentIds: string[] = [];
     const failedStudents: string[] = [];
@@ -1635,28 +1860,17 @@ export default function AdminStudents({
           locallyCachedStudents.push(student.name);
         }
 
-        if (student.recordId) {
-          try {
-            const response = await fetch(`${STUDENTS_API_URL}${student.recordId}/`, {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ status: "Graduated" }),
-            });
-
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({}));
-              throw new Error(
-                errorData?.detail || "Unable to sync graduated status.",
-              );
-            }
-          } catch (error) {
-            console.warn(
-              "Unable to sync graduated status to backend student API.",
-              error,
-            );
-          }
+        try {
+          await updateAdminStudentStatus({
+            branch: student.branch || currentBranch,
+            studentNumber: student.id,
+            status: "Graduated",
+          });
+        } catch (error) {
+          console.warn(
+            "Unable to sync graduated status to Supabase.",
+            error,
+          );
         }
 
         rememberAlumniStudentStatus(student.id, student.status);
@@ -1795,8 +2009,10 @@ export default function AdminStudents({
     viewingStudent,
     viewingStudentAcademicStanding?.label,
   );
-  const viewingStudentOwnScheduleReason = hasApprovedOwnSchedule(viewingStudent)
-    ? "This student was approved for own-schedule admission and is treated as irregular while the customized load is being managed."
+  const viewingStudentOwnScheduleReason = hasRequestedOwnSchedule(viewingStudent)
+    ? hasApprovedOwnSchedule(viewingStudent)
+      ? "This student was approved for own-schedule admission and is treated as irregular while the customized load is being managed."
+      : "This student requested an own schedule and is treated as irregular while the schedule workflow is still being managed."
     : "";
   const viewingStudentScheduleRequest = viewingStudent
     ? studentScheduleRequests.find(
@@ -1923,32 +2139,6 @@ export default function AdminStudents({
   const canEditViewingStudentScholarshipScore =
     isViewingCollegeStudent &&
     Boolean(viewingStudent && viewingStudentApplicantRecord?.trackingNumber);
-  const canManageViewingStudentSection =
-    Boolean(viewingStudent) &&
-    viewingStudent?.status !== "Archived" &&
-    viewingStudent?.status !== "Graduated";
-  const viewingStudentSectionChoices = viewingStudent
-    ? getStudentSectionChoices({
-        branch: viewingStudent.branch || currentBranch,
-        program: viewingStudent.program,
-        yearLevel: viewingStudent.yearLevel,
-        strandOrCourse: viewingStudent.strandOrCourse,
-        currentSectionCode: viewingStudent.section,
-      })
-    : [];
-  const viewingStudentCurrentSectionChoice = viewingStudent
-    ? viewingStudentSectionChoices.find(
-        (section) => section.code === (viewingStudent.section || "").trim(),
-      ) ?? null
-    : null;
-  const pendingSectionChoice =
-    viewingStudentSectionChoices.find((section) => section.code === pendingSectionCode) ??
-    null;
-  const canApplyViewingStudentSectionChange =
-    canManageViewingStudentSection &&
-    Boolean(pendingSectionCode.trim()) &&
-    pendingSectionCode.trim() !== (viewingStudent?.section || "").trim();
-
   useEffect(() => {
     if (!canEditViewingStudentScholarshipScore) {
       setPendingScholarshipScore("");
@@ -1967,15 +2157,6 @@ export default function AdminStudents({
     viewingStudent?.id,
     viewingStudentApplicantRecord?.scholarshipExamScore,
   ]);
-
-  useEffect(() => {
-    if (!viewingStudent) {
-      setPendingSectionCode("");
-      return;
-    }
-
-    setPendingSectionCode((viewingStudent.section || "").trim());
-  }, [viewingStudent]);
 
   const requirementNotifications: StudentRequirementNotification[] = students
     .filter(
@@ -2080,7 +2261,7 @@ export default function AdminStudents({
     if (!viewingStudent) return;
     const selectedStudent = viewingStudent;
     closeViewModal();
-    openAddEditModal(selectedStudent);
+    void openAddEditModal(selectedStudent);
   };
 
   const handleOpenNotifications = () => {
@@ -3218,110 +3399,6 @@ export default function AdminStudents({
                     <label>Section</label>
                     <div className="students-profile-value">
                       {viewingStudent.section || "N/A"}
-                    </div>
-                  </div>
-                  <div className="students-profile-field students-profile-field-full">
-                    <label>Section Management</label>
-                    <div className="students-profile-value students-profile-list-box students-section-management-box">
-                      <div className="students-section-management-current">
-                        <div className="students-section-management-copy">
-                          <strong>
-                            Current section: {viewingStudent.section || "Not assigned"}
-                          </strong>
-                          <span>
-                            {viewingStudentCurrentSectionChoice
-                              ? getSectionDescriptorLabel(
-                                  viewingStudentCurrentSectionChoice,
-                                )
-                              : "Review and move this student to another matching section when needed."}
-                          </span>
-                        </div>
-                        {viewingStudentCurrentSectionChoice ? (
-                          <span
-                            className={`students-section-capacity-badge ${
-                              viewingStudentCurrentSectionChoice.isFull
-                                ? "full"
-                                : "available"
-                            }`}
-                          >
-                            {getSectionCapacityLabel(
-                              viewingStudentCurrentSectionChoice,
-                            )}
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {canManageViewingStudentSection ? (
-                        viewingStudentSectionChoices.length > 0 ? (
-                          <>
-                            <div className="students-section-management-controls">
-                              <select
-                                value={pendingSectionCode}
-                                onChange={(event) => {
-                                  setPendingSectionCode(event.target.value);
-                                  if (sectionChangeFeedback) {
-                                    setSectionChangeFeedback(null);
-                                  }
-                                }}
-                                disabled={isSavingSectionChange}
-                              >
-                                <option value="">Select section</option>
-                                {viewingStudentSectionChoices.map((sectionChoice) => (
-                                  <option
-                                    key={sectionChoice.id}
-                                    value={sectionChoice.code}
-                                  >
-                                    {buildStudentSectionOptionLabel(sectionChoice)}
-                                  </option>
-                                ))}
-                              </select>
-                              <button
-                                type="button"
-                                className="students-save-btn students-inline-save-btn"
-                                onClick={handleApplySectionChange}
-                                disabled={
-                                  !canApplyViewingStudentSectionChange ||
-                                  isSavingSectionChange
-                                }
-                              >
-                                {isSavingSectionChange
-                                  ? "Moving..."
-                                  : "Move Student"}
-                              </button>
-                            </div>
-                            {pendingSectionChoice ? (
-                              <p className="students-scholarship-score-hint">
-                                Move to {pendingSectionChoice.code}:{" "}
-                                {getSectionDescriptorLabel(pendingSectionChoice)}{" "}
-                                ({getSectionCapacityLabel(pendingSectionChoice)})
-                              </p>
-                            ) : (
-                              <p className="students-scholarship-score-hint">
-                                Select a section to move this student and keep the
-                                section count updated.
-                              </p>
-                            )}
-                          </>
-                        ) : (
-                          <p className="students-scholarship-score-hint">
-                            No matching section is available yet. Create or assign
-                            sections in the enrollees section first.
-                          </p>
-                        )
-                      ) : (
-                        <p className="students-scholarship-score-hint">
-                          Section changes are only available for active
-                          undergraduate students.
-                        </p>
-                      )}
-
-                      {sectionChangeFeedback ? (
-                        <p
-                          className={`students-inline-feedback ${sectionChangeFeedback.type}`}
-                        >
-                          {sectionChangeFeedback.message}
-                        </p>
-                      ) : null}
                     </div>
                   </div>
                   <div className="students-profile-field">

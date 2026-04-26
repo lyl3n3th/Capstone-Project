@@ -46,6 +46,10 @@ class BackupRestoreStartSerializer(serializers.Serializer):
     backup_history_id = serializers.UUIDField()
 
 
+class BackupArchiveUploadSerializer(serializers.Serializer):
+    archive = serializers.FileField()
+
+
 class BackupSnapshotCreateSerializer(serializers.Serializer):
     backup_type = serializers.ChoiceField(
         choices=(BackupHistory.TYPE_MANUAL, BackupHistory.TYPE_AUTOMATED),

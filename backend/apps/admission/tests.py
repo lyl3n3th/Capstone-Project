@@ -6,6 +6,7 @@ from django.test import TestCase
 
 from apps.admission.models import AdmissionApplication, AdmissionRequirement
 from apps.admission.tracking_recovery import (
+    AdmissionDecisionNotificationTarget,
     AdmissionTrackingNotificationTarget,
     TrackingRecoveryMatch,
 )
@@ -266,6 +267,114 @@ class AdmissionSubmissionNotificationApiTests(TestCase):
         response = self.client.post(
             "/api/admissions/submission-notification/",
             data=json.dumps({"trackingNumber": "AICS-20260422-MISSING"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("detail", response.json())
+
+
+class AdmissionDecisionNotificationApiTests(TestCase):
+    def test_decision_notification_requires_reason(self):
+        response = self.client.post(
+            "/api/admissions/decision-notification/",
+            data=json.dumps({"email": "jane@example.com"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("errors", response.json())
+
+    @patch("apps.admission.views.deliver_admission_decision_notification")
+    def test_decision_notification_uses_supplied_email(self, mock_deliver):
+        mock_deliver.return_value = {
+            "email": {
+                "status": "sent",
+                "destination": "ja***@example.com",
+            }
+        }
+
+        response = self.client.post(
+            "/api/admissions/decision-notification/",
+            data=json.dumps(
+                {
+                    "email": "jane@example.com",
+                    "fullName": "Jane Doe",
+                    "trackingNumber": "AICS-20260425-DEC123",
+                    "recordType": "admission",
+                    "decisionStatus": "rejected",
+                    "decisionReason": "Incomplete admission requirements",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        delivered_target = mock_deliver.call_args.args[0]
+        self.assertIsInstance(delivered_target, AdmissionDecisionNotificationTarget)
+        self.assertEqual(delivered_target.email, "jane@example.com")
+        self.assertEqual(delivered_target.full_name, "Jane Doe")
+        self.assertEqual(delivered_target.tracking_number, "AICS-20260425-DEC123")
+
+    @patch("apps.admission.views.deliver_admission_decision_notification")
+    @patch("apps.admission.views.find_tracking_notification_target")
+    def test_decision_notification_can_lookup_tracking_number(
+        self,
+        mock_find_tracking_notification_target,
+        mock_deliver_admission_decision_notification,
+    ):
+        mock_find_tracking_notification_target.return_value = (
+            AdmissionTrackingNotificationTarget(
+                tracking_number="AICS-20260425-DEC124",
+                email="jane@example.com",
+                phone_number="09123456789",
+                first_name="Jane",
+                last_name="Doe",
+                application_status="submitted",
+                submitted_at="2026-04-25T08:00:00+00:00",
+                created_at="2026-04-25T07:00:00+00:00",
+            )
+        )
+        mock_deliver_admission_decision_notification.return_value = {
+            "email": {
+                "status": "sent",
+                "destination": "ja***@example.com",
+            }
+        }
+
+        response = self.client.post(
+            "/api/admissions/decision-notification/",
+            data=json.dumps(
+                {
+                    "trackingNumber": "AICS-20260425-DEC124",
+                    "decisionStatus": "rejected",
+                    "decisionReason": "Submitted documents are invalid or unreadable",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        delivered_target = mock_deliver_admission_decision_notification.call_args.args[0]
+        self.assertEqual(delivered_target.email, "jane@example.com")
+        self.assertEqual(delivered_target.full_name, "Jane Doe")
+
+    @patch("apps.admission.views.find_tracking_notification_target")
+    def test_decision_notification_returns_not_found_when_missing(
+        self,
+        mock_find_tracking_notification_target,
+    ):
+        mock_find_tracking_notification_target.return_value = None
+
+        response = self.client.post(
+            "/api/admissions/decision-notification/",
+            data=json.dumps(
+                {
+                    "trackingNumber": "AICS-20260425-MISSING",
+                    "decisionStatus": "rejected",
+                    "decisionReason": "Incomplete admission requirements",
+                }
+            ),
             content_type="application/json",
         )
 

@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AdmissionDecisionNotificationView,
     AdmissionStep2View,
     AdmissionSubmissionNotificationView,
     AdmissionTrackingRecoveryView,
@@ -18,6 +19,11 @@ urlpatterns = [
         "submission-notification/",
         AdmissionSubmissionNotificationView.as_view(),
         name="admission-submission-notification",
+    ),
+    path(
+        "decision-notification/",
+        AdmissionDecisionNotificationView.as_view(),
+        name="admission-decision-notification",
     ),
     path(
         "requirements/",

@@ -6,6 +6,7 @@ interface BranchCardProps {
     code: string;
     name: string;
   };
+  helperText?: string;
   isSelected: boolean;
   isDisabled: boolean;
   onClick: () => void;
@@ -13,6 +14,7 @@ interface BranchCardProps {
 
 export const BranchCard: React.FC<BranchCardProps> = ({
   branch,
+  helperText,
   isSelected,
   isDisabled,
   onClick,
@@ -21,6 +23,7 @@ export const BranchCard: React.FC<BranchCardProps> = ({
     <div
       className={`choices ${isSelected ? "selected" : ""} ${isDisabled ? "disabled-branch" : ""}`}
       onClick={!isDisabled ? onClick : undefined}
+      aria-disabled={isDisabled}
       style={{ cursor: isDisabled ? "not-allowed" : "pointer" }}
     >
       <span className="circle1">
@@ -28,7 +31,7 @@ export const BranchCard: React.FC<BranchCardProps> = ({
       </span>
       <div className="location-text">
         <p className="location">{branch.name}</p>
-        <p className="campus">{branch.name} branch</p>
+        <p className="campus">{helperText || `${branch.name} branch`}</p>
       </div>
     </div>
   );

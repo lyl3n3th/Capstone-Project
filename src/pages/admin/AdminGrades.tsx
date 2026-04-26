@@ -89,6 +89,7 @@ interface TemplateClassSection {
   yearLevel: string;
   semester?: string;
   strand?: string;
+  enrolleeIds?: string[];
 }
 
 interface TemplateSubjectAssignment {
@@ -202,6 +203,13 @@ const COLLEGE_TEMPLATE_SEMESTERS: CollegeTemplateSemester[] = [
   "2nd Semester",
   "Summer",
 ];
+const COLLEGE_TEMPLATE_YEAR_LEVELS = [
+  "1st Year",
+  "2nd Year",
+  "3rd Year",
+  "4th Year",
+] as const;
+const SHS_TEMPLATE_YEAR_LEVELS = ["Grade 11", "Grade 12"] as const;
 const SHS_TEMPLATE_QUARTERS: ShsTemplateQuarter[] = [
   "1st Quarter",
   "2nd Quarter",
@@ -351,8 +359,12 @@ export default function AdminGrades({
   const [historyPage, setHistoryPage] = useState(1);
   const [collegeTemplateSemester, setCollegeTemplateSemester] =
     useState<CollegeTemplateSemester>("1st Semester");
+  const [collegeTemplateYearLevel, setCollegeTemplateYearLevel] =
+    useState<(typeof COLLEGE_TEMPLATE_YEAR_LEVELS)[number]>("1st Year");
   const [shsTemplateQuarter, setShsTemplateQuarter] =
     useState<ShsTemplateQuarter>("1st Quarter");
+  const [shsTemplateYearLevel, setShsTemplateYearLevel] =
+    useState<(typeof SHS_TEMPLATE_YEAR_LEVELS)[number]>("Grade 11");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -574,10 +586,17 @@ export default function AdminGrades({
     return "";
   };
 
+  const normalizeYearLevelLabel = (value?: string) =>
+    value?.trim().toLowerCase() || "";
+
   const getSelectedTemplateChoice = (
     templateType: StudentGradeProgramType,
   ): TemplateDownloadChoice =>
     templateType === "College" ? collegeTemplateSemester : shsTemplateQuarter;
+
+  const getSelectedTemplateYearLevel = (
+    templateType: StudentGradeProgramType,
+  ) => (templateType === "College" ? collegeTemplateYearLevel : shsTemplateYearLevel);
 
   const resolveTemplateSemester = (
     templateType: StudentGradeProgramType,
@@ -604,13 +623,22 @@ export default function AdminGrades({
   const buildTemplateDownloadFileName = (
     templateType: StudentGradeProgramType,
     templateChoice: TemplateDownloadChoice,
+    yearLevel: string,
   ) => {
     const template = TEMPLATE_DOWNLOADS[templateType];
     const baseFileName = template.fileName.replace(/\.xlsx$/i, "");
-    const suffix = sanitizeTemplateFileNameSegment(templateChoice);
+    const suffix = [yearLevel, templateChoice]
+      .map(sanitizeTemplateFileNameSegment)
+      .filter(Boolean)
+      .join("_");
 
     return suffix ? `${baseFileName}_${suffix}.xlsx` : template.fileName;
   };
+
+  const getTemplateSelectionSummary = (
+    yearLevel: string,
+    templateChoice: TemplateDownloadChoice,
+  ) => `${yearLevel} ${templateChoice}`;
 
   const sortStudentsForTemplate = (
     left: { id: string; name: string },
@@ -763,6 +791,7 @@ export default function AdminGrades({
       programType === "SHS" ? defaultGradingPeriod?.trim() || "" : "";
 
     const unitsBySubjectKey = new Map<string, string>();
+    const assignmentFallbackByKey = new Map<string, TemplateSubjectAssignment>();
 
     subjectCatalog.forEach((subject) => {
       const unitsLabel =
@@ -774,23 +803,55 @@ export default function AdminGrades({
       unitsBySubjectKey.set(`code:${subject.code.toUpperCase()}`, unitsLabel);
     });
 
-    if (assignments.length === 0) {
-      return students.map((student) => [
-        student.id,
-        student.name,
-        "",
-        "",
-        shsQuarterValue,
-        "",
-        "",
-        "",
-        "",
-        "",
-      ]);
-    }
+    const buildAssignmentLookupKeys = (assignment: TemplateSubjectAssignment) => {
+      const subjectCode = assignment.subjectCode.toUpperCase();
+      const keys = [
+        `id:${assignment.subjectId}:${assignment.semester}:${assignment.academicYear}`,
+        `code:${subjectCode}:${assignment.semester}:${assignment.academicYear}`,
+        `id:${assignment.subjectId}:${assignment.semester}`,
+        `code:${subjectCode}:${assignment.semester}`,
+        `id:${assignment.subjectId}`,
+        `code:${subjectCode}`,
+      ];
 
-    return students.flatMap((student) =>
-      (student.assignments ?? assignments).map((assignment) => {
+      return keys.filter((key, index) => keys.indexOf(key) === index);
+    };
+
+    assignments.forEach((assignment) => {
+      buildAssignmentLookupKeys(assignment).forEach((key) => {
+        if (!assignmentFallbackByKey.has(key)) {
+          assignmentFallbackByKey.set(key, assignment);
+        }
+      });
+    });
+
+    return students.flatMap((student) => {
+      const rowAssignments =
+        student.assignments && student.assignments.length > 0
+          ? student.assignments
+          : assignments;
+
+      if (rowAssignments.length === 0) {
+        return [
+          [
+            student.id,
+            student.name,
+            "",
+            "",
+            shsQuarterValue,
+            "",
+            "",
+            "",
+            "",
+            "",
+          ],
+        ];
+      }
+
+      return rowAssignments.map((assignment) => {
+        const fallbackAssignment = buildAssignmentLookupKeys(assignment)
+          .map((key) => assignmentFallbackByKey.get(key))
+          .find(Boolean);
         const units =
           (assignment.units === undefined || assignment.units === null
             ? ""
@@ -798,6 +859,8 @@ export default function AdminGrades({
           unitsBySubjectKey.get(`id:${assignment.subjectId}`) ||
           unitsBySubjectKey.get(`code:${assignment.subjectCode.toUpperCase()}`) ||
           "";
+        const instructorName =
+          assignment.instructorName || fallbackAssignment?.instructorName || "";
 
         return programType === "College"
           ? [
@@ -808,7 +871,7 @@ export default function AdminGrades({
               units,
               "",
               "",
-              assignment.instructorName || "",
+              instructorName,
               "",
               "",
             ]
@@ -820,12 +883,12 @@ export default function AdminGrades({
               shsQuarterValue,
               "",
               "",
-              assignment.instructorName || "",
+              instructorName,
               "",
               "",
             ];
-      }),
-    );
+      });
+    });
   };
 
   const buildFallbackTemplateRows = (
@@ -850,6 +913,7 @@ export default function AdminGrades({
   const buildFallbackTemplateSheet = (
     templateType: StudentGradeProgramType,
     templateChoice: TemplateDownloadChoice,
+    yearLevel: string,
   ): GeneratedTemplateSheet => ({
     academicYear: getDefaultAcademicYear(),
     descriptor: "",
@@ -857,15 +921,17 @@ export default function AdminGrades({
     sectionCode: "",
     semester: resolveTemplateSemester(templateType, templateChoice),
     sheetName: "Grades Template",
-    yearLevel: "",
+    yearLevel,
   });
 
   const getGeneratedTemplateSheets = (
     templateType: StudentGradeProgramType,
     templateChoice: TemplateDownloadChoice,
+    targetYearLevel: string,
   ): GeneratedTemplateSheet[] => {
     const usedSheetNames = new Set<string>();
     const targetSemester = resolveTemplateSemester(templateType, templateChoice);
+    const normalizedTargetYearLevel = normalizeYearLevelLabel(targetYearLevel);
     const defaultGradingPeriod = getTemplateGradingPeriod(
       templateType,
       templateChoice,
@@ -893,11 +959,16 @@ export default function AdminGrades({
         portalContext: resolveStudentPortalContext(student),
       }),
     );
+    const eligibleYearLevelStudentContexts = resolvedStudentContexts.filter(
+      ({ portalContext }) =>
+        portalContext.resolvedStudentRecord.program === templateType &&
+        normalizeYearLevelLabel(portalContext.resolvedStudentRecord.yearLevel) ===
+          normalizedTargetYearLevel,
+    );
     const selectedTermAcademicYear = getLatestAcademicYear([
-      ...resolvedStudentContexts
+      ...eligibleYearLevelStudentContexts
         .filter(
           ({ portalContext }) =>
-            portalContext.resolvedStudentRecord.program === templateType &&
             normalizeSemesterLabel(portalContext.currentTerm.semester) ===
               targetSemester,
         )
@@ -911,37 +982,45 @@ export default function AdminGrades({
           return storedSections.some(
             (section) =>
               section.program === templateType &&
+              normalizeYearLevelLabel(section.yearLevel) ===
+                normalizedTargetYearLevel &&
               (assignment.sectionId === section.id ||
                 assignment.sectionCode === section.code),
           );
         })
         .map((assignment) => assignment.academicYear),
     ]);
-    const selectedTermStudentContexts = resolvedStudentContexts.filter(
-      ({ portalContext }) =>
-        portalContext.resolvedStudentRecord.program === templateType &&
-        normalizeSemesterLabel(portalContext.currentTerm.semester) ===
-          targetSemester &&
-        (!selectedTermAcademicYear ||
-          !portalContext.currentTerm.academicYear ||
-          portalContext.currentTerm.academicYear.trim() ===
-            selectedTermAcademicYear.trim()),
-    );
 
     return storedSections
       .filter(
         (section) =>
-          section.program === templateType && Boolean(section.code.trim()),
+          section.program === templateType &&
+          normalizeYearLevelLabel(section.yearLevel) ===
+            normalizedTargetYearLevel &&
+          Boolean(section.code.trim()),
       )
       .sort(sortSectionsForTemplate)
       .map<GeneratedTemplateSheet | null>((section) => {
         const normalizedSectionSemester =
           normalizeSemesterLabel(section.semester) || targetSemester;
-        const sectionStudents = selectedTermStudentContexts
-          .filter(
-            ({ portalContext }) =>
-              portalContext.resolvedStudentRecord.section === section.code,
-          )
+        const linkedEnrolleeIds = new Set(
+          (section.enrolleeIds ?? [])
+            .map((enrolleeId) => enrolleeId.trim())
+            .filter(Boolean),
+        );
+        const isStudentLinkedToSection = (
+          studentContext: TemplateResolvedStudentContext,
+        ) => {
+          const resolvedSectionCode =
+            studentContext.portalContext.resolvedStudentRecord.section?.trim() || "";
+
+          return (
+            resolvedSectionCode === section.code ||
+            linkedEnrolleeIds.has(studentContext.id.trim())
+          );
+        };
+        const sectionStudents = eligibleYearLevelStudentContexts
+          .filter(isStudentLinkedToSection)
           .map((studentContext) => {
             const studentAssignments = getStudentTemplateAssignmentsForSemester({
               portalContext: studentContext.portalContext,
@@ -971,11 +1050,8 @@ export default function AdminGrades({
                   selectedTermAcademicYear.trim()),
           )
           .sort(sortAssignmentsForTemplate);
-        const irregularAssignmentsByStudent = selectedTermStudentContexts
-          .filter(
-            ({ portalContext }) =>
-              portalContext.resolvedStudentRecord.section !== section.code,
-          )
+        const irregularAssignmentsByStudent = eligibleYearLevelStudentContexts
+          .filter((studentContext) => !isStudentLinkedToSection(studentContext))
           .map((studentContext) => {
             const plannedAssignments = getStudentTemplateAssignmentsForSemester({
               portalContext: studentContext.portalContext,
@@ -1869,13 +1945,18 @@ export default function AdminGrades({
   const buildStyledTemplateArchive = async (
     templateType: StudentGradeProgramType,
     templateChoice: TemplateDownloadChoice,
+    targetYearLevel: string,
   ) => {
     const template = TEMPLATE_DOWNLOADS[templateType];
-    const matchedSheets = getGeneratedTemplateSheets(templateType, templateChoice);
+    const matchedSheets = getGeneratedTemplateSheets(
+      templateType,
+      templateChoice,
+      targetYearLevel,
+    );
     const generatedSheets =
       matchedSheets.length > 0
         ? matchedSheets
-        : [buildFallbackTemplateSheet(templateType, templateChoice)];
+        : [buildFallbackTemplateSheet(templateType, templateChoice, targetYearLevel)];
 
     const templateResponse = await fetch(template.href);
 
@@ -2198,28 +2279,41 @@ export default function AdminGrades({
   ) => {
     try {
       const templateChoice = getSelectedTemplateChoice(templateType);
+      const targetYearLevel = getSelectedTemplateYearLevel(templateType);
+      const selectionSummary = getTemplateSelectionSummary(
+        targetYearLevel,
+        templateChoice,
+      );
       const { archive, generatedSheetCount, matchedSectionCount } =
-        await buildStyledTemplateArchive(templateType, templateChoice);
+        await buildStyledTemplateArchive(
+          templateType,
+          templateChoice,
+          targetYearLevel,
+        );
 
       if (!archive) {
         throw new Error("Template archive was not generated.");
       }
 
       downloadBlob(
-        buildTemplateDownloadFileName(templateType, templateChoice),
+        buildTemplateDownloadFileName(
+          templateType,
+          templateChoice,
+          targetYearLevel,
+        ),
         archive,
       );
 
       if (matchedSectionCount === 0) {
         addToast(
-          `No ${templateType} sections matched ${templateChoice} for ${currentBranch}, so a blank template was downloaded with that setting.`,
+          `No ${templateType} sections matched ${selectionSummary} for ${currentBranch}, so a blank template was downloaded with that setting.`,
           "warning",
         );
         return;
       }
 
       addToast(
-        `${templateType} ${templateChoice} template downloaded with ${generatedSheetCount} section worksheet${generatedSheetCount === 1 ? "" : "s"}.`,
+        `${templateType} ${selectionSummary} template downloaded with ${generatedSheetCount} section worksheet${generatedSheetCount === 1 ? "" : "s"}.`,
         "success",
       );
     } catch (error) {
@@ -2572,8 +2666,8 @@ export default function AdminGrades({
 
             <p className="template-description">
               Download the Excel template with the correct format for uploading
-              grades. Choose the target semester or quarter first. The template
-              includes:
+              grades. Choose the target year level and semester or quarter
+              first. The template includes:
             </p>
 
             <ul className="template-list">
@@ -2583,7 +2677,7 @@ export default function AdminGrades({
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
-                One worksheet tab per existing section in this branch
+                One worksheet tab per matching section in this branch
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
@@ -2592,7 +2686,7 @@ export default function AdminGrades({
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
-                Section details, academic year, and semester metadata at the top
+                Section details, year level, academic year, and semester metadata at the top
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
@@ -2616,6 +2710,28 @@ export default function AdminGrades({
 
             <div className="template-actions">
               <div className="template-download-group">
+                <label
+                  className="template-choice-label"
+                  htmlFor="college-template-year-level"
+                >
+                  College year level
+                </label>
+                <select
+                  id="college-template-year-level"
+                  className="template-choice-select"
+                  value={collegeTemplateYearLevel}
+                  onChange={(event) =>
+                    setCollegeTemplateYearLevel(
+                      event.target.value as (typeof COLLEGE_TEMPLATE_YEAR_LEVELS)[number],
+                    )
+                  }
+                >
+                  {COLLEGE_TEMPLATE_YEAR_LEVELS.map((yearLevel) => (
+                    <option key={yearLevel} value={yearLevel}>
+                      {yearLevel}
+                    </option>
+                  ))}
+                </select>
                 <label
                   className="template-choice-label"
                   htmlFor="college-template-semester"
@@ -2647,6 +2763,28 @@ export default function AdminGrades({
               </div>
 
               <div className="template-download-group">
+                <label
+                  className="template-choice-label"
+                  htmlFor="shs-template-year-level"
+                >
+                  SHS year level
+                </label>
+                <select
+                  id="shs-template-year-level"
+                  className="template-choice-select"
+                  value={shsTemplateYearLevel}
+                  onChange={(event) =>
+                    setShsTemplateYearLevel(
+                      event.target.value as (typeof SHS_TEMPLATE_YEAR_LEVELS)[number],
+                    )
+                  }
+                >
+                  {SHS_TEMPLATE_YEAR_LEVELS.map((yearLevel) => (
+                    <option key={yearLevel} value={yearLevel}>
+                      {yearLevel}
+                    </option>
+                  ))}
+                </select>
                 <label
                   className="template-choice-label"
                   htmlFor="shs-template-quarter"

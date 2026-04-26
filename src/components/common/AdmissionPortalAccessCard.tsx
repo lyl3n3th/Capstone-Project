@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useAdmissionPortalStatus } from "../../hooks/useAdmissionPortalStatus";
 import {
@@ -6,6 +6,7 @@ import {
   ADMISSION_PORTAL_OPEN_DESCRIPTION,
   formatAdmissionCloseDate,
 } from "../../services/admissionPortal";
+import { getAdmissionBranchName } from "../../services/admission";
 
 const getTodayDateInputValue = () => {
   const currentDate = new Date();
@@ -16,9 +17,22 @@ const getTodayDateInputValue = () => {
   return `${year}-${month}-${day}`;
 };
 
+const getTomorrowDateInputValue = () => {
+  const currentDate = new Date();
+  currentDate.setDate(currentDate.getDate() + 1);
+
+  const year = currentDate.getFullYear();
+  const month = String(currentDate.getMonth() + 1).padStart(2, "0");
+  const day = String(currentDate.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
+
 export default function AdmissionPortalAccessCard() {
   const { currentUser } = useAuth();
   const canManageAdmission = currentUser?.role === "registrar";
+  const managedBranch = currentUser?.branch || "Bacoor";
+  const managedBranchName = getAdmissionBranchName(managedBranch);
   const {
     isOpen: isAdmissionOpen,
     closeOnDate,
@@ -26,21 +40,31 @@ export default function AdmissionPortalAccessCard() {
     isAutoClosed,
     setAdmissionPortalOpen,
     setAdmissionPortalStatus,
-  } = useAdmissionPortalStatus();
-  const [scheduledCloseDate, setScheduledCloseDate] = useState(closeOnDate);
-  const [validationMessage, setValidationMessage] = useState("");
-  const formattedCloseDate = formatAdmissionCloseDate(closeOnDate);
+  } = useAdmissionPortalStatus(managedBranch);
+  const scheduleSourceKey = `${managedBranch}:${isAdmissionOpen}:${closeOnDate}`;
   const todayDateInputValue = getTodayDateInputValue();
-
-  useEffect(() => {
-    const nextScheduledCloseDate =
-      !isAdmissionOpen && closeOnDate && closeOnDate < todayDateInputValue
-        ? ""
-        : closeOnDate;
-
-    setScheduledCloseDate(nextScheduledCloseDate);
-    setValidationMessage("");
-  }, [closeOnDate, isAdmissionOpen, todayDateInputValue]);
+  const minimumScheduledCloseDate = getTomorrowDateInputValue();
+  const defaultScheduledCloseDate =
+    !isAdmissionOpen && closeOnDate && closeOnDate <= todayDateInputValue
+      ? ""
+      : closeOnDate;
+  const [scheduleDraft, setScheduleDraft] = useState(() => ({
+    sourceKey: scheduleSourceKey,
+    value: defaultScheduledCloseDate,
+  }));
+  const [validationState, setValidationState] = useState(() => ({
+    sourceKey: scheduleSourceKey,
+    message: "",
+  }));
+  const scheduledCloseDate =
+    scheduleDraft.sourceKey === scheduleSourceKey
+      ? scheduleDraft.value
+      : defaultScheduledCloseDate;
+  const validationMessage =
+    validationState.sourceKey === scheduleSourceKey
+      ? validationState.message
+      : "";
+  const formattedCloseDate = formatAdmissionCloseDate(closeOnDate);
 
   const updatedAtLabel = (() => {
     if (!updatedAt) {
@@ -58,7 +82,7 @@ export default function AdmissionPortalAccessCard() {
 
   const admissionDescription = (() => {
     if (isAdmissionOpen && formattedCloseDate) {
-      return `New admission forms are available until ${formattedCloseDate}. Applicants can use the Enroll Now button to start a new submission.`;
+      return `New admission forms are currently available. Admissions are scheduled to close on ${formattedCloseDate}. Applicants can use the Enroll Now button to start a new submission.`;
     }
 
     if (isAdmissionOpen) {
@@ -66,7 +90,7 @@ export default function AdmissionPortalAccessCard() {
     }
 
     if (isAutoClosed && formattedCloseDate) {
-      return `Admissions closed automatically after ${formattedCloseDate}. Applicants can still track an existing application below.`;
+      return `Admissions closed automatically on ${formattedCloseDate}. Applicants can still track an existing application below.`;
     }
 
     return ADMISSION_PORTAL_CLOSED_DESCRIPTION;
@@ -76,7 +100,7 @@ export default function AdmissionPortalAccessCard() {
     const details: string[] = [];
 
     if (isAdmissionOpen && formattedCloseDate) {
-      details.push(`Closes on ${formattedCloseDate}.`);
+      details.push(`Scheduled to close on ${formattedCloseDate}.`);
     } else if (formattedCloseDate) {
       details.push(`Closed on ${formattedCloseDate}.`);
     }
@@ -92,12 +116,19 @@ export default function AdmissionPortalAccessCard() {
     const nextCloseDate = scheduledCloseDate.trim();
 
     if (!nextCloseDate) {
-      setValidationMessage("Please select the admission closing date.");
+      setValidationState({
+        sourceKey: scheduleSourceKey,
+        message: "Please select the admission closing date.",
+      });
       return;
     }
 
-    if (nextCloseDate < todayDateInputValue) {
-      setValidationMessage("Please select today's date or a future date.");
+    if (nextCloseDate < minimumScheduledCloseDate) {
+      setValidationState({
+        sourceKey: scheduleSourceKey,
+        message:
+          "Please select a future date. Use Close Admission Now if you need to close admissions today.",
+      });
       return;
     }
 
@@ -105,13 +136,26 @@ export default function AdmissionPortalAccessCard() {
       isOpen: true,
       closeOnDate: nextCloseDate,
     });
-    setValidationMessage("");
+    setScheduleDraft({
+      sourceKey: scheduleSourceKey,
+      value: nextCloseDate,
+    });
+    setValidationState({
+      sourceKey: scheduleSourceKey,
+      message: "",
+    });
   };
 
   const handleCloseAdmission = () => {
     setAdmissionPortalOpen(false);
-    setScheduledCloseDate("");
-    setValidationMessage("");
+    setScheduleDraft({
+      sourceKey: scheduleSourceKey,
+      value: "",
+    });
+    setValidationState({
+      sourceKey: scheduleSourceKey,
+      message: "",
+    });
   };
 
   return (
@@ -124,7 +168,11 @@ export default function AdmissionPortalAccessCard() {
         >
           {isAdmissionOpen ? "Admissions Open" : "Admissions Closed"}
         </span>
-        <h3>{canManageAdmission ? "Admission Access" : "Admission Status"}</h3>
+        <h3>
+          {canManageAdmission
+            ? `${managedBranchName} Admission Access`
+            : `${managedBranchName} Admission Status`}
+        </h3>
         <p>{admissionDescription}</p>
         {admissionMeta ? (
           <p className="admission-portal-meta">{admissionMeta}</p>
@@ -139,10 +187,16 @@ export default function AdmissionPortalAccessCard() {
               type="date"
               className="admission-portal-date-input"
               value={scheduledCloseDate}
-              min={todayDateInputValue}
+              min={minimumScheduledCloseDate}
               onChange={(event) => {
-                setScheduledCloseDate(event.target.value);
-                setValidationMessage("");
+                setScheduleDraft({
+                  sourceKey: scheduleSourceKey,
+                  value: event.target.value,
+                });
+                setValidationState({
+                  sourceKey: scheduleSourceKey,
+                  message: "",
+                });
               }}
             />
           </label>
@@ -150,7 +204,11 @@ export default function AdmissionPortalAccessCard() {
             <p className="admission-portal-helper is-error">
               {validationMessage}
             </p>
-          ) : null}
+          ) : (
+            <p className="admission-portal-helper">
+              The selected date is the first day admissions are closed.
+            </p>
+          )}
           <button
             type="button"
             className="admission-portal-toggle is-open"

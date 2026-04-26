@@ -291,6 +291,24 @@ export async function fetchBackupHistory() {
   return parseJsonResponse<BackupHistoryRecord[]>(response);
 }
 
+const getDownloadFileName = (
+  response: Response,
+  fallbackFileName: string,
+) => {
+  const contentDisposition = response.headers.get("Content-Disposition") || "";
+  const utfMatch = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (utfMatch?.[1]) {
+    return decodeURIComponent(utfMatch[1]);
+  }
+
+  const plainMatch = contentDisposition.match(/filename\s*=\s*"?(.*?)"?(?:;|$)/i);
+  if (plainMatch?.[1]) {
+    return plainMatch[1];
+  }
+
+  return fallbackFileName;
+};
+
 export async function createManualBackup(options?: { backupType?: "manual" | "automated" }) {
   const snapshot = buildBackupSnapshot();
   const response = await fetch(`${API_BASE_URL}/api/admin/backup/manual/`, {
@@ -304,6 +322,57 @@ export async function createManualBackup(options?: { backupType?: "manual" | "au
   });
 
   return parseJsonResponse<BackupHistoryRecord>(response);
+}
+
+export async function uploadBackupArchive(file: File) {
+  const formData = new FormData();
+  formData.append("archive", file);
+
+  const response = await fetch(`${API_BASE_URL}/api/admin/backup/upload/`, {
+    method: "POST",
+    headers: buildHeaders(),
+    body: formData,
+  });
+
+  return parseJsonResponse<BackupHistoryRecord>(response);
+}
+
+export async function downloadBackupArchive(
+  backupHistoryId: string,
+  fallbackFileName = "backup.zip",
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/admin/backup/history/${backupHistoryId}/download/`,
+    {
+      headers: buildHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    let message = "Failed to download backup ZIP.";
+    try {
+      const data = (await response.json()) as { detail?: string } | undefined;
+      if (data?.detail) {
+        message = data.detail;
+      }
+    } catch {
+      message = response.statusText || message;
+    }
+
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const objectUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = getDownloadFileName(response, fallbackFileName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(objectUrl);
+  }, 0);
 }
 
 export async function syncBackupSnapshot() {

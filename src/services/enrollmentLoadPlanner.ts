@@ -31,6 +31,13 @@ export interface ScheduledAssignmentConflict {
   message: string;
 }
 
+const SEMESTER_ORDER = ["1st Semester", "2nd Semester", "Summer"];
+
+type AcademicTermSnapshot = Pick<
+  StoredStudentGradeRecord,
+  "academicYear" | "semester"
+>;
+
 export const buildEnrollmentSubjectKey = ({
   code,
   title,
@@ -56,6 +63,82 @@ export const getRequiredShsQuarterLabels = (semester: string) =>
   semester.trim().toLowerCase().includes("2nd")
     ? ["3rd Quarter", "4th Quarter"]
     : ["1st Quarter", "2nd Quarter"];
+
+const normalizeSemesterValue = (semester?: string | null) =>
+  (semester || "").trim().toLowerCase();
+
+const getAcademicYearSortValue = (academicYear?: string) => {
+  const match = academicYear?.match(/\d{4}/);
+  return match ? Number(match[0]) : 0;
+};
+
+const getSemesterOrderIndex = (semester?: string) => {
+  const index = SEMESTER_ORDER.indexOf(semester as (typeof SEMESTER_ORDER)[number]);
+  return index >= 0 ? index : SEMESTER_ORDER.length;
+};
+
+const compareAcademicTerms = (
+  left: AcademicTermSnapshot,
+  right: AcademicTermSnapshot,
+) =>
+  getAcademicYearSortValue(left.academicYear) -
+    getAcademicYearSortValue(right.academicYear) ||
+  getSemesterOrderIndex(left.semester) - getSemesterOrderIndex(right.semester) ||
+  left.academicYear.localeCompare(right.academicYear) ||
+  left.semester.localeCompare(right.semester);
+
+const groupLatestAttemptRecordsBySubject = (
+  gradeRecords: StoredStudentGradeRecord[],
+) => {
+  const groupedRecords = new Map<string, StoredStudentGradeRecord[]>();
+
+  [...gradeRecords]
+    .sort(compareAcademicTerms)
+    .forEach((record) => {
+      const key = buildEnrollmentSubjectKey({
+        code: record.subjectCode,
+        title: record.subjectTitle,
+      });
+      const existingRecords = groupedRecords.get(key);
+
+      if (!existingRecords) {
+        groupedRecords.set(key, [record]);
+        return;
+      }
+
+      const termComparison = compareAcademicTerms(record, existingRecords[0]);
+
+      if (termComparison > 0) {
+        groupedRecords.set(key, [record]);
+        return;
+      }
+
+      if (termComparison === 0) {
+        groupedRecords.set(key, [...existingRecords, record]);
+      }
+    });
+
+  return groupedRecords;
+};
+
+const getCollegeTerminalRecordPriority = (record: StoredStudentGradeRecord) => {
+  const normalizedPeriod = record.gradingPeriod.trim().toLowerCase();
+  const normalizedSemester = normalizeSemesterValue(record.semester);
+
+  if (normalizedPeriod === "overall") {
+    return 3;
+  }
+
+  if (normalizedPeriod === normalizedSemester) {
+    return 2;
+  }
+
+  if (normalizedPeriod.includes("final")) {
+    return 1;
+  }
+
+  return 0;
+};
 
 const getRetakeSubjectPriority = (
   evaluation: EnrollmentRetakeRequestItem["evaluation"],
@@ -86,39 +169,49 @@ export const getEnrollmentRetakeRequestItems = ({
   gradeRecords: StoredStudentGradeRecord[];
 }) => {
   const groupedItems = new Map<string, EnrollmentRetakeRequestItem>();
+  const normalizedTargetSemester = normalizeSemesterValue(semester);
 
   if (program === "College") {
-    gradeRecords
-      .filter(isRetakeGradeRecord)
-      .filter((record) => isCollegeTerminalGradeRecord(record))
-      .forEach((record) => {
-        const key = buildEnrollmentSubjectKey({
-          code: record.subjectCode,
-          title: record.subjectTitle,
-        });
-        const existingItem = groupedItems.get(key);
+    groupLatestAttemptRecordsBySubject(
+      gradeRecords.filter((record) => isCollegeTerminalGradeRecord(record)),
+    ).forEach((records, key) => {
+      if (
+        records.length === 0 ||
+        normalizeSemesterValue(records[0].semester) !== normalizedTargetSemester
+      ) {
+        return;
+      }
 
-        if (
-          !existingItem ||
-          getRetakeSubjectPriority(record.evaluation) >=
-            getRetakeSubjectPriority(existingItem.evaluation)
-        ) {
-          groupedItems.set(key, {
-            subjectCode: record.subjectCode,
-            subjectTitle: record.subjectTitle,
-            evaluation: record.evaluation,
-            gradingPeriods: [record.gradingPeriod],
-          });
-          return;
-        }
+      const resolvedRecord = [...records].sort(
+        (left, right) =>
+          getCollegeTerminalRecordPriority(right) -
+            getCollegeTerminalRecordPriority(left) ||
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          right.gradingPeriod.localeCompare(left.gradingPeriod),
+      )[0];
 
-        groupedItems.set(key, {
-          ...existingItem,
-          gradingPeriods: Array.from(
-            new Set([...existingItem.gradingPeriods, record.gradingPeriod]),
-          ),
-        });
+      if (!resolvedRecord || !isRetakeEvaluation(resolvedRecord.evaluation)) {
+        return;
+      }
+
+      const flaggedPeriods = Array.from(
+        new Set(
+          records
+            .filter(isRetakeGradeRecord)
+            .map((record) => record.gradingPeriod),
+        ),
+      );
+
+      groupedItems.set(key, {
+        subjectCode: resolvedRecord.subjectCode,
+        subjectTitle: resolvedRecord.subjectTitle,
+        evaluation: resolvedRecord.evaluation,
+        gradingPeriods:
+          flaggedPeriods.length > 0
+            ? flaggedPeriods
+            : [resolvedRecord.gradingPeriod],
       });
+    });
 
     return Array.from(groupedItems.values()).sort(
       (left, right) =>
@@ -127,21 +220,15 @@ export const getEnrollmentRetakeRequestItems = ({
     );
   }
 
-  const requiredQuarterLabels = getRequiredShsQuarterLabels(semester);
-  const subjectRecordsByKey = new Map<string, StoredStudentGradeRecord[]>();
+  groupLatestAttemptRecordsBySubject(gradeRecords).forEach((records) => {
+    if (
+      records.length === 0 ||
+      normalizeSemesterValue(records[0].semester) !== normalizedTargetSemester
+    ) {
+      return;
+    }
 
-  gradeRecords
-    .filter((record) => requiredQuarterLabels.includes(record.gradingPeriod))
-    .forEach((record) => {
-      const key = buildEnrollmentSubjectKey({
-        code: record.subjectCode,
-        title: record.subjectTitle,
-      });
-      const existingRecords = subjectRecordsByKey.get(key) ?? [];
-      subjectRecordsByKey.set(key, [...existingRecords, record]);
-    });
-
-  subjectRecordsByKey.forEach((records) => {
+    const requiredQuarterLabels = getRequiredShsQuarterLabels(records[0].semester);
     const postedPeriods = new Set(records.map((record) => record.gradingPeriod));
     const hasCompleteSemesterGrades = requiredQuarterLabels.every((label) =>
       postedPeriods.has(label),

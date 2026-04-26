@@ -22,6 +22,14 @@
   overflow: hidden;
 }
 
+.am-reports-main-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  gap: 24px;
+  flex: 1;
+  min-height: 0;
+}
+
 /* Page Header */
 .am-reports-header {
   display: flex;
@@ -86,6 +94,183 @@
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+/* =============================================
+   REVIEW STATUS TABLE
+   ============================================= */
+.am-reports-status-pane {
+  min-height: 0;
+}
+
+.am-reports-status-card {
+  height: 100%;
+  min-height: 500px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.am-reports-status-header {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.am-reports-status-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #1A3D5C;
+}
+
+.am-reports-status-header p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #64748b;
+}
+
+.am-reports-status-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.am-reports-status-stat {
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid transparent;
+}
+
+.am-reports-status-stat.pending {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.am-reports-status-stat.reviewed {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.am-reports-status-stat-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.am-reports-status-stat strong {
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.am-reports-status-table-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.am-reports-status-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.am-reports-status-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #ffffff;
+  padding: 12px 16px;
+  font-size: 0.72rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+}
+
+.am-reports-status-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+}
+
+.am-reports-status-table tbody tr {
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.am-reports-status-table tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.am-reports-status-table tbody tr.active td {
+  background: #eff6ff;
+}
+
+.am-reports-status-report {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.am-reports-status-report strong {
+  color: #1e293b;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.am-reports-status-report span {
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.am-reports-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.am-reports-status-badge.pending {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.am-reports-status-badge.reviewed {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.am-reports-status-date {
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.am-reports-status-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
 }
 
 /* =============================================
@@ -346,6 +531,42 @@
   word-break: break-word; 
 }
 
+.am-reports-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.am-reports-review-toggle-btn {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  border-radius: 10px;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.am-reports-review-toggle-btn:hover {
+  transform: translateY(-1px);
+}
+
+.am-reports-review-toggle-btn.is-pending {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.am-reports-review-toggle-btn.is-reviewed {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
 .am-reports-detail-delete-btn {
   background: #fff;
   color: #94a3b8;
@@ -386,6 +607,14 @@
 
 .am-reports-info-chip strong {
   color: #1e293b;
+}
+
+.am-reports-info-chip-status.pending {
+  color: #c2410c;
+}
+
+.am-reports-info-chip-status.reviewed {
+  color: #15803d;
 }
 
 .am-reports-text-body {
@@ -818,6 +1047,11 @@
     padding: 20px;
   }
 
+  .am-reports-main-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
   .am-reports-split-view {
     grid-template-columns: 1fr;
     min-height: 500px;
@@ -833,6 +1067,11 @@
   
   .am-reports-detail-pane { 
     display: none; 
+  }
+
+  .am-reports-detail-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .am-reports-container.detail-open .am-reports-list-pane { 
@@ -885,6 +1124,18 @@
   .am-reports-list-search-container { 
     padding: 12px; 
   }
+
+  .am-reports-status-header,
+  .am-reports-status-summary {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .am-reports-status-table th,
+  .am-reports-status-table td {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
   
   .am-reports-search-bar input { 
     font-size: 13px; 
@@ -910,6 +1161,11 @@
   .am-reports-detail-pane { 
     padding: 16px; 
   }
+
+  .am-reports-detail-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
   
   .am-reports-detail-title { 
     font-size: 1.1rem; 
@@ -925,6 +1181,14 @@
 
   .am-reports-select-all-btn span { 
     display: none; 
+  }
+
+  .am-reports-status-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .am-reports-status-table .am-reports-status-date {
+    white-space: normal;
   }
 
   .am-reports-modal-overlay {
@@ -969,6 +1233,10 @@
   .am-reports-title-group h2 { 
     font-size: 1rem; 
   }
+
+  .am-reports-status-header h3 {
+    font-size: 1rem;
+  }
   
   .am-reports-trash-toggle-btn { 
     padding: 5px 8px; 
@@ -992,5 +1260,10 @@
   .am-reports-mass-del-btn { 
     padding: 4px 8px; 
     font-size: 11px; 
+  }
+
+  .am-reports-status-table th:last-child,
+  .am-reports-status-table td:last-child {
+    display: none;
   }
 }

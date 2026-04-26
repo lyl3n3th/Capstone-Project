@@ -5,6 +5,7 @@ import {
   Outlet,
   Route,
   Routes,
+  useLocation,
 } from "react-router-dom";
 import AdmissionHome from "./pages/admission/AdmissionHome";
 import AdmissionStep1 from "./pages/admission/AdmissionStep1";
@@ -19,6 +20,7 @@ import StudentProfile from "./pages/student/StudentProfile.tsx";
 import StudentGrades from "./pages/student/StudentGrades.tsx";
 import StudentSubjects from "./pages/student/StudentSubjects.tsx";
 import StudentEnrollment from "./pages/student/StudentEnrollment.tsx";
+import StudentEvaluation from "./pages/student/StudentEvaluation.tsx";
 import StudentLogin from "./pages/student/StudentLogin.tsx";
 import StudentRegistration from "./pages/student/StudentRegistration.tsx";
 
@@ -43,7 +45,14 @@ import StaffLogin from "./pages/staff/StaffLogin.tsx";
 import TestSupabase from "./components/TestSupabase";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import PublicOnlyRoute from "./components/auth/PublicOnlyRoute";
-import { useAdmissionPortalStatus } from "./hooks/useAdmissionPortalStatus";
+import {
+  useAdmissionPortalOverview,
+  useAdmissionPortalStatus,
+} from "./hooks/useAdmissionPortalStatus";
+import {
+  DEFAULT_ADMISSION_BRANCH_CODE,
+  resolveAdmissionPortalBranchCode,
+} from "./services/admissionPortal";
 import { useAuth } from "./hooks/useAuth";
 import { STAFF_PORTAL_ROLES } from "./types/user";
 
@@ -84,9 +93,23 @@ function AdminPortalRoute({ children }: { children: ReactNode }) {
 }
 
 function AdmissionApplicationRoute({ children }: { children: ReactNode }) {
-  const { isOpen: isAdmissionPortalOpen } = useAdmissionPortalStatus();
+  const location = useLocation();
+  const branchParam = new URLSearchParams(location.search).get("branch");
+  const resolvedBranchCode = resolveAdmissionPortalBranchCode(branchParam);
+  const { isAnyOpen: isAnyAdmissionBranchOpen } = useAdmissionPortalOverview();
+  const { isOpen: isSelectedBranchOpen } = useAdmissionPortalStatus(
+    resolvedBranchCode ?? DEFAULT_ADMISSION_BRANCH_CODE,
+  );
 
-  if (!isAdmissionPortalOpen) {
+  if (branchParam && !resolvedBranchCode) {
+    return <Navigate to="/enroll" replace />;
+  }
+
+  if (resolvedBranchCode && !isSelectedBranchOpen) {
+    return <Navigate to="/enroll" replace />;
+  }
+
+  if (!resolvedBranchCode && !isAnyAdmissionBranchOpen) {
     return <Navigate to="/admission" replace />;
   }
 
@@ -202,6 +225,14 @@ function AppRoutes() {
         element={
           <StudentPortalRoute>
             <StudentEnrollment />
+          </StudentPortalRoute>
+        }
+      />
+      <Route
+        path="/student/evaluation"
+        element={
+          <StudentPortalRoute>
+            <StudentEvaluation />
           </StudentPortalRoute>
         }
       />

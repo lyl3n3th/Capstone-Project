@@ -13,7 +13,9 @@ from rest_framework.views import APIView
 
 from .models import AdmissionApplication, AdmissionRequirement
 from .tracking_recovery import (
+    build_decision_notification_target,
     build_tracking_notification_target,
+    deliver_admission_decision_notification,
     deliver_submission_tracking_notification,
     deliver_tracking_recovery,
     find_matching_admission_applications,
@@ -139,6 +141,71 @@ def validate_submission_notification_payload(payload):
     if cleaned["mobile"] and len(normalized_mobile) < 10:
         errors.setdefault("mobile", []).append("Enter a valid mobile number.")
     cleaned["mobile"] = normalized_mobile
+
+    return cleaned, errors
+
+
+def validate_decision_notification_payload(payload):
+    errors = {}
+    cleaned = {
+        "tracking_number": normalize_tracking_number(
+            payload.get("tracking_number", payload.get("trackingNumber", ""))
+        ),
+        "student_number": normalize_text(
+            payload.get("student_number", payload.get("studentNumber", ""))
+        )
+        or "",
+        "email": normalize_text(payload.get("email", "")) or "",
+        "full_name": normalize_text(
+            payload.get("full_name", payload.get("fullName", ""))
+        )
+        or "",
+        "decision_status": (
+            normalize_text(
+                payload.get(
+                    "decision_status",
+                    payload.get("decisionStatus", "rejected"),
+                )
+            )
+            or "rejected"
+        ).lower(),
+        "decision_reason": normalize_text(
+            payload.get("decision_reason", payload.get("decisionReason", ""))
+        )
+        or "",
+        "record_type": (
+            normalize_text(
+                payload.get("record_type", payload.get("recordType", "admission"))
+            )
+            or "admission"
+        ).lower(),
+    }
+
+    if not cleaned["decision_reason"]:
+        errors.setdefault("decision_reason", []).append(
+            "Decision reason is required."
+        )
+
+    if cleaned["email"]:
+        try:
+            validate_email(cleaned["email"])
+        except Exception:
+            errors.setdefault("email", []).append("Enter a valid email address.")
+
+    if not cleaned["email"] and not cleaned["tracking_number"]:
+        errors.setdefault("email", []).append(
+            "Email address is required when no tracking number is provided."
+        )
+
+    if cleaned["decision_status"] not in {"accepted", "rejected"}:
+        errors.setdefault("decision_status", []).append(
+            "Decision status must be accepted or rejected."
+        )
+
+    if cleaned["record_type"] not in {"admission", "enrollment"}:
+        errors.setdefault("record_type", []).append(
+            "Record type must be admission or enrollment."
+        )
 
     return cleaned, errors
 
@@ -381,6 +448,80 @@ class AdmissionSubmissionNotificationView(APIView):
             "Tracking number confirmation sent to the registered contact details."
             if any_delivery_sent
             else "Tracking number confirmation prepared, but messaging is not configured."
+        )
+
+        return Response(
+            {
+                "message": message,
+                "tracking_number": notification_target.tracking_number,
+                "deliveries": deliveries,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AdmissionDecisionNotificationView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser]
+
+    def post(self, request):
+        cleaned, errors = validate_decision_notification_payload(request.data)
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        notification_target = None
+
+        if cleaned["email"]:
+            notification_target = build_decision_notification_target(
+                email=cleaned["email"],
+                full_name=cleaned["full_name"],
+                tracking_number=cleaned["tracking_number"],
+                student_number=cleaned["student_number"],
+                record_type=cleaned["record_type"],
+            )
+        else:
+            try:
+                tracking_target = find_tracking_notification_target(
+                    cleaned["tracking_number"],
+                )
+            except (ImproperlyConfigured, SupabaseRestError) as exc:
+                return Response(
+                    {"detail": str(exc)},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+            if not tracking_target:
+                return Response(
+                    {"detail": "No admission record matched this tracking number."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            notification_target = build_decision_notification_target(
+                email=tracking_target.email,
+                full_name=" ".join(
+                    part
+                    for part in [
+                        tracking_target.first_name,
+                        tracking_target.last_name,
+                    ]
+                    if part
+                ),
+                tracking_number=tracking_target.tracking_number,
+                student_number=cleaned["student_number"],
+                record_type=cleaned["record_type"],
+            )
+
+        deliveries = deliver_admission_decision_notification(
+            notification_target,
+            decision_status=cleaned["decision_status"],
+            decision_reason=cleaned["decision_reason"],
+        )
+        email_sent = deliveries["email"].get("status") == "sent"
+        message = (
+            "Decision email sent to the applicant."
+            if email_sent
+            else "Decision email prepared, but delivery is not configured."
         )
 
         return Response(

@@ -5,6 +5,7 @@ import {
   type AdminAttachment,
 } from "./adminStorage";
 import type { EnrollmentRequestedLoadRecord } from "./enrollmentLoadPlanner";
+import { stripLegacyMockEnrollmentRequestRecords } from "./legacyMockData";
 
 export type EnrollmentRequestStatus = "Pending" | "Approved" | "Rejected";
 
@@ -32,6 +33,7 @@ export interface EnrollmentRequestRecord {
   enrollmentDate?: string;
   updatedAt?: string;
   notes?: string;
+  rejectionReason?: string;
   attachments?: AdminAttachment[];
   requestedLoad?: EnrollmentRequestedLoadRecord;
   irregularRequest?: EnrollmentIrregularRequestRecord;
@@ -96,10 +98,12 @@ export const getRegularEnrollmentRequirementItems = () =>
 
 export const readEnrollmentRequestsForBranch = (branch?: string | null) =>
   sortEnrollmentRequests(
-    readBranchScopedData<EnrollmentRequestRecord[]>(
-      ENROLLMENT_REQUEST_STORAGE_SCOPE,
-      normalizeBranchName(branch),
-    ) ?? [],
+    stripLegacyMockEnrollmentRequestRecords(
+      readBranchScopedData<EnrollmentRequestRecord[]>(
+        ENROLLMENT_REQUEST_STORAGE_SCOPE,
+        normalizeBranchName(branch),
+      ) ?? [],
+    ),
   );
 
 export const writeEnrollmentRequestsForBranch = (
@@ -107,7 +111,9 @@ export const writeEnrollmentRequestsForBranch = (
   requests: EnrollmentRequestRecord[],
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
-  const sortedRequests = sortEnrollmentRequests(requests);
+  const sortedRequests = sortEnrollmentRequests(
+    stripLegacyMockEnrollmentRequestRecords(requests),
+  );
 
   writeBranchScopedData(
     ENROLLMENT_REQUEST_STORAGE_SCOPE,

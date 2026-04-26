@@ -10,6 +10,7 @@ import {
   FaSave,
   FaTrash,
   FaUndo,
+  FaUpload,
 } from "react-icons/fa";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
@@ -17,6 +18,7 @@ import {
   applyBackupSnapshot,
   createManualBackup,
   deleteBackup,
+  downloadBackupArchive,
   fetchBackupHistory,
   type BackupSettingsRecord,
   fetchBackupSnapshot,
@@ -25,6 +27,7 @@ import {
   saveBackupSettings,
   startBackupRestore,
   type BackupHistoryRecord,
+  uploadBackupArchive,
 } from "../../services/backupApi";
 import "../../styles/admin/admin-backup.css";
 
@@ -76,6 +79,7 @@ export default function AdminBackup({
   const refreshTimerRef = useRef<number | null>(null);
   const hasLoadedDataRef = useRef(false);
   const isSettingsDirtyRef = useRef(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const loadBackupDataRef = useRef<
     (options?: LoadBackupDataOptions) => Promise<void>
   >(async () => undefined);
@@ -89,8 +93,11 @@ export default function AdminBackup({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+  const [isUploadingBackup, setIsUploadingBackup] = useState(false);
+  const [downloadingBackupId, setDownloadingBackupId] = useState<string | null>(null);
   const [isSettingsDirty, setIsSettingsDirty] = useState(false);
   const [pageLoadError, setPageLoadError] = useState<string | null>(null);
+  const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
 
   const addToast = (message: string, type: Toast["type"]) => {
     toastCounterRef.current += 1;
@@ -308,6 +315,13 @@ export default function AdminBackup({
     }
   };
 
+  const clearSelectedUploadFile = () => {
+    setSelectedUploadFile(null);
+    if (uploadInputRef.current) {
+      uploadInputRef.current.value = "";
+    }
+  };
+
   const handleSaveSettings = async () => {
     try {
       setIsSavingSettings(true);
@@ -330,6 +344,51 @@ export default function AdminBackup({
       );
     } finally {
       setIsSavingSettings(false);
+    }
+  };
+
+  const handleUploadArchive = async () => {
+    if (!selectedUploadFile) {
+      addToast("Choose a backup ZIP file to upload.", "warning");
+      return;
+    }
+
+    try {
+      setIsUploadingBackup(true);
+      const uploadedBackup = await uploadBackupArchive(selectedUploadFile);
+      const mappedBackup = mapBackupRecord(uploadedBackup);
+      setBackups((prev) => [
+        mappedBackup,
+        ...prev.filter((item) => item.id !== mappedBackup.id),
+      ]);
+      setHistoryPage(0);
+      clearSelectedUploadFile();
+      await loadBackupData({ showErrorToast: false, preserveDirtySettings: true });
+      addToast("Backup ZIP uploaded and added to backup history.", "success");
+    } catch (error) {
+      addToast(
+        error instanceof Error ? error.message : "Failed to upload backup ZIP.",
+        "error",
+      );
+    } finally {
+      setIsUploadingBackup(false);
+    }
+  };
+
+  const handleDownload = async (backupId: string, backupName: string) => {
+    try {
+      setDownloadingBackupId(backupId);
+      await downloadBackupArchive(backupId, backupName);
+      addToast(`Downloading ${backupName}.`, "success");
+    } catch (error) {
+      addToast(
+        error instanceof Error ? error.message : "Failed to download backup ZIP.",
+        "error",
+      );
+    } finally {
+      setDownloadingBackupId((currentId) =>
+        currentId === backupId ? null : currentId,
+      );
     }
   };
 
@@ -575,6 +634,61 @@ export default function AdminBackup({
                     </p>
                   </div>
                 </button>
+
+                <div className="summary-card upload-backup-card">
+                  <div className="summary-icon amber">
+                    <FaUpload />
+                  </div>
+                  <div className="summary-text upload-backup-text">
+                    <h4>Upload Backup ZIP</h4>
+                    <p>
+                      Upload an existing AICSync backup ZIP so it appears in
+                      backup history and can be restored after a system issue.
+                    </p>
+
+                    <div className="upload-backup-controls">
+                      <input
+                        ref={uploadInputRef}
+                        type="file"
+                        accept=".zip,application/zip"
+                        className="upload-backup-input"
+                        onChange={(event) => {
+                          setSelectedUploadFile(
+                            event.target.files?.[0] || null,
+                          );
+                        }}
+                        disabled={isUploadingBackup}
+                      />
+                      <div className="upload-backup-actions">
+                        <button
+                          type="button"
+                          className="upload-backup-btn"
+                          onClick={() => void handleUploadArchive()}
+                          disabled={!selectedUploadFile || isUploadingBackup}
+                        >
+                          <FaUpload />
+                          {isUploadingBackup ? "Uploading..." : "Upload ZIP"}
+                        </button>
+                        {selectedUploadFile ? (
+                          <button
+                            type="button"
+                            className="upload-backup-clear-btn"
+                            onClick={clearSelectedUploadFile}
+                            disabled={isUploadingBackup}
+                          >
+                            Clear
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <small>
+                      {selectedUploadFile
+                        ? `Selected file: ${selectedUploadFile.name}`
+                        : "Accepted file: AICSync backup archive in .zip format."}
+                    </small>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -653,6 +767,20 @@ export default function AdminBackup({
                         </td>
                         <td>
                           <div className="action-group">
+                            <button
+                              className="action-btn download"
+                              onClick={() => void handleDownload(backup.id, backup.name)}
+                              title="Download backup ZIP"
+                              disabled={
+                                backup.rawStatus !== "completed" ||
+                                downloadingBackupId === backup.id
+                              }
+                            >
+                              <FaHdd />
+                              {downloadingBackupId === backup.id
+                                ? "Downloading..."
+                                : "Download"}
+                            </button>
                             <button
                               className="action-btn restore"
                               onClick={() => void handleRestore(backup.id, backup.name)}

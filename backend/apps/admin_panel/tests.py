@@ -1,11 +1,16 @@
+import io
+import json
+import zipfile
 from datetime import datetime, time, timezone
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.admin_panel.automation import is_automated_backup_due
+from apps.admin_panel.models import BackupHistory
 from apps.admin_panel.repository import BackupSettingsRecord
 
 
@@ -132,3 +137,107 @@ class BackupAutomatedDispatchApiTests(TestCase):
             created_by=self.user,
             created_by_name="",
         )
+
+
+class BackupArchiveApiTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="backup-upload-admin",
+            password="password123",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def _build_snapshot_zip(self, *, branch="Bacoor"):
+        archive_buffer = io.BytesIO()
+        with zipfile.ZipFile(archive_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "metadata/manifest.json",
+                json.dumps(
+                    {
+                        "branch": branch,
+                        "backup_type": "manual",
+                        "snapshot_format": "json",
+                        "dataset_counts": {"students": 1, "alumni": 1},
+                        "models": [],
+                        "model_counts": {},
+                    }
+                ).encode("utf-8"),
+            )
+            archive.writestr(
+                "data/students.json",
+                json.dumps([{"id": "S-1", "branch": branch}]).encode("utf-8"),
+            )
+            archive.writestr(
+                "data/alumni.json",
+                json.dumps([{"id": "A-1", "becameAlumniOn": "2026-04-24"}]).encode("utf-8"),
+            )
+
+        archive_buffer.seek(0)
+        return archive_buffer.getvalue()
+
+    @patch("apps.admin_panel.services.upload_backup_blob")
+    def test_upload_backup_archive_creates_completed_history_entry(self, upload_blob_mock):
+        upload_blob_mock.return_value = (
+            "local-media",
+            "branches/bacoor/uploads/bacoor_backup.zip",
+        )
+
+        response = self.client.post(
+            "/api/admin/backup/upload/",
+            {
+                "archive": SimpleUploadedFile(
+                    "bacoor_backup.zip",
+                    self._build_snapshot_zip(),
+                    content_type="application/zip",
+                )
+            },
+            format="multipart",
+            HTTP_X_USER_ROLE="admin",
+            HTTP_X_USER_BRANCH="Bacoor",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["status"], "completed")
+        self.assertEqual(response.data["backup_type"], "manual")
+        self.assertEqual(response.data["backup_filename"], "bacoor_backup.zip")
+        self.assertEqual(response.data["metadata"]["snapshot_format"], "json")
+        self.assertEqual(response.data["metadata"]["student_count"], 1)
+        self.assertEqual(response.data["metadata"]["alumni_count"], 1)
+        self.assertEqual(response.data["metadata"]["upload_source"], "uploaded_archive")
+
+        history = BackupHistory.objects.get(pk=response.data["id"])
+        self.assertEqual(history.status, BackupHistory.STATUS_COMPLETED)
+        self.assertEqual(
+            history.file_path,
+            "branches/bacoor/uploads/bacoor_backup.zip",
+        )
+
+    @patch("apps.admin_panel.views.download_backup_blob")
+    def test_download_backup_archive_returns_zip_attachment(self, download_blob_mock):
+        download_blob_mock.return_value = b"zip-payload"
+        history = BackupHistory.objects.create(
+            branch="Bacoor",
+            backup_type=BackupHistory.TYPE_MANUAL,
+            file_path="branches/bacoor/manual/bacoor_backup.zip",
+            sql_file_path="",
+            backup_filename="bacoor_backup.zip",
+            storage_bucket="local-media",
+            status=BackupHistory.STATUS_COMPLETED,
+            progress=100,
+        )
+
+        response = self.client.get(
+            f"/api/admin/backup/history/{history.id}/download/",
+            HTTP_X_USER_ROLE="admin",
+            HTTP_X_USER_BRANCH="Bacoor",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/zip")
+        self.assertIn(
+            'attachment; filename="bacoor_backup.zip"',
+            response["Content-Disposition"],
+        )
+        self.assertEqual(response.content, b"zip-payload")

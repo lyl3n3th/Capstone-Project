@@ -22,6 +22,8 @@ import {
 } from "../../services/reportApi";
 import "../../styles/manager/area-managerReports.css";
 
+const REVIEWED_REPORTS_STORAGE_KEY = "am-reviewed-report-ids";
+
 interface Report {
   id: string;
   user: string;
@@ -67,6 +69,36 @@ const mapApiReport = (report: ReportRecord): Report => ({
   file_name: getFileNameFromUrl(report.attachment_url) || undefined,
 });
 
+const readReviewedReportIds = () => {
+  if (typeof window === "undefined") {
+    return [] as string[];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(REVIEWED_REPORTS_STORAGE_KEY);
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+    if (!Array.isArray(parsedValue)) {
+      return [];
+    }
+
+    return Array.from(
+      new Set(
+        parsedValue.filter(
+          (value): value is string =>
+            typeof value === "string" && value.trim().length > 0,
+        ),
+      ),
+    );
+  } catch (error) {
+    console.error("Failed to read reviewed report ids", error);
+    return [];
+  }
+};
+
 // Helper: format any date/time string → MM/DD/YYYY
 const formatDateTime = (value: string): string => {
   if (!value) return "—";
@@ -88,6 +120,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
   const [reports, setReports] = useState<Report[]>([]);
   const [trash, setTrash] = useState<Report[]>([]);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
+  const [reviewedIds, setReviewedIds] = useState<string[]>(readReviewedReportIds);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -142,6 +175,17 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
     fetchReports();
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(
+      REVIEWED_REPORTS_STORAGE_KEY,
+      JSON.stringify(reviewedIds),
+    );
+  }, [reviewedIds]);
+
   const filteredReports = useMemo(() => {
     return reports.filter(
       (r) =>
@@ -150,9 +194,47 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
     );
   }, [reports, searchTerm]);
 
+  const pendingReviewCount = useMemo(
+    () => reports.filter((report) => !reviewedIds.includes(report.id)).length,
+    [reports, reviewedIds],
+  );
+
+  const reviewedCount = useMemo(
+    () => reports.filter((report) => reviewedIds.includes(report.id)).length,
+    [reports, reviewedIds],
+  );
+
+  const reportStatusRows = useMemo(() => {
+    return [...filteredReports].sort((firstReport, secondReport) => {
+      const firstIsReviewed = reviewedIds.includes(firstReport.id);
+      const secondIsReviewed = reviewedIds.includes(secondReport.id);
+
+      if (firstIsReviewed !== secondIsReviewed) {
+        return firstIsReviewed ? 1 : -1;
+      }
+
+      return (
+        new Date(secondReport.time).getTime() -
+        new Date(firstReport.time).getTime()
+      );
+    });
+  }, [filteredReports, reviewedIds]);
+
+  const selectedReportIsReviewed = selectedReport
+    ? reviewedIds.includes(selectedReport.id)
+    : false;
+
   const handleSelectReport = (report: Report) => {
     setSelectedReport(report);
     setShowDetail(true);
+  };
+
+  const handleToggleReviewStatus = (reportId: string) => {
+    setReviewedIds((currentIds) =>
+      currentIds.includes(reportId)
+        ? currentIds.filter((currentId) => currentId !== reportId)
+        : [...currentIds, reportId],
+    );
   };
 
   const toggleSelectAll = () => {
@@ -220,6 +302,9 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
       try {
         await permanentlyDeleteReport(id);
         await fetchReports();
+        setReviewedIds((currentIds) =>
+          currentIds.filter((currentId) => currentId !== id),
+        );
         if (selectedReport?.id === id) {
           setSelectedReport(null);
           setShowDetail(false);
@@ -239,8 +324,12 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
       )
     ) {
       try {
+        const trashIds = trash.map((item) => item.id);
         await Promise.all(trash.map((item) => permanentlyDeleteReport(item.id)));
         await fetchReports();
+        setReviewedIds((currentIds) =>
+          currentIds.filter((currentId) => !trashIds.includes(currentId)),
+        );
         if (selectedReport && trash.some((item) => item.id === selectedReport.id)) {
           setSelectedReport(null);
           setShowDetail(false);
@@ -280,7 +369,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
                 Reports
               </h2>
               <span className="am-reports-msg-count">
-                Inbox: {reports.length}
+                Inbox: {reports.length} | Pending Review: {pendingReviewCount}
               </span>
             </div>
           </div>
@@ -296,147 +385,262 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
           </div>
         </header>
 
-        <div className="am-reports-split-view">
-          <div className="am-reports-list-pane">
-            <div className="am-reports-list-search-container">
-              <div className="am-reports-search-bar">
-                <BsSearch className="am-reports-search-icon" />
-                <input
-                  type="text"
-                  placeholder="Search inbox..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
+        <div className="am-reports-main-grid">
+          <aside className="am-reports-status-pane">
+            <div className="am-reports-status-card">
+              <div className="am-reports-status-header">
+                <div>
+                  <h3>Review Status Table</h3>
+                  <p>
+                    Track which inbox reports are still pending review and
+                    which ones have already been reviewed.
+                  </p>
+                </div>
               </div>
-              <div className="am-reports-list-controls">
-                <button
-                  className="am-reports-select-all-btn"
-                  onClick={toggleSelectAll}
-                >
-                  {selectedIds.length === filteredReports.length &&
-                  filteredReports.length > 0 ? (
-                    <BsCheckSquareFill className="am-reports-chk-active" />
-                  ) : (
-                    <BsSquare className="am-reports-chk-inactive" />
-                  )}
-                  <span>Select All</span>
-                </button>
-                {selectedIds.length > 0 && (
+
+              <div className="am-reports-status-summary">
+                <div className="am-reports-status-stat pending">
+                  <span className="am-reports-status-stat-label">
+                    Pending Review
+                  </span>
+                  <strong>{pendingReviewCount}</strong>
+                </div>
+                <div className="am-reports-status-stat reviewed">
+                  <span className="am-reports-status-stat-label">Reviewed</span>
+                  <strong>{reviewedCount}</strong>
+                </div>
+              </div>
+
+              <div className="am-reports-status-table-wrapper">
+                <table className="am-reports-status-table">
+                  <thead>
+                    <tr>
+                      <th>Report</th>
+                      <th>Status</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportStatusRows.length > 0 ? (
+                      reportStatusRows.map((report) => {
+                        const isReviewed = reviewedIds.includes(report.id);
+
+                        return (
+                          <tr
+                            key={report.id}
+                            className={
+                              selectedReport?.id === report.id
+                                ? "active"
+                                : undefined
+                            }
+                            onClick={() => handleSelectReport(report)}
+                          >
+                            <td>
+                              <div className="am-reports-status-report">
+                                <strong>{report.title}</strong>
+                                <span>
+                                  {report.user} | {report.branch}
+                                </span>
+                              </div>
+                            </td>
+                            <td>
+                              <span
+                                className={`am-reports-status-badge ${isReviewed ? "reviewed" : "pending"}`}
+                              >
+                                {isReviewed ? "Reviewed" : "Pending"}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="am-reports-status-date">
+                                {formatDateTime(report.time)}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={3}>
+                          <div className="am-reports-status-empty">
+                            No reports match the current search.
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </aside>
+
+          <div className="am-reports-split-view">
+            <div className="am-reports-list-pane">
+              <div className="am-reports-list-search-container">
+                <div className="am-reports-search-bar">
+                  <BsSearch className="am-reports-search-icon" />
+                  <input
+                    type="text"
+                    placeholder="Search reports..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                <div className="am-reports-list-controls">
                   <button
-                    className="am-reports-mass-del-btn"
-                    onClick={() => handleMoveToTrash(selectedIds)}
+                    className="am-reports-select-all-btn"
+                    onClick={toggleSelectAll}
                   >
-                    <BsTrash3 /> Move to Trash ({selectedIds.length})
+                    {selectedIds.length === filteredReports.length &&
+                    filteredReports.length > 0 ? (
+                      <BsCheckSquareFill className="am-reports-chk-active" />
+                    ) : (
+                      <BsSquare className="am-reports-chk-inactive" />
+                    )}
+                    <span>Select All</span>
                   </button>
+                  {selectedIds.length > 0 && (
+                    <button
+                      className="am-reports-mass-del-btn"
+                      onClick={() => handleMoveToTrash(selectedIds)}
+                    >
+                      <BsTrash3 /> Move to Trash ({selectedIds.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="am-reports-scroll-list">
+                {filteredReports.length > 0 ? (
+                  filteredReports.map((report) => (
+                    <div
+                      key={report.id}
+                      className={`am-reports-card-item ${selectedReport?.id === report.id ? "active" : ""}`}
+                      onClick={() => handleSelectReport(report)}
+                    >
+                      <div
+                        className="am-reports-selection-overlay"
+                        onClick={(e) => toggleSelectOne(e, report.id)}
+                      >
+                        {selectedIds.includes(report.id) ? (
+                          <BsCheckSquareFill className="am-reports-chk-active" />
+                        ) : (
+                          <BsSquare className="am-reports-chk-inactive" />
+                        )}
+                      </div>
+                      <div className="am-reports-card-body">
+                        <div className="am-reports-card-top">
+                          <span className="am-reports-sender">
+                            {report.user}
+                          </span>
+                          <span className="am-reports-time">
+                            {formatDateTime(report.time)}
+                          </span>
+                        </div>
+                        <div className="am-reports-card-title">
+                          {report.title}
+                        </div>
+                        <div className="am-reports-card-branch">
+                          {report.branch}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="am-reports-empty-state">
+                    <BsEnvelopePaperFill size={48} />
+                    <p>No reports found</p>
+                  </div>
                 )}
               </div>
             </div>
 
-            <div className="am-reports-scroll-list">
-              {filteredReports.length > 0 ? (
-                filteredReports.map((report) => (
-                  <div
-                    key={report.id}
-                    className={`am-reports-card-item ${selectedReport?.id === report.id ? "active" : ""}`}
-                    onClick={() => handleSelectReport(report)}
-                  >
-                    <div
-                      className="am-reports-selection-overlay"
-                      onClick={(e) => toggleSelectOne(e, report.id)}
-                    >
-                      {selectedIds.includes(report.id) ? (
-                        <BsCheckSquareFill className="am-reports-chk-active" />
-                      ) : (
-                        <BsSquare className="am-reports-chk-inactive" />
-                      )}
-                    </div>
-                    <div className="am-reports-card-body">
-                      <div className="am-reports-card-top">
-                        <span className="am-reports-sender">{report.user}</span>
-                        <span className="am-reports-time">
-                          {formatDateTime(report.time)}
-                        </span>
-                      </div>
-                      <div className="am-reports-card-title">
-                        {report.title}
-                      </div>
-                      <div className="am-reports-card-branch">
-                        {report.branch}
-                      </div>
+            <div className="am-reports-detail-pane">
+              {selectedReport ? (
+                <div className="am-reports-full-content">
+                  <div className="am-reports-detail-header">
+                    <h1 className="am-reports-detail-title">
+                      {selectedReport.title}
+                    </h1>
+                    <div className="am-reports-detail-actions">
+                      <button
+                        className={`am-reports-review-toggle-btn ${selectedReportIsReviewed ? "is-reviewed" : "is-pending"}`}
+                        onClick={() =>
+                          handleToggleReviewStatus(selectedReport.id)
+                        }
+                      >
+                        {selectedReportIsReviewed
+                          ? "Mark as Pending"
+                          : "Mark as Reviewed"}
+                      </button>
+                      <button
+                        className="am-reports-detail-delete-btn"
+                        onClick={() => handleMoveToTrash([selectedReport.id])}
+                      >
+                        <BsTrash3 />
+                      </button>
                     </div>
                   </div>
-                ))
+                  <div className="am-reports-info-bar">
+                    <div className="am-reports-info-chip">
+                      <strong>From:</strong> {selectedReport.user}
+                    </div>
+                    <div className="am-reports-info-chip">
+                      <strong>Branch:</strong> {selectedReport.branch}
+                    </div>
+                    <div className="am-reports-info-chip">
+                      <strong>Date:</strong> {formatDateTime(selectedReport.time)}
+                    </div>
+                    <div
+                      className={`am-reports-info-chip am-reports-info-chip-status ${selectedReportIsReviewed ? "reviewed" : "pending"}`}
+                    >
+                      <strong>Status:</strong>{" "}
+                      {selectedReportIsReviewed
+                        ? "Reviewed"
+                        : "Pending Review"}
+                    </div>
+                  </div>
+                  <div className="am-reports-text-body">
+                    {selectedReport.text}
+                  </div>
+                  {selectedReport.file_name && (
+                    <div className="am-reports-attachment-box">
+                      <div className="am-reports-file-info">
+                        <BsFileEarmarkPdf className="am-reports-pdf-icon" />
+                        <div className="am-reports-file-text-group">
+                          <p className="am-reports-file-name">
+                            {selectedReport.file_name}
+                          </p>
+                          <p className="am-reports-file-type">PDF Document</p>
+                        </div>
+                      </div>
+                      <button
+                        className="am-reports-download-btn"
+                        onClick={() => {
+                          if (selectedReport.file_url) {
+                            window.open(
+                              selectedReport.file_url,
+                              "_blank",
+                              "noopener,noreferrer",
+                            );
+                          }
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  )}
+                </div>
               ) : (
-                <div className="am-reports-empty-state">
-                  <BsEnvelopePaperFill size={48} />
-                  <p>No reports found</p>
+                <div className="am-reports-select-prompt">
+                  <MdOutlineMarkEmailUnread
+                    size={80}
+                    className="am-reports-prompt-icon"
+                  />
+                  <h3>Select a Message</h3>
+                  <p>Choose a report from the list to view its contents.</p>
                 </div>
               )}
             </div>
-          </div>
-
-          <div className="am-reports-detail-pane">
-            {selectedReport ? (
-              <div className="am-reports-full-content">
-                <div className="am-reports-detail-header">
-                  <h1 className="am-reports-detail-title">
-                    {selectedReport.title}
-                  </h1>
-                  <button
-                    className="am-reports-detail-delete-btn"
-                    onClick={() => handleMoveToTrash([selectedReport.id])}
-                  >
-                    <BsTrash3 />
-                  </button>
-                </div>
-                <div className="am-reports-info-bar">
-                  <div className="am-reports-info-chip">
-                    <strong>From:</strong> {selectedReport.user}
-                  </div>
-                  <div className="am-reports-info-chip">
-                    <strong>Branch:</strong> {selectedReport.branch}
-                  </div>
-                  <div className="am-reports-info-chip">
-                    <strong>Date:</strong> {formatDateTime(selectedReport.time)}
-                  </div>
-                </div>
-                <div className="am-reports-text-body">
-                  {selectedReport.text}
-                </div>
-                {selectedReport.file_name && (
-                  <div className="am-reports-attachment-box">
-                    <div className="am-reports-file-info">
-                      <BsFileEarmarkPdf className="am-reports-pdf-icon" />
-                      <div className="am-reports-file-text-group">
-                        <p className="am-reports-file-name">
-                          {selectedReport.file_name}
-                        </p>
-                        <p className="am-reports-file-type">PDF Document</p>
-                      </div>
-                    </div>
-                    <button
-                      className="am-reports-download-btn"
-                      onClick={() => {
-                        if (selectedReport.file_url) {
-                          window.open(selectedReport.file_url, "_blank", "noopener,noreferrer");
-                        }
-                      }}
-                    >
-                      Download
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="am-reports-select-prompt">
-                <MdOutlineMarkEmailUnread
-                  size={80}
-                  className="am-reports-prompt-icon"
-                />
-                <h3>Select a Message</h3>
-                <p>Choose a report from the list to view its contents.</p>
-              </div>
-            )}
           </div>
         </div>
 

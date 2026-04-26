@@ -34,6 +34,15 @@ class AdmissionTrackingNotificationTarget:
     created_at: str | None
 
 
+@dataclass(frozen=True)
+class AdmissionDecisionNotificationTarget:
+    email: str
+    full_name: str | None
+    tracking_number: str
+    student_number: str
+    record_type: str
+
+
 def build_tracking_notification_target(
     *,
     tracking_number,
@@ -54,6 +63,23 @@ def build_tracking_notification_target(
         application_status=(application_status or "submitted").strip().lower(),
         submitted_at=submitted_at,
         created_at=created_at,
+    )
+
+
+def build_decision_notification_target(
+    *,
+    email="",
+    full_name=None,
+    tracking_number="",
+    student_number="",
+    record_type="admission",
+):
+    return AdmissionDecisionNotificationTarget(
+        email=normalize_email(email),
+        full_name=full_name.strip() if isinstance(full_name, str) and full_name.strip() else None,
+        tracking_number=normalize_tracking_number(tracking_number),
+        student_number=student_number.strip() if isinstance(student_number, str) else "",
+        record_type=(record_type or "admission").strip().lower(),
     )
 
 
@@ -136,7 +162,7 @@ def send_delivery_email(*, destination_email, subject, message):
         )
     except Exception as exc:  # pragma: no cover - exercised via mocked tests
         raise TrackingRecoveryDeliveryError(
-            "Unable to send the tracking number by email right now."
+            "Unable to send the admission email right now."
         ) from exc
 
 
@@ -241,6 +267,25 @@ def get_support_email_line():
     )
 
 
+def get_record_type_copy(record_type):
+    normalized_type = (record_type or "").strip().lower()
+
+    if normalized_type == "enrollment":
+        return "enrollment request"
+
+    return "admission application"
+
+
+def build_decision_reference_line(target):
+    if target.record_type == "enrollment" and target.student_number:
+        return f"Student Number: {target.student_number}"
+    if target.tracking_number:
+        return f"Tracking Number: {target.tracking_number}"
+    if target.student_number:
+        return f"Student Number: {target.student_number}"
+    return ""
+
+
 def build_submission_confirmation_email_message(target):
     applicant_name = " ".join(
         part for part in [target.first_name, target.last_name] if part
@@ -255,6 +300,49 @@ def build_submission_confirmation_email_message(target):
         "",
         "Keep this tracking number for status updates and future reference.",
     ]
+
+    if support_email_line:
+        lines.extend(["", support_email_line])
+
+    return "\n".join(lines)
+
+
+def build_decision_notification_email_message(target, *, decision_status, decision_reason):
+    recipient_name = target.full_name or "Student"
+    record_copy = get_record_type_copy(target.record_type)
+    support_email_line = get_support_email_line()
+    normalized_status = (decision_status or "").strip().lower()
+    reference_line = build_decision_reference_line(target)
+
+    if normalized_status == "accepted":
+        decision_copy = (
+            f"After reviewing your AICS {record_copy}, we are pleased to let you know "
+            "that it has been approved."
+        )
+    else:
+        decision_copy = (
+            f"After reviewing your AICS {record_copy}, we regret to inform you "
+            "that it has been rejected at this time."
+        )
+
+    lines = [
+        f"Hello {recipient_name},",
+        "",
+        decision_copy,
+    ]
+
+    if decision_reason:
+        lines.extend(["", f"Reason: {decision_reason}"])
+
+    if reference_line:
+        lines.extend(["", reference_line])
+
+    lines.extend(
+        [
+            "",
+            "Please coordinate with the admissions or registrar office if you need clarification or the next steps for your record.",
+        ]
+    )
 
     if support_email_line:
         lines.extend(["", support_email_line])
@@ -380,3 +468,39 @@ def deliver_submission_tracking_notification(target):
         email_message=build_submission_confirmation_email_message(target),
         sms_message=build_submission_confirmation_sms_message(target),
     )
+
+
+def deliver_admission_decision_notification(
+    target,
+    *,
+    decision_status,
+    decision_reason,
+):
+    normalized_email = normalize_email(target.email)
+    email_delivery = {
+        "status": "not_configured",
+        "destination": mask_email_address(normalized_email),
+    }
+
+    if normalized_email and is_email_delivery_configured():
+        try:
+            send_delivery_email(
+                destination_email=normalized_email,
+                subject=(
+                    f"AICS {get_record_type_copy(target.record_type)} "
+                    f"{(decision_status or 'updated').strip().lower()}"
+                ),
+                message=build_decision_notification_email_message(
+                    target,
+                    decision_status=decision_status,
+                    decision_reason=decision_reason,
+                ),
+            )
+            email_delivery["status"] = "sent"
+        except TrackingRecoveryDeliveryError as exc:
+            email_delivery["status"] = "failed"
+            email_delivery["error"] = str(exc)
+
+    return {
+        "email": email_delivery,
+    }

@@ -382,6 +382,10 @@
   font-size: 18px;
   display: flex;
   align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
 }
 
 /* Forgot Link */
@@ -414,6 +418,10 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
+}
+
+.staff-login-page .reset-form .form-groups {
   min-width: 0;
 }
 
@@ -625,6 +633,10 @@
   .staff-login-page .selectlog {
     padding: 10px 12px;
     font-size: 14px;
+  }
+
+  .staff-login-page .password-wrapper input {
+    padding-right: 42px;
   }
   
   .staff-login-page .submit-btn {

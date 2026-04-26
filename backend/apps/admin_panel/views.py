@@ -1,7 +1,9 @@
 import logging
 
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -19,6 +21,7 @@ from .repository import (
     update_backup_history,
 )
 from .serializers import (
+    BackupArchiveUploadSerializer,
     BackupAutomatedDispatchSerializer,
     BackupHistorySerializer,
     BackupRestoreStartSerializer,
@@ -27,7 +30,14 @@ from .serializers import (
     BackupSnapshotCreateSerializer,
     BackupSnapshotSyncSerializer,
 )
-from .services import create_branch_backup, delete_backup_artifacts, read_backup_snapshot, restore_branch_backup
+from .services import (
+    create_branch_backup,
+    delete_backup_artifacts,
+    read_backup_snapshot,
+    restore_branch_backup,
+    store_uploaded_backup_archive,
+)
+from .storage import download_backup_blob
 
 
 logger = logging.getLogger(__name__)
@@ -286,6 +296,41 @@ class BackupRestoreStartView(APIView):
         return Response(BackupHistorySerializer(restore_history).data, status=status.HTTP_202_ACCEPTED)
 
 
+class BackupArchiveUploadView(APIView):
+    permission_classes = [IsBranchAdmin]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        branch_id, user = get_request_branch_context(request)
+        if not branch_id:
+            return Response({"detail": "Branch context is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = BackupArchiveUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        archive = serializer.validated_data["archive"]
+        archive_name = getattr(archive, "name", "uploaded-backup.zip")
+
+        try:
+            history = store_uploaded_backup_archive(
+                branch_id=branch_id,
+                uploaded_file_name=archive_name,
+                payload=archive.read(),
+                created_by=user,
+                created_by_name=request.headers.get("X-User-Name", "").strip(),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Failed to upload backup archive for branch %s", branch_id)
+            return Response(
+                {"detail": "Unable to upload the backup ZIP right now."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(BackupHistorySerializer(history).data, status=status.HTTP_201_CREATED)
+
+
 class BackupHistoryDeleteView(APIView):
     permission_classes = [IsBranchAdmin]
 
@@ -300,6 +345,41 @@ class BackupHistoryDeleteView(APIView):
 
         delete_backup_artifacts(history)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class BackupHistoryDownloadView(APIView):
+    permission_classes = [IsBranchAdmin]
+
+    def get(self, request, backup_history_id):
+        branch_id, _user = get_request_branch_context(request)
+        if not branch_id:
+            return Response({"detail": "Branch context is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        history = get_backup_history(backup_history_id, branch=branch_id)
+        if not history:
+            return Response({"detail": "Backup history not found for this branch."}, status=status.HTTP_404_NOT_FOUND)
+
+        if (
+            history.backup_type not in (BackupHistory.TYPE_MANUAL, BackupHistory.TYPE_AUTOMATED)
+            or history.status != BackupHistory.STATUS_COMPLETED
+            or not history.file_path
+        ):
+            return Response({"detail": "Backup ZIP is not available for download."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            payload = download_backup_blob(object_path=history.file_path)
+        except Exception:
+            logger.exception("Failed to download backup archive %s", backup_history_id)
+            return Response(
+                {"detail": "Backup ZIP could not be downloaded."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        response = HttpResponse(payload, content_type="application/zip")
+        response["Content-Disposition"] = (
+            f'attachment; filename="{history.backup_filename or "backup.zip"}"'
+        )
+        return response
 
 
 class BackupRestoreStatusView(APIView):

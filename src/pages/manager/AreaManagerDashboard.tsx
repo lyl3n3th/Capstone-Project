@@ -369,7 +369,7 @@ const AreaManagerDashboard = ({
               <MdAssignment size={24} />
             </div>
             <div className="kpi-info">
-              <span className="kpi-label">Pending Reports</span>
+              <span className="kpi-label">Pending Review Reports</span>
               <h2 className="kpi-value">{reportsCount}</h2>
             </div>
           </div>

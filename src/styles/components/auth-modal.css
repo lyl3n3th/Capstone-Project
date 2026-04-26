@@ -22,6 +22,13 @@
   flex-direction: column;
 }
 
+.auth-modal-card,
+.auth-modal-card *,
+.auth-modal-card *::before,
+.auth-modal-card *::after {
+  box-sizing: border-box;
+}
+
 .auth-modal-header {
   display: flex;
   align-items: flex-start;
@@ -81,6 +88,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .auth-modal-footer {

@@ -208,6 +208,42 @@ const getOwnScheduleStatusMessage = (
   return "Choose one available schedule per subject, then submit it for final approval.";
 };
 
+const getOwnScheduleSubjectsEmptyStateMessage = ({
+  requestStatus,
+  selectionStatus,
+  showOwnSchedulePlanner,
+}: {
+  requestStatus?: "Pending" | "Approved" | "Rejected";
+  selectionStatus?: "Not Submitted" | "Pending Approval" | "Approved" | "Rejected";
+  showOwnSchedulePlanner: boolean;
+}) => {
+  if (showOwnSchedulePlanner) {
+    return "No official subjects are posted yet. They will appear here after your schedule request is approved.";
+  }
+
+  if (requestStatus === "Pending") {
+    return "Your own-schedule request is still under review. Official subjects will appear here after it is approved.";
+  }
+
+  if (requestStatus === "Rejected") {
+    return "Your own-schedule request was not approved yet. Official subjects will appear here once a new request is approved.";
+  }
+
+  if (selectionStatus === "Approved") {
+    return "Your approved own-schedule load is not posted yet. Please contact the registrar.";
+  }
+
+  if (selectionStatus === "Pending Approval") {
+    return "Your selected schedules are still waiting for approval. Official subjects will appear here once they are approved.";
+  }
+
+  if (requestStatus === "Approved") {
+    return "No official subjects are posted yet for your own-schedule request.";
+  }
+
+  return "No subjects found for the selected academic year and semester.";
+};
+
 function StudentSubjects() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const {
@@ -233,18 +269,40 @@ function StudentSubjects() {
   const { toasts, addToast, removeToast } = useToast();
 
   const isSHS = student?.programType === "SHS";
-  const supportsOwnSchedule = Boolean(
-    student?.requestedOwnSchedule &&
-      student.ownScheduleRequestStatus === "Approved",
+  const hasOwnScheduleRequest = Boolean(
+    student?.requestedOwnSchedule ||
+      student?.ownScheduleRequestStatus === "Approved" ||
+      currentTerm?.source === "own_schedule",
   );
+  const supportsOwnSchedule = Boolean(
+    hasOwnScheduleRequest &&
+      (student?.ownScheduleRequestStatus === "Approved" ||
+        currentTerm?.source === "own_schedule"),
+  );
+  const resolvedOwnScheduleRequestStatus =
+    student?.ownScheduleRequestStatus ||
+    (supportsOwnSchedule ? "Approved" : undefined);
   const ownScheduleAcademicYear =
-    student?.ownScheduleAcademicYear || scheduleRequest?.academicYear || "2026-2027";
+    student?.ownScheduleAcademicYear ||
+    currentTerm?.academicYear ||
+    scheduleRequest?.academicYear ||
+    "2026-2027";
   const ownScheduleSemester =
-    student?.ownScheduleSemester || scheduleRequest?.semester || "1st Semester";
+    student?.ownScheduleSemester ||
+    currentTerm?.semester ||
+    scheduleRequest?.semester ||
+    "1st Semester";
   const showOwnSchedulePlanner =
     supportsOwnSchedule && student?.ownScheduleSelectionStatus !== "Approved";
   const showIrregularSections =
-    student?.status === "Irregular" || supportsOwnSchedule;
+    student?.status === "Irregular" || hasOwnScheduleRequest;
+  const subjectsEmptyStateMessage = hasOwnScheduleRequest
+    ? getOwnScheduleSubjectsEmptyStateMessage({
+        requestStatus: resolvedOwnScheduleRequestStatus,
+        selectionStatus: student?.ownScheduleSelectionStatus,
+        showOwnSchedulePlanner,
+      })
+    : "No subjects found for the selected academic year and semester.";
 
   useEffect(() => {
     if (!student || !supportsOwnSchedule) {
@@ -919,11 +977,7 @@ function StudentSubjects() {
               ))
             ) : (
               <div className="s-no-subjects">
-                <p>
-                  {showOwnSchedulePlanner
-                    ? "No official subjects are posted yet. They will appear here after your schedule request is approved."
-                    : "No subjects found for the selected academic year and semester."}
-                </p>
+                <p>{subjectsEmptyStateMessage}</p>
               </div>
             )}
           </div>

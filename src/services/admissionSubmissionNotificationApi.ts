@@ -28,6 +28,14 @@ export interface AdmissionSubmissionNotificationResponse {
   };
 }
 
+export interface AdmissionDecisionNotificationResponse {
+  message: string;
+  tracking_number?: string;
+  deliveries: {
+    email: AdmissionNotificationDelivery;
+  };
+}
+
 const parseSubmissionNotificationError = async (response: Response) => {
   let message = "Unable to send the tracking number automatically right now.";
 
@@ -58,6 +66,16 @@ export interface SendAdmissionSubmissionNotificationPayload {
   applicationStatus?: string;
 }
 
+export interface SendAdmissionDecisionNotificationPayload {
+  email?: string;
+  fullName?: string;
+  trackingNumber?: string;
+  studentNumber?: string;
+  recordType?: "admission" | "enrollment";
+  decisionStatus?: "rejected";
+  decisionReason: string;
+}
+
 export async function sendAdmissionSubmissionNotification(
   payload: SendAdmissionSubmissionNotificationPayload,
 ) {
@@ -77,4 +95,25 @@ export async function sendAdmissionSubmissionNotification(
   }
 
   return (await response.json()) as AdmissionSubmissionNotificationResponse;
+}
+
+export async function sendAdmissionDecisionNotification(
+  payload: SendAdmissionDecisionNotificationPayload,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/admissions/decision-notification/`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    await parseSubmissionNotificationError(response);
+  }
+
+  return (await response.json()) as AdmissionDecisionNotificationResponse;
 }

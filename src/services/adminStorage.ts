@@ -16,6 +16,7 @@ import {
   type EnrollmentRetakeChoiceGroup,
   type EnrollmentRetakeRequestItem,
 } from "./enrollmentLoadPlanner";
+import { stripLegacyMockStudentRecords } from "./legacyMockData";
 import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 
 export type AdminBranchName = "Bacoor" | "Taytay" | "GMA";
@@ -68,6 +69,7 @@ export interface AdminEnrolleeRecord {
   ownScheduleAcademicYear?: string;
   ownScheduleSemester?: string;
   ownScheduleDecisionAt?: string;
+  rejectionReason?: string;
   personalInfo: AdminPersonalInformation;
   attachments?: AdminAttachment[];
   convertedAt?: string;
@@ -113,6 +115,7 @@ export interface StudentPortalSubject {
   code: string;
   title: string;
   units?: number;
+  instructorId?: string;
   section?: string;
   schedule: string;
   room: string;
@@ -305,6 +308,27 @@ type StoredSectionAssignmentRecord = {
   isManualOverride: boolean;
 };
 
+type StoredEnrollmentIrregularRequestRecord = {
+  mode: "own_schedule" | "section_assignment";
+  requestedSectionId?: string;
+  requestedSectionCode?: string;
+};
+
+type StoredEnrollmentRequestRecord = {
+  id: string;
+  branch: string;
+  studentNumber: string;
+  trackingNumber?: string;
+  requestedYearLevel: string;
+  academicYear: string;
+  semester: string;
+  enrollmentStatus: "Pending" | "Approved" | "Rejected";
+  requestDate: string;
+  enrollmentDate?: string;
+  updatedAt?: string;
+  irregularRequest?: StoredEnrollmentIrregularRequestRecord;
+};
+
 const STUDENT_STORAGE_KEY = "aics-students";
 const BRANCH_STORAGE_PREFIX = "aics-admin";
 const DEFAULT_BRANCH: AdminBranchName = "Bacoor";
@@ -313,6 +337,7 @@ const DEFAULT_SECTION_SEMESTER = "1st Semester";
 const STUDENT_NUMBER_FLOOR = 261000;
 const STUDENT_NUMBER_SUFFIX_LENGTH = 6;
 const REQUIREMENTS_BUCKET = "admission-requirements";
+const ENROLLMENT_REQUEST_STORAGE_SCOPE = "enrollment-requests";
 
 type SupabaseRequirementFileRow = {
   file_name: string;
@@ -515,6 +540,17 @@ export const getBranchFromStudentNumber = (
   return BRANCH_BY_STUDENT_NUMBER_PREFIX[prefixMatch[1]] ?? null;
 };
 
+export interface InstructorEvaluationStatusRecord {
+  instructorId: string;
+  isOpen: boolean;
+  updatedAt: string;
+}
+
+export type InstructorEvaluationStatusMap = Record<
+  string,
+  InstructorEvaluationStatusRecord
+>;
+
 const getStudentNumberSequenceValue = (
   studentNumber?: string | null,
   branch?: string | null,
@@ -653,6 +689,43 @@ export const writeBranchScopedData = (
   writeStorageItem(getBranchStorageKey(scope, branch), value);
 };
 
+const INSTRUCTOR_EVALUATION_STATUS_SCOPE = "instructor-evaluations";
+
+export const readInstructorEvaluationStatuses = (
+  branch?: string | null,
+): InstructorEvaluationStatusMap =>
+  readBranchScopedData<InstructorEvaluationStatusMap>(
+    INSTRUCTOR_EVALUATION_STATUS_SCOPE,
+    branch,
+  ) ?? {};
+
+export const setInstructorEvaluationStatus = ({
+  branch,
+  instructorId,
+  isOpen,
+}: {
+  branch?: string | null;
+  instructorId: string;
+  isOpen: boolean;
+}) => {
+  const nextStatuses = {
+    ...readInstructorEvaluationStatuses(branch),
+    [instructorId]: {
+      instructorId,
+      isOpen,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+
+  writeBranchScopedData(
+    INSTRUCTOR_EVALUATION_STATUS_SCOPE,
+    branch,
+    nextStatuses,
+  );
+
+  return nextStatuses;
+};
+
 export const getCurrentSession = () =>
   readStorageItem<AuthSession>(AUTH_STORAGE_KEY);
 
@@ -660,16 +733,206 @@ export const getCurrentBranch = () =>
   normalizeBranchName(getCurrentSession()?.user.branch);
 
 export const readStoredStudents = () =>
-  readStorageItem<StudentStorageRecord[]>(STUDENT_STORAGE_KEY) ?? [];
+  stripLegacyMockStudentRecords(
+    readStorageItem<StudentStorageRecord[]>(STUDENT_STORAGE_KEY) ?? [],
+  );
 
 export const writeStoredStudents = (students: StudentStorageRecord[]) => {
-  writeStorageItem(STUDENT_STORAGE_KEY, students);
+  writeStorageItem(STUDENT_STORAGE_KEY, stripLegacyMockStudentRecords(students));
 };
+
+const normalizeComparableStudentValue = (value?: string | null) =>
+  (value || "").trim().toLowerCase();
+
+const getStoredEnrollmentRequestSortValue = (
+  request: StoredEnrollmentRequestRecord,
+) => {
+  const timestamp = request.updatedAt || request.enrollmentDate || request.requestDate;
+  const parsedValue = Date.parse(timestamp);
+  return Number.isFinite(parsedValue) ? parsedValue : 0;
+};
+
+const matchesStoredEnrollmentRequestStudent = (
+  request: StoredEnrollmentRequestRecord,
+  student: Pick<StudentStorageRecord, "id" | "trackingNumber">,
+) => {
+  if (
+    student.trackingNumber &&
+    request.trackingNumber &&
+    request.trackingNumber === student.trackingNumber
+  ) {
+    return true;
+  }
+
+  return request.studentNumber === student.id;
+};
+
+const getStoredSectionYearCode = (yearLevel: string) => {
+  const normalizedValue = yearLevel.trim().toLowerCase();
+
+  if (normalizedValue.includes("grade 12") || normalizedValue.includes("2nd")) {
+    return "2";
+  }
+
+  if (normalizedValue.includes("grade 11") || normalizedValue.includes("1st")) {
+    return "1";
+  }
+
+  const yearMatch = normalizedValue.match(/\b([1-4])(st|nd|rd|th)?\b/);
+  return yearMatch?.[1] || "1";
+};
+
+const buildStoredProgressedBlockSectionCode = ({
+  currentSectionCode,
+  requestedYearLevel,
+}: {
+  currentSectionCode?: string;
+  requestedYearLevel: string;
+}) => {
+  const normalizedCode = currentSectionCode?.trim().toUpperCase();
+
+  if (!normalizedCode) {
+    return "";
+  }
+
+  const requestedYearCode = getStoredSectionYearCode(requestedYearLevel);
+  const codeParts = normalizedCode.match(/^(.*?)([1-4])([A-Z]+)$/);
+
+  if (!codeParts) {
+    return normalizedCode;
+  }
+
+  const [, prefix, , blockLabel] = codeParts;
+  return `${prefix}${requestedYearCode}${blockLabel}`;
+};
+
+const getLatestApprovedStoredEnrollmentRequest = (
+  student: Pick<StudentStorageRecord, "branch" | "id" | "trackingNumber">,
+) =>
+  (
+    readBranchScopedData<StoredEnrollmentRequestRecord[]>(
+      ENROLLMENT_REQUEST_STORAGE_SCOPE,
+      student.branch,
+    ) ?? []
+  )
+    .filter(
+      (request) =>
+        request.enrollmentStatus === "Approved" &&
+        matchesStoredEnrollmentRequestStudent(request, student),
+    )
+    .sort(
+      (left, right) =>
+        getStoredEnrollmentRequestSortValue(right) -
+          getStoredEnrollmentRequestSortValue(left) ||
+        right.id.localeCompare(left.id),
+    )[0] ?? null;
+
+const resolveStoredStudentEnrollmentState = (
+  student: StudentStorageRecord,
+): StudentStorageRecord => {
+  const approvedEnrollmentRequest = getLatestApprovedStoredEnrollmentRequest(student);
+
+  if (!approvedEnrollmentRequest) {
+    return student;
+  }
+
+  const hasApprovedOwnScheduleRequest =
+    approvedEnrollmentRequest.irregularRequest?.mode === "own_schedule";
+  const resolvedYearLevel =
+    approvedEnrollmentRequest.requestedYearLevel || student.yearLevel;
+  const shouldApplyRequestedPlacement =
+    normalizeComparableStudentValue(student.yearLevel) !==
+      normalizeComparableStudentValue(resolvedYearLevel) ||
+    !student.section?.trim();
+  const resolvedSection = hasApprovedOwnScheduleRequest
+    ? ""
+    : approvedEnrollmentRequest.irregularRequest?.mode === "section_assignment"
+      ? shouldApplyRequestedPlacement
+        ? approvedEnrollmentRequest.irregularRequest.requestedSectionCode ||
+          student.section ||
+          ""
+        : student.section ||
+          approvedEnrollmentRequest.irregularRequest.requestedSectionCode ||
+          ""
+      : shouldApplyRequestedPlacement
+        ? buildStoredProgressedBlockSectionCode({
+            currentSectionCode: student.section,
+            requestedYearLevel: resolvedYearLevel,
+          }) ||
+          student.section ||
+          ""
+        : student.section ||
+          buildStoredProgressedBlockSectionCode({
+            currentSectionCode: student.section,
+            requestedYearLevel: resolvedYearLevel,
+          }) ||
+          "";
+
+  return {
+    ...student,
+    yearLevel: resolvedYearLevel,
+    section: resolvedSection,
+    requestedOwnSchedule:
+      hasApprovedOwnScheduleRequest || student.requestedOwnSchedule,
+    ownScheduleRequestStatus: hasApprovedOwnScheduleRequest
+      ? "Approved"
+      : student.ownScheduleRequestStatus,
+    ownScheduleAcademicYear: hasApprovedOwnScheduleRequest
+      ? approvedEnrollmentRequest.academicYear
+      : student.ownScheduleAcademicYear,
+    ownScheduleSemester: hasApprovedOwnScheduleRequest
+      ? normalizeStoredSemester(approvedEnrollmentRequest.semester)
+      : student.ownScheduleSemester,
+    ownScheduleSelectionStatus: hasApprovedOwnScheduleRequest
+      ? student.ownScheduleSelectionStatus || "Not Submitted"
+      : student.ownScheduleSelectionStatus,
+  };
+};
+
+const hasResolvedStudentStateChanged = (
+  originalStudent: StudentStorageRecord,
+  resolvedStudent: StudentStorageRecord,
+) =>
+  normalizeComparableStudentValue(originalStudent.yearLevel) !==
+    normalizeComparableStudentValue(resolvedStudent.yearLevel) ||
+  normalizeComparableStudentValue(originalStudent.section) !==
+    normalizeComparableStudentValue(resolvedStudent.section) ||
+  Boolean(originalStudent.requestedOwnSchedule) !==
+    Boolean(resolvedStudent.requestedOwnSchedule) ||
+  normalizeComparableStudentValue(originalStudent.ownScheduleRequestStatus) !==
+    normalizeComparableStudentValue(resolvedStudent.ownScheduleRequestStatus) ||
+  normalizeComparableStudentValue(originalStudent.ownScheduleAcademicYear) !==
+    normalizeComparableStudentValue(resolvedStudent.ownScheduleAcademicYear) ||
+  normalizeComparableStudentValue(originalStudent.ownScheduleSemester) !==
+    normalizeComparableStudentValue(resolvedStudent.ownScheduleSemester) ||
+  normalizeComparableStudentValue(originalStudent.ownScheduleSelectionStatus) !==
+    normalizeComparableStudentValue(resolvedStudent.ownScheduleSelectionStatus);
 
 export const getStudentsForBranch = (branch?: string | null) => {
   const resolvedBranch = normalizeBranchName(branch);
+  const storedStudents = readStoredStudents();
+  let didResolveStudentState = false;
 
-  return readStoredStudents().filter(
+  const nextStudents = storedStudents.map((student) => {
+    if (normalizeBranchName(student.branch) !== resolvedBranch) {
+      return student;
+    }
+
+    const resolvedStudent = resolveStoredStudentEnrollmentState(student);
+
+    if (!hasResolvedStudentStateChanged(student, resolvedStudent)) {
+      return student;
+    }
+
+    didResolveStudentState = true;
+    return resolvedStudent;
+  });
+
+  if (didResolveStudentState) {
+    writeStoredStudents(nextStudents);
+  }
+
+  return nextStudents.filter(
     (student) => normalizeBranchName(student.branch) === resolvedBranch,
   );
 };
@@ -761,6 +1024,9 @@ const matchesStrandOrCourse = (
   return left.includes(right) || right.includes(left);
 };
 
+const normalizeStoredSectionCode = (value?: string | null) =>
+  value?.trim().toUpperCase() || "";
+
 const normalizeStoredSemester = (value?: string | null) => {
   const normalized = value?.trim().toLowerCase() || "";
 
@@ -849,6 +1115,7 @@ const mapStoredSubjectsToPortalSubjects = (
       code: subject.code,
       title: subject.name,
       units: subject.units,
+      instructorId: undefined,
       section: undefined,
       schedule: "TBA",
       room: "TBA",
@@ -879,6 +1146,7 @@ const mapStoredAssignmentsToPortalSubjects = (
         code: assignment.subjectCode,
         title: assignment.subjectName,
         units: subjectDetails?.units,
+        instructorId: assignment.instructorId || undefined,
         section: assignment.sectionCode,
         schedule: formatScheduleLabel(assignment.schedule),
         room: formatScheduleRooms(assignment.schedule),
@@ -902,6 +1170,7 @@ const mapPlanItemsToPortalSubjects = (
       code: item.subjectCode,
       title: item.subjectName,
       units: item.units,
+      instructorId: undefined,
       section: undefined,
       schedule: "TBA",
       room: "TBA",
@@ -939,6 +1208,7 @@ const mapScheduledAssignmentsToPortalSubjects = (
           assignment.units ??
           matchingPlannedSubject?.units ??
           matchingStoredSubject?.units,
+        instructorId: assignment.instructorId || undefined,
         section: assignment.sectionCode,
         schedule: formatScheduleLabel(assignment.schedule),
         room: formatScheduleRooms(assignment.schedule),
@@ -950,6 +1220,31 @@ const mapScheduledAssignmentsToPortalSubjects = (
       };
     }),
   );
+
+export const getStudentPortalSubjectsFromScheduledAssignments = ({
+  branch,
+  assignments,
+  plannedSubjects = [],
+}: {
+  branch?: string | null;
+  assignments: StudentScheduledAssignmentItem[];
+  plannedSubjects?: StudentSubjectPlanItem[];
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedSubjects =
+    (readBranchScopedData<StoredAcademicSubject[]>("subjects", resolvedBranch) ?? []).map(
+      (subject) => ({
+        ...subject,
+        semester: normalizeStoredSemester(subject.semester),
+      }),
+    );
+
+  return mapScheduledAssignmentsToPortalSubjects(
+    assignments,
+    plannedSubjects,
+    storedSubjects,
+  );
+};
 
 const subjectPlanItemMatches = (
   item: Pick<StudentSubjectPlanItem, "subjectId" | "subjectCode">,
@@ -973,6 +1268,37 @@ const findMatchingStudentSubjectPlan = (
 
     return studentNumbersMatch(plan.studentNumber, student.id, branch);
   }) ?? null;
+
+const shouldUseStudentSubjectPlan = (
+  student: Partial<
+    Pick<
+      StudentStorageRecord,
+      "ownScheduleRequestStatus" | "requestedOwnSchedule" | "studentStatus"
+    >
+  >,
+  plan: StudentSubjectPlanRecord | null,
+) => {
+  if (!plan) {
+    return false;
+  }
+
+  if (plan.source === "student_schedule_request") {
+    return (
+      student.requestedOwnSchedule === true ||
+      student.ownScheduleRequestStatus === "Approved"
+    );
+  }
+
+  if (plan.source === "transferee_validation") {
+    return student.studentStatus === "Transferee";
+  }
+
+  if (plan.source === "enrollment_request") {
+    return false;
+  }
+
+  return true;
+};
 
 export const findStoredStudent = ({
   branch,
@@ -1559,7 +1885,14 @@ export const updateStudentRequirementReviewStatus = ({
 export const getStudentPortalSubjects = (
   student: Pick<
     StudentStorageRecord,
-    "branch" | "program" | "yearLevel" | "strandOrCourse" | "section"
+    | "branch"
+    | "program"
+    | "yearLevel"
+    | "strandOrCourse"
+    | "section"
+    | "requestedOwnSchedule"
+    | "ownScheduleRequestStatus"
+    | "studentStatus"
   > &
     Pick<StudentStorageRecord, "id" | "trackingNumber">,
 ): StudentPortalSubject[] => {
@@ -1591,12 +1924,18 @@ export const getStudentPortalSubjects = (
     branch,
     storedSubjectPlans,
   );
-  const plannedSemester = studentSubjectPlan
-    ? normalizeStoredSemester(studentSubjectPlan.semester)
+  const activeStudentSubjectPlan = shouldUseStudentSubjectPlan(
+    student,
+    studentSubjectPlan,
+  )
+    ? studentSubjectPlan
+    : null;
+  const plannedSemester = activeStudentSubjectPlan
+    ? normalizeStoredSemester(activeStudentSubjectPlan.semester)
     : undefined;
   const defaultAcademicYear =
     storedAssignments[0]?.academicYear ||
-    studentSubjectPlan?.academicYear ||
+    activeStudentSubjectPlan?.academicYear ||
     "2026-2027";
   const matchedSubjects = storedSubjects.filter(
     (subject) =>
@@ -1624,8 +1963,9 @@ export const getStudentPortalSubjects = (
         (subject) => normalizeStoredSemester(subject.semester) === effectiveSemester,
       )
     : matchedSubjects;
-  const creditedPlanSubjects = studentSubjectPlan?.creditedSubjects ?? [];
-  const plannedScheduledAssignments = studentSubjectPlan?.scheduledAssignments ?? [];
+  const creditedPlanSubjects = activeStudentSubjectPlan?.creditedSubjects ?? [];
+  const plannedScheduledAssignments =
+    activeStudentSubjectPlan?.scheduledAssignments ?? [];
   const creditedScopedSubjects =
     creditedPlanSubjects.length > 0
       ? semesterScopedSubjects.filter(
@@ -1636,16 +1976,16 @@ export const getStudentPortalSubjects = (
         )
       : semesterScopedSubjects;
   const planAcademicYear =
-    studentSubjectPlan?.academicYear?.trim() || defaultAcademicYear;
+    activeStudentSubjectPlan?.academicYear?.trim() || defaultAcademicYear;
 
   if (plannedScheduledAssignments.length > 0) {
     const scheduledPortalSubjects = mapScheduledAssignmentsToPortalSubjects(
       plannedScheduledAssignments,
-      studentSubjectPlan?.assignedSubjects ?? [],
+      activeStudentSubjectPlan?.assignedSubjects ?? [],
       storedSubjects,
     );
 
-    if ((studentSubjectPlan?.assignedSubjects.length ?? 0) > 0) {
+    if ((activeStudentSubjectPlan?.assignedSubjects.length ?? 0) > 0) {
       const scheduledAssignmentKeys = new Set(
         plannedScheduledAssignments.map(
           (assignment) =>
@@ -1653,7 +1993,7 @@ export const getStudentPortalSubjects = (
         ),
       );
       const unresolvedPlannedSubjects =
-        studentSubjectPlan?.assignedSubjects.filter(
+        activeStudentSubjectPlan?.assignedSubjects.filter(
           (item) =>
             !scheduledAssignmentKeys.has(
               `${item.subjectId}:${item.subjectCode}:${effectiveSemester || DEFAULT_SECTION_SEMESTER}`,
@@ -1673,8 +2013,8 @@ export const getStudentPortalSubjects = (
     return scheduledPortalSubjects;
   }
 
-  if ((studentSubjectPlan?.assignedSubjects.length ?? 0) > 0) {
-    const plannedSubjects = studentSubjectPlan?.assignedSubjects ?? [];
+  if ((activeStudentSubjectPlan?.assignedSubjects.length ?? 0) > 0) {
+    const plannedSubjects = activeStudentSubjectPlan?.assignedSubjects ?? [];
     const plannedCatalogSubjects = creditedScopedSubjects.filter((subject) =>
       plannedSubjects.some((item) =>
         subjectPlanItemMatches(item, subject.id, subject.code),
@@ -1848,6 +2188,108 @@ export const getStudentPortalSubjectsForTerm = ({
   );
 };
 
+export const getStudentPortalSubjectsForSectionTerm = ({
+  branch,
+  program,
+  yearLevel,
+  strandOrCourse,
+  sectionCode,
+  semester,
+  academicYear,
+}: {
+  branch?: string | null;
+  program: string;
+  yearLevel: string;
+  strandOrCourse?: string;
+  sectionCode?: string | null;
+  semester: string;
+  academicYear?: string;
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedSubjects =
+    (
+      readBranchScopedData<StoredAcademicSubject[]>("subjects", resolvedBranch) ?? []
+    ).map((subject) => ({
+      ...subject,
+      semester: normalizeStoredSemester(subject.semester),
+    }));
+  const storedAssignments =
+    (
+      readBranchScopedData<StoredSubjectAssignment[]>(
+        "subject-assignments",
+        resolvedBranch,
+      ) ?? []
+    ).map((assignment) => ({
+      ...assignment,
+      semester: normalizeStoredSemester(assignment.semester),
+    }));
+  const resolvedAcademicYear =
+    academicYear || storedAssignments[0]?.academicYear || "2026-2027";
+  const normalizedSemester = normalizeStoredSemester(semester);
+  const normalizedSectionCode = sectionCode?.trim() || "";
+  const semesterScopedSubjects = storedSubjects.filter(
+    (subject) =>
+      subject.program === program &&
+      subject.yearLevel === yearLevel &&
+      subject.semester === normalizedSemester &&
+      matchesStrandOrCourse(
+        resolveStoredSubjectStrandOrCourse(subject),
+        strandOrCourse,
+      ),
+  );
+
+  if (!normalizedSectionCode) {
+    return mapStoredSubjectsToPortalSubjects(
+      semesterScopedSubjects,
+      resolvedAcademicYear,
+    );
+  }
+
+  const sectionAssignments = storedAssignments.filter(
+    (assignment) =>
+      assignment.academicYear === resolvedAcademicYear &&
+      assignment.sectionCode === normalizedSectionCode &&
+      assignment.semester === normalizedSemester &&
+      (storedSubjects.length === 0 ||
+        semesterScopedSubjects.some(
+          (subject) =>
+            (subject.id === assignment.subjectId ||
+              subject.code === assignment.subjectCode) &&
+            subject.semester === assignment.semester,
+        )),
+  );
+
+  if (sectionAssignments.length === 0) {
+    return mapStoredSubjectsToPortalSubjects(
+      semesterScopedSubjects,
+      resolvedAcademicYear,
+    );
+  }
+
+  const assignedPortalSubjects = mapStoredAssignmentsToPortalSubjects(
+    sectionAssignments,
+    storedSubjects,
+  );
+  const assignedSubjectKeys = new Set(
+    sectionAssignments.map(
+      (assignment) =>
+        `${assignment.subjectId}:${assignment.subjectCode}:${assignment.semester}`,
+    ),
+  );
+  const remainingCatalogSubjects = semesterScopedSubjects.filter(
+    (subject) =>
+      !assignedSubjectKeys.has(`${subject.id}:${subject.code}:${subject.semester}`),
+  );
+
+  return sortPortalSubjects([
+    ...assignedPortalSubjects,
+    ...mapStoredSubjectsToPortalSubjects(
+      remainingCatalogSubjects,
+      resolvedAcademicYear,
+    ),
+  ]);
+};
+
 export const getEnrollmentSectionChoices = ({
   branch,
   program,
@@ -1885,7 +2327,8 @@ export const getEnrollmentSectionChoices = ({
           storedAssignments.find(
             (assignment) =>
               assignment.sectionId === section.id ||
-              assignment.sectionCode === section.code,
+              normalizeStoredSectionCode(assignment.sectionCode) ===
+                normalizeStoredSectionCode(section.code),
           )?.semester,
       );
       const sectionStrandOrCourse =
@@ -1911,7 +2354,8 @@ export const getEnrollmentSectionChoices = ({
           assignment.academicYear === resolvedAcademicYear &&
           normalizeStoredSemester(assignment.semester) === normalizedSemester &&
           (assignment.sectionId === section.id ||
-            assignment.sectionCode === section.code),
+            normalizeStoredSectionCode(assignment.sectionCode) ===
+              normalizeStoredSectionCode(section.code)),
       ).length;
 
       return {
@@ -1949,7 +2393,8 @@ export const getStudentSectionChoices = ({
   currentSectionCode?: string | null;
 }): StudentSectionChoice[] => {
   const resolvedBranch = normalizeBranchName(branch);
-  const normalizedCurrentSectionCode = currentSectionCode?.trim() || "";
+  const normalizedCurrentSectionCode =
+    normalizeStoredSectionCode(currentSectionCode);
   const storedSections =
     readBranchScopedData<StoredClassSection[]>("class-sections", resolvedBranch) ??
     [];
@@ -1969,7 +2414,7 @@ export const getStudentSectionChoices = ({
           : section.strand || "All";
 
       return (
-        section.code === normalizedCurrentSectionCode ||
+        normalizeStoredSectionCode(section.code) === normalizedCurrentSectionCode ||
         (sectionProgram === program &&
           sectionYearLevel === yearLevel &&
           matchesStrandOrCourse(sectionStrandOrCourse, strandOrCourse))
@@ -1988,13 +2433,14 @@ export const getStudentSectionChoices = ({
           storedAssignments.find(
             (assignment) =>
               assignment.sectionId === section.id ||
-              assignment.sectionCode === section.code,
+              normalizeStoredSectionCode(assignment.sectionCode) ===
+                normalizeStoredSectionCode(section.code),
           )?.semester,
       );
 
       return {
         id: section.id,
-        code: section.code,
+        code: normalizeStoredSectionCode(section.code) || section.code,
         program: section.program || program,
         yearLevel: section.yearLevel || yearLevel,
         semester,
@@ -2010,8 +2456,10 @@ export const getStudentSectionChoices = ({
       };
     })
     .sort((left, right) => {
-      const leftIsCurrent = left.code === normalizedCurrentSectionCode;
-      const rightIsCurrent = right.code === normalizedCurrentSectionCode;
+      const leftIsCurrent =
+        normalizeStoredSectionCode(left.code) === normalizedCurrentSectionCode;
+      const rightIsCurrent =
+        normalizeStoredSectionCode(right.code) === normalizedCurrentSectionCode;
 
       if (leftIsCurrent !== rightIsCurrent) {
         return leftIsCurrent ? -1 : 1;
@@ -2037,7 +2485,8 @@ export const updateStoredStudentSection = ({
   nextSectionCode: string;
 }): StudentSectionUpdateResult | null => {
   const resolvedBranch = normalizeBranchName(branch);
-  const normalizedNextSectionCode = nextSectionCode.trim();
+  const normalizedNextSectionCode =
+    normalizeStoredSectionCode(nextSectionCode);
 
   if (!normalizedNextSectionCode) {
     throw new Error("Choose a section before saving.");
@@ -2058,7 +2507,7 @@ export const updateStoredStudentSection = ({
     return null;
   }
 
-  const previousSection = targetStudent.section?.trim() || "";
+  const previousSection = normalizeStoredSectionCode(targetStudent.section);
   if (previousSection === normalizedNextSectionCode) {
     return {
       student: targetStudent,
@@ -2072,7 +2521,8 @@ export const updateStoredStudentSection = ({
     readBranchScopedData<StoredClassSection[]>("class-sections", resolvedBranch) ??
     [];
   const targetSection = storedSections.find(
-    (section) => section.code === normalizedNextSectionCode,
+    (section) =>
+      normalizeStoredSectionCode(section.code) === normalizedNextSectionCode,
   );
 
   if (!targetSection) {
@@ -2154,7 +2604,7 @@ export const updateStoredStudentSection = ({
   writeStoredStudents(nextStudents);
 
   const nextSections = storedSections.map((section) => {
-    if (section.code === previousSection) {
+    if (normalizeStoredSectionCode(section.code) === previousSection) {
       const existingEnrolleeIds = section.enrolleeIds ?? [];
       const nextEnrolleeIds =
         linkedEnrolleeId && existingEnrolleeIds.includes(linkedEnrolleeId)
@@ -2171,7 +2621,9 @@ export const updateStoredStudentSection = ({
       };
     }
 
-    if (section.code === normalizedNextSectionCode) {
+    if (
+      normalizeStoredSectionCode(section.code) === normalizedNextSectionCode
+    ) {
       const existingEnrolleeIds = section.enrolleeIds ?? [];
       const shouldAddLinkedEnrollee =
         Boolean(linkedEnrolleeId) &&
@@ -2542,263 +2994,8 @@ export const updateStoredStudentOwnScheduleState = ({
 };
 
 export const getDefaultBranchEnrollees = (
-  branch: string | null | undefined,
-): AdminEnrolleeRecord[] => {
-  const resolvedBranch = normalizeBranchName(branch);
-
-  const mockBranchApplicants: Record<AdminBranchName, AdminEnrolleeRecord[]> = {
-    Bacoor: [
-      {
-        id: "BAC-APP-001",
-        trackingNumber: "AICS-20260401-BAC101",
-        fullName: "Marianne Santos",
-        program: "College",
-        yearLevel: "1st Year",
-        strandOrCourse: "BSE - Bachelor of Entrepreneurship",
-        applicationDate: "2026-04-01",
-        documentsSubmitted: 4,
-        totalDocuments: 4,
-        status: "Pending",
-        branch: "Bacoor",
-        studentStatus: "Senior High Graduate",
-        honorLabel: "No Honor",
-        personalInfo: {
-          fullName: "Marianne Santos",
-          birthDate: "2008-03-14",
-          contactNumber: "0912 334 5567",
-          program: "College",
-          guardianName: "Ramon Santos",
-          email: "marianne.santos@example.com",
-          address: "Molino, Bacoor, Cavite",
-          yearLevel: "1st Year",
-          guardianContact: "0917 551 9922",
-        },
-        attachments: [
-          {
-            name: "Form 137",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Diploma/Certificate of Graduation",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Birth Certificate/PSA",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Good Moral Character",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-        ],
-      },
-      {
-        id: "BAC-APP-002",
-        trackingNumber: "AICS-20260402-BAC102",
-        fullName: "Jericho Ramos",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        strandOrCourse: "ICT - Information and Communications Technology",
-        applicationDate: "2026-04-02",
-        documentsSubmitted: 3,
-        totalDocuments: 4,
-        status: "Pending",
-        branch: "Bacoor",
-        studentStatus: "Junior High Completer",
-        honorLabel: "No Honor",
-        personalInfo: {
-          fullName: "Jericho Ramos",
-          birthDate: "2009-11-22",
-          contactNumber: "0918 443 1178",
-          program: "SHS",
-          guardianName: "Alma Ramos",
-          email: "jericho.ramos@example.com",
-          address: "Bacoor, Cavite",
-          yearLevel: "Grade 11",
-          guardianContact: "0932 144 8821",
-        },
-        attachments: [
-          {
-            name: "Form 137",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Grade Report Card",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Birth Certificate/PSA",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-        ],
-      },
-      {
-        id: "BAC-APP-003",
-        trackingNumber: "AICS-20260403-BAC103",
-        fullName: "Alyssa Mae Cruz",
-        program: "College",
-        yearLevel: "1st Year",
-        strandOrCourse: "BSIT - Bachelor of Science in Information Technology",
-        applicationDate: "2026-04-03",
-        documentsSubmitted: 4,
-        totalDocuments: 4,
-        status: "Pending",
-        branch: "Bacoor",
-        studentStatus: "Transferee",
-        honorLabel: "No Honor",
-        personalInfo: {
-          fullName: "Alyssa Mae Cruz",
-          birthDate: "2006-09-19",
-          contactNumber: "0917 889 1123",
-          program: "College",
-          guardianName: "Marissa Cruz",
-          email: "alyssa.cruz@example.com",
-          address: "Bacoor, Cavite",
-          yearLevel: "1st Year",
-          guardianContact: "0918 662 0045",
-        },
-        attachments: [
-          {
-            name: "Transcript of Records (TOR)",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Honorable Dismissal",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Birth Certificate/PSA",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Good Moral Character",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-        ],
-      },
-    ],
-    Taytay: [
-      {
-        id: "TAY-APP-001",
-        trackingNumber: "AICS-20260401-TAY101",
-        fullName: "Alyssa Dela Cruz",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        strandOrCourse: "ABM - Accountancy, Business, and Management",
-        applicationDate: "2026-04-01",
-        documentsSubmitted: 4,
-        totalDocuments: 4,
-        status: "Pending",
-        branch: "Taytay",
-        studentStatus: "Junior High Completer",
-        honorLabel: "No Honor",
-        personalInfo: {
-          fullName: "Alyssa Dela Cruz",
-          birthDate: "2009-08-30",
-          contactNumber: "0919 412 7731",
-          program: "SHS",
-          guardianName: "Carlo Dela Cruz",
-          email: "alyssa.delacruz@example.com",
-          address: "Taytay, Rizal",
-          yearLevel: "Grade 11",
-          guardianContact: "0956 331 2015",
-        },
-        attachments: [
-          {
-            name: "Form 137",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Grade Report Card",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Birth Certificate/PSA",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Good Moral Character",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-        ],
-      },
-    ],
-    GMA: [
-      {
-        id: "GMA-APP-001",
-        trackingNumber: "AICS-20260401-GMA101",
-        fullName: "Nico Fernandez",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        strandOrCourse: "GAS - General Academic Strand",
-        applicationDate: "2026-04-01",
-        documentsSubmitted: 2,
-        totalDocuments: 4,
-        status: "Pending",
-        branch: "GMA",
-        studentStatus: "Junior High Completer",
-        honorLabel: "No Honor",
-        personalInfo: {
-          fullName: "Nico Fernandez",
-          birthDate: "2009-02-04",
-          contactNumber: "0915 224 9930",
-          program: "SHS",
-          guardianName: "Lorna Fernandez",
-          email: "nico.fernandez@example.com",
-          address: "GMA, Cavite",
-          yearLevel: "Grade 11",
-          guardianContact: "0912 440 1804",
-        },
-        attachments: [
-          {
-            name: "Form 137",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-          {
-            name: "Birth Certificate/PSA",
-            type: "pdf",
-            url: "#",
-            reviewStatus: "Pending",
-          },
-        ],
-      },
-    ],
-  };
-
-  return mockBranchApplicants[resolvedBranch];
-};
+  _branch: string | null | undefined,
+): AdminEnrolleeRecord[] => [];
 
 const getSignedRequirementUrl = async (
   storagePath: string,
