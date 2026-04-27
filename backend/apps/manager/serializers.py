@@ -13,6 +13,8 @@ class ReportSerializer(serializers.Serializer):
     message = serializers.CharField(read_only=True)
     attachment_url = serializers.CharField(read_only=True, allow_blank=True)
     is_deleted = serializers.BooleanField(read_only=True)
+    is_reviewed = serializers.BooleanField(read_only=True)
+    reviewed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
 
 
@@ -21,3 +23,7 @@ class ReportCreateSerializer(serializers.Serializer):
     subject = serializers.CharField(max_length=255)
     message = serializers.CharField()
     attachment = serializers.FileField(required=False, allow_null=True)
+
+
+class ReportReviewStatusSerializer(serializers.Serializer):
+    is_reviewed = serializers.BooleanField()

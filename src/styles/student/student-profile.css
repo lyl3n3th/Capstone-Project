@@ -2,11 +2,11 @@
 
 
 .s-profile-content {
-  padding: 20px;
+  padding: 24px;
   max-width: 1500px;
-  margin: 0;
-  margin-left: 180px; 
-  width: calc(100% - 280px);
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 
@@ -17,6 +17,7 @@
   margin-bottom: 30px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 30px;
   color: white;
   box-shadow: 0 10px 30px rgba(0,0,0,0.15);
@@ -46,10 +47,16 @@
   display: block;
 }
 
+.s-profile-header-info {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
 .s-profile-header-info h1 {
   font-size: 32px;
   font-weight: 700;
   margin: 0 0 10px 0;
+  overflow-wrap: anywhere;
 }
 
 .s-profile-badges {
@@ -77,12 +84,14 @@
   font-size: 16px;
   margin: 5px 0;
   opacity: 0.9;
+  overflow-wrap: anywhere;
 }
 
 .s-profile-grade {
   font-size: 14px;
   margin: 0;
   opacity: 0.8;
+  overflow-wrap: anywhere;
 }
 
 /* Profile Sections */
@@ -140,15 +149,17 @@
   color: #333;
   padding: 8px 0;
   border-bottom: 1px solid #f0f0f0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Profile Page Additional Styles */
 .s-profile-name-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  position: relative;
 }
 
 .s-edit-btn {
@@ -173,6 +184,7 @@
 .s-edit-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 24px;
   padding: 16px;
@@ -183,6 +195,7 @@
 .s-save-btn, .s-cancel-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   padding: 8px 16px;
   border: none;
@@ -190,6 +203,7 @@
   font-size: 14px;
   cursor: pointer;
   transition: all 0.3s;
+  min-height: 42px;
 }
 
 .s-save-btn {
@@ -224,6 +238,7 @@
   border-radius: 6px;
   font-size: 14px;
   font-family: inherit;
+  box-sizing: border-box;
 }
 
 .s-profile-field textarea {
@@ -259,10 +274,18 @@
 }
 
 /* ===== RESPONSIVE BREAKPOINTS ===== */
+@media (max-width: 900px) {
+  .s-profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .s-profile-field.s-full-width {
+    grid-column: span 1;
+  }
+}
+
 @media (max-width: 1024px) {
   .s-profile-content {
-    margin-left: 0;
-    width: 100%;
     padding: 20px;
   }
   
@@ -290,13 +313,17 @@
   
   .s-profile-content {
     padding: 20px;
-    margin-top: 70px;
   }
   
   .s-profile-header-card {
     flex-direction: column;
     text-align: center;
     padding: 25px;
+  }
+
+  .s-profile-header-info {
+    flex: 1 1 auto;
+    width: 100%;
   }
   
   .s-profile-header-info h1 {
@@ -307,21 +334,10 @@
     justify-content: center;
   }
   
-  .s-profile-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 /* Mobile Landscape */
 @media (max-width: 640px) {
-  .s-profile-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .s-profile-field.s-full-width {
-    grid-column: span 1;
-  }
-  
   .s-profile-section {
     padding: 20px;
   }
@@ -329,12 +345,20 @@
   .s-section-title-with-icon {
     font-size: 18px;
   }
+
+  .s-edit-actions {
+    flex-direction: column;
+  }
+
+  .s-save-btn,
+  .s-cancel-btn {
+    width: 100%;
+  }
 }
 
 @media (max-width: 480px) {
   .s-profile-content {
     padding: 15px;
-    margin-top: 20px;
   }
   
   .s-profile-header-card {
@@ -359,11 +383,10 @@
   }
 
   .s-edit-btn {
-    position: relative;
-    top: auto;
-    right: auto;
     display: inline-flex;
-    padding: 5px 10px;
+    justify-content: center;
+    width: 100%;
+    padding: 8px 12px;
     font-size: 12px;
   }
   

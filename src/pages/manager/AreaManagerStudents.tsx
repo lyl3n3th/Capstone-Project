@@ -4,6 +4,7 @@ import {
   getStudentCredentialOverview,
   normalizeBranchName,
   readStoredStudents,
+  STORED_STUDENTS_UPDATED_EVENT,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
 import "../../styles/manager/area-manageStudents.css";
@@ -61,6 +62,23 @@ const splitStoredStudentName = (fullName: string) => {
 const getAdmissionTypeLabel = (studentStatus?: string) =>
   studentStatus?.trim() || "Not recorded";
 
+const getNormalizedStudentRecordStatus = (status?: string | null) =>
+  (status || "").trim().toLowerCase();
+
+const isVisibleManagerStudentRecord = (
+  student: Pick<StudentStorageRecord, "status">,
+) => {
+  const normalizedStatus = getNormalizedStudentRecordStatus(student.status);
+
+  return ![
+    "archived",
+    "graduated",
+    "deleted",
+    "inactive",
+    "removed",
+  ].includes(normalizedStatus);
+};
+
 const getCredentialStatusLabel = (student: StudentStorageRecord) => {
   const credentialOverview = getStudentCredentialOverview({
     branch: student.branch,
@@ -106,7 +124,7 @@ const mapStoredStudentToDirectoryRow = (
     first_name: firstName,
     last_name: lastName,
     student_id: student.id,
-    status: student.status === "Archived" ? "inactive" : "active",
+    status: isVisibleManagerStudentRecord(student) ? "active" : "inactive",
     credential_status: getCredentialStatusLabel(student),
     admission_status: student.studentStatus,
     course: isShsStudent
@@ -148,7 +166,7 @@ const AreaManagerStudents: React.FC = () => {
 
       try {
         const storedStudents = readStoredStudents()
-          .filter((student) => student.status !== "Archived")
+          .filter(isVisibleManagerStudentRecord)
           .map(mapStoredStudentToDirectoryRow);
 
         setStudents(storedStudents);
@@ -163,10 +181,12 @@ const AreaManagerStudents: React.FC = () => {
     loadStudents();
 
     window.addEventListener("storage", loadStudents);
+    window.addEventListener(STORED_STUDENTS_UPDATED_EVENT, loadStudents);
     window.addEventListener("focus", loadStudents);
 
     return () => {
       window.removeEventListener("storage", loadStudents);
+      window.removeEventListener(STORED_STUDENTS_UPDATED_EVENT, loadStudents);
       window.removeEventListener("focus", loadStudents);
     };
   }, []);

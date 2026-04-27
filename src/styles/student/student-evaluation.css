@@ -22,6 +22,7 @@
   position: relative;
   z-index: 1;
   max-width: 720px;
+  min-width: 0;
 }
 
 .s-evaluation-kicker {
@@ -55,6 +56,7 @@
   position: relative;
   z-index: 1;
   min-width: 220px;
+  max-width: 100%;
   align-self: flex-start;
   padding: 18px 20px;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -85,11 +87,18 @@
 
 .s-evaluation-summary .s-summary-card {
   border-color: #dbeafe;
+  min-width: 0;
+}
+
+.s-evaluation-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
 }
 
 .s-evaluation-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: 18px;
 }
 
@@ -97,6 +106,7 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
   min-height: 100%;
   padding: 22px;
   border: 1px solid #dbe5ef;
@@ -148,6 +158,7 @@
   color: #0f172a;
   font-size: 20px;
   line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .s-evaluation-card-copy p {
@@ -164,7 +175,9 @@
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.3;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .s-evaluation-state-open {
@@ -198,6 +211,8 @@
   color: #334155;
   font-size: 12px;
   line-height: 1.4;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .s-evaluation-card-note {
@@ -279,6 +294,7 @@
 .s-evaluation-placeholder-item span {
   color: #1a3d5c;
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .s-evaluation-placeholder-item strong {
@@ -292,15 +308,31 @@
   padding: 48px 24px;
 }
 
+@media (max-width: 980px) {
+  .s-evaluation-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .s-evaluation-term-card {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .s-evaluation-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 768px) {
   .s-evaluation-hero {
     padding: 22px;
     border-radius: 16px;
   }
 
-  .s-evaluation-term-card {
+  .s-evaluation-card-copy {
+    flex: 1 1 auto;
     width: 100%;
-    min-width: 0;
   }
 
   .s-evaluation-card {
@@ -323,5 +355,28 @@
   .s-evaluation-placeholder-item {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .s-evaluation-placeholder-item strong {
+    align-self: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .s-evaluation-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .s-evaluation-hero {
+    padding: 18px;
+  }
+
+  .s-evaluation-hero p {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .s-evaluation-term-card {
+    padding: 16px;
   }
 }

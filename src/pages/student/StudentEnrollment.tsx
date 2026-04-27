@@ -7,7 +7,6 @@ import Header from "../../components/common/Header";
 import { ToastContainer } from "../../components/common/Toast";
 import { useStudent } from "../../hooks/useStudent";
 import {
-  getEnrollmentSectionChoices,
   getEnrollmentRetakeChoiceGroups,
   getStudentCredentialOverview,
   getStudentPortalSubjectsForTerm,
@@ -32,8 +31,9 @@ import {
   ENROLLMENT_REQUESTS_UPDATED_EVENT,
   getEnrollmentRequestForStudent,
   getRegularEnrollmentRequirementItems,
+  hydrateEnrollmentRequestAttachments,
   saveEnrollmentRequest,
-  type EnrollmentIrregularRequestRecord,
+  uploadEnrollmentRequestAttachment,
 } from "../../services/enrollmentRequests";
 import {
   getStudentGradeRecords,
@@ -52,6 +52,10 @@ type Toast = {
 type UploadedEnrollmentFile = {
   name: string;
   url?: string;
+  type?: string;
+  storagePath?: string;
+  storageBucket?: string;
+  uploadedAt?: string;
 };
 
 type EnrollmentRequirementItem = {
@@ -682,6 +686,39 @@ const getUploadedAttachmentType = (fileName?: string) => {
   return fileName.split(".").pop()?.trim().toLowerCase() || "file";
 };
 
+const hasViewableAttachmentUrl = (url?: string) =>
+  Boolean(url && url !== "#");
+
+const mapAttachmentsToUploadedFiles = (
+  attachments: NonNullable<
+    ReturnType<typeof getEnrollmentRequestForStudent>
+  >["attachments"],
+  enrollmentRequirements: EnrollmentRequirementItem[],
+  previousFiles: Record<string, UploadedEnrollmentFile>,
+) =>
+  enrollmentRequirements.reduce<Record<string, UploadedEnrollmentFile>>(
+    (result, requirement, index) => {
+      const storedAttachment = attachments?.[index];
+
+      if (!storedAttachment) {
+        return result;
+      }
+
+      result[requirement.key] = {
+        name: storedAttachment.name,
+        type: storedAttachment.type,
+        storagePath: storedAttachment.storagePath,
+        storageBucket: storedAttachment.storageBucket,
+        uploadedAt: storedAttachment.uploadedAt,
+        url: hasViewableAttachmentUrl(storedAttachment.url)
+          ? storedAttachment.url
+          : previousFiles[requirement.key]?.url,
+      };
+      return result;
+    },
+    {},
+  );
+
 const getStatusToneClass = (label: string) => {
   const normalized = normalizeAcademicToken(label);
 
@@ -716,12 +753,6 @@ function StudentEnrollment() {
   const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
   const [enrollmentRequestsVersion, setEnrollmentRequestsVersion] = useState(0);
   const [isRetakePlanModalOpen, setIsRetakePlanModalOpen] = useState(false);
-  const [isSectionRequestModalOpen, setIsSectionRequestModalOpen] =
-    useState(false);
-  const [selectedIrregularRequestMode, setSelectedIrregularRequestMode] =
-    useState<EnrollmentIrregularRequestRecord["mode"] | "">("");
-  const [selectedIrregularSectionId, setSelectedIrregularSectionId] =
-    useState("");
   const [selectedRetakeAssignmentsBySubject, setSelectedRetakeAssignmentsBySubject] =
     useState<Record<string, string>>({});
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -876,7 +907,6 @@ function StudentEnrollment() {
     activeEnrollmentRequest?.requestedLoad?.mode === "retake"
       ? activeEnrollmentRequest.requestedLoad
       : null;
-  const requestedIrregularRequest = activeEnrollmentRequest?.irregularRequest ?? null;
   const isRegularFlowStudent = student?.status === "Regular";
   const supportsIrregularEnrollmentRequest = Boolean(
     student && storageProgram === "College" && student.status === "Irregular",
@@ -932,45 +962,6 @@ function StudentEnrollment() {
     () => retakeChoiceGroups.filter((group) => group.assignmentOptions.length === 0),
     [retakeChoiceGroups],
   );
-  const irregularSectionChoices = useMemo(
-    () =>
-      student &&
-      supportsIrregularEnrollmentRequest &&
-      nextPlacement.hasNextTerm
-        ? getEnrollmentSectionChoices({
-            branch: student.branch,
-            program: storageProgram,
-            yearLevel: nextPlacement.yearLevel,
-            strandOrCourse: student.program,
-            semester: nextPlacement.semester,
-            academicYear: nextPlacement.academicYear,
-          })
-        : [],
-    [
-      nextPlacement.academicYear,
-      nextPlacement.hasNextTerm,
-      nextPlacement.semester,
-      nextPlacement.yearLevel,
-      storageProgram,
-      student,
-      supportsIrregularEnrollmentRequest,
-    ],
-  );
-  const selectedIrregularSection = useMemo(
-    () =>
-      irregularSectionChoices.find(
-        (section) => section.id === selectedIrregularSectionId,
-      ) ?? null,
-    [irregularSectionChoices, selectedIrregularSectionId],
-  );
-  const irregularRequestSelectionLabel =
-    selectedIrregularRequestMode === "own_schedule"
-      ? "Own Schedule Request"
-      : selectedIrregularRequestMode === "section_assignment"
-        ? selectedIrregularSection?.code ||
-          requestedIrregularRequest?.requestedSectionCode ||
-          "Section Request Pending"
-        : "No request type selected";
   const isRetakePlanComplete = retakeGroupsWithAvailableSchedules.every((group) =>
     Boolean(selectedRetakeAssignmentsBySubject[group.subjectId]),
   );
@@ -1023,10 +1014,6 @@ function StudentEnrollment() {
   const isRequestLocked =
     activeEnrollmentRequest?.enrollmentStatus === "Pending" ||
     activeEnrollmentRequest?.enrollmentStatus === "Approved";
-  const isIrregularEnrollmentConfigured =
-    selectedIrregularRequestMode === "own_schedule" ||
-    (selectedIrregularRequestMode === "section_assignment" &&
-      Boolean(selectedIrregularSectionId));
   const isEligibleForEnrollment =
     Boolean(
       student &&
@@ -1047,11 +1034,7 @@ function StudentEnrollment() {
           ? "Needs Resubmission"
           : isEligibleForEnrollment
             ? supportsIrregularEnrollmentRequest
-              ? isIrregularEnrollmentConfigured
-                ? selectedIrregularRequestMode === "section_assignment"
-                  ? "Eligible with Section Request"
-                  : "Eligible with Own Schedule Request"
-                : "Eligible - Choose Request Type"
+              ? "Eligible with Own Schedule Request"
               : hasRetakeAdvisory
                 ? "Eligible with Retake Advisory"
                 : isLevelUpTerm
@@ -1073,13 +1056,7 @@ function StudentEnrollment() {
               : supportsIrregularEnrollmentRequest
                 ? !nextPlacement.hasNextTerm
                   ? "A next enrollment term is not available yet for this student record."
-                  : selectedIrregularRequestMode === "own_schedule"
-                    ? "All required grades are complete. Upload the requirements and submit this request so the next-term own schedule planner can be opened again."
-                    : selectedIrregularRequestMode === "section_assignment"
-                      ? selectedIrregularSection
-                        ? `All required grades are complete. Upload the requirements and submit your request to stay in ${selectedIrregularSection.code}.`
-                        : "All required grades are complete. Choose the section you want to stay in before submitting."
-                      : "All required grades are complete. Choose whether to request your own schedule again or request assignment to a specific section."
+                  : "All required grades are complete. Upload the requirements and submit this request so the next-term own schedule planner can be opened again."
                 : hasRetakeAdvisory
                   ? hasCollegeRetakePlanner
                     ? "All required grades are complete. Upload the requirements, complete the retake plan load, and submit the request for review."
@@ -1108,13 +1085,9 @@ function StudentEnrollment() {
         ? "Enrollment Approved"
       : activeEnrollmentRequest?.enrollmentStatus === "Rejected"
           ? "Resubmit Enrollment Request"
-          : supportsIrregularEnrollmentRequest &&
-              selectedIrregularRequestMode === "own_schedule"
+          : supportsIrregularEnrollmentRequest
             ? "Submit Own Schedule Request"
-            : supportsIrregularEnrollmentRequest &&
-                selectedIrregularRequestMode === "section_assignment"
-              ? "Submit Section Assignment Request"
-              : "Submit Enrollment Request";
+            : "Submit Enrollment Request";
 
   const studentData = {
     name: studentName,
@@ -1138,6 +1111,11 @@ function StudentEnrollment() {
   };
 
   const handleFileUpload = async (requirement: EnrollmentRequirementItem) => {
+    if (!student) {
+      addToast("Student record is still loading.", "warning");
+      return;
+    }
+
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
@@ -1152,25 +1130,35 @@ function StudentEnrollment() {
       setUploadingId(requirement.key);
 
       try {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        const previewUrl = URL.createObjectURL(file);
-
-        setUploadedFiles((prev) => {
-          const previousUrl = prev[requirement.key]?.url;
-
-          if (previousUrl) {
-            URL.revokeObjectURL(previousUrl);
-          }
-
-          return {
-            ...prev,
-            [requirement.key]: { name: file.name, url: previewUrl },
-          };
+        const uploadedAttachment = await uploadEnrollmentRequestAttachment({
+          trackingNumber: student.trackingNumber,
+          studentNumber: student.studentNumber,
+          academicYear: nextPlacement.academicYear,
+          semester: nextPlacement.semester,
+          requirementKey: requirement.key,
+          file,
         });
+
+        setUploadedFiles((prev) => ({
+          ...prev,
+          [requirement.key]: {
+            name: uploadedAttachment.name,
+            url: uploadedAttachment.url,
+            type: uploadedAttachment.type,
+            storagePath: uploadedAttachment.storagePath,
+            storageBucket: uploadedAttachment.storageBucket,
+            uploadedAt: uploadedAttachment.uploadedAt,
+          },
+        }));
         addToast(`${requirement.label} uploaded successfully.`, "success");
       } catch (error) {
         console.error("Upload failed:", error);
-        addToast("Upload failed. Please try again.", "error");
+        addToast(
+          error instanceof Error
+            ? error.message
+            : "Upload failed. Please try again.",
+          "error",
+        );
       } finally {
         setUploadingId(null);
       }
@@ -1232,44 +1220,6 @@ Generated on: ${new Date().toLocaleDateString()}
     setIsRetakePlanModalOpen(false);
   };
 
-  const openSectionRequestModal = () => {
-    if (!supportsIrregularEnrollmentRequest) {
-      return;
-    }
-
-    setIsSectionRequestModalOpen(true);
-  };
-
-  const closeSectionRequestModal = () => {
-    setIsSectionRequestModalOpen(false);
-  };
-
-  const handleSelectOwnScheduleRequest = () => {
-    if (isRequestLocked) {
-      return;
-    }
-
-    setSelectedIrregularRequestMode("own_schedule");
-    addToast(
-      "Own schedule was selected for the next enrollment request.",
-      "info",
-    );
-  };
-
-  const handleSaveSectionRequest = () => {
-    if (!selectedIrregularSectionId) {
-      addToast("Choose a section before saving this request.", "warning");
-      return;
-    }
-
-    setSelectedIrregularRequestMode("section_assignment");
-    setIsSectionRequestModalOpen(false);
-    addToast(
-      `Section assignment request set to ${selectedIrregularSection?.code || "the selected section"}.`,
-      "info",
-    );
-  };
-
   const handleRetakeAssignmentChange = (
     subjectId: string,
     nextAssignmentId: string,
@@ -1283,6 +1233,11 @@ Generated on: ${new Date().toLocaleDateString()}
   const handleEnroll = () => {
     if (!student) {
       addToast("Student record is still loading.", "warning");
+      return;
+    }
+
+    if (uploadingId) {
+      addToast("Wait for the current file upload to finish first.", "info");
       return;
     }
 
@@ -1332,24 +1287,6 @@ Generated on: ${new Date().toLocaleDateString()}
       return;
     }
 
-    if (supportsIrregularEnrollmentRequest && !isIrregularEnrollmentConfigured) {
-      addToast(
-        "Choose whether to request your own schedule again or request assignment to a specific section before submitting.",
-        "warning",
-      );
-      return;
-    }
-
-    if (
-      supportsIrregularEnrollmentRequest &&
-      selectedIrregularRequestMode === "section_assignment" &&
-      !selectedIrregularSection
-    ) {
-      setIsSectionRequestModalOpen(true);
-      addToast("Choose the section you want to stay in before submitting.", "warning");
-      return;
-    }
-
     const missingRequirement = enrollmentRequirements.find(
       (requirement) => !uploadedFiles[requirement.key],
     );
@@ -1384,20 +1321,11 @@ Generated on: ${new Date().toLocaleDateString()}
     }
 
     const submittedAt = new Date();
-    const irregularRequest: EnrollmentIrregularRequestRecord | undefined =
-      supportsIrregularEnrollmentRequest && isIrregularEnrollmentConfigured
-        ? selectedIrregularRequestMode === "section_assignment"
-          ? {
-              mode: "section_assignment",
-              requestedSectionId: selectedIrregularSectionId,
-              requestedSectionCode:
-                selectedIrregularSection?.code ||
-                requestedIrregularRequest?.requestedSectionCode,
-            }
-          : {
-              mode: "own_schedule",
-            }
-        : undefined;
+    const irregularRequest = supportsIrregularEnrollmentRequest
+      ? {
+          mode: "own_schedule" as const,
+        }
+      : undefined;
     const requestedLoad = hasCollegeRetakePlanner
       ? {
           mode: "retake" as const,
@@ -1432,9 +1360,7 @@ Generated on: ${new Date().toLocaleDateString()}
     const irregularRequestNote =
       irregularRequest?.mode === "own_schedule"
         ? ` Irregular request: student asked to request an own schedule again for ${nextPlacement.semester} ${nextPlacement.academicYear}.`
-        : irregularRequest?.mode === "section_assignment"
-          ? ` Irregular request: student requested assignment to section ${irregularRequest.requestedSectionCode || "TBA"} for ${nextPlacement.semester} ${nextPlacement.academicYear}.`
-          : "";
+        : "";
     const nextRequest = {
       id:
         activeEnrollmentRequest?.id ||
@@ -1456,10 +1382,14 @@ Generated on: ${new Date().toLocaleDateString()}
       notes: `${gradePostingSummary.postedSubjects}/${gradePostingSummary.totalSubjects} current-term subjects already have posted grades for the ${supportsIrregularEnrollmentRequest ? "irregular" : "regular"} enrollment flow.${retakeSubjectsNote}${hasRetakeAdvisory ? " Dependent prerequisite subjects should wait until the retakes are completed." : ""}${retakeOfferingNote}${irregularRequestNote}`,
       attachments: enrollmentRequirements.map((requirement) => ({
         name: uploadedFiles[requirement.key]?.name || requirement.label,
-        type: getUploadedAttachmentType(uploadedFiles[requirement.key]?.name),
-        // Student portal uploads are stored as request references in this local workflow.
-        url: "#",
+        type:
+          uploadedFiles[requirement.key]?.type ||
+          getUploadedAttachmentType(uploadedFiles[requirement.key]?.name),
+        url: uploadedFiles[requirement.key]?.url || "#",
         reviewStatus: "Pending" as const,
+        storagePath: uploadedFiles[requirement.key]?.storagePath,
+        storageBucket: uploadedFiles[requirement.key]?.storageBucket,
+        uploadedAt: uploadedFiles[requirement.key]?.uploadedAt,
       })),
       requestedLoad,
       irregularRequest,
@@ -1469,7 +1399,6 @@ Generated on: ${new Date().toLocaleDateString()}
       saveEnrollmentRequest(nextRequest);
       setEnrollmentRequestsVersion((previousValue) => previousValue + 1);
       setIsRetakePlanModalOpen(false);
-      setIsSectionRequestModalOpen(false);
       addToast(
         `Enrollment request sent for ${nextPlacement.yearLevel} ${nextPlacement.semester}. Admin or registrar review is now pending.`,
         "success",
@@ -1592,26 +1521,46 @@ Date: ${new Date().toLocaleDateString()}
     }
 
     setUploadedFiles((previousFiles) =>
-      enrollmentRequirements.reduce<Record<string, UploadedEnrollmentFile>>(
-        (result, requirement, index) => {
-          const storedAttachment = activeEnrollmentRequest.attachments?.[index];
-
-          if (!storedAttachment) {
-            return result;
-          }
-
-          result[requirement.key] = {
-            name: storedAttachment.name,
-            url:
-              storedAttachment.url && storedAttachment.url !== "#"
-                ? storedAttachment.url
-                : previousFiles[requirement.key]?.url,
-          };
-          return result;
-        },
-        {},
+      mapAttachmentsToUploadedFiles(
+        activeEnrollmentRequest.attachments,
+        enrollmentRequirements,
+        previousFiles,
       ),
     );
+
+    if (
+      !activeEnrollmentRequest.attachments.some(
+        (attachment) => attachment.storagePath,
+      )
+    ) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const refreshUploadedAttachmentUrls = async () => {
+      const hydratedAttachments = await hydrateEnrollmentRequestAttachments(
+        activeEnrollmentRequest.attachments,
+      );
+
+      if (isCancelled || !hydratedAttachments?.length) {
+        return;
+      }
+
+      setUploadedFiles((previousFiles) =>
+        mapAttachmentsToUploadedFiles(
+          hydratedAttachments,
+          enrollmentRequirements,
+          previousFiles,
+        ),
+      );
+    };
+
+    void refreshUploadedAttachmentUrls();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [activeEnrollmentRequest, enrollmentRequirements]);
 
   useEffect(() => {
@@ -1639,36 +1588,9 @@ Date: ${new Date().toLocaleDateString()}
   }, [hasCollegeRetakePlanner, requestedRetakeLoad, retakeChoiceGroups]);
 
   useEffect(() => {
-    if (!supportsIrregularEnrollmentRequest) {
-      setSelectedIrregularRequestMode("");
-      setSelectedIrregularSectionId("");
-      setIsSectionRequestModalOpen(false);
-      return;
-    }
-
-    if (!requestedIrregularRequest) {
-      return;
-    }
-
-    const matchedSectionId =
-      requestedIrregularRequest.requestedSectionId ||
-      irregularSectionChoices.find(
-        (section) => section.code === requestedIrregularRequest.requestedSectionCode,
-      )?.id ||
-      "";
-
-    setSelectedIrregularRequestMode(requestedIrregularRequest.mode);
-    setSelectedIrregularSectionId(matchedSectionId);
-  }, [
-    irregularSectionChoices,
-    requestedIrregularRequest,
-    supportsIrregularEnrollmentRequest,
-  ]);
-
-  useEffect(() => {
     return () => {
       Object.values(uploadedFilesRef.current).forEach((file) => {
-        if (file.url) {
+        if (file.url?.startsWith("blob:")) {
           URL.revokeObjectURL(file.url);
         }
       });
@@ -1994,88 +1916,6 @@ Date: ${new Date().toLocaleDateString()}
             </div>
           </div>
 
-          {supportsIrregularEnrollmentRequest && (
-            <div className="s-enrollment-card s-irregular-request-card">
-              <div className="s-irregular-request-header">
-                <div>
-                  <h3>Irregular Request Setup</h3>
-                  <p className="s-irregular-request-text">
-                    Choose whether you want to request your own schedule again
-                    for the next term or ask to stay in one specific section.
-                  </p>
-                </div>
-                <span className="s-subject-chip">
-                  {irregularRequestSelectionLabel}
-                </span>
-              </div>
-              <div className="s-subject-summary">
-                <span className="s-subject-chip">
-                  {nextPlacement.yearLevel} - {nextPlacement.semester}
-                </span>
-                <span className="s-subject-chip">
-                  {nextPlacement.academicYear}
-                </span>
-                {selectedIrregularSection ? (
-                  <span className="s-subject-chip">
-                    {selectedIrregularSection.availableSlots} open seat
-                    {selectedIrregularSection.availableSlots === 1 ? "" : "s"}
-                  </span>
-                ) : null}
-              </div>
-              <div className="s-irregular-request-actions">
-                <button
-                  type="button"
-                  className={`s-irregular-request-btn ${selectedIrregularRequestMode === "own_schedule" ? "selected" : ""}`}
-                  onClick={handleSelectOwnScheduleRequest}
-                  disabled={isRequestLocked}
-                >
-                  Request Own Schedule
-                </button>
-                <button
-                  type="button"
-                  className={`s-irregular-request-btn ${selectedIrregularRequestMode === "section_assignment" ? "selected" : ""}`}
-                  onClick={openSectionRequestModal}
-                  disabled={isRequestLocked}
-                >
-                  {selectedIrregularRequestMode === "section_assignment"
-                    ? "Change Requested Section"
-                    : "Request Specific Section"}
-                </button>
-              </div>
-              <div className="s-irregular-request-selection">
-                {selectedIrregularRequestMode === "own_schedule" ? (
-                  <span>
-                    After approval, the next-term own schedule planner will open
-                    again from the Current Subjects page.
-                  </span>
-                ) : selectedIrregularRequestMode === "section_assignment" ? (
-                  selectedIrregularSection ? (
-                    <span>
-                      Requested section:{" "}
-                      <strong>{selectedIrregularSection.code}</strong>
-                      {` | ${selectedIrregularSection.scheduledAssignmentCount} scheduled subject`}
-                      {selectedIrregularSection.scheduledAssignmentCount === 1
-                        ? ""
-                        : "s"}
-                      {" loaded for the term."}
-                    </span>
-                  ) : (
-                    <span>
-                      The selected section is not available in the current list
-                      yet. Open the section picker to review it before
-                      submitting.
-                    </span>
-                  )
-                ) : (
-                  <span>
-                    Pick one option above before you submit the enrollment
-                    request.
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
           <div className="s-requirements-section">
             <h3>Enrollment & Requirements</h3>
             <div className="s-requirements-grid">
@@ -2091,7 +1931,9 @@ Date: ${new Date().toLocaleDateString()}
                         <MdDownload /> Download
                       </button>
                     )}
-                    {uploadedFiles[requirement.key]?.url && (
+                    {hasViewableAttachmentUrl(
+                      uploadedFiles[requirement.key]?.url,
+                    ) && (
                       <a
                         className="s-requirement-view"
                         href={uploadedFiles[requirement.key]?.url}
@@ -2140,13 +1982,6 @@ Date: ${new Date().toLocaleDateString()}
               {totalUnits > 0 && (
                 <span className="s-subject-chip">{totalUnits} total units</span>
               )}
-              {supportsIrregularEnrollmentRequest &&
-              selectedIrregularRequestMode === "section_assignment" &&
-              selectedIrregularSection ? (
-                <span className="s-subject-chip">
-                  Requesting {selectedIrregularSection.code}
-                </span>
-              ) : null}
             </div>
             <div className="s-table-wrapper">
               <table className="s-enrollment-table">
@@ -2265,14 +2100,13 @@ Date: ${new Date().toLocaleDateString()}
             <div className="s-note-content">
               <p>
                 Regular students can submit the standard enrollment request from
-                this page, and eligible college irregular students can choose
-                between an own-schedule request or a specific section request.
+                this page, and eligible college irregular students can submit an
+                own-schedule request for the next term.
               </p>
               <p className="s-notice-text">
                 Notice: Clearance stays required, and the grades requirement now
                 uses the semester grades certificate. College retake requests
-                must also complete the plan load before submission, while
-                irregular schedule requests must finish the request setup above.
+                must also complete the plan load before submission.
               </p>
             </div>
           </div>
@@ -2344,106 +2178,6 @@ Date: ${new Date().toLocaleDateString()}
             </button>
           </div>
         </main>
-
-        {isSectionRequestModalOpen && supportsIrregularEnrollmentRequest && (
-          <div
-            className="s-retake-plan-modal-overlay"
-            onClick={closeSectionRequestModal}
-          >
-            <div
-              className="s-retake-plan-modal s-section-request-modal"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="s-retake-plan-modal-header">
-                <div>
-                  <h2>Request Specific Section</h2>
-                  <p>
-                    {nextPlacement.yearLevel} - {nextPlacement.semester} (
-                    {nextPlacement.academicYear})
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="s-retake-plan-modal-close"
-                  onClick={closeSectionRequestModal}
-                  aria-label="Close section request"
-                >
-                  x
-                </button>
-              </div>
-
-              <div className="s-retake-plan-modal-body">
-                <p className="s-retake-plan-modal-note">
-                  Select the section you want to stay in for the upcoming term.
-                  The request will be sent for admin or registrar approval
-                  together with your enrollment documents.
-                </p>
-                {irregularSectionChoices.length > 0 ? (
-                  <div className="s-section-request-list">
-                    {irregularSectionChoices.map((section) => (
-                      <label
-                        key={section.id}
-                        className={`s-section-request-option ${
-                          selectedIrregularSectionId === section.id
-                            ? "selected"
-                            : ""
-                        }`}
-                      >
-                        <span className="s-section-request-control">
-                          <input
-                            type="radio"
-                            name="requested-section"
-                            value={section.id}
-                            checked={selectedIrregularSectionId === section.id}
-                            onChange={(event) =>
-                              setSelectedIrregularSectionId(event.target.value)
-                            }
-                            disabled={isRequestLocked}
-                          />
-                        </span>
-                        <div className="s-section-request-copy">
-                          <strong>{section.code}</strong>
-                          <span>
-                            {section.program} | {section.yearLevel} |{" "}
-                            {section.semester}
-                          </span>
-                          <span>
-                            {section.availableSlots} open seat
-                            {section.availableSlots === 1 ? "" : "s"} |{" "}
-                            {section.scheduledAssignmentCount} scheduled subject
-                            {section.scheduledAssignmentCount === 1 ? "" : "s"}
-                          </span>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="s-retake-plan-empty-state">
-                    No matching section is available yet for the upcoming term.
-                  </div>
-                )}
-              </div>
-
-              <div className="s-retake-plan-modal-actions">
-                <button
-                  type="button"
-                  className="s-download-confirmation-btn s-retake-plan-secondary-btn"
-                  onClick={closeSectionRequestModal}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="s-retake-plan-btn"
-                  onClick={handleSaveSectionRequest}
-                  disabled={isRequestLocked || irregularSectionChoices.length === 0}
-                >
-                  Save Section Request
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {isRetakePlanModalOpen && hasCollegeRetakePlanner && (
           <div

@@ -10,7 +10,6 @@ import {
   type ChartData,
 } from "chart.js";
 import { Pie, Bar } from "react-chartjs-2";
-import axios from "axios";
 import {
   MdPeople,
   MdAssignment,
@@ -20,11 +19,13 @@ import {
 import {
   getDefaultBranchEnrollees,
   getStudentsForBranch,
+  normalizeBranchName,
   readBranchScopedData,
   type AdminBranchName,
   type AdminEnrolleeRecord,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
+import { fetchInboxReports, type ReportRecord } from "../../services/reportApi";
 import ChartNote from "../../components/common/ChartNote";
 import "../../styles/manager/area-managerDashboard.css";
 import "../../styles/manager/area-manager.css";
@@ -60,14 +61,6 @@ interface DashboardBranchData {
   pending_reports: number;
 }
 
-interface DashboardApiResponse {
-  branches?: DashboardBranchData[];
-  bar_data?: ChartData<"bar", number[], string> | null;
-  reports?: unknown[];
-  shs_enrollees?: number;
-  college_enrollees?: number;
-}
-
 interface DashboardState {
   branches: DashboardBranchData[];
   barData: ChartData<"bar", number[], string>;
@@ -83,8 +76,6 @@ type PopulationRecord = {
   academicLevel: "SHS" | "College" | "Other";
 };
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const MANAGER_BRANCHES: AdminBranchName[] = ["Bacoor", "Taytay", "GMA"];
 const chartColors = ["#0052cc", "#4c8bf5", "#97bcff", "#c2d6ff", "#e2e8f0"];
 
@@ -175,7 +166,38 @@ const getBranchEnrollees = (branch: AdminBranchName) =>
   readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", branch) ??
   getDefaultBranchEnrollees(branch);
 
-const buildLocalDashboardState = (): DashboardState => {
+const buildPendingReportCounts = (reports: ReportRecord[]) => {
+  const countsByBranch = new Map<AdminBranchName, number>(
+    MANAGER_BRANCHES.map((branch) => [branch, 0] as const),
+  );
+
+  reports.forEach((report) => {
+    if (report.is_reviewed) {
+      return;
+    }
+
+    const normalizedBranch = normalizeBranchName(report.branch_name);
+    if (!countsByBranch.has(normalizedBranch)) {
+      return;
+    }
+
+    countsByBranch.set(
+      normalizedBranch,
+      (countsByBranch.get(normalizedBranch) || 0) + 1,
+    );
+  });
+
+  return {
+    countsByBranch,
+    totalPending: Array.from(countsByBranch.values()).reduce(
+      (total, count) => total + count,
+      0,
+    ),
+  };
+};
+
+const buildLocalDashboardState = (reports: ReportRecord[] = []): DashboardState => {
+  const pendingReportCounts = buildPendingReportCounts(reports);
   const branches = MANAGER_BRANCHES.map((branch) => {
     const students = getStudentsForBranch(branch);
     const enrollees = getBranchEnrollees(branch);
@@ -190,9 +212,7 @@ const buildLocalDashboardState = (): DashboardState => {
     const collegeEnrollees = enrollees.filter(
       (enrollee) => enrollee.program === "College",
     ).length;
-    const pendingReports = enrollees.filter(
-      (enrollee) => enrollee.status === "Pending",
-    ).length;
+    const pendingReports = pendingReportCounts.countsByBranch.get(branch) || 0;
 
     return {
       branch_name: branch,
@@ -207,53 +227,13 @@ const buildLocalDashboardState = (): DashboardState => {
   return {
     branches,
     barData: buildBarChartData(branches),
-    reportsCount: branches.reduce(
-      (total, branch) => total + branch.pending_reports,
-      0,
-    ),
+    reportsCount: pendingReportCounts.totalPending,
     enrollmentStats: {
       shs: branches.reduce((total, branch) => total + branch.shs_enrollees, 0),
       college: branches.reduce(
         (total, branch) => total + branch.college_enrollees,
         0,
       ),
-    },
-  };
-};
-
-const normalizeDashboardResponse = (
-  responseData?: DashboardApiResponse | null,
-): DashboardState | null => {
-  const branches = Array.isArray(responseData?.branches)
-    ? responseData.branches
-    : [];
-
-  if (branches.length === 0) {
-    return null;
-  }
-
-  return {
-    branches,
-    barData: responseData?.bar_data || buildBarChartData(branches),
-    reportsCount: Array.isArray(responseData?.reports)
-      ? responseData.reports.length
-      : branches.reduce(
-          (total, branch) => total + (branch.pending_reports || 0),
-          0,
-        ),
-    enrollmentStats: {
-      shs:
-        responseData?.shs_enrollees ??
-        branches.reduce(
-          (total, branch) => total + (branch.shs_enrollees || 0),
-          0,
-        ),
-      college:
-        responseData?.college_enrollees ??
-        branches.reduce(
-          (total, branch) => total + (branch.college_enrollees || 0),
-          0,
-        ),
     },
   };
 };
@@ -282,21 +262,12 @@ const AreaManagerDashboard = ({
   };
 
   const fetchAllData = async () => {
-    const localDashboardState = buildLocalDashboardState();
-
     try {
-      const response = await axios.get<DashboardApiResponse>(
-        `${API_BASE_URL}/api/dashboard-stats/`,
-      );
-      const normalizedApiData = normalizeDashboardResponse(response.data);
-
-      applyDashboardState(normalizedApiData || localDashboardState);
+      const inboxReports = await fetchInboxReports();
+      applyDashboardState(buildLocalDashboardState(inboxReports));
     } catch (error) {
-      console.error(
-        "Dashboard fetch failed, falling back to locally stored data:",
-        error,
-      );
-      applyDashboardState(localDashboardState);
+      console.error("Failed to load manager dashboard reports:", error);
+      applyDashboardState(buildLocalDashboardState());
     } finally {
       setLoading(false);
     }
@@ -304,6 +275,11 @@ const AreaManagerDashboard = ({
 
   useEffect(() => {
     void fetchAllData();
+
+    window.addEventListener("focus", fetchAllData);
+    return () => {
+      window.removeEventListener("focus", fetchAllData);
+    };
   }, []);
 
   const totalStudentsCount = dashboardData.reduce(

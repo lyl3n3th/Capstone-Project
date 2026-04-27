@@ -4,6 +4,7 @@ import {
   writeBranchScopedData,
   type AdminAttachment,
 } from "./adminStorage";
+import { supabase } from "../lib/supabase";
 import type { EnrollmentRequestedLoadRecord } from "./enrollmentLoadPlanner";
 import { stripLegacyMockEnrollmentRequestRecords } from "./legacyMockData";
 
@@ -48,6 +49,8 @@ export interface EnrollmentRequirementItem {
 export const ENROLLMENT_REQUEST_STORAGE_SCOPE = "enrollment-requests";
 export const ENROLLMENT_REQUESTS_UPDATED_EVENT =
   "aics-enrollment-requests-updated";
+const ENROLLMENT_REQUEST_ATTACHMENT_BUCKET = "admission-requirements";
+const ENROLLMENT_REQUEST_ATTACHMENT_URL_TTL_SECONDS = 60 * 60;
 
 const REGULAR_ENROLLMENT_REQUIREMENTS: EnrollmentRequirementItem[] = [
   {
@@ -61,6 +64,132 @@ const REGULAR_ENROLLMENT_REQUIREMENTS: EnrollmentRequirementItem[] = [
     required: true,
   },
 ];
+
+type SupabaseErrorLike = {
+  code?: string;
+  details?: string | null;
+  hint?: string | null;
+  message: string;
+};
+
+export interface EnrollmentRequestAttachmentUploadInput {
+  trackingNumber?: string | null;
+  studentNumber?: string | null;
+  academicYear: string;
+  semester: string;
+  requirementKey: string;
+  file: File;
+}
+
+const sanitizeStorageSegment = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "item";
+
+const sanitizeFileName = (value: string) =>
+  value.replace(/[^a-zA-Z0-9._-]/g, "_");
+
+const getErrorMessage = (error: SupabaseErrorLike) =>
+  error.details
+    ? `${error.message} ${error.details}`.trim()
+    : error.hint
+      ? `${error.message} ${error.hint}`.trim()
+      : error.message;
+
+const createEnrollmentRequestAttachmentUrl = async (
+  storagePath: string,
+  storageBucket = ENROLLMENT_REQUEST_ATTACHMENT_BUCKET,
+) => {
+  const { data, error } = await supabase.storage
+    .from(storageBucket)
+    .createSignedUrl(
+      storagePath,
+      ENROLLMENT_REQUEST_ATTACHMENT_URL_TTL_SECONDS,
+    );
+
+  if (error || !data?.signedUrl) {
+    console.warn("Failed to sign enrollment request attachment URL", error);
+    return "#";
+  }
+
+  return data.signedUrl;
+};
+
+export const uploadEnrollmentRequestAttachment = async ({
+  trackingNumber,
+  studentNumber,
+  academicYear,
+  semester,
+  requirementKey,
+  file,
+}: EnrollmentRequestAttachmentUploadInput): Promise<AdminAttachment> => {
+  const safeFileName = sanitizeFileName(file.name);
+  const ownerKey = sanitizeStorageSegment(
+    trackingNumber?.trim() || studentNumber?.trim() || "student",
+  );
+  const storagePath = [
+    "enrollment-requests",
+    ownerKey,
+    sanitizeStorageSegment(academicYear),
+    sanitizeStorageSegment(semester),
+    sanitizeStorageSegment(requirementKey),
+    `${Date.now()}-${safeFileName}`,
+  ].join("/");
+
+  const { error: uploadError } = await supabase.storage
+    .from(ENROLLMENT_REQUEST_ATTACHMENT_BUCKET)
+    .upload(storagePath, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+
+  if (uploadError) {
+    throw new Error(getErrorMessage(uploadError));
+  }
+
+  return {
+    name: file.name,
+    type: file.type || "file",
+    url: await createEnrollmentRequestAttachmentUrl(storagePath),
+    storagePath,
+    storageBucket: ENROLLMENT_REQUEST_ATTACHMENT_BUCKET,
+    uploadedAt: new Date().toISOString(),
+  };
+};
+
+export const hydrateEnrollmentRequestAttachments = async (
+  attachments?: AdminAttachment[],
+) => {
+  if (!attachments?.length) {
+    return attachments;
+  }
+
+  return Promise.all(
+    attachments.map(async (attachment) => {
+      if (!attachment.storagePath) {
+        return attachment;
+      }
+
+      return {
+        ...attachment,
+        url: await createEnrollmentRequestAttachmentUrl(
+          attachment.storagePath,
+          attachment.storageBucket || ENROLLMENT_REQUEST_ATTACHMENT_BUCKET,
+        ),
+      };
+    }),
+  );
+};
+
+export const hydrateEnrollmentRequestRecordAttachments = async (
+  request: EnrollmentRequestRecord,
+): Promise<EnrollmentRequestRecord> => ({
+  ...request,
+  attachments: await hydrateEnrollmentRequestAttachments(request.attachments),
+});
 
 const getRequestSortValue = (request: EnrollmentRequestRecord) => {
   const timestamp =

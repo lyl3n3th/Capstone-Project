@@ -41,9 +41,14 @@ import {
   updateAdmissionProgress,
 } from "../../services/admission";
 import {
+  applyStudentGradeUploadOperationsForBranch,
   getStudentAcademicStanding,
   getStudentGradeRecords,
+  STUDENT_GRADE_RECORDS_UPDATED_EVENT,
+  validateAndNormalizeUploadedGradeRow,
   type StoredStudentGradeRecord,
+  type StudentGradeProgramType,
+  type StudentGradeUploadOperation,
 } from "../../services/studentGrades";
 import { getLatestApprovedEnrollmentRequestForStudent } from "../../services/enrollmentRequests";
 import { stripLegacyMockAdmissionRecords } from "../../services/legacyMockData";
@@ -278,6 +283,30 @@ interface ShsGradeSummaryRow {
   subjectCode: string;
   subjectTitle: string;
   quarterGrades: Record<ShsQuarterLabel, string>;
+}
+
+interface StudentGradeEditFieldState {
+  key: string;
+  label: string;
+  gradingPeriod: string;
+  semester: string;
+  value: string;
+  existingRecord: StoredStudentGradeRecord | null;
+}
+
+interface StudentGradeEditState {
+  title: string;
+  subtitle: string;
+  branch: string;
+  studentId: string;
+  fullName: string;
+  subjectCode: string;
+  subjectTitle: string;
+  programType: StudentGradeProgramType;
+  academicYear: string;
+  semester: string;
+  unit: string;
+  fields: StudentGradeEditFieldState[];
 }
 
 interface PlannerConflict {
@@ -555,6 +584,9 @@ const sortCollegeGradeRecords = (records: StoredStudentGradeRecord[]) =>
     return left.gradingPeriod.localeCompare(right.gradingPeriod);
   });
 
+const buildShsGradeSummaryKey = (subjectCode: string, subjectTitle: string) =>
+  `${subjectCode}::${subjectTitle}`;
+
 const buildShsGradeSummaryRows = (records: StoredStudentGradeRecord[]) => {
   const rows = new Map<string, ShsGradeSummaryRow>();
 
@@ -564,7 +596,7 @@ const buildShsGradeSummaryRows = (records: StoredStudentGradeRecord[]) => {
       return;
     }
 
-    const key = `${record.subjectCode}::${record.subjectTitle}`;
+    const key = buildShsGradeSummaryKey(record.subjectCode, record.subjectTitle);
     const existingRow = rows.get(key) ?? {
       key,
       subjectCode: record.subjectCode,
@@ -587,6 +619,29 @@ const buildShsGradeSummaryRows = (records: StoredStudentGradeRecord[]) => {
       left.subjectTitle.localeCompare(right.subjectTitle),
   );
 };
+
+const getEditableShsQuarterLabels = (semester: string): ShsQuarterLabel[] => {
+  const normalizedSemester = semester.trim().toLowerCase();
+
+  if (normalizedSemester === "1st semester") {
+    return ["1st Quarter", "2nd Quarter"];
+  }
+
+  if (normalizedSemester === "2nd semester") {
+    return ["3rd Quarter", "4th Quarter"];
+  }
+
+  return [...SHS_QUARTER_DISPLAY_ORDER];
+};
+
+const buildGradeClearIdentityFromRecord = (record: StoredStudentGradeRecord) => ({
+  studentId: record.studentId,
+  subjectCode: record.subjectCode,
+  academicYear: record.academicYear,
+  semester: record.semester,
+  gradingPeriod: record.gradingPeriod,
+  programType: record.programType,
+});
 
 const mergeApprovedEnrollees = (records: AdminEnrolleeRecord[]) => {
   const mergedRecords = new Map<string, AdminEnrolleeRecord>();
@@ -978,8 +1033,16 @@ export default function AdminStudents({
     useState(false);
   const [scholarshipScoreFeedback, setScholarshipScoreFeedback] =
     useState<InlineFeedback | null>(null);
+  const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
   const [gradeTermFilter, setGradeTermFilter] = useState("all");
   const [gradeSearchTerm, setGradeSearchTerm] = useState("");
+  const [gradeEditState, setGradeEditState] =
+    useState<StudentGradeEditState | null>(null);
+  const [gradeEditFeedback, setGradeEditFeedback] =
+    useState<InlineFeedback | null>(null);
+  const [gradeManagementFeedback, setGradeManagementFeedback] =
+    useState<InlineFeedback | null>(null);
+  const [isSavingGradeEdit, setIsSavingGradeEdit] = useState(false);
 
   // Form state for add/edit
   const [formData, setFormData] = useState<Student>({
@@ -1135,6 +1198,7 @@ export default function AdminStudents({
   useEffect(() => {
     const handleBackupRestoreApplied = () => {
       setStudents(getStudentsForBranch(currentBranch) as Student[]);
+      setGradeRecordsVersion((previousValue) => previousValue + 1);
       setStudentSubjectPlans(
         readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
           STUDENT_SUBJECT_PLAN_SCOPE,
@@ -1158,6 +1222,31 @@ export default function AdminStudents({
       window.removeEventListener(
         BACKUP_RESTORE_APPLIED_EVENT,
         handleBackupRestoreApplied as EventListener,
+      );
+    };
+  }, [currentBranch]);
+
+  useEffect(() => {
+    const handleStudentGradeRecordsUpdated = (event: Event) => {
+      const customEvent = event as CustomEvent<{ branch?: string }>;
+      const updatedBranch = normalizeBranchName(customEvent.detail?.branch);
+
+      if (updatedBranch && updatedBranch !== currentBranch) {
+        return;
+      }
+
+      setGradeRecordsVersion((previousValue) => previousValue + 1);
+    };
+
+    window.addEventListener(
+      STUDENT_GRADE_RECORDS_UPDATED_EVENT,
+      handleStudentGradeRecordsUpdated as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener(
+        STUDENT_GRADE_RECORDS_UPDATED_EVENT,
+        handleStudentGradeRecordsUpdated as EventListener,
       );
     };
   }, [currentBranch]);
@@ -1221,7 +1310,7 @@ export default function AdminStudents({
           }),
         ]),
       ),
-    [students, currentBranch],
+    [students, currentBranch, gradeRecordsVersion],
   );
   const getStudentAcademicStandingLabel = (student: Student) =>
     getDisplayedAcademicStandingLabel(
@@ -1674,6 +1763,9 @@ export default function AdminStudents({
   const openViewModal = (student: Student) => {
     setGradeTermFilter("all");
     setGradeSearchTerm("");
+    setGradeEditState(null);
+    setGradeEditFeedback(null);
+    setGradeManagementFeedback(null);
     setViewingStudent(student);
   };
 
@@ -1683,6 +1775,9 @@ export default function AdminStudents({
     setScholarshipScoreFeedback(null);
     setGradeTermFilter("all");
     setGradeSearchTerm("");
+    setGradeEditState(null);
+    setGradeEditFeedback(null);
+    setGradeManagementFeedback(null);
   };
 
   const toggleStudentSelection = (studentId: string) => {
@@ -1808,6 +1903,277 @@ export default function AdminStudents({
       });
     } finally {
       setIsSavingScholarshipScore(false);
+    }
+  };
+
+  const handleCloseGradeEditor = () => {
+    setGradeEditState(null);
+    setGradeEditFeedback(null);
+  };
+
+  const handleOpenCollegeGradeEditor = (record: StoredStudentGradeRecord) => {
+    if (!viewingStudent) {
+      return;
+    }
+
+    setGradeManagementFeedback(null);
+    setGradeEditFeedback(null);
+    setGradeEditState({
+      title: "Edit Uploaded Grade",
+      subtitle: `${record.subjectCode} - ${record.subjectTitle} | ${record.academicYear} | ${record.semester}`,
+      branch: viewingStudent.branch || currentBranch,
+      studentId: record.studentId,
+      fullName: record.fullName,
+      subjectCode: record.subjectCode,
+      subjectTitle: record.subjectTitle,
+      programType: record.programType,
+      academicYear: record.academicYear,
+      semester: record.semester,
+      unit: record.units != null ? String(record.units) : "",
+      fields: [
+        {
+          key: record.id,
+          label: record.gradingPeriod,
+          gradingPeriod: record.gradingPeriod,
+          semester: record.semester,
+          value: record.grade,
+          existingRecord: record,
+        },
+      ],
+    });
+  };
+
+  const handleOpenShsGradeEditor = ({
+    academicYear,
+    semester,
+    row,
+    records,
+  }: {
+    academicYear: string;
+    semester: string;
+    row: ShsGradeSummaryRow;
+    records: StoredStudentGradeRecord[];
+  }) => {
+    if (!viewingStudent) {
+      return;
+    }
+
+    const editableQuarterLabels = getEditableShsQuarterLabels(semester);
+    const recordByPeriod = new Map(
+      records.map((record) => [record.gradingPeriod, record] as const),
+    );
+
+    setGradeManagementFeedback(null);
+    setGradeEditFeedback(null);
+    setGradeEditState({
+      title: "Edit Uploaded Grades",
+      subtitle: `${row.subjectCode} - ${row.subjectTitle} | ${academicYear} | ${semester}`,
+      branch: viewingStudent.branch || currentBranch,
+      studentId: viewingStudent.id,
+      fullName: viewingStudent.name,
+      subjectCode: row.subjectCode,
+      subjectTitle: row.subjectTitle,
+      programType: "SHS",
+      academicYear,
+      semester,
+      unit: "",
+      fields: editableQuarterLabels.map((quarterLabel) => {
+        const existingRecord = recordByPeriod.get(quarterLabel) ?? null;
+
+        return {
+          key: `${row.key}::${quarterLabel}`,
+          label: quarterLabel,
+          gradingPeriod: quarterLabel,
+          semester: "",
+          value: existingRecord?.grade || "",
+          existingRecord,
+        };
+      }),
+    });
+  };
+
+  const handleGradeEditFieldChange = (fieldKey: string, nextValue: string) => {
+    setGradeEditState((previousState) => {
+      if (!previousState) {
+        return previousState;
+      }
+
+      return {
+        ...previousState,
+        fields: previousState.fields.map((field) =>
+          field.key === fieldKey ? { ...field, value: nextValue } : field,
+        ),
+      };
+    });
+
+    if (gradeEditFeedback) {
+      setGradeEditFeedback(null);
+    }
+
+    if (gradeManagementFeedback) {
+      setGradeManagementFeedback(null);
+    }
+  };
+
+  const handleSaveGradeEdit = () => {
+    if (!gradeEditState) {
+      return;
+    }
+
+    setIsSavingGradeEdit(true);
+    setGradeEditFeedback(null);
+
+    try {
+      const updatedAt = new Date().toISOString();
+      const operations: StudentGradeUploadOperation[] = [];
+
+      for (const field of gradeEditState.fields) {
+        const trimmedValue = field.value.trim();
+        const currentValue = field.existingRecord?.grade.trim() ?? "";
+
+        if (trimmedValue === currentValue) {
+          continue;
+        }
+
+        if (!field.existingRecord && trimmedValue === "") {
+          continue;
+        }
+
+        const validationResult = validateAndNormalizeUploadedGradeRow(
+          {
+            studentId: gradeEditState.studentId,
+            fullName: gradeEditState.fullName,
+            subjectCode: gradeEditState.subjectCode,
+            subjectTitle: gradeEditState.subjectTitle,
+            grade: trimmedValue,
+            unit: gradeEditState.unit,
+            gradingPeriod: field.gradingPeriod,
+            programType: gradeEditState.programType,
+            academicYear: gradeEditState.academicYear,
+            semester: field.semester,
+            branch: gradeEditState.branch,
+          },
+          updatedAt,
+          { allowBlankGradeClear: true },
+        );
+
+        if (validationResult.errorReason) {
+          setGradeEditFeedback({
+            type: "warning",
+            message: `${field.label}: ${validationResult.errorReason}.`,
+          });
+          setIsSavingGradeEdit(false);
+          return;
+        }
+
+        if (validationResult.normalizedRecord) {
+          operations.push({
+            type: "upsert",
+            record: validationResult.normalizedRecord,
+          });
+        } else if (validationResult.clearRecordIdentity) {
+          operations.push({
+            type: "clear",
+            identity: validationResult.clearRecordIdentity,
+          });
+        }
+      }
+
+      if (operations.length === 0) {
+        setGradeEditFeedback({
+          type: "warning",
+          message: "No grade changes were detected.",
+        });
+        return;
+      }
+
+      applyStudentGradeUploadOperationsForBranch(gradeEditState.branch, operations);
+      setGradeEditState(null);
+      setGradeManagementFeedback({
+        type: "success",
+        message:
+          operations.length === 1
+            ? "Grade updated successfully."
+            : `${operations.length} grade changes saved successfully.`,
+      });
+    } catch (error) {
+      console.error("Failed to update student grades", error);
+      setGradeEditFeedback({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to update the selected grade right now.",
+      });
+    } finally {
+      setIsSavingGradeEdit(false);
+    }
+  };
+
+  const handleRemoveGradeRecords = ({
+    branch,
+    records,
+    summaryLabel,
+  }: {
+    branch: string;
+    records: StoredStudentGradeRecord[];
+    summaryLabel: string;
+  }) => {
+    if (records.length === 0) {
+      setGradeManagementFeedback({
+        type: "warning",
+        message: "No saved grades were found for the selected row.",
+      });
+      return;
+    }
+
+    const shouldRemove = window.confirm(
+      `Remove ${records.length} saved grade${
+        records.length === 1 ? "" : "s"
+      } for ${summaryLabel}?\n\nThis action will update the student's academic standing if needed.`,
+    );
+
+    if (!shouldRemove) {
+      return;
+    }
+
+    try {
+      applyStudentGradeUploadOperationsForBranch(
+        branch,
+        records.map((record) => ({
+          type: "clear" as const,
+          identity: buildGradeClearIdentityFromRecord(record),
+        })),
+      );
+      setGradeEditState((previousState) => {
+        if (!previousState) {
+          return previousState;
+        }
+
+        const isEditingRemovedSubject =
+          previousState.subjectCode === records[0].subjectCode &&
+          previousState.academicYear === records[0].academicYear &&
+          previousState.semester === records[0].semester;
+
+        return isEditingRemovedSubject ? null : previousState;
+      });
+      setGradeEditFeedback(null);
+      setGradeManagementFeedback({
+        type: "success",
+        message:
+          records.length === 1
+            ? "Grade removed successfully."
+            : `${records.length} grades removed successfully.`,
+      });
+    } catch (error) {
+      console.error("Failed to remove student grades", error);
+      setGradeManagementFeedback({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to remove the selected grade right now.",
+      });
     }
   };
 
@@ -2030,7 +2396,7 @@ export default function AdminStudents({
             studentId: viewingStudent.id,
           })
         : [],
-    [currentBranch, viewingStudent],
+    [currentBranch, gradeRecordsVersion, viewingStudent],
   );
   const viewingStudentGradeTerms = sortAcademicTerms(
     Array.from(
@@ -3698,18 +4064,97 @@ export default function AdminStudents({
                               />
                             </div>
                           </div>
+                          {gradeEditState ? (
+                            <div className="students-grade-editor">
+                              <div className="students-grade-editor-header">
+                                <div>
+                                  <h4>{gradeEditState.title}</h4>
+                                  <p>{gradeEditState.subtitle}</p>
+                                </div>
+                              </div>
+                              <div className="students-grade-editor-grid">
+                                {gradeEditState.fields.map((field) => (
+                                  <label
+                                    key={field.key}
+                                    className="students-grade-editor-field"
+                                  >
+                                    <span>{field.label}</span>
+                                    <input
+                                      type="text"
+                                      value={field.value}
+                                      onChange={(event) =>
+                                        handleGradeEditFieldChange(
+                                          field.key,
+                                          event.target.value,
+                                        )
+                                      }
+                                      placeholder={
+                                        gradeEditState.programType === "College"
+                                          ? "1.00, 1.25, 3.00, INC, FAILED"
+                                          : "Enter a grade or leave blank"
+                                      }
+                                      disabled={isSavingGradeEdit}
+                                    />
+                                  </label>
+                                ))}
+                              </div>
+                              <p className="students-grade-editor-hint">
+                                Leave a field blank to clear that saved grade.
+                              </p>
+                              {gradeEditFeedback ? (
+                                <p
+                                  className={`students-inline-feedback ${gradeEditFeedback.type}`}
+                                >
+                                  {gradeEditFeedback.message}
+                                </p>
+                              ) : null}
+                              <div className="students-grade-editor-actions">
+                                <button
+                                  type="button"
+                                  className="students-cancel-btn"
+                                  onClick={handleCloseGradeEditor}
+                                  disabled={isSavingGradeEdit}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  className="students-save-btn"
+                                  onClick={handleSaveGradeEdit}
+                                  disabled={isSavingGradeEdit}
+                                >
+                                  {isSavingGradeEdit
+                                    ? "Saving..."
+                                    : "Save Grade Changes"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+                          {gradeManagementFeedback ? (
+                            <p
+                              className={`students-inline-feedback ${gradeManagementFeedback.type}`}
+                            >
+                              {gradeManagementFeedback.message}
+                            </p>
+                          ) : null}
                           {filteredViewingStudentGradeTerms.map(
                             ({ academicYear, semester }) => {
-                              const termGrades =
+                              const filteredTermGrades =
                                 filteredViewingStudentGradeRecords.filter(
-                                (record) =>
+                                  (record) =>
+                                    record.academicYear === academicYear &&
+                                    record.semester === semester,
+                                );
+                              const allTermGrades =
+                                viewingStudentGradeRecords.filter(
+                                  (record) =>
                                   record.academicYear === academicYear &&
                                   record.semester === semester,
                                 );
 
                               if (isViewingCollegeStudent) {
                                 const sortedTermGrades =
-                                  sortCollegeGradeRecords(termGrades);
+                                  sortCollegeGradeRecords(filteredTermGrades);
                                 const hasIrregularTrigger = sortedTermGrades.some(
                                   (record) =>
                                     viewingStudentGradeTriggerIds.has(record.id),
@@ -3747,6 +4192,7 @@ export default function AdminStudents({
                                             <th>Grade</th>
                                             <th>Units</th>
                                             <th>Result</th>
+                                            <th>Actions</th>
                                           </tr>
                                         </thead>
                                         <tbody>
@@ -3767,6 +4213,38 @@ export default function AdminStudents({
                                               <td>{record.normalizedGrade}</td>
                                               <td>{record.units ?? "—"}</td>
                                               <td>{record.evaluation}</td>
+                                              <td>
+                                                <div className="students-grade-row-actions">
+                                                  <button
+                                                    type="button"
+                                                    className="students-grade-action-btn"
+                                                    onClick={() =>
+                                                      handleOpenCollegeGradeEditor(
+                                                        record,
+                                                      )
+                                                    }
+                                                    disabled={isAnyAlumniMovePending}
+                                                  >
+                                                    Edit
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className="students-grade-action-btn danger"
+                                                    onClick={() =>
+                                                      handleRemoveGradeRecords({
+                                                        branch:
+                                                          viewingStudent.branch ||
+                                                          currentBranch,
+                                                        records: [record],
+                                                        summaryLabel: `${record.subjectCode} - ${record.subjectTitle} (${record.gradingPeriod})`,
+                                                      })
+                                                    }
+                                                    disabled={isAnyAlumniMovePending}
+                                                  >
+                                                    Remove
+                                                  </button>
+                                                </div>
+                                              </td>
                                             </tr>
                                           ))}
                                         </tbody>
@@ -3776,7 +4254,24 @@ export default function AdminStudents({
                                 );
                               }
 
-                              const shsRows = buildShsGradeSummaryRows(termGrades);
+                              const visibleShsRowKeys = new Set(
+                                filteredTermGrades.map((record) =>
+                                  buildShsGradeSummaryKey(
+                                    record.subjectCode,
+                                    record.subjectTitle,
+                                  ),
+                                ),
+                              );
+                              const shsRows = buildShsGradeSummaryRows(
+                                allTermGrades.filter((record) =>
+                                  visibleShsRowKeys.has(
+                                    buildShsGradeSummaryKey(
+                                      record.subjectCode,
+                                      record.subjectTitle,
+                                    ),
+                                  ),
+                                ),
+                              );
 
                               return (
                                 <div
@@ -3799,27 +4294,73 @@ export default function AdminStudents({
                                           <th>2nd Quarter</th>
                                           <th>3rd Quarter</th>
                                           <th>4th Quarter</th>
+                                          <th>Actions</th>
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {shsRows.map((row) => (
-                                          <tr key={row.key}>
-                                            <td>{row.subjectCode}</td>
-                                            <td>{row.subjectTitle}</td>
-                                            <td>
-                                              {row.quarterGrades["1st Quarter"]}
-                                            </td>
-                                            <td>
-                                              {row.quarterGrades["2nd Quarter"]}
-                                            </td>
-                                            <td>
-                                              {row.quarterGrades["3rd Quarter"]}
-                                            </td>
-                                            <td>
-                                              {row.quarterGrades["4th Quarter"]}
-                                            </td>
-                                          </tr>
-                                        ))}
+                                        {shsRows.map((row) => {
+                                          const rowRecords = allTermGrades.filter(
+                                            (record) =>
+                                              buildShsGradeSummaryKey(
+                                                record.subjectCode,
+                                                record.subjectTitle,
+                                              ) === row.key,
+                                          );
+
+                                          return (
+                                            <tr key={row.key}>
+                                              <td>{row.subjectCode}</td>
+                                              <td>{row.subjectTitle}</td>
+                                              <td>
+                                                {row.quarterGrades["1st Quarter"]}
+                                              </td>
+                                              <td>
+                                                {row.quarterGrades["2nd Quarter"]}
+                                              </td>
+                                              <td>
+                                                {row.quarterGrades["3rd Quarter"]}
+                                              </td>
+                                              <td>
+                                                {row.quarterGrades["4th Quarter"]}
+                                              </td>
+                                              <td>
+                                                <div className="students-grade-row-actions">
+                                                  <button
+                                                    type="button"
+                                                    className="students-grade-action-btn"
+                                                    onClick={() =>
+                                                      handleOpenShsGradeEditor({
+                                                        academicYear,
+                                                        semester,
+                                                        row,
+                                                        records: rowRecords,
+                                                      })
+                                                    }
+                                                    disabled={isAnyAlumniMovePending}
+                                                  >
+                                                    Edit
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className="students-grade-action-btn danger"
+                                                    onClick={() =>
+                                                      handleRemoveGradeRecords({
+                                                        branch:
+                                                          viewingStudent.branch ||
+                                                          currentBranch,
+                                                        records: rowRecords,
+                                                        summaryLabel: `${row.subjectCode} - ${row.subjectTitle} (${semester})`,
+                                                      })
+                                                    }
+                                                    disabled={isAnyAlumniMovePending}
+                                                  >
+                                                    Remove
+                                                  </button>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
                                       </tbody>
                                     </table>
                                   </div>

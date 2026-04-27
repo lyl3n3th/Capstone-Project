@@ -7,13 +7,15 @@ const API_BASE_URL =
 
 export interface ReportRecord {
   id: string;
-  sender: number;
+  sender: string | null;
   sender_name: string;
   branch_name: string;
   subject: string;
   message: string;
   attachment_url: string;
   is_deleted: boolean;
+  is_reviewed: boolean;
+  reviewed_at: string | null;
   created_at: string;
 }
 
@@ -105,6 +107,14 @@ export async function fetchTrashReports() {
   return parseJsonResponse<ReportRecord[]>(response);
 }
 
+export async function fetchSentReports() {
+  const response = await fetch(`${API_BASE_URL}/api/manager/reports/sent/`, {
+    headers: buildHeaders(),
+  });
+
+  return parseJsonResponse<ReportRecord[]>(response);
+}
+
 export async function createReport(payload: CreateReportPayload) {
   const formData = new FormData();
   formData.append("branch", payload.branch);
@@ -144,6 +154,22 @@ export async function restoreReport(reportId: string) {
       method: "PATCH",
       headers: buildHeaders("application/json"),
       body: "{}",
+    },
+  );
+
+  return parseJsonResponse<ReportRecord>(response);
+}
+
+export async function updateReportReviewStatus(
+  reportId: string,
+  isReviewed: boolean,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/manager/reports/${reportId}/review-status/`,
+    {
+      method: "PATCH",
+      headers: buildHeaders("application/json"),
+      body: JSON.stringify({ is_reviewed: isReviewed }),
     },
   );
 

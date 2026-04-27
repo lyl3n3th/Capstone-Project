@@ -49,6 +49,8 @@ class Report(models.Model):
     message = models.TextField()
     attachment_url = models.URLField(blank=True)
     is_deleted = models.BooleanField(default=False)
+    is_reviewed = models.BooleanField(default=False)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

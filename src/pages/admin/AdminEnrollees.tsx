@@ -67,6 +67,7 @@ import {
 import { activateApprovedStudent } from "../../services/auth";
 import {
   getRegularEnrollmentRequirementItems,
+  hydrateEnrollmentRequestRecordAttachments,
   readEnrollmentRequestsForBranch,
   type EnrollmentRequestRecord,
   writeEnrollmentRequestsForBranch,
@@ -90,6 +91,9 @@ interface Attachment {
   type: string;
   url: string;
   reviewStatus?: "Pending" | "Approved" | "Rejected";
+  storagePath?: string;
+  storageBucket?: string;
+  uploadedAt?: string;
 }
 
 interface PersonalInformation {
@@ -163,6 +167,10 @@ interface SectionFormState {
   maxCapacity: number;
 }
 
+type CollegeSubjectType = "major" | "minor";
+type ShsSubjectType = "core" | "applied" | "specialized";
+type SubjectType = CollegeSubjectType | ShsSubjectType;
+
 interface SubjectFormState {
   code: string;
   name: string;
@@ -171,7 +179,7 @@ interface SubjectFormState {
   semester: string;
   units: string;
   strand: string;
-  type: "major" | "minor";
+  type: SubjectType;
   prerequisiteSubjectIds: string[];
 }
 
@@ -207,6 +215,7 @@ interface Subject {
   yearLevel: string;
   semester: string;
   strand?: string;
+  subjectType?: SubjectType;
   isMinor?: boolean;
   prerequisiteSubjectIds?: string[];
 }
@@ -888,13 +897,161 @@ const resolveSubjectStrandOrCourse = (
     ? subject.strand || DEFAULT_COLLEGE_COURSE
     : subject.strand || "All";
 
+const LEGACY_APPLIED_SHS_SUBJECT_CODES = new Set([
+  "MIN115",
+  "MIN116",
+  "MIN117",
+  "MIN118",
+  "MIN121",
+  "MIN122",
+  "MIN123",
+]);
+
+const LEGACY_APPLIED_SHS_SUBJECT_NAMES = new Set([
+  "english for academic purposes",
+  "filipino sa piling larangan",
+  "practical research 2",
+  "inquiries and investigation",
+  "entrepreneurship",
+  "research project",
+  "work immersion",
+]);
+
+const normalizeSubjectLookupValue = (value?: string) =>
+  value?.trim().toLowerCase().replace(/\s+/g, " ") || "";
+
+const inferLegacyShsSubjectType = ({
+  code,
+  name,
+  strand,
+}: {
+  code?: string;
+  name?: string;
+  strand?: string;
+}): ShsSubjectType => {
+  if ((strand || "All") !== "All") {
+    return "specialized";
+  }
+
+  const normalizedCode = code?.trim().toUpperCase() || "";
+  const normalizedName = normalizeSubjectLookupValue(name);
+
+  if (
+    LEGACY_APPLIED_SHS_SUBJECT_CODES.has(normalizedCode) ||
+    LEGACY_APPLIED_SHS_SUBJECT_NAMES.has(normalizedName)
+  ) {
+    return "applied";
+  }
+
+  return "core";
+};
+
+const normalizeSubjectTypeForProgram = ({
+  program,
+  type,
+  strand,
+  code,
+  name,
+}: {
+  program: "College" | "SHS";
+  type?: string;
+  strand?: string;
+  code?: string;
+  name?: string;
+}): SubjectType => {
+  if (program === "College") {
+    return type === "minor" ? "minor" : "major";
+  }
+
+  if (
+    type === "core" ||
+    type === "applied" ||
+    type === "specialized"
+  ) {
+    return type;
+  }
+
+  return inferLegacyShsSubjectType({ code, name, strand });
+};
+
+const getResolvedSubjectType = (
+  subject: Pick<
+    Subject,
+    "code" | "name" | "program" | "strand" | "isMinor" | "subjectType"
+  >,
+): SubjectType => {
+  if (subject.program === "College") {
+    if (subject.subjectType === "minor" || subject.subjectType === "major") {
+      return subject.subjectType;
+    }
+
+    return subject.isMinor ? "minor" : "major";
+  }
+
+  return normalizeSubjectTypeForProgram({
+    program: "SHS",
+    type: subject.subjectType,
+    code: subject.code,
+    name: subject.name,
+    strand: resolveSubjectStrandOrCourse(subject),
+  });
+};
+
+const getSubjectTypeLabel = (
+  subject: Pick<
+    Subject,
+    "code" | "name" | "program" | "strand" | "isMinor" | "subjectType"
+  >,
+) => {
+  const resolvedType = getResolvedSubjectType(subject);
+
+  switch (resolvedType) {
+    case "minor":
+      return "Minor";
+    case "major":
+      return "Major";
+    case "core":
+      return "Core";
+    case "applied":
+      return "Applied";
+    default:
+      return "Specialized";
+  }
+};
+
+const getSubjectTypeBadgeClass = (
+  subject: Pick<
+    Subject,
+    "code" | "name" | "program" | "strand" | "isMinor" | "subjectType"
+  >,
+) => {
+  const resolvedType = getResolvedSubjectType(subject);
+
+  switch (resolvedType) {
+    case "minor":
+      return "minor-badge";
+    case "major":
+      return "major-badge";
+    case "core":
+      return "core-badge";
+    case "applied":
+      return "applied-badge";
+    default:
+      return "specialized-badge";
+  }
+};
+
 const normalizeSubjectCatalog = (catalog: Subject[]) =>
-  catalog.map((subject) =>
-    subject.program === "College" && !subject.strand
+  catalog.map((subject) => {
+    const resolvedType = getResolvedSubjectType(subject);
+
+    return subject.program === "College" && !subject.strand
       ? {
           ...subject,
           semester: normalizeSectionSemester(subject.semester),
           strand: DEFAULT_COLLEGE_COURSE,
+          subjectType: resolvedType,
+          isMinor: resolvedType === "minor",
           prerequisiteSubjectIds: normalizeStringList(
             subject.prerequisiteSubjectIds,
           ),
@@ -902,11 +1059,14 @@ const normalizeSubjectCatalog = (catalog: Subject[]) =>
       : {
           ...subject,
           semester: normalizeSectionSemester(subject.semester),
+          subjectType: resolvedType,
+          isMinor:
+            subject.program === "College" ? resolvedType === "minor" : undefined,
           prerequisiteSubjectIds: normalizeStringList(
             subject.prerequisiteSubjectIds,
           ),
-        },
-  );
+        };
+  });
 
 const getSubjectYearLevelRank = (program: string, yearLevel: string) => {
   const options = getProgramYearLevelOptions(program);
@@ -1280,8 +1440,6 @@ export default function AdminEnrollees({
   );
   const [newSection, setNewSection] =
     useState<SectionFormState>(createDefaultSectionForm());
-  const [showSectionRequestsModal, setShowSectionRequestsModal] =
-    useState(false);
   const [showMoveStudentsModal, setShowMoveStudentsModal] = useState(false);
   const [moveStudentSearchTerm, setMoveStudentSearchTerm] = useState("");
   const [selectedMoveStudentId, setSelectedMoveStudentId] = useState("");
@@ -2671,7 +2829,12 @@ export default function AdminEnrollees({
       yearLevel: draft.yearLevel,
       semester: normalizeSectionSemester(draft.semester),
       strand: draft.program === "College" ? DEFAULT_COLLEGE_COURSE : draft.strand,
-      isMinor: draft.type === "minor",
+      subjectType: normalizeSubjectTypeForProgram({
+        program: draft.program,
+        type: draft.type,
+        strand: draft.strand,
+      }),
+      isMinor: draft.program === "College" ? draft.type === "minor" : undefined,
       prerequisiteSubjectIds: draft.prerequisiteSubjectIds,
     };
 
@@ -2713,7 +2876,11 @@ export default function AdminEnrollees({
       yearLevel: normalizedYearLevel,
       semester: normalizedSemester,
       strand: normalizedStrand,
-      type: draft.type === "minor" ? "minor" : "major",
+      type: normalizeSubjectTypeForProgram({
+        program,
+        type: draft.type,
+        strand: normalizedStrand,
+      }),
       prerequisiteSubjectIds: normalizeStringList(
         draft.prerequisiteSubjectIds,
       ).filter((subjectId) => prerequisiteOptions.has(subjectId)),
@@ -2749,7 +2916,7 @@ export default function AdminEnrollees({
           subject.program === "College"
             ? DEFAULT_COLLEGE_COURSE
             : subject.strand || "All",
-        type: subject.isMinor ? "minor" : "major",
+        type: getResolvedSubjectType(subject),
         prerequisiteSubjectIds: normalizeStringList(
           subject.prerequisiteSubjectIds,
         ),
@@ -2801,6 +2968,14 @@ export default function AdminEnrollees({
     }
 
     const nextSubject: Subject = {
+      subjectType: normalizeSubjectTypeForProgram({
+        program: subjectForm.program,
+        type: subjectForm.type,
+        strand:
+          subjectForm.program === "College"
+            ? DEFAULT_COLLEGE_COURSE
+            : subjectForm.strand || "All",
+      }),
       id:
         editingSubject?.id ||
         `subject_${Date.now()}_${normalizedCode.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
@@ -2814,7 +2989,10 @@ export default function AdminEnrollees({
         subjectForm.program === "College"
           ? DEFAULT_COLLEGE_COURSE
           : subjectForm.strand || "All",
-      isMinor: subjectForm.type === "minor",
+      isMinor:
+        subjectForm.program === "College"
+          ? subjectForm.type === "minor"
+          : undefined,
       prerequisiteSubjectIds: normalizeStringList(
         subjectForm.prerequisiteSubjectIds,
       ),
@@ -4410,14 +4588,6 @@ export default function AdminEnrollees({
     );
   };
 
-  const openSectionRequestsModal = () => {
-    setShowSectionRequestsModal(true);
-  };
-
-  const closeSectionRequestsModal = () => {
-    setShowSectionRequestsModal(false);
-  };
-
   const openMoveStudentsModal = () => {
     setMoveStudentSearchTerm("");
     setSelectedMoveStudentId("");
@@ -4524,12 +4694,6 @@ export default function AdminEnrollees({
     );
   };
 
-  const handleReviewSectionRequest = (request: EnrollmentRequest) => {
-    setActiveTab("enrollments");
-    handleViewRequestDetails(request);
-    closeSectionRequestsModal();
-  };
-
   const handleApplyStudentMove = () => {
     if (!selectedMoveStudent) {
       return;
@@ -4597,10 +4761,13 @@ export default function AdminEnrollees({
     setIsLoading(true);
     try {
       const storedRequests = readEnrollmentRequestsForBranch(currentBranch);
+      const hydratedRequests = await Promise.all(
+        storedRequests.map(hydrateEnrollmentRequestRecordAttachments),
+      );
 
-      if (storedRequests.length > 0) {
+      if (hydratedRequests.length > 0) {
         setEnrollmentRequests(
-          storedRequests.map((request) => ({
+          hydratedRequests.map((request) => ({
             ...request,
             semester: normalizeSectionSemester(request.semester),
             currentSemester: request.currentSemester
@@ -5621,11 +5788,6 @@ export default function AdminEnrollees({
     activeTab === "transferees"
       ? pendingTransfereeAssignments
       : pendingRegularAssignments;
-  const pendingSectionRequestRecords = enrollmentRequests.filter(
-    (request) =>
-      request.enrollmentStatus === "Pending" &&
-      request.irregularRequest?.mode === "section_assignment",
-  );
   const activeBranchStudents = getStudentsForBranch(currentBranch).filter(
     (student) =>
       student.status !== "Archived" && student.status !== "Graduated",
@@ -5945,7 +6107,13 @@ export default function AdminEnrollees({
           return false;
         }
       }
-      if (!subjectFilter.showMinor && subject.isMinor) return false;
+      if (
+        subject.program === "College" &&
+        !subjectFilter.showMinor &&
+        getResolvedSubjectType(subject) === "minor"
+      ) {
+        return false;
+      }
       return true;
     });
   };
@@ -6646,7 +6814,7 @@ export default function AdminEnrollees({
                     <option value="All">All Strands/Courses</option>
                     {subjectFilter.program === "SHS" ? (
                       <>
-                        <option value="All">All Strands (Core)</option>
+                        <option value="All">All Strands</option>
                         <option value="ICT">ICT</option>
                         <option value="GAS">GAS</option>
                         <option value="HUMSS">HUMSS</option>
@@ -6661,19 +6829,21 @@ export default function AdminEnrollees({
                       <></>
                     )}
                   </select>
-                  <label className="filter-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={subjectFilter.showMinor}
-                      onChange={(e) =>
-                        setSubjectFilter({
-                          ...subjectFilter,
-                          showMinor: e.target.checked,
-                        })
-                      }
-                    />{" "}
-                    Show Minor Subjects
-                  </label>
+                  {subjectFilter.program !== "SHS" ? (
+                    <label className="filter-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={subjectFilter.showMinor}
+                        onChange={(e) =>
+                          setSubjectFilter({
+                            ...subjectFilter,
+                            showMinor: e.target.checked,
+                          })
+                        }
+                      />{" "}
+                      Show Minor Subjects
+                    </label>
+                  ) : null}
                 </div>
 
                 {/* Subjects Table View */}
@@ -6736,15 +6906,13 @@ export default function AdminEnrollees({
                                               </span>
                                             </td>
                                             <td>
-                                              {subject.isMinor ? (
-                                                <span className="minor-badge">
-                                                  Minor
-                                                </span>
-                                              ) : (
-                                                  <span className="major-badge">
-                                                    Major
-                                                  </span>
+                                              <span
+                                                className={getSubjectTypeBadgeClass(
+                                                  subject,
                                                 )}
+                                              >
+                                                {getSubjectTypeLabel(subject)}
+                                              </span>
                                             </td>
                                             <td className="subject-prerequisite-cell">
                                               {getSubjectPrerequisiteSummary(subject)}
@@ -6841,15 +7009,13 @@ export default function AdminEnrollees({
                                               </span>
                                             </td>
                                             <td>
-                                              {subject.isMinor ? (
-                                                <span className="minor-badge">
-                                                  Minor
-                                                </span>
-                                              ) : (
-                                                  <span className="major-badge">
-                                                    Major
-                                                  </span>
+                                              <span
+                                                className={getSubjectTypeBadgeClass(
+                                                  subject,
                                                 )}
+                                              >
+                                                {getSubjectTypeLabel(subject)}
+                                              </span>
                                             </td>
                                             <td className="subject-prerequisite-cell">
                                               {getSubjectPrerequisiteSummary(subject)}
@@ -6955,15 +7121,13 @@ export default function AdminEnrollees({
                                                 <td>{subject.name}</td>
                                                 <td>{subject.units || 3}</td>
                                                 <td>
-                                                  {subject.isMinor ? (
-                                                    <span className="minor-badge">
-                                                      Minor
-                                                    </span>
-                                                ) : (
-                                                  <span className="major-badge">
-                                                    Major
+                                                  <span
+                                                    className={getSubjectTypeBadgeClass(
+                                                      subject,
+                                                    )}
+                                                  >
+                                                    {getSubjectTypeLabel(subject)}
                                                   </span>
-                                                )}
                                               </td>
                                               <td className="subject-prerequisite-cell">
                                                 {getSubjectPrerequisiteSummary(subject)}
@@ -8359,9 +8523,7 @@ export default function AdminEnrollees({
                                             {subject.code} - {subject.name}
                                           </strong>
                                           <span>
-                                            {subject.isMinor
-                                              ? "Minor"
-                                              : "Major"}
+                                            {getSubjectTypeLabel(subject)}
                                             {subject.units
                                               ? ` | ${subject.units} units`
                                               : ""}
@@ -8417,9 +8579,7 @@ export default function AdminEnrollees({
                                               {subject.code} - {subject.name}
                                             </strong>
                                             <span>
-                                              {subject.isMinor
-                                                ? "Minor"
-                                                : "Major"}
+                                              {getSubjectTypeLabel(subject)}
                                               {subject.units
                                                 ? ` | ${subject.units} units`
                                                 : ""}
@@ -8785,22 +8945,9 @@ export default function AdminEnrollees({
               <div className="section-manager-toolbar">
                 <div className="section-manager-toolbar-copy">
                   <strong>Section tools</strong>
-                  <p>
-                    Review specific-section requests and move current students
-                    here while managing class sections.
-                  </p>
+                  <p>Move current students here while managing class sections.</p>
                 </div>
                 <div className="section-manager-toolbar-actions">
-                  <button
-                    type="button"
-                    className="action-btn section-requests"
-                    onClick={openSectionRequestsModal}
-                  >
-                    <FaFileAlt /> Section Requests
-                    {pendingSectionRequestRecords.length > 0
-                      ? ` (${pendingSectionRequestRecords.length})`
-                      : ""}
-                  </button>
                   <button
                     type="button"
                     className="action-btn move-students"
@@ -9319,8 +9466,18 @@ export default function AdminEnrollees({
                       })
                     }
                   >
-                    <option value="major">Major</option>
-                    <option value="minor">Minor</option>
+                    {subjectForm.program === "SHS" ? (
+                      <>
+                        <option value="core">Core</option>
+                        <option value="applied">Applied</option>
+                        <option value="specialized">Specialized</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="major">Major</option>
+                        <option value="minor">Minor</option>
+                      </>
+                    )}
                   </select>
                 </div>
                 <div className="form-group">
@@ -9658,7 +9815,7 @@ export default function AdminEnrollees({
                                 {subject.code} - {subject.name}
                               </strong>
                               <span>
-                                {subject.isMinor ? "Minor" : "Major"}
+                                {getSubjectTypeLabel(subject)}
                                 {subject.units
                                   ? ` | ${subject.units} units`
                                   : ""}
@@ -9880,100 +10037,6 @@ export default function AdminEnrollees({
                 title={`Delete ${pendingAssignmentDeleteTargets.length} selected assignments`}
               >
                 <FaTrash />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showSectionRequestsModal && (
-        <div
-          className="review-modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="section-requests-title"
-        >
-          <div className="review-modal section-request-modal">
-            <div className="review-modal-header">
-              <h2 id="section-requests-title">Section Requests</h2>
-              <button
-                type="button"
-                className="review-modal-close"
-                onClick={closeSectionRequestsModal}
-                aria-label="Close section requests"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="review-modal-body section-request-body">
-              <div className="section-request-intro">
-                <p>
-                  Review pending enrollment requests where students asked for a
-                  specific section.
-                </p>
-              </div>
-              {pendingSectionRequestRecords.length > 0 ? (
-                <div className="section-request-list">
-                  {pendingSectionRequestRecords.map((request) => {
-                    const requestedSection =
-                      getRequestedSectionForEnrollmentRequest(request);
-
-                    return (
-                      <div key={request.id} className="section-request-card">
-                        <div className="section-request-card-head">
-                          <div>
-                            <strong>{request.fullName}</strong>
-                            <p>
-                              {request.studentNumber} | {request.program} |{" "}
-                              {request.requestedYearLevel}
-                            </p>
-                          </div>
-                          <span className="retake-request-status-badge enrollment-irregular-badge">
-                            SECTION
-                          </span>
-                        </div>
-                        <div className="section-request-meta">
-                          <span>
-                            Requested section:{" "}
-                            <strong>
-                              {requestedSection?.code ||
-                                request.irregularRequest?.requestedSectionCode ||
-                                "Not available"}
-                            </strong>
-                          </span>
-                          <span>
-                            Term:{" "}
-                            <strong>
-                              {request.semester} | {request.academicYear}
-                            </strong>
-                          </span>
-                        </div>
-                        <div className="section-request-actions">
-                          <button
-                            type="button"
-                            className="action-btn section-requests"
-                            onClick={() => handleReviewSectionRequest(request)}
-                          >
-                            <FaEye /> Review Request
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="section-request-empty">
-                  No pending specific-section requests are waiting right now.
-                </div>
-              )}
-            </div>
-            <div className="review-modal-footer">
-              <button
-                type="button"
-                className="action-btn cancel"
-                onClick={closeSectionRequestsModal}
-              >
-                Close
               </button>
             </div>
           </div>

@@ -142,6 +142,29 @@ class ReportApiTests(TestCase):
         self.assertEqual(len(inbox_response.data), 0)
         self.assertEqual(len(trash_response.data), 1)
 
+    def test_area_manager_can_update_review_status(self):
+        self.client.force_authenticate(user=self.manager_user)
+
+        review_response = self.client.patch(
+            f"/api/manager/reports/{self.report.id}/review-status/",
+            {"is_reviewed": True},
+            format="json",
+        )
+        self.assertEqual(review_response.status_code, 200)
+        self.report.refresh_from_db()
+        self.assertTrue(self.report.is_reviewed)
+        self.assertIsNotNone(self.report.reviewed_at)
+
+        pending_response = self.client.patch(
+            f"/api/manager/reports/{self.report.id}/review-status/",
+            {"is_reviewed": False},
+            format="json",
+        )
+        self.assertEqual(pending_response.status_code, 200)
+        self.report.refresh_from_db()
+        self.assertFalse(self.report.is_reviewed)
+        self.assertIsNone(self.report.reviewed_at)
+
     def test_area_manager_can_soft_delete_restore_and_permanently_delete_report(self):
         self.client.force_authenticate(user=self.manager_user)
 
@@ -175,3 +198,15 @@ class ReportApiTests(TestCase):
 
         self.assertEqual(trash_response.status_code, 403)
         self.assertEqual(delete_response.status_code, 403)
+
+    def test_branch_admin_can_view_branch_sent_reports(self):
+        self.report.is_reviewed = True
+        self.report.save(update_fields=["is_reviewed"])
+        self.client.force_authenticate(user=self.branch_admin_user)
+
+        response = self.client.get("/api/manager/reports/sent/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["branch_name"], "Bacoor")
+        self.assertTrue(response.data[0]["is_reviewed"])

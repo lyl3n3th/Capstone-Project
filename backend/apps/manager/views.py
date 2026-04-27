@@ -12,8 +12,20 @@ from .permissions import (
     get_request_role,
     resolve_staff_account_from_request,
 )
-from .repository import create_report, delete_report, get_report, set_report_deleted, use_supabase_reports, list_reports
-from .serializers import ReportCreateSerializer, ReportSerializer
+from .repository import (
+    create_report,
+    delete_report,
+    get_report,
+    list_reports,
+    set_report_deleted,
+    set_report_reviewed,
+    use_supabase_reports,
+)
+from .serializers import (
+    ReportCreateSerializer,
+    ReportReviewStatusSerializer,
+    ReportSerializer,
+)
 from .storage import upload_report_attachment
 
 
@@ -138,6 +150,26 @@ class ReportTrashView(APIView):
         return Response(serializer.data)
 
 
+class ReportSentView(APIView):
+    permission_classes = [IsBranchAdmin]
+
+    def get(self, request):
+        sender_context = get_sender_from_request(request)
+        branch_name = sender_context["branch"] if sender_context else get_request_branch(request)
+
+        if not branch_name:
+            return Response(
+                {"detail": "Unable to determine the branch for sent reports."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ReportSerializer(
+            list_reports(is_deleted=False, branch_name=branch_name),
+            many=True,
+        )
+        return Response(serializer.data)
+
+
 class ReportSoftDeleteView(APIView):
     permission_classes = [IsAreaManager]
 
@@ -165,6 +197,27 @@ class ReportRestoreView(APIView):
             return Response(ReportSerializer(report).data)
 
         updated_report = set_report_deleted(report_id, is_deleted=False)
+        return Response(ReportSerializer(updated_report).data)
+
+
+class ReportReviewStatusView(APIView):
+    permission_classes = [IsAreaManager]
+
+    def patch(self, request, report_id):
+        serializer = ReportReviewStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        report = get_report(report_id)
+        if not report:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        updated_report = set_report_reviewed(
+            report_id,
+            is_reviewed=serializer.validated_data["is_reviewed"],
+        )
+        if not updated_report:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
         return Response(ReportSerializer(updated_report).data)
 
 

@@ -6,6 +6,7 @@ import {
   type StudentPortalSubject,
 } from "../services/adminStorage";
 import { studentApi, type StudentPortalCurrentTerm } from "../services/studentApi";
+import { STUDENT_GRADE_RECORDS_UPDATED_EVENT } from "../services/studentGrades";
 import type { Student } from "../types/student";
 import { StudentContext } from "./student-context";
 
@@ -83,14 +84,22 @@ export const StudentProvider: React.FC<{ children: React.ReactNode }> = ({
       return;
     }
 
-    const handleStorage = () => {
+    const handlePortalRefresh = () => {
       void loadStudentRef.current(false);
     };
 
-    window.addEventListener("storage", handleStorage);
+    window.addEventListener("storage", handlePortalRefresh);
+    window.addEventListener(
+      STUDENT_GRADE_RECORDS_UPDATED_EVENT,
+      handlePortalRefresh as EventListener,
+    );
 
     return () => {
-      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("storage", handlePortalRefresh);
+      window.removeEventListener(
+        STUDENT_GRADE_RECORDS_UPDATED_EVENT,
+        handlePortalRefresh as EventListener,
+      );
     };
   }, []);
 

@@ -1,16 +1,16 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
+  BsArrowCounterclockwise,
+  BsArrowLeft,
+  BsCheckSquareFill,
   BsEnvelopePaperFill,
-  BsTrash3,
   BsFileEarmarkPdf,
   BsSearch,
-  BsCheckSquareFill,
   BsSquare,
-  BsArrowLeft,
-  BsArrowCounterclockwise,
+  BsTrash3,
   BsX,
 } from "react-icons/bs";
-import { MdOutlineMarkEmailUnread, MdDeleteSweep } from "react-icons/md";
+import { MdDeleteSweep, MdOutlineMarkEmailUnread } from "react-icons/md";
 import { ToastContainer } from "../../components/common/Toast";
 import {
   fetchInboxReports,
@@ -18,11 +18,10 @@ import {
   moveReportToTrash,
   permanentlyDeleteReport,
   restoreReport,
+  updateReportReviewStatus,
   type ReportRecord,
 } from "../../services/reportApi";
 import "../../styles/manager/area-managerReports.css";
-
-const REVIEWED_REPORTS_STORAGE_KEY = "am-reviewed-report-ids";
 
 interface Report {
   id: string;
@@ -33,6 +32,8 @@ interface Report {
   text: string;
   file_url?: string;
   file_name?: string;
+  isReviewed: boolean;
+  reviewedAt: string | null;
 }
 
 interface ReportsPageProps {
@@ -47,6 +48,8 @@ interface Toast {
   message: string;
   type: "success" | "error" | "info" | "warning";
 }
+
+type ReportStatusFilter = "all" | "pending" | "reviewed";
 
 const getFileNameFromUrl = (url?: string) => {
   if (!url) {
@@ -67,68 +70,42 @@ const mapApiReport = (report: ReportRecord): Report => ({
   text: report.message,
   file_url: report.attachment_url || undefined,
   file_name: getFileNameFromUrl(report.attachment_url) || undefined,
+  isReviewed: report.is_reviewed,
+  reviewedAt: report.reviewed_at,
 });
 
-const readReviewedReportIds = () => {
-  if (typeof window === "undefined") {
-    return [] as string[];
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(REVIEWED_REPORTS_STORAGE_KEY);
-    if (!rawValue) {
-      return [];
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-    if (!Array.isArray(parsedValue)) {
-      return [];
-    }
-
-    return Array.from(
-      new Set(
-        parsedValue.filter(
-          (value): value is string =>
-            typeof value === "string" && value.trim().length > 0,
-        ),
-      ),
-    );
-  } catch (error) {
-    console.error("Failed to read reviewed report ids", error);
-    return [];
-  }
-};
-
-// Helper: format any date/time string → MM/DD/YYYY
-const formatDateTime = (value: string): string => {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (!isNaN(d.getTime())) {
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const yyyy = d.getFullYear();
-    const hours = d.getHours();
-    const minutes = String(d.getMinutes()).padStart(2, "0");
+const formatDateTime = (value?: string | null): string => {
+  if (!value) return "-";
+  const dateValue = new Date(value);
+  if (!Number.isNaN(dateValue.getTime())) {
+    const mm = String(dateValue.getMonth() + 1).padStart(2, "0");
+    const dd = String(dateValue.getDate()).padStart(2, "0");
+    const yyyy = dateValue.getFullYear();
+    const hours = dateValue.getHours();
+    const minutes = String(dateValue.getMinutes()).padStart(2, "0");
     const suffix = hours >= 12 ? "PM" : "AM";
     const twelveHour = hours % 12 || 12;
     return `${mm}/${dd}/${yyyy} ${twelveHour}:${minutes} ${suffix}`;
   }
-  return "â€”";
+  return "-";
 };
+
+const updateMatchingReport = (items: Report[], updatedReport: Report) =>
+  items.map((item) => (item.id === updatedReport.id ? updatedReport : item));
 
 const AreaManagerReports: React.FC<ReportsPageProps> = () => {
   const [reports, setReports] = useState<Report[]>([]);
   const [trash, setTrash] = useState<Report[]>([]);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
-  const [reviewedIds, setReviewedIds] = useState<string[]>(readReviewedReportIds);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ReportStatusFilter>("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showDetail, setShowDetail] = useState(false);
   const [showTrashModal, setShowTrashModal] = useState(false);
+  const [isUpdatingReviewStatus, setIsUpdatingReviewStatus] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {
     const id = Date.now().toString();
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -139,6 +116,14 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
 
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  };
+
+  const replaceReportInState = (updatedReport: Report) => {
+    setReports((current) => updateMatchingReport(current, updatedReport));
+    setTrash((current) => updateMatchingReport(current, updatedReport));
+    setSelectedReport((current) =>
+      current?.id === updatedReport.id ? updatedReport : current,
+    );
   };
 
   const fetchReports = async () => {
@@ -163,8 +148,8 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
           null
         );
       });
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      console.error(error);
       addToast("Failed to load reports", "error");
     } finally {
       setLoading(false);
@@ -172,69 +157,74 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
   };
 
   useEffect(() => {
-    fetchReports();
+    void fetchReports();
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.setItem(
-      REVIEWED_REPORTS_STORAGE_KEY,
-      JSON.stringify(reviewedIds),
-    );
-  }, [reviewedIds]);
-
-  const filteredReports = useMemo(() => {
-    return reports.filter(
-      (r) =>
-        r.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.user.toLowerCase().includes(searchTerm.toLowerCase()),
-    );
-  }, [reports, searchTerm]);
+  const inboxCount = reports.length;
 
   const pendingReviewCount = useMemo(
-    () => reports.filter((report) => !reviewedIds.includes(report.id)).length,
-    [reports, reviewedIds],
+    () => reports.filter((report) => !report.isReviewed).length,
+    [reports],
   );
 
-  const reviewedCount = useMemo(
-    () => reports.filter((report) => reviewedIds.includes(report.id)).length,
-    [reports, reviewedIds],
-  );
+  const reviewedCount = inboxCount - pendingReviewCount;
 
-  const reportStatusRows = useMemo(() => {
-    return [...filteredReports].sort((firstReport, secondReport) => {
-      const firstIsReviewed = reviewedIds.includes(firstReport.id);
-      const secondIsReviewed = reviewedIds.includes(secondReport.id);
+  const filteredReports = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
 
-      if (firstIsReviewed !== secondIsReviewed) {
-        return firstIsReviewed ? 1 : -1;
-      }
+    return reports.filter((report) => {
+      const matchesSearch =
+        !normalizedSearch ||
+        report.title.toLowerCase().includes(normalizedSearch) ||
+        report.user.toLowerCase().includes(normalizedSearch) ||
+        report.branch.toLowerCase().includes(normalizedSearch);
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "pending" && !report.isReviewed) ||
+        (statusFilter === "reviewed" && report.isReviewed);
 
-      return (
-        new Date(secondReport.time).getTime() -
-        new Date(firstReport.time).getTime()
-      );
+      return matchesSearch && matchesStatus;
     });
-  }, [filteredReports, reviewedIds]);
+  }, [reports, searchTerm, statusFilter]);
 
-  const selectedReportIsReviewed = selectedReport
-    ? reviewedIds.includes(selectedReport.id)
-    : false;
+  const displayedReports = useMemo(
+    () =>
+      [...filteredReports].sort((left, right) => {
+        if (left.isReviewed !== right.isReviewed) {
+          return left.isReviewed ? 1 : -1;
+        }
+
+        return new Date(right.time).getTime() - new Date(left.time).getTime();
+      }),
+    [filteredReports],
+  );
+
+  const selectedReportIsReviewed = selectedReport?.isReviewed ?? false;
 
   const handleSelectReport = (report: Report) => {
     setSelectedReport(report);
     setShowDetail(true);
   };
 
-  const handleToggleReviewStatus = (reportId: string) => {
-    setReviewedIds((currentIds) =>
-      currentIds.includes(reportId)
-        ? currentIds.filter((currentId) => currentId !== reportId)
-        : [...currentIds, reportId],
-    );
+  const handleToggleReviewStatus = async (report: Report) => {
+    try {
+      setIsUpdatingReviewStatus(true);
+      const updated = mapApiReport(
+        await updateReportReviewStatus(report.id, !report.isReviewed),
+      );
+      replaceReportInState(updated);
+      addToast(
+        updated.isReviewed
+          ? "Report marked as reviewed."
+          : "Report returned to pending review.",
+        "success",
+      );
+    } catch (error) {
+      console.error("Failed to update review status", error);
+      addToast("Failed to update review status", "error");
+    } finally {
+      setIsUpdatingReviewStatus(false);
+    }
   };
 
   const toggleSelectAll = () => {
@@ -244,14 +234,16 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
     ) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(filteredReports.map((r) => r.id));
+      setSelectedIds(filteredReports.map((report) => report.id));
     }
   };
 
-  const toggleSelectOne = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+  const toggleSelectOne = (event: React.MouseEvent, id: string) => {
+    event.stopPropagation();
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((selectedId) => selectedId !== id)
+        : [...current, id],
     );
   };
 
@@ -302,16 +294,13 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
       try {
         await permanentlyDeleteReport(id);
         await fetchReports();
-        setReviewedIds((currentIds) =>
-          currentIds.filter((currentId) => currentId !== id),
-        );
         if (selectedReport?.id === id) {
           setSelectedReport(null);
           setShowDetail(false);
         }
         addToast("Report permanently deleted", "success");
-      } catch (e) {
-        console.error("Failed to permanently delete report", e);
+      } catch (error) {
+        console.error("Failed to permanently delete report", error);
         addToast("Failed to delete from server", "error");
       }
     }
@@ -327,10 +316,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
         const trashIds = trash.map((item) => item.id);
         await Promise.all(trash.map((item) => permanentlyDeleteReport(item.id)));
         await fetchReports();
-        setReviewedIds((currentIds) =>
-          currentIds.filter((currentId) => !trashIds.includes(currentId)),
-        );
-        if (selectedReport && trash.some((item) => item.id === selectedReport.id)) {
+        if (selectedReport && trashIds.includes(selectedReport.id)) {
           setSelectedReport(null);
           setShowDetail(false);
         }
@@ -355,21 +341,21 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
       >
         <header className="am-reports-header">
           <div className="am-reports-header-left">
-            {showDetail && (
+            {showDetail ? (
               <button
                 className="am-reports-mobile-back-btn"
                 onClick={() => setShowDetail(false)}
               >
                 <BsArrowLeft />
               </button>
-            )}
+            ) : null}
             <div className="am-reports-title-group">
               <h2>
-                <BsEnvelopePaperFill className="am-reports-title-icon" />{" "}
+                <BsEnvelopePaperFill className="am-reports-title-icon" />
                 Reports
               </h2>
               <span className="am-reports-msg-count">
-                Inbox: {reports.length} | Pending Review: {pendingReviewCount}
+                Inbox: {inboxCount} | Pending Review: {pendingReviewCount}
               </span>
             </div>
           </div>
@@ -385,274 +371,245 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
           </div>
         </header>
 
-        <div className="am-reports-main-grid">
-          <aside className="am-reports-status-pane">
-            <div className="am-reports-status-card">
-              <div className="am-reports-status-header">
-                <div>
-                  <h3>Review Status Table</h3>
-                  <p>
-                    Track which inbox reports are still pending review and
-                    which ones have already been reviewed.
-                  </p>
-                </div>
+        <section className="am-reports-summary-band">
+          <button
+            type="button"
+            className={`am-reports-summary-card ${statusFilter === "all" ? "is-active" : ""}`}
+            onClick={() => setStatusFilter("all")}
+          >
+            <span className="am-reports-summary-label">Inbox</span>
+            <strong>{inboxCount}</strong>
+            <p>All active reports waiting in the inbox.</p>
+          </button>
+          <button
+            type="button"
+            className={`am-reports-summary-card pending ${statusFilter === "pending" ? "is-active" : ""}`}
+            onClick={() => setStatusFilter("pending")}
+          >
+            <span className="am-reports-summary-label">Pending Review</span>
+            <strong>{pendingReviewCount}</strong>
+            <p>Focus on reports that still need your review.</p>
+          </button>
+          <button
+            type="button"
+            className={`am-reports-summary-card reviewed ${statusFilter === "reviewed" ? "is-active" : ""}`}
+            onClick={() => setStatusFilter("reviewed")}
+          >
+            <span className="am-reports-summary-label">Reviewed</span>
+            <strong>{reviewedCount}</strong>
+            <p>Reports already checked and cleared by the manager.</p>
+          </button>
+        </section>
+
+        <div className="am-reports-split-view am-reports-split-view-wide">
+          <div className="am-reports-list-pane">
+            <div className="am-reports-list-search-container">
+              <div className="am-reports-search-bar">
+                <BsSearch className="am-reports-search-icon" />
+                <input
+                  type="text"
+                  placeholder="Search reports..."
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                />
               </div>
 
-              <div className="am-reports-status-summary">
-                <div className="am-reports-status-stat pending">
-                  <span className="am-reports-status-stat-label">
-                    Pending Review
-                  </span>
-                  <strong>{pendingReviewCount}</strong>
-                </div>
-                <div className="am-reports-status-stat reviewed">
-                  <span className="am-reports-status-stat-label">Reviewed</span>
-                  <strong>{reviewedCount}</strong>
-                </div>
+              <div className="am-reports-filter-row">
+                <button
+                  type="button"
+                  className={`am-reports-filter-chip ${statusFilter === "all" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("all")}
+                >
+                  All ({inboxCount})
+                </button>
+                <button
+                  type="button"
+                  className={`am-reports-filter-chip pending ${statusFilter === "pending" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("pending")}
+                >
+                  Pending ({pendingReviewCount})
+                </button>
+                <button
+                  type="button"
+                  className={`am-reports-filter-chip reviewed ${statusFilter === "reviewed" ? "active" : ""}`}
+                  onClick={() => setStatusFilter("reviewed")}
+                >
+                  Reviewed ({reviewedCount})
+                </button>
               </div>
 
-              <div className="am-reports-status-table-wrapper">
-                <table className="am-reports-status-table">
-                  <thead>
-                    <tr>
-                      <th>Report</th>
-                      <th>Status</th>
-                      <th>Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reportStatusRows.length > 0 ? (
-                      reportStatusRows.map((report) => {
-                        const isReviewed = reviewedIds.includes(report.id);
-
-                        return (
-                          <tr
-                            key={report.id}
-                            className={
-                              selectedReport?.id === report.id
-                                ? "active"
-                                : undefined
-                            }
-                            onClick={() => handleSelectReport(report)}
-                          >
-                            <td>
-                              <div className="am-reports-status-report">
-                                <strong>{report.title}</strong>
-                                <span>
-                                  {report.user} | {report.branch}
-                                </span>
-                              </div>
-                            </td>
-                            <td>
-                              <span
-                                className={`am-reports-status-badge ${isReviewed ? "reviewed" : "pending"}`}
-                              >
-                                {isReviewed ? "Reviewed" : "Pending"}
-                              </span>
-                            </td>
-                            <td>
-                              <span className="am-reports-status-date">
-                                {formatDateTime(report.time)}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={3}>
-                          <div className="am-reports-status-empty">
-                            No reports match the current search.
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </aside>
-
-          <div className="am-reports-split-view">
-            <div className="am-reports-list-pane">
-              <div className="am-reports-list-search-container">
-                <div className="am-reports-search-bar">
-                  <BsSearch className="am-reports-search-icon" />
-                  <input
-                    type="text"
-                    placeholder="Search reports..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
-                <div className="am-reports-list-controls">
+              <div className="am-reports-list-controls">
+                <button
+                  className="am-reports-select-all-btn"
+                  onClick={toggleSelectAll}
+                >
+                  {selectedIds.length === filteredReports.length &&
+                  filteredReports.length > 0 ? (
+                    <BsCheckSquareFill className="am-reports-chk-active" />
+                  ) : (
+                    <BsSquare className="am-reports-chk-inactive" />
+                  )}
+                  <span>Select All</span>
+                </button>
+                {selectedIds.length > 0 ? (
                   <button
-                    className="am-reports-select-all-btn"
-                    onClick={toggleSelectAll}
+                    className="am-reports-mass-del-btn"
+                    onClick={() => handleMoveToTrash(selectedIds)}
                   >
-                    {selectedIds.length === filteredReports.length &&
-                    filteredReports.length > 0 ? (
-                      <BsCheckSquareFill className="am-reports-chk-active" />
-                    ) : (
-                      <BsSquare className="am-reports-chk-inactive" />
-                    )}
-                    <span>Select All</span>
+                    <BsTrash3 /> Move to Trash ({selectedIds.length})
                   </button>
-                  {selectedIds.length > 0 && (
-                    <button
-                      className="am-reports-mass-del-btn"
-                      onClick={() => handleMoveToTrash(selectedIds)}
-                    >
-                      <BsTrash3 /> Move to Trash ({selectedIds.length})
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="am-reports-scroll-list">
-                {filteredReports.length > 0 ? (
-                  filteredReports.map((report) => (
-                    <div
-                      key={report.id}
-                      className={`am-reports-card-item ${selectedReport?.id === report.id ? "active" : ""}`}
-                      onClick={() => handleSelectReport(report)}
-                    >
-                      <div
-                        className="am-reports-selection-overlay"
-                        onClick={(e) => toggleSelectOne(e, report.id)}
-                      >
-                        {selectedIds.includes(report.id) ? (
-                          <BsCheckSquareFill className="am-reports-chk-active" />
-                        ) : (
-                          <BsSquare className="am-reports-chk-inactive" />
-                        )}
-                      </div>
-                      <div className="am-reports-card-body">
-                        <div className="am-reports-card-top">
-                          <span className="am-reports-sender">
-                            {report.user}
-                          </span>
-                          <span className="am-reports-time">
-                            {formatDateTime(report.time)}
-                          </span>
-                        </div>
-                        <div className="am-reports-card-title">
-                          {report.title}
-                        </div>
-                        <div className="am-reports-card-branch">
-                          {report.branch}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="am-reports-empty-state">
-                    <BsEnvelopePaperFill size={48} />
-                    <p>No reports found</p>
-                  </div>
-                )}
+                ) : null}
               </div>
             </div>
 
-            <div className="am-reports-detail-pane">
-              {selectedReport ? (
-                <div className="am-reports-full-content">
-                  <div className="am-reports-detail-header">
-                    <h1 className="am-reports-detail-title">
-                      {selectedReport.title}
-                    </h1>
-                    <div className="am-reports-detail-actions">
-                      <button
-                        className={`am-reports-review-toggle-btn ${selectedReportIsReviewed ? "is-reviewed" : "is-pending"}`}
-                        onClick={() =>
-                          handleToggleReviewStatus(selectedReport.id)
-                        }
-                      >
-                        {selectedReportIsReviewed
-                          ? "Mark as Pending"
-                          : "Mark as Reviewed"}
-                      </button>
-                      <button
-                        className="am-reports-detail-delete-btn"
-                        onClick={() => handleMoveToTrash([selectedReport.id])}
-                      >
-                        <BsTrash3 />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="am-reports-info-bar">
-                    <div className="am-reports-info-chip">
-                      <strong>From:</strong> {selectedReport.user}
-                    </div>
-                    <div className="am-reports-info-chip">
-                      <strong>Branch:</strong> {selectedReport.branch}
-                    </div>
-                    <div className="am-reports-info-chip">
-                      <strong>Date:</strong> {formatDateTime(selectedReport.time)}
-                    </div>
+            <div className="am-reports-scroll-list">
+              {displayedReports.length > 0 ? (
+                displayedReports.map((report) => (
+                  <div
+                    key={report.id}
+                    className={`am-reports-card-item ${selectedReport?.id === report.id ? "active" : ""} ${report.isReviewed ? "is-reviewed" : "is-pending"}`}
+                    onClick={() => handleSelectReport(report)}
+                  >
                     <div
-                      className={`am-reports-info-chip am-reports-info-chip-status ${selectedReportIsReviewed ? "reviewed" : "pending"}`}
+                      className="am-reports-selection-overlay"
+                      onClick={(event) => toggleSelectOne(event, report.id)}
                     >
-                      <strong>Status:</strong>{" "}
-                      {selectedReportIsReviewed
-                        ? "Reviewed"
-                        : "Pending Review"}
+                      {selectedIds.includes(report.id) ? (
+                        <BsCheckSquareFill className="am-reports-chk-active" />
+                      ) : (
+                        <BsSquare className="am-reports-chk-inactive" />
+                      )}
                     </div>
-                  </div>
-                  <div className="am-reports-text-body">
-                    {selectedReport.text}
-                  </div>
-                  {selectedReport.file_name && (
-                    <div className="am-reports-attachment-box">
-                      <div className="am-reports-file-info">
-                        <BsFileEarmarkPdf className="am-reports-pdf-icon" />
-                        <div className="am-reports-file-text-group">
-                          <p className="am-reports-file-name">
-                            {selectedReport.file_name}
-                          </p>
-                          <p className="am-reports-file-type">PDF Document</p>
-                        </div>
+                    <div className="am-reports-card-body">
+                      <div className="am-reports-card-top">
+                        <span className="am-reports-sender">{report.user}</span>
+                        <span className="am-reports-time">
+                          {formatDateTime(report.time)}
+                        </span>
                       </div>
-                      <button
-                        className="am-reports-download-btn"
-                        onClick={() => {
-                          if (selectedReport.file_url) {
-                            window.open(
-                              selectedReport.file_url,
-                              "_blank",
-                              "noopener,noreferrer",
-                            );
-                          }
-                        }}
-                      >
-                        Download
-                      </button>
+                      <div className="am-reports-card-title">{report.title}</div>
+                      <div className="am-reports-card-meta">
+                        <span className="am-reports-card-branch">
+                          {report.branch}
+                        </span>
+                        <span
+                          className={`am-reports-card-status ${report.isReviewed ? "reviewed" : "pending"}`}
+                        >
+                          {report.isReviewed ? "Reviewed" : "Pending Review"}
+                        </span>
+                      </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                ))
               ) : (
-                <div className="am-reports-select-prompt">
-                  <MdOutlineMarkEmailUnread
-                    size={80}
-                    className="am-reports-prompt-icon"
-                  />
-                  <h3>Select a Message</h3>
-                  <p>Choose a report from the list to view its contents.</p>
+                <div className="am-reports-empty-state">
+                  <BsEnvelopePaperFill size={48} />
+                  <p>No reports found</p>
                 </div>
               )}
             </div>
           </div>
+
+          <div className="am-reports-detail-pane">
+            {selectedReport ? (
+              <div className="am-reports-full-content">
+                <div className="am-reports-detail-header">
+                  <h1 className="am-reports-detail-title">
+                    {selectedReport.title}
+                  </h1>
+                  <div className="am-reports-detail-actions">
+                    <button
+                      className={`am-reports-review-toggle-btn ${selectedReportIsReviewed ? "is-reviewed" : "is-pending"}`}
+                      onClick={() => handleToggleReviewStatus(selectedReport)}
+                      disabled={isUpdatingReviewStatus}
+                    >
+                      {isUpdatingReviewStatus
+                        ? "Updating..."
+                        : selectedReportIsReviewed
+                          ? "Mark as Pending"
+                          : "Mark as Reviewed"}
+                    </button>
+                    <button
+                      className="am-reports-detail-delete-btn"
+                      onClick={() => handleMoveToTrash([selectedReport.id])}
+                    >
+                      <BsTrash3 />
+                    </button>
+                  </div>
+                </div>
+                <div className="am-reports-info-bar">
+                  <div className="am-reports-info-chip">
+                    <strong>From:</strong> {selectedReport.user}
+                  </div>
+                  <div className="am-reports-info-chip">
+                    <strong>Branch:</strong> {selectedReport.branch}
+                  </div>
+                  <div className="am-reports-info-chip">
+                    <strong>Date:</strong> {formatDateTime(selectedReport.time)}
+                  </div>
+                  <div
+                    className={`am-reports-info-chip am-reports-info-chip-status ${selectedReportIsReviewed ? "reviewed" : "pending"}`}
+                  >
+                    <strong>Status:</strong>{" "}
+                    {selectedReportIsReviewed ? "Reviewed" : "Pending Review"}
+                  </div>
+                  <div className="am-reports-info-chip">
+                    <strong>Reviewed At:</strong>{" "}
+                    {selectedReport.reviewedAt
+                      ? formatDateTime(selectedReport.reviewedAt)
+                      : "Not yet reviewed"}
+                  </div>
+                </div>
+                <div className="am-reports-text-body">{selectedReport.text}</div>
+                {selectedReport.file_name ? (
+                  <div className="am-reports-attachment-box">
+                    <div className="am-reports-file-info">
+                      <BsFileEarmarkPdf className="am-reports-pdf-icon" />
+                      <div className="am-reports-file-text-group">
+                        <p className="am-reports-file-name">
+                          {selectedReport.file_name}
+                        </p>
+                        <p className="am-reports-file-type">Attached report file</p>
+                      </div>
+                    </div>
+                    <button
+                      className="am-reports-download-btn"
+                      onClick={() => {
+                        if (selectedReport.file_url) {
+                          window.open(
+                            selectedReport.file_url,
+                            "_blank",
+                            "noopener,noreferrer",
+                          );
+                        }
+                      }}
+                    >
+                      Download
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="am-reports-select-prompt">
+                <MdOutlineMarkEmailUnread
+                  size={80}
+                  className="am-reports-prompt-icon"
+                />
+                <h3>Select a Message</h3>
+                <p>Choose a report from the list to view its contents.</p>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Trash Modal */}
-        {showTrashModal && (
+        {showTrashModal ? (
           <div
             className="am-reports-modal-overlay"
             onClick={() => setShowTrashModal(false)}
           >
             <div
               className="am-reports-trash-modal"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
             >
               <div className="am-reports-modal-header">
                 <div className="am-reports-modal-title">
@@ -675,14 +632,14 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
                     Currently showing <strong>{trash.length}</strong> deleted{" "}
                     {trash.length === 1 ? "report" : "reports"}
                   </p>
-                  {trash.length > 0 && (
+                  {trash.length > 0 ? (
                     <button
                       className="am-reports-empty-trash-btn"
                       onClick={handleEmptyTrash}
                     >
                       <MdDeleteSweep size={16} /> Empty Trash
                     </button>
-                  )}
+                  ) : null}
                 </div>
 
                 {trash.length === 0 ? (
@@ -725,9 +682,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
                               <div className="am-reports-trash-actions">
                                 <button
                                   className="am-reports-restore-btn"
-                                  onClick={() =>
-                                    handleRestoreFromTrash(item.id)
-                                  }
+                                  onClick={() => handleRestoreFromTrash(item.id)}
                                 >
                                   <BsArrowCounterclockwise />
                                   <span className="btn-label">Restore</span>
@@ -750,7 +705,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
               </div>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

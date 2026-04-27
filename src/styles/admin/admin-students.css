@@ -1168,6 +1168,80 @@
   font-size: 13px;
 }
 
+.students-grade-editor {
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
+  padding: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.students-grade-editor-header h4 {
+  margin: 0;
+  color: #1a3d5c;
+  font-size: 16px;
+}
+
+.students-grade-editor-header p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.students-grade-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.students-grade-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.students-grade-editor-field span {
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.students-grade-editor-field input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.students-grade-editor-field input:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+}
+
+.students-grade-editor-hint {
+  margin: -4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.students-grade-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .students-grade-section {
   border: 1px solid #dbe4ee;
   border-radius: 12px;
@@ -1231,6 +1305,45 @@
 
 .students-grade-row-flagged td {
   background: #fff7f7;
+}
+
+.students-grade-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.students-grade-action-btn {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.students-grade-action-btn:hover:not(:disabled) {
+  background: #dbeafe;
+}
+
+.students-grade-action-btn.danger {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #b91c1c;
+}
+
+.students-grade-action-btn.danger:hover:not(:disabled) {
+  background: #ffe4e6;
+}
+
+.students-grade-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .students-planner-warning {
@@ -1700,6 +1813,20 @@
   .students-grade-toolbar {
     grid-template-columns: 1fr;
   }
+
+  .students-grade-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .students-grade-editor-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .students-grade-action-btn {
+    width: 100%;
+  }
+
   .students-detail-item {
     flex-direction: column;
     gap: 4px;

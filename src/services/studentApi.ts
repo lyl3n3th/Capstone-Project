@@ -14,6 +14,7 @@ import {
   resolveStudentPortalContext,
   type StudentPortalCurrentTerm,
 } from "./studentPortalResolver";
+import { getStudentAcademicStanding } from "./studentGrades";
 export type { StudentPortalCurrentTerm } from "./studentPortalResolver";
 
 export interface StudentPortalData {
@@ -217,6 +218,29 @@ const buildFullName = ({
     .join(" ")
     .trim();
 
+const getPortalStudentStatus = (
+  storedStudent: StudentStorageRecord,
+): Student["status"] => {
+  const hasIrregularScheduleFlag =
+    storedStudent.requestedOwnSchedule === true ||
+    storedStudent.ownScheduleRequestStatus === "Approved";
+  const gradeStanding = getStudentAcademicStanding({
+    branch: storedStudent.branch,
+    program: storedStudent.program,
+    studentId: storedStudent.id,
+  }).label;
+
+  if (hasIrregularScheduleFlag || gradeStanding === "Irregular") {
+    return "Irregular";
+  }
+
+  if (storedStudent.studentStatus === "Transferee") {
+    return "Transferee";
+  }
+
+  return "Regular";
+};
+
 const mapStoredStudentToPortalStudent = (
   storedStudent: StudentStorageRecord,
 ): Student => {
@@ -247,13 +271,7 @@ const mapStoredStudentToPortalStudent = (
     programType: storedStudent.program === "SHS" ? "SHS" : "BS",
     gender: storedStudent.gender || mockStudent.gender,
     birthday: storedStudent.birthDate || mockStudent.birthday,
-    status:
-      storedStudent.requestedOwnSchedule === true ||
-      storedStudent.ownScheduleRequestStatus === "Approved"
-        ? "Irregular"
-        : storedStudent.studentStatus === "Transferee"
-          ? "Transferee"
-          : "Regular",
+    status: getPortalStudentStatus(storedStudent),
     civilStatus: storedStudent.civilStatus || mockStudent.civilStatus,
     religion: mockStudent.religion,
     guardianName: storedStudent.guardianName || mockStudent.guardianName,

@@ -683,138 +683,6 @@
   background: #1a3d5c;
 }
 
-.s-irregular-request-card {
-  margin-bottom: 24px;
-}
-
-.s-irregular-request-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.s-irregular-request-text {
-  margin: 8px 0 0;
-  font-size: 13px;
-  line-height: 1.6;
-  color: #475467;
-}
-
-.s-irregular-request-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.s-irregular-request-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 42px;
-  padding: 0 18px;
-  border: 1px solid #cbd5e1;
-  border-radius: 12px;
-  background: #ffffff;
-  color: #0f172a;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.s-irregular-request-btn:hover {
-  border-color: #066287;
-  color: #066287;
-}
-
-.s-irregular-request-btn.selected {
-  border-color: #0f766e;
-  background: #ecfdf5;
-  color: #065f46;
-}
-
-.s-irregular-request-btn:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
-.s-irregular-request-selection {
-  margin-top: 16px;
-  padding: 14px 16px;
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  background: #f8fbff;
-  color: #0f4c81;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.s-irregular-request-selection strong {
-  color: #0f172a;
-}
-
-.s-section-request-modal {
-  width: min(760px, 100%);
-}
-
-.s-section-request-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.s-section-request-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid #dbe4ee;
-  border-radius: 16px;
-  background: #ffffff;
-  cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease,
-    background-color 0.2s ease;
-}
-
-.s-section-request-option:hover {
-  border-color: #94a3b8;
-}
-
-.s-section-request-option.selected {
-  border-color: #0f766e;
-  background: #ecfdf5;
-  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.12);
-}
-
-.s-section-request-control {
-  padding-top: 2px;
-}
-
-.s-section-request-control input {
-  width: 16px;
-  height: 16px;
-}
-
-.s-section-request-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.s-section-request-copy strong {
-  color: #0f172a;
-  font-size: 14px;
-}
-
-.s-section-request-copy span {
-  color: #64748b;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
 .s-finance-stat {
   display: flex;
   justify-content: space-between;
@@ -952,7 +820,6 @@
     grid-template-columns: 1fr;
   }
 
-  .s-irregular-request-header,
   .s-retake-plan-summary-status {
     max-width: none;
   }
@@ -969,19 +836,6 @@
     justify-content: flex-start;
   }
 
-  .s-irregular-request-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .s-irregular-request-actions {
-    flex-direction: column;
-  }
-
-  .s-irregular-request-btn {
-    width: 100%;
-  }
-  
   .s-enroll-btn, .s-download-confirmation-btn {
     width: 100%;
     justify-content: center;

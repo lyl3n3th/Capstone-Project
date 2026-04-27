@@ -28,6 +28,9 @@ export interface AdminAttachment {
   type: string;
   url: string;
   reviewStatus?: "Pending" | "Approved" | "Rejected";
+  storagePath?: string;
+  storageBucket?: string;
+  uploadedAt?: string;
 }
 
 export interface AdminPersonalInformation {
@@ -338,6 +341,7 @@ const STUDENT_NUMBER_FLOOR = 261000;
 const STUDENT_NUMBER_SUFFIX_LENGTH = 6;
 const REQUIREMENTS_BUCKET = "admission-requirements";
 const ENROLLMENT_REQUEST_STORAGE_SCOPE = "enrollment-requests";
+export const STORED_STUDENTS_UPDATED_EVENT = "aics:stored-students-updated";
 
 type SupabaseRequirementFileRow = {
   file_name: string;
@@ -739,6 +743,10 @@ export const readStoredStudents = () =>
 
 export const writeStoredStudents = (students: StudentStorageRecord[]) => {
   writeStorageItem(STUDENT_STORAGE_KEY, stripLegacyMockStudentRecords(students));
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(STORED_STUDENTS_UPDATED_EVENT));
+  }
 };
 
 const normalizeComparableStudentValue = (value?: string | null) =>
