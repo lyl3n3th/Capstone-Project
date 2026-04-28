@@ -391,6 +391,8 @@ function AdmissionStep4() {
   });
   const honorDiscount = tuitionEstimate.honorDiscountPercentage;
   const isAccepted = applicationData?.applicationStatus === "accepted";
+  const isRejected = applicationData?.applicationStatus === "rejected";
+  const rejectionReason = applicationData?.rejectionReason?.trim() || "";
   const shouldShowScholarshipExam = isCollege && applyScholarship;
   const buttonText = isAccepted
     ? "Proceed to Student Portal"
@@ -494,7 +496,7 @@ function AdmissionStep4() {
             </div>
           )}
 
-          {!canEdit && (
+          {!canEdit && !isAccepted && !isRejected && (
             <div className="conf-notice conf-notice-success">
               <strong>Application Submitted:</strong> Your admission record is
               already in Submitted and is waiting for the next registrar update.
@@ -532,6 +534,15 @@ function AdmissionStep4() {
                   <a href={studentPortalLink}>Proceed to Student Portal</a>
                 </p>
               )}
+            </div>
+          )}
+
+          {isRejected && (
+            <div className="conf-notice conf-notice-warning">
+              <strong>Application Rejected:</strong>{" "}
+              {rejectionReason
+                ? `Reason: ${rejectionReason}`
+                : "Please coordinate with admissions for more details about the rejection."}
             </div>
           )}
 
@@ -633,6 +644,12 @@ function AdmissionStep4() {
                   <span className="conf-summary-value">
                     {resolvedStudentNumber}
                   </span>
+                </div>
+              )}
+              {isRejected && rejectionReason && (
+                <div className="conf-summary-item">
+                  <span className="conf-summary-label">Decision Note:</span>
+                  <span className="conf-summary-value">{rejectionReason}</span>
                 </div>
               )}
               {applicationData.honorLabel &&

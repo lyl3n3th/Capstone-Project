@@ -29,6 +29,7 @@ import {
 } from "../../services/enrollmentLoadPlanner";
 import {
   ENROLLMENT_REQUESTS_UPDATED_EVENT,
+  fetchEnrollmentRequests,
   getEnrollmentRequestForStudent,
   getRegularEnrollmentRequirementItems,
   hydrateEnrollmentRequestAttachments,
@@ -1230,7 +1231,7 @@ Generated on: ${new Date().toLocaleDateString()}
     }));
   };
 
-  const handleEnroll = () => {
+  const handleEnroll = async () => {
     if (!student) {
       addToast("Student record is still loading.", "warning");
       return;
@@ -1396,7 +1397,7 @@ Generated on: ${new Date().toLocaleDateString()}
     };
 
     try {
-      saveEnrollmentRequest(nextRequest);
+      await saveEnrollmentRequest(nextRequest);
       setEnrollmentRequestsVersion((previousValue) => previousValue + 1);
       setIsRetakePlanModalOpen(false);
       addToast(
@@ -1514,6 +1515,32 @@ Date: ${new Date().toLocaleDateString()}
       window.removeEventListener("storage", handleStorageUpdate);
     };
   }, []);
+
+  useEffect(() => {
+    if (!student) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const syncEnrollmentRequests = async () => {
+      try {
+        await fetchEnrollmentRequests(student.branch);
+
+        if (!isCancelled) {
+          setEnrollmentRequestsVersion((previousValue) => previousValue + 1);
+        }
+      } catch (error) {
+        console.warn("Unable to refresh shared enrollment requests.", error);
+      }
+    };
+
+    void syncEnrollmentRequests();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [student?.branch, student?.studentNumber, student?.trackingNumber]);
 
   useEffect(() => {
     if (!activeEnrollmentRequest?.attachments?.length) {

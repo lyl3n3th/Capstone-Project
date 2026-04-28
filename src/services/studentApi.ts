@@ -10,6 +10,13 @@ import {
   type StudentPortalSubject,
   type StudentStorageRecord,
 } from "./adminStorage";
+import { fetchAndCacheAcademicSnapshot } from "./academicData";
+import { fetchAdminStudents, saveAdminStudent } from "./adminStudentsApi";
+import { fetchStudentSubjectPlans } from "./studentPlanningApi";
+import {
+  fetchEnrollmentRequests,
+  hasLatestApprovedIrregularEnrollmentRequestForStudent,
+} from "./enrollmentRequests";
 import {
   resolveStudentPortalContext,
   type StudentPortalCurrentTerm,
@@ -147,61 +154,256 @@ const wait = (durationMs: number) =>
 const getFallbackSubjects = (programType: Student["programType"]) =>
   programType === "SHS" ? fallbackSubjectsSHS : fallbackSubjectsCollege;
 
-const getStudentSessionOverrides = (): Partial<Student> => {
+const getCurrentStudentSessionUser = (): AuthSession["user"] | null => {
   if (typeof window === "undefined") {
-    return {};
+    return null;
   }
 
   const rawSession = localStorage.getItem(AUTH_STORAGE_KEY);
 
   if (!rawSession) {
-    return {};
+    return null;
   }
 
   try {
     const parsedSession = JSON.parse(rawSession) as AuthSession;
 
     if (parsedSession.user.role !== "student") {
-      return {};
+      return null;
     }
 
+    return parsedSession.user;
+  } catch (error) {
+    console.error("Failed to resolve current student session", error);
+    return null;
+  }
+};
+
+const getStudentSessionOverrides = (
+  sessionUser = getCurrentStudentSessionUser(),
+): Partial<Student> => {
+  if (!sessionUser) {
+    return {};
+  }
+
+  try {
     const derivedFirstName =
-      parsedSession.user.firstName ||
-      parsedSession.user.displayName.split(" ")[0] ||
+      sessionUser.firstName ||
+      sessionUser.displayName.split(" ")[0] ||
       mockStudent.firstName;
     const derivedLastName =
-      parsedSession.user.lastName ||
-      parsedSession.user.displayName
+      sessionUser.lastName ||
+      sessionUser.displayName
         .split(" ")
         .slice(1)
         .join(" ") ||
       mockStudent.lastName;
 
     return {
-      id: parsedSession.user.id,
-      studentNumber:
-        parsedSession.user.studentNumber || mockStudent.studentNumber,
-      trackingNumber: parsedSession.user.trackingNumber,
+      id: sessionUser.id,
+      studentNumber: sessionUser.studentNumber || mockStudent.studentNumber,
+      trackingNumber: sessionUser.trackingNumber,
       firstName: derivedFirstName,
       lastName: derivedLastName,
-      middleName: parsedSession.user.middleName,
-      email: parsedSession.user.email || mockStudent.email,
-      contactNumber:
-        parsedSession.user.contactNumber || mockStudent.contactNumber,
-      address: parsedSession.user.address || mockStudent.address,
-      program: parsedSession.user.program || mockStudent.program,
-      yearLevel: parsedSession.user.yearLevel || mockStudent.yearLevel,
-      branch: parsedSession.user.branch || mockStudent.branch,
-      section: parsedSession.user.section,
-      programType: parsedSession.user.programType || mockStudent.programType,
-      gender: parsedSession.user.gender || mockStudent.gender,
-      birthday: parsedSession.user.birthDate || mockStudent.birthday,
-      civilStatus: parsedSession.user.civilStatus || mockStudent.civilStatus,
+      middleName: sessionUser.middleName,
+      email: sessionUser.email || mockStudent.email,
+      contactNumber: sessionUser.contactNumber || mockStudent.contactNumber,
+      address: sessionUser.address || mockStudent.address,
+      program: sessionUser.program || mockStudent.program,
+      yearLevel: sessionUser.yearLevel || mockStudent.yearLevel,
+      branch: sessionUser.branch || mockStudent.branch,
+      section: sessionUser.section,
+      programType: sessionUser.programType || mockStudent.programType,
+      gender: sessionUser.gender || mockStudent.gender,
+      birthday: sessionUser.birthDate || mockStudent.birthday,
+      civilStatus: sessionUser.civilStatus || mockStudent.civilStatus,
     };
   } catch (error) {
     console.error("Failed to read student session overrides", error);
     return {};
   }
+};
+
+const buildSessionBackedPortalStudent = (
+  sessionUser: AuthSession["user"],
+): Student => {
+  const sessionOverrides = getStudentSessionOverrides(sessionUser);
+
+  return {
+    ...mockStudent,
+    ...sessionOverrides,
+    id: sessionUser.id || sessionOverrides.studentNumber || mockStudent.id,
+    studentNumber:
+      sessionUser.studentNumber || sessionOverrides.studentNumber || mockStudent.studentNumber,
+    trackingNumber: sessionUser.trackingNumber,
+    status: "Regular",
+  };
+};
+
+const buildCurrentTermFallback = (yearLevel: string): StudentPortalCurrentTerm => ({
+  yearLevel,
+  academicYear: "2026-2027",
+  semester: "1st Semester",
+  source: "fallback",
+});
+
+const mergeStudentIntoLocalCache = (student: StudentStorageRecord) => {
+  const currentBranch = normalizeBranchName(student.branch);
+  const nextStudents = [
+    ...readStoredStudents().filter((storedStudent) => {
+      if (normalizeBranchName(storedStudent.branch) !== currentBranch) {
+        return true;
+      }
+
+      if (storedStudent.id === student.id) {
+        return false;
+      }
+
+      return !(
+        storedStudent.trackingNumber &&
+        student.trackingNumber &&
+        storedStudent.trackingNumber === student.trackingNumber
+      );
+    }),
+    student,
+  ];
+
+  writeStoredStudents(nextStudents);
+};
+
+const getStoredStudentRecordForCurrentSession = (
+  sessionUser = getCurrentStudentSessionUser(),
+): StudentStorageRecord | null => {
+  if (!sessionUser?.studentNumber) {
+    return null;
+  }
+
+  try {
+    const currentBranch = normalizeBranchName(sessionUser.branch);
+    return (
+      readStoredStudents().find(
+        (student) =>
+          student.id === sessionUser.studentNumber &&
+          normalizeBranchName(student.branch) === currentBranch,
+      ) || null
+    );
+  } catch (error) {
+    console.error("Failed to resolve student session record", error);
+    return null;
+  }
+};
+
+const syncStudentPortalAcademicCache = async (
+  branch?: string | null,
+) => {
+  if (!branch?.trim()) {
+    return;
+  }
+
+  try {
+    await Promise.all([
+      fetchAndCacheAcademicSnapshot(branch),
+      fetchStudentSubjectPlans(branch),
+      fetchEnrollmentRequests(branch),
+    ]);
+  } catch (error) {
+    console.warn("Failed to fetch shared student portal data.", error);
+  }
+};
+
+const fetchRemoteStudentRecordForCurrentSession = async (
+  sessionUser: AuthSession["user"],
+) => {
+  if (!sessionUser.studentNumber) {
+    return null;
+  }
+
+  try {
+    const remoteStudents = await fetchAdminStudents(sessionUser.branch);
+    const remoteStudent =
+      remoteStudents.find(
+        (student) =>
+          student.id === sessionUser.studentNumber ||
+          (sessionUser.trackingNumber &&
+            student.trackingNumber === sessionUser.trackingNumber),
+      ) ?? null;
+
+    if (!remoteStudent) {
+      return null;
+    }
+
+    mergeStudentIntoLocalCache(remoteStudent);
+    return remoteStudent;
+  } catch (error) {
+    console.warn("Failed to fetch shared student record for current session.", error);
+    return null;
+  }
+};
+
+const getStudentPortalDataForCurrentSession = async (): Promise<StudentPortalData> => {
+  await wait(300);
+
+  const sessionUser = getCurrentStudentSessionUser();
+  await syncStudentPortalAcademicCache(sessionUser?.branch);
+  let storedStudent = getStoredStudentRecordForCurrentSession(sessionUser);
+
+  if (sessionUser) {
+    const remoteStudent = await fetchRemoteStudentRecordForCurrentSession(
+      sessionUser,
+    );
+
+    if (remoteStudent) {
+      storedStudent = remoteStudent;
+    }
+  }
+
+  if (storedStudent) {
+    const { resolvedStudentRecord, currentTerm, subjects } =
+      resolveStudentPortalContext(storedStudent);
+    const student = {
+      ...mapStoredStudentToPortalStudent(resolvedStudentRecord),
+      yearLevel: resolvedStudentRecord.yearLevel,
+    };
+    const credentialOverview = getStudentCredentialOverview({
+      branch: storedStudent.branch,
+      studentNumber: storedStudent.id,
+      trackingNumber: storedStudent.trackingNumber,
+    });
+
+    return {
+      student,
+      subjects,
+      credentialItems: credentialOverview?.items ?? [],
+      credentialSummary: credentialOverview?.summary ?? null,
+      currentTerm,
+    };
+  }
+
+  if (sessionUser) {
+    const student = buildSessionBackedPortalStudent(sessionUser);
+    const credentialOverview = getStudentCredentialOverview({
+      branch: student.branch,
+      studentNumber: student.studentNumber,
+      trackingNumber: student.trackingNumber,
+    });
+
+    return {
+      student,
+      subjects: [],
+      credentialItems: credentialOverview?.items ?? [],
+      credentialSummary: credentialOverview?.summary ?? null,
+      currentTerm: buildCurrentTermFallback(student.yearLevel),
+    };
+  }
+
+  const fallbackStudent = { ...mockStudent, ...getStudentSessionOverrides() };
+  return {
+    student: fallbackStudent,
+    subjects: getFallbackSubjects(fallbackStudent.programType),
+    credentialItems: [],
+    credentialSummary: null,
+    currentTerm: buildCurrentTermFallback(fallbackStudent.yearLevel),
+  };
 };
 
 const buildFullName = ({
@@ -224,13 +426,23 @@ const getPortalStudentStatus = (
   const hasIrregularScheduleFlag =
     storedStudent.requestedOwnSchedule === true ||
     storedStudent.ownScheduleRequestStatus === "Approved";
+  const hasApprovedIrregularEnrollmentRequest =
+    hasLatestApprovedIrregularEnrollmentRequestForStudent({
+      branch: storedStudent.branch,
+      studentNumber: storedStudent.id,
+      trackingNumber: storedStudent.trackingNumber,
+    });
   const gradeStanding = getStudentAcademicStanding({
     branch: storedStudent.branch,
     program: storedStudent.program,
     studentId: storedStudent.id,
   }).label;
 
-  if (hasIrregularScheduleFlag || gradeStanding === "Irregular") {
+  if (
+    hasIrregularScheduleFlag ||
+    hasApprovedIrregularEnrollmentRequest ||
+    gradeStanding === "Irregular"
+  ) {
     return "Irregular";
   }
 
@@ -285,83 +497,8 @@ const mapStoredStudentToPortalStudent = (
   };
 };
 
-const getStoredStudentRecordForCurrentSession = (): StudentStorageRecord | null => {
-  if (typeof window === "undefined") {
-    return null;
-  }
 
-  const rawSession = localStorage.getItem(AUTH_STORAGE_KEY);
-
-  if (!rawSession) {
-    return null;
-  }
-
-  try {
-    const parsedSession = JSON.parse(rawSession) as AuthSession;
-
-    if (
-      parsedSession.user.role !== "student" ||
-      !parsedSession.user.studentNumber
-    ) {
-      return null;
-    }
-
-    const currentBranch = normalizeBranchName(parsedSession.user.branch);
-    return (
-      readStoredStudents().find(
-        (student) =>
-          student.id === parsedSession.user.studentNumber &&
-          normalizeBranchName(student.branch) === currentBranch,
-      ) || null
-    );
-  } catch (error) {
-    console.error("Failed to resolve student session record", error);
-    return null;
-  }
-};
-
-const getStudentPortalDataForCurrentSession = async (): Promise<StudentPortalData> => {
-  await wait(300);
-
-  const storedStudent = getStoredStudentRecordForCurrentSession();
-  if (storedStudent) {
-    const { resolvedStudentRecord, currentTerm, subjects } =
-      resolveStudentPortalContext(storedStudent);
-    const student = {
-      ...mapStoredStudentToPortalStudent(resolvedStudentRecord),
-      yearLevel: resolvedStudentRecord.yearLevel,
-    };
-    const credentialOverview = getStudentCredentialOverview({
-      branch: storedStudent.branch,
-      studentNumber: storedStudent.id,
-      trackingNumber: storedStudent.trackingNumber,
-    });
-
-    return {
-      student,
-      subjects,
-      credentialItems: credentialOverview?.items ?? [],
-      credentialSummary: credentialOverview?.summary ?? null,
-      currentTerm,
-    };
-  }
-
-  const fallbackStudent = { ...mockStudent, ...getStudentSessionOverrides() };
-  return {
-    student: fallbackStudent,
-    subjects: getFallbackSubjects(fallbackStudent.programType),
-    credentialItems: [],
-    credentialSummary: null,
-    currentTerm: {
-      yearLevel: fallbackStudent.yearLevel,
-      academicYear: "2026-2027",
-      semester: "1st Semester",
-      source: "fallback",
-    },
-  };
-};
-
-const persistStudentProfileUpdate = (
+const persistStudentProfileUpdate = async (
   storedStudent: StudentStorageRecord,
   data: Partial<Student>,
 ) => {
@@ -394,7 +531,17 @@ const persistStudentProfileUpdate = (
   );
 
   writeStoredStudents(updatedStudents);
-  return mapStoredStudentToPortalStudent(nextStudentRecord);
+
+  try {
+    const savedStudent = await saveAdminStudent(nextStudentRecord);
+    return mapStoredStudentToPortalStudent(savedStudent);
+  } catch (error) {
+    console.warn(
+      "Failed to sync updated student profile to Supabase. Keeping the local profile update.",
+      error,
+    );
+    return mapStoredStudentToPortalStudent(nextStudentRecord);
+  }
 };
 
 export const studentApi = {
@@ -415,6 +562,11 @@ export const studentApi = {
       return persistStudentProfileUpdate(storedStudent, data);
     }
 
-    return { ...mockStudent, ...getStudentSessionOverrides(), ...data };
+    const sessionUser = getCurrentStudentSessionUser();
+    if (sessionUser) {
+      return { ...buildSessionBackedPortalStudent(sessionUser), ...data };
+    }
+
+    return { ...mockStudent, ...data };
   },
 };

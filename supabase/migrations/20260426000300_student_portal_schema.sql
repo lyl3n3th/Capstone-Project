@@ -1214,7 +1214,9 @@ returns table (
   program_level text,
   track_name text,
   honor_label text,
+  honor_discount_percentage numeric,
   application_status text,
+  rejection_reason text,
   current_step smallint,
   first_name text,
   last_name text,
@@ -1226,6 +1228,9 @@ returns table (
   phone_number text,
   year_completion integer,
   applied_for_scholarship boolean,
+  scholarship_exam_score numeric,
+  effective_discount_percentage numeric,
+  effective_discount_source text,
   requirements_uploaded_at timestamptz,
   submitted_at timestamptz,
   created_at timestamptz,
@@ -1248,7 +1253,9 @@ as $$
     program.level as program_level,
     track.name as track_name,
     honor.label as honor_label,
+    coalesce(honor.tuition_discount_percent, 0)::numeric(5, 2) as honor_discount_percentage,
     app.application_status,
+    app.rejection_reason,
     app.current_step,
     app.first_name,
     app.last_name,
@@ -1260,6 +1267,25 @@ as $$
     app.phone_number,
     app.year_completion,
     app.applied_for_scholarship,
+    app.scholarship_exam_score,
+    public.calculate_admission_discount_percentage(
+      honor.tuition_discount_percent,
+      app.applied_for_scholarship,
+      app.scholarship_exam_score
+    ) as effective_discount_percentage,
+    case
+      when coalesce(app.applied_for_scholarship, false)
+        and app.scholarship_exam_score is not null
+        and app.scholarship_exam_score > coalesce(honor.tuition_discount_percent, 0)
+        then 'scholarship_exam'
+      when coalesce(honor.tuition_discount_percent, 0) > 0
+        then 'honor'
+      when coalesce(app.applied_for_scholarship, false)
+        and app.scholarship_exam_score is not null
+        and app.scholarship_exam_score > 0
+        then 'scholarship_exam'
+      else 'none'
+    end as effective_discount_source,
     app.requirements_uploaded_at,
     app.submitted_at,
     app.created_at,
@@ -1317,7 +1343,9 @@ as $$
     program.level,
     track.name,
     honor.label,
+    honor.tuition_discount_percent,
     app.application_status,
+    app.rejection_reason,
     app.current_step,
     app.first_name,
     app.last_name,
@@ -1329,6 +1357,7 @@ as $$
     app.phone_number,
     app.year_completion,
     app.applied_for_scholarship,
+    app.scholarship_exam_score,
     app.requirements_uploaded_at,
     app.submitted_at,
     app.created_at,

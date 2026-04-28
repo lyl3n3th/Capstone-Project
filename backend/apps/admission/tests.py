@@ -9,6 +9,7 @@ from apps.admission.tracking_recovery import (
     AdmissionDecisionNotificationTarget,
     AdmissionTrackingNotificationTarget,
     TrackingRecoveryMatch,
+    build_decision_notification_email_message,
 )
 
 
@@ -317,6 +318,42 @@ class AdmissionDecisionNotificationApiTests(TestCase):
         self.assertEqual(delivered_target.tracking_number, "AICS-20260425-DEC123")
 
     @patch("apps.admission.views.deliver_admission_decision_notification")
+    def test_accepted_decision_notification_allows_missing_reason_and_portal_link(
+        self,
+        mock_deliver,
+    ):
+        mock_deliver.return_value = {
+            "email": {
+                "status": "sent",
+                "destination": "ja***@example.com",
+            }
+        }
+
+        response = self.client.post(
+            "/api/admissions/decision-notification/",
+            data=json.dumps(
+                {
+                    "email": "jane@example.com",
+                    "fullName": "Jane Doe",
+                    "trackingNumber": "AICS-20260425-DEC200",
+                    "studentNumber": "BAC-261001",
+                    "recordType": "admission",
+                    "decisionStatus": "accepted",
+                    "portalLink": "http://localhost:5173/student/login?branch=Bacoor&studentNumber=BAC-261001",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        delivered_target = mock_deliver.call_args.args[0]
+        self.assertEqual(delivered_target.student_number, "BAC-261001")
+        self.assertEqual(
+            delivered_target.portal_link,
+            "http://localhost:5173/student/login?branch=Bacoor&studentNumber=BAC-261001",
+        )
+
+    @patch("apps.admission.views.deliver_admission_decision_notification")
     @patch("apps.admission.views.find_tracking_notification_target")
     def test_decision_notification_can_lookup_tracking_number(
         self,
@@ -380,3 +417,26 @@ class AdmissionDecisionNotificationApiTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertIn("detail", response.json())
+
+    def test_accepted_decision_email_includes_registration_note_before_sign_in(self):
+        message = build_decision_notification_email_message(
+            AdmissionDecisionNotificationTarget(
+                email="jane@example.com",
+                full_name="Jane Doe",
+                tracking_number="AICS-20260425-DEC200",
+                student_number="BAC-261001",
+                record_type="admission",
+                portal_link="http://localhost:5173/student/login?branch=Bacoor&studentNumber=BAC-261001",
+            ),
+            decision_status="accepted",
+            decision_reason="",
+        )
+
+        self.assertIn(
+            "You must register your student portal account first before signing in or accessing the student portal.",
+            message,
+        )
+        self.assertIn(
+            "Use the assigned student number above, together with your approved email address and mobile number, during portal registration.",
+            message,
+        )

@@ -17,9 +17,12 @@ import type {
 import {
   getStudentScheduleChoiceGroups,
   getStudentScheduleSelectionRequest,
-  saveStudentScheduleSelectionRequest,
-  updateStoredStudentOwnScheduleState,
 } from "../../services/adminStorage";
+import {
+  fetchStudentScheduleRequests,
+  saveStudentPlanningState,
+  saveStudentScheduleRequest,
+} from "../../services/studentPlanningApi";
 import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
 
@@ -111,6 +114,42 @@ const formatScheduleChoiceLabel = (
           .join(" / ")
       : "Schedule pending"
   }${assignment.instructorName ? ` - ${assignment.instructorName}` : ""}`;
+
+const formatAssignmentScheduleDetails = (
+  assignment?: Pick<StudentScheduledAssignmentItem, "schedule">,
+) => {
+  if (!assignment || assignment.schedule.length === 0) {
+    return "TBA";
+  }
+
+  return assignment.schedule
+    .map(
+      (slot) =>
+        `${slot.day.slice(0, 3)} ${formatClockLabel(slot.startTime)}-${formatClockLabel(slot.endTime)}`,
+    )
+    .join(" / ");
+};
+
+const formatAssignmentRoomDetails = (
+  assignment?: Pick<StudentScheduledAssignmentItem, "schedule">,
+) => {
+  if (!assignment || assignment.schedule.length === 0) {
+    return "TBA";
+  }
+
+  return Array.from(
+    new Set(
+      assignment.schedule.map((slot) => slot.room?.trim() || "TBA"),
+    ),
+  ).join(", ");
+};
+
+const formatAssignmentProfessorDetails = (
+  assignment?: Pick<StudentScheduledAssignmentItem, "instructorName">,
+) => {
+  const instructorName = assignment?.instructorName?.trim();
+  return instructorName && instructorName.length > 0 ? instructorName : "TBA";
+};
 
 const buildScheduledAssignmentConflicts = (
   assignments: Pick<
@@ -296,13 +335,17 @@ function StudentSubjects() {
     supportsOwnSchedule && student?.ownScheduleSelectionStatus !== "Approved";
   const showIrregularSections =
     student?.status === "Irregular" || hasOwnScheduleRequest;
+  const isMissingSyncedAcademicData =
+    currentTerm?.source === "fallback" && allSubjects.length === 0;
   const subjectsEmptyStateMessage = hasOwnScheduleRequest
     ? getOwnScheduleSubjectsEmptyStateMessage({
         requestStatus: resolvedOwnScheduleRequestStatus,
         selectionStatus: student?.ownScheduleSelectionStatus,
         showOwnSchedulePlanner,
       })
-    : "No subjects found for the selected academic year and semester.";
+    : isMissingSyncedAcademicData
+      ? "No official subjects are posted yet for your current term."
+      : "No subjects found for the selected academic year and semester.";
 
   useEffect(() => {
     if (!student || !supportsOwnSchedule) {
@@ -312,38 +355,58 @@ function StudentSubjects() {
       return;
     }
 
-    const nextScheduleRequest = getStudentScheduleSelectionRequest({
-      branch: student.branch,
-      studentNumber: student.studentNumber,
-      trackingNumber: student.trackingNumber,
-    });
-    const nextAcademicYear =
-      nextScheduleRequest?.academicYear ||
-      student.ownScheduleAcademicYear ||
-      "2026-2027";
-    const nextSemester =
-      nextScheduleRequest?.semester ||
-      student.ownScheduleSemester ||
-      "1st Semester";
-    const nextChoiceGroups = getStudentScheduleChoiceGroups({
-      branch: student.branch,
-      program: student.programType === "SHS" ? "SHS" : "College",
-      yearLevel: student.yearLevel,
-      strandOrCourse: student.program,
-      semester: nextSemester,
-      academicYear: nextAcademicYear,
-    });
+    let isCancelled = false;
 
-    setScheduleRequest(nextScheduleRequest);
-    setScheduleChoiceGroups(nextChoiceGroups);
-    setSelectedAssignmentsBySubject(
-      Object.fromEntries(
-        (nextScheduleRequest?.selections ?? []).map((selection) => [
-          selection.subjectId,
-          selection.assignmentId,
-        ]),
-      ),
-    );
+    const loadOwnScheduleRequest = async () => {
+      try {
+        await fetchStudentScheduleRequests(student.branch);
+      } catch (error) {
+        console.warn("Failed to fetch shared student schedule requests.", error);
+      }
+
+      const nextScheduleRequest = getStudentScheduleSelectionRequest({
+        branch: student.branch,
+        studentNumber: student.studentNumber,
+        trackingNumber: student.trackingNumber,
+      });
+      const nextAcademicYear =
+        nextScheduleRequest?.academicYear ||
+        student.ownScheduleAcademicYear ||
+        "2026-2027";
+      const nextSemester =
+        nextScheduleRequest?.semester ||
+        student.ownScheduleSemester ||
+        "1st Semester";
+      const nextChoiceGroups = getStudentScheduleChoiceGroups({
+        branch: student.branch,
+        program: student.programType === "SHS" ? "SHS" : "College",
+        yearLevel: student.yearLevel,
+        strandOrCourse: student.program,
+        semester: nextSemester,
+        academicYear: nextAcademicYear,
+      });
+
+      if (isCancelled) {
+        return;
+      }
+
+      setScheduleRequest(nextScheduleRequest);
+      setScheduleChoiceGroups(nextChoiceGroups);
+      setSelectedAssignmentsBySubject(
+        Object.fromEntries(
+          (nextScheduleRequest?.selections ?? []).map((selection) => [
+            selection.subjectId,
+            selection.assignmentId,
+          ]),
+        ),
+      );
+    };
+
+    void loadOwnScheduleRequest();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [
     student,
     supportsOwnSchedule,
@@ -528,20 +591,18 @@ function StudentSubjects() {
 
     try {
       setIsSubmittingScheduleRequest(true);
-      saveStudentScheduleSelectionRequest(nextRequest);
-      updateStoredStudentOwnScheduleState({
+      const savedRequest = await saveStudentScheduleRequest(nextRequest);
+      await saveStudentPlanningState({
         branch: student.branch,
         studentNumber: student.studentNumber,
         trackingNumber: student.trackingNumber,
-        updates: {
-          requestedOwnSchedule: true,
-          ownScheduleRequestStatus: "Approved",
-          ownScheduleAcademicYear,
-          ownScheduleSemester,
-          ownScheduleSelectionStatus: "Pending Approval",
-        },
+        requestedOwnSchedule: true,
+        ownScheduleRequestStatus: "Approved",
+        ownScheduleAcademicYear,
+        ownScheduleSemester,
+        ownScheduleSelectionStatus: "Pending Approval",
       });
-      setScheduleRequest(nextRequest);
+      setScheduleRequest(savedRequest);
       await refreshStudent();
       addToast("Schedule request submitted for approval.", "success");
     } catch (error) {
@@ -753,51 +814,107 @@ function StudentSubjects() {
               <div className="s-own-schedule-grid">
                 <div className="s-own-schedule-subjects">
                   {scheduleChoiceGroups.length > 0 ? (
-                    scheduleChoiceGroups.map((group) => (
-                      <div
-                        key={group.subjectId}
-                        className="s-own-schedule-subject-card"
-                      >
-                        <div className="s-own-schedule-subject-copy">
-                          <h3>
-                            {group.subjectCode} - {group.subjectName}
-                          </h3>
-                          <p>
-                            {typeof group.units === "number"
-                              ? `${group.units} unit(s)`
-                              : "Units not specified"}
-                          </p>
-                        </div>
-                        <label className="s-own-schedule-field">
-                          <span>Available schedules</span>
-                          <select
-                            value={selectedAssignmentsBySubject[group.subjectId] || ""}
-                            onChange={(event) =>
-                              handleOwnScheduleSelectionChange(
-                                group.subjectId,
-                                event.target.value,
-                              )
-                            }
-                          >
-                            <option value="">Not selected</option>
-                            {group.assignmentOptions.map((assignment) => (
-                              <option
-                                key={assignment.assignmentId}
-                                value={assignment.assignmentId}
-                              >
-                                {formatScheduleChoiceLabel(assignment)}
+                    scheduleChoiceGroups.map((group) => {
+                      const selectedAssignment = group.assignmentOptions.find(
+                        (assignment) =>
+                          assignment.assignmentId ===
+                          selectedAssignmentsBySubject[group.subjectId],
+                      );
+                      const isConflict =
+                        selectedAssignment &&
+                        ownScheduleConflictAssignmentIds.has(
+                          selectedAssignment.assignmentId,
+                        );
+
+                      return (
+                        <div
+                          key={group.subjectId}
+                          className={`s-own-schedule-subject-card${
+                            isConflict ? " flagged" : ""
+                          }`}
+                        >
+                          <div className="s-subject-header">
+                            <div className="s-subject-code">
+                              {group.subjectCode}
+                            </div>
+                            {typeof group.units === "number" && !isSHS ? (
+                              <div className="s-subject-units">
+                                {group.units} unit(s)
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <h3 className="s-subject-title">{group.subjectName}</h3>
+
+                          <div className="s-subject-details">
+                            {selectedAssignment?.sectionCode ? (
+                              <div className="s-subject-detail">
+                                <span className="s-detail-label">Section:</span>
+                                <span>{selectedAssignment.sectionCode}</span>
+                              </div>
+                            ) : null}
+                            <div className="s-subject-detail">
+                              <span className="s-detail-label">Schedule:</span>
+                              <span>
+                                {formatAssignmentScheduleDetails(
+                                  selectedAssignment,
+                                )}
+                              </span>
+                            </div>
+                            <div className="s-subject-detail">
+                              <span className="s-detail-label">Room:</span>
+                              <span>
+                                {formatAssignmentRoomDetails(selectedAssignment)}
+                              </span>
+                            </div>
+                            <div className="s-subject-detail">
+                              <span className="s-detail-label">Professor:</span>
+                              <span>
+                                {formatAssignmentProfessorDetails(
+                                  selectedAssignment,
+                                )}
+                              </span>
+                            </div>
+                          </div>
+
+                          <label className="s-own-schedule-field">
+                            <span>Available schedules</span>
+                            <select
+                              value={
+                                selectedAssignmentsBySubject[group.subjectId] || ""
+                              }
+                              onChange={(event) =>
+                                handleOwnScheduleSelectionChange(
+                                  group.subjectId,
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              <option value="">
+                                {group.assignmentOptions.length > 0
+                                  ? "Select a schedule"
+                                  : "No offering available"}
                               </option>
-                            ))}
-                          </select>
-                        </label>
-                        {group.assignmentOptions.length === 0 ? (
-                          <p className="s-own-schedule-empty-option">
-                            No scheduled offering is available for this subject
-                            yet.
-                          </p>
-                        ) : null}
-                      </div>
-                    ))
+                              {group.assignmentOptions.map((assignment) => (
+                                <option
+                                  key={assignment.assignmentId}
+                                  value={assignment.assignmentId}
+                                >
+                                  {formatScheduleChoiceLabel(assignment)}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          {group.assignmentOptions.length === 0 ? (
+                            <p className="s-own-schedule-empty-option">
+                              No scheduled offering is available for this subject
+                              yet.
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })
                   ) : (
                     <div className="s-no-subjects">
                       <p>

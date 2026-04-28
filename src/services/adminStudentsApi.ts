@@ -3,6 +3,11 @@ import {
   normalizeBranchName,
   type StudentStorageRecord,
 } from "./adminStorage";
+import {
+  mergeStudentPlanningStatesIntoStudents,
+  saveStudentPlanningState,
+  fetchStudentPlanningStates,
+} from "./studentPlanningApi";
 
 type SupabaseErrorLike = {
   code?: string;
@@ -96,6 +101,18 @@ const getSingleRow = <T,>(data: unknown): T | null => {
 
   return null;
 };
+
+const hasOwnPlanningField = (
+  student: StudentStorageRecord,
+  field: keyof Pick<
+    StudentStorageRecord,
+    | "requestedOwnSchedule"
+    | "ownScheduleRequestStatus"
+    | "ownScheduleAcademicYear"
+    | "ownScheduleSemester"
+    | "ownScheduleSelectionStatus"
+  >,
+) => Object.prototype.hasOwnProperty.call(student, field);
 
 const splitFullName = (fullName: string) => {
   const normalizedName = fullName.trim().replace(/\s+/g, " ");
@@ -204,7 +221,18 @@ export async function fetchAdminStudents(branch?: string | null) {
   }
 
   const rows = Array.isArray(data) ? data : [];
-  return rows.map(mapAdminStudentRow);
+  const students = rows.map(mapAdminStudentRow);
+
+  try {
+    const planningStates = await fetchStudentPlanningStates(branch);
+    return mergeStudentPlanningStatesIntoStudents(students, planningStates);
+  } catch (planningError) {
+    console.warn(
+      "Unable to fetch shared student planning states. Falling back to base student records.",
+      planningError,
+    );
+    return students;
+  }
 }
 
 export async function getNextAdminStudentNumber(branch?: string | null) {
@@ -240,7 +268,62 @@ export async function saveAdminStudent(student: StudentStorageRecord) {
     throw new Error("Supabase did not return the saved student.");
   }
 
-  return mapAdminStudentRow(row);
+  const savedStudent = mapAdminStudentRow(row);
+
+  const shouldSyncPlanningState =
+    hasOwnPlanningField(student, "requestedOwnSchedule") ||
+    hasOwnPlanningField(student, "ownScheduleRequestStatus") ||
+    hasOwnPlanningField(student, "ownScheduleAcademicYear") ||
+    hasOwnPlanningField(student, "ownScheduleSemester") ||
+    hasOwnPlanningField(student, "ownScheduleSelectionStatus");
+
+  if (shouldSyncPlanningState) {
+    try {
+      await saveStudentPlanningState({
+        branch: student.branch,
+        studentNumber: student.id,
+        trackingNumber: student.trackingNumber,
+        requestedOwnSchedule: Boolean(student.requestedOwnSchedule),
+        ownScheduleRequestStatus: student.ownScheduleRequestStatus,
+        ownScheduleAcademicYear: student.ownScheduleAcademicYear,
+        ownScheduleSemester: student.ownScheduleSemester,
+        ownScheduleSelectionStatus: student.ownScheduleSelectionStatus,
+      });
+    } catch (planningError) {
+      console.warn(
+        "Unable to sync shared student planning state while saving the student record.",
+        planningError,
+      );
+    }
+  }
+
+  return {
+    ...savedStudent,
+    requestedOwnSchedule: hasOwnPlanningField(student, "requestedOwnSchedule")
+      ? student.requestedOwnSchedule
+      : savedStudent.requestedOwnSchedule,
+    ownScheduleRequestStatus: hasOwnPlanningField(
+      student,
+      "ownScheduleRequestStatus",
+    )
+      ? student.ownScheduleRequestStatus
+      : savedStudent.ownScheduleRequestStatus,
+    ownScheduleAcademicYear: hasOwnPlanningField(
+      student,
+      "ownScheduleAcademicYear",
+    )
+      ? student.ownScheduleAcademicYear
+      : savedStudent.ownScheduleAcademicYear,
+    ownScheduleSemester: hasOwnPlanningField(student, "ownScheduleSemester")
+      ? student.ownScheduleSemester
+      : savedStudent.ownScheduleSemester,
+    ownScheduleSelectionStatus: hasOwnPlanningField(
+      student,
+      "ownScheduleSelectionStatus",
+    )
+      ? student.ownScheduleSelectionStatus
+      : savedStudent.ownScheduleSelectionStatus,
+  };
 }
 
 export async function updateAdminStudentStatus({

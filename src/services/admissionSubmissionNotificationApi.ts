@@ -72,8 +72,9 @@ export interface SendAdmissionDecisionNotificationPayload {
   trackingNumber?: string;
   studentNumber?: string;
   recordType?: "admission" | "enrollment";
-  decisionStatus?: "rejected";
-  decisionReason: string;
+  decisionStatus?: "accepted" | "rejected";
+  decisionReason?: string;
+  portalLink?: string;
 }
 
 export async function sendAdmissionSubmissionNotification(

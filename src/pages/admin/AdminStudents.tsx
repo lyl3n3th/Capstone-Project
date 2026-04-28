@@ -37,6 +37,13 @@ import {
   updateAdminStudentStatus,
 } from "../../services/adminStudentsApi";
 import {
+  fetchStudentScheduleRequests,
+  fetchStudentSubjectPlans,
+  saveStudentPlanningState,
+  saveStudentScheduleRequest,
+  saveStudentSubjectPlan,
+} from "../../services/studentPlanningApi";
+import {
   getEstimatedCollegeTuition,
   updateAdmissionProgress,
 } from "../../services/admission";
@@ -50,7 +57,11 @@ import {
   type StudentGradeProgramType,
   type StudentGradeUploadOperation,
 } from "../../services/studentGrades";
-import { getLatestApprovedEnrollmentRequestForStudent } from "../../services/enrollmentRequests";
+import {
+  fetchEnrollmentRequests,
+  getLatestApprovedEnrollmentRequestForStudent,
+  getLatestApprovedIrregularEnrollmentRequestForStudent,
+} from "../../services/enrollmentRequests";
 import { stripLegacyMockAdmissionRecords } from "../../services/legacyMockData";
 import "../../styles/admin/admin-students.css";
 
@@ -430,12 +441,24 @@ const hasRequestedOwnSchedule = (
 
 const getDisplayedAcademicStandingLabel = (
   student:
-    | Pick<Student, "requestedOwnSchedule" | "ownScheduleRequestStatus">
+    | Pick<
+        Student,
+        "id" | "branch" | "trackingNumber" | "requestedOwnSchedule" | "ownScheduleRequestStatus"
+      >
     | null
     | undefined,
   fallbackLabel?: string | null,
 ): "Regular" | "Irregular" =>
-  hasRequestedOwnSchedule(student) || fallbackLabel === "Irregular"
+  hasRequestedOwnSchedule(student) ||
+  Boolean(
+    student &&
+      getLatestApprovedIrregularEnrollmentRequestForStudent({
+        branch: student.branch,
+        studentNumber: student.id,
+        trackingNumber: student.trackingNumber,
+      }),
+  ) ||
+  fallbackLabel === "Irregular"
     ? "Irregular"
     : "Regular";
 
@@ -767,49 +790,76 @@ const buildProgressedBlockSectionCode = ({
   return `${prefix}${requestedYearCode}${blockLabel}`;
 };
 
+const getLinkedStudentEnrollee = (
+  student: Pick<Student, "branch" | "id" | "trackingNumber">,
+) =>
+  (
+    readBranchScopedData<AdminEnrolleeRecord[]>(
+      ENROLLEE_STORAGE_SCOPE,
+      normalizeBranchName(student.branch),
+    ) ?? []
+  ).find((record) => {
+    if (
+      student.trackingNumber &&
+      record.trackingNumber === student.trackingNumber
+    ) {
+      return true;
+    }
+
+    return record.studentNumber === student.id;
+  }) ?? null;
+
 const resolveStudentWithApprovedEnrollment = (student: Student): Student => {
+  const linkedEnrollee = getLinkedStudentEnrollee(student);
+  const studentWithOwnScheduleFallback = {
+    ...student,
+    ...mergeStudentOwnScheduleState(student, linkedEnrollee),
+  };
   const approvedEnrollmentRequest = getLatestApprovedEnrollmentRequestForStudent({
-    branch: student.branch,
-    studentNumber: student.id,
-    trackingNumber: student.trackingNumber,
+    branch: studentWithOwnScheduleFallback.branch,
+    studentNumber: studentWithOwnScheduleFallback.id,
+    trackingNumber: studentWithOwnScheduleFallback.trackingNumber,
   });
 
   if (!approvedEnrollmentRequest) {
-    return student;
+    return studentWithOwnScheduleFallback;
   }
 
   const hasApprovedOwnScheduleRequest =
     approvedEnrollmentRequest.irregularRequest?.mode === "own_schedule";
   const resolvedYearLevel =
-    approvedEnrollmentRequest.requestedYearLevel || student.yearLevel;
+    approvedEnrollmentRequest.requestedYearLevel ||
+    studentWithOwnScheduleFallback.yearLevel;
 
   return {
-    ...student,
+    ...studentWithOwnScheduleFallback,
     yearLevel: resolvedYearLevel,
     section:
       approvedEnrollmentRequest.irregularRequest?.mode === "own_schedule"
         ? ""
         : approvedEnrollmentRequest.irregularRequest?.mode === "section_assignment"
           ? approvedEnrollmentRequest.irregularRequest.requestedSectionCode ||
-            student.section
+            studentWithOwnScheduleFallback.section
           : buildProgressedBlockSectionCode({
-                currentSectionCode: student.section,
+                currentSectionCode: studentWithOwnScheduleFallback.section,
                 requestedYearLevel: resolvedYearLevel,
-              }) || student.section,
+              }) || studentWithOwnScheduleFallback.section,
     requestedOwnSchedule:
-      hasApprovedOwnScheduleRequest || student.requestedOwnSchedule,
+      hasApprovedOwnScheduleRequest ||
+      studentWithOwnScheduleFallback.requestedOwnSchedule,
     ownScheduleRequestStatus: hasApprovedOwnScheduleRequest
       ? "Approved"
-      : student.ownScheduleRequestStatus,
+      : studentWithOwnScheduleFallback.ownScheduleRequestStatus,
     ownScheduleAcademicYear: hasApprovedOwnScheduleRequest
       ? approvedEnrollmentRequest.academicYear
-      : student.ownScheduleAcademicYear,
+      : studentWithOwnScheduleFallback.ownScheduleAcademicYear,
     ownScheduleSemester: hasApprovedOwnScheduleRequest
       ? approvedEnrollmentRequest.semester
-      : student.ownScheduleSemester,
+      : studentWithOwnScheduleFallback.ownScheduleSemester,
     ownScheduleSelectionStatus: hasApprovedOwnScheduleRequest
-      ? student.ownScheduleSelectionStatus || "Not Submitted"
-      : student.ownScheduleSelectionStatus,
+      ? studentWithOwnScheduleFallback.ownScheduleSelectionStatus ||
+        "Not Submitted"
+      : studentWithOwnScheduleFallback.ownScheduleSelectionStatus,
   };
 };
 
@@ -1080,6 +1130,11 @@ export default function AdminStudents({
 
       try {
         const localBranchStudents = getStudentsForBranch(currentBranch) as Student[];
+        try {
+          await fetchEnrollmentRequests(currentBranch);
+        } catch (error) {
+          console.warn("Unable to fetch shared enrollment requests.", error);
+        }
         let fetchedBranchStudents = (await fetchAdminStudents(
           currentBranch,
         )) as Student[];
@@ -1178,21 +1233,53 @@ export default function AdminStudents({
   }, [currentBranch]);
 
   useEffect(() => {
+    let isCancelled = false;
     setHasLoadedStudentPlanData(false);
     setSelectedStudentIds([]);
-    setStudentSubjectPlans(
+
+    const fallbackPlans =
       readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
         STUDENT_SUBJECT_PLAN_SCOPE,
         currentBranch,
-      ) ?? {},
-    );
-    setStudentScheduleRequests(
+      ) ?? {};
+    const fallbackRequests =
       readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
         STUDENT_SCHEDULE_REQUEST_SCOPE,
         currentBranch,
-      ) ?? [],
-    );
-    setHasLoadedStudentPlanData(true);
+      ) ?? [];
+
+    const loadSharedStudentPlanData = async () => {
+      let nextPlans = fallbackPlans;
+      let nextRequests = fallbackRequests;
+
+      try {
+        const [remotePlans, remoteRequests] = await Promise.all([
+          fetchStudentSubjectPlans(currentBranch),
+          fetchStudentScheduleRequests(currentBranch),
+        ]);
+        nextPlans = remotePlans;
+        nextRequests = remoteRequests;
+      } catch (error) {
+        console.warn(
+          "Failed to fetch shared student planning records. Falling back to cached branch data.",
+          error,
+        );
+      }
+
+      if (isCancelled) {
+        return;
+      }
+
+      setStudentSubjectPlans(nextPlans);
+      setStudentScheduleRequests(nextRequests);
+      setHasLoadedStudentPlanData(true);
+    };
+
+    void loadSharedStudentPlanData();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [currentBranch]);
 
   useEffect(() => {
@@ -2375,10 +2462,20 @@ export default function AdminStudents({
     viewingStudent,
     viewingStudentAcademicStanding?.label,
   );
+  const viewingStudentIrregularEnrollmentRequest = viewingStudent
+    ? getLatestApprovedIrregularEnrollmentRequestForStudent({
+        branch: viewingStudent.branch || currentBranch,
+        studentNumber: viewingStudent.id,
+        trackingNumber: viewingStudent.trackingNumber,
+      })
+    : null;
   const viewingStudentOwnScheduleReason = hasRequestedOwnSchedule(viewingStudent)
     ? hasApprovedOwnSchedule(viewingStudent)
       ? "This student was approved for own-schedule admission and is treated as irregular while the customized load is being managed."
       : "This student requested an own schedule and is treated as irregular while the schedule workflow is still being managed."
+    : viewingStudentIrregularEnrollmentRequest?.irregularRequest?.mode ===
+        "section_assignment"
+      ? "This student has an approved irregular enrollment request and is treated as irregular for the current term."
     : "";
   const viewingStudentScheduleRequest = viewingStudent
     ? studentScheduleRequests.find(
@@ -2677,7 +2774,7 @@ export default function AdminStudents({
     setStudents((prev) => [...prev]);
   };
 
-  const handleScheduleSelectionDecision = (
+  const handleScheduleSelectionDecision = async (
     notification: StudentScheduleSelectionNotification,
     status: "Approved" | "Rejected",
   ) => {
@@ -2711,6 +2808,10 @@ export default function AdminStudents({
       nextRequests,
     );
 
+    const updatedRequest =
+      nextRequests.find((request) => request.id === notification.request.id) ||
+      notification.request;
+
     if (status === "Approved") {
       const student = notification.student;
       const planKey = getStudentSubjectPlanKey(student);
@@ -2737,24 +2838,32 @@ export default function AdminStudents({
             left.subjectName.localeCompare(right.subjectName),
         );
 
+      const nextPlan: StudentSubjectPlanRecord = {
+        id: planKey,
+        trackingNumber: student.trackingNumber,
+        studentNumber: student.id,
+        semester: notification.request.semester,
+        academicYear: notification.request.academicYear,
+        assignedSubjects,
+        creditedSubjects: existingPlan?.creditedSubjects ?? [],
+        scheduledAssignments: notification.request.selections,
+        notes:
+          existingPlan?.notes ||
+          "Approved from student own-schedule selection.",
+        updatedAt: timestamp,
+        source: "student_schedule_request",
+      };
+
       setStudentSubjectPlans((prev) => ({
         ...prev,
-        [planKey]: {
-          id: planKey,
-          trackingNumber: student.trackingNumber,
-          studentNumber: student.id,
-          semester: notification.request.semester,
-          academicYear: notification.request.academicYear,
-          assignedSubjects,
-          creditedSubjects: existingPlan?.creditedSubjects ?? [],
-          scheduledAssignments: notification.request.selections,
-          notes:
-            existingPlan?.notes ||
-            "Approved from student own-schedule selection.",
-          updatedAt: timestamp,
-          source: "student_schedule_request",
-        },
+        [planKey]: nextPlan,
       }));
+
+      try {
+        await saveStudentSubjectPlan(currentBranch, nextPlan);
+      } catch (error) {
+        console.error("Failed to save shared student subject plan", error);
+      }
     }
 
     updateStoredStudentOwnScheduleState({
@@ -2770,6 +2879,23 @@ export default function AdminStudents({
           status === "Approved" ? "Approved" : "Rejected",
       },
     });
+
+    try {
+      await saveStudentScheduleRequest(updatedRequest);
+      await saveStudentPlanningState({
+        branch: notification.student.branch || currentBranch,
+        studentNumber: notification.student.id,
+        trackingNumber: notification.student.trackingNumber,
+        requestedOwnSchedule: true,
+        ownScheduleRequestStatus: "Approved",
+        ownScheduleAcademicYear: notification.request.academicYear,
+        ownScheduleSemester: notification.request.semester,
+        ownScheduleSelectionStatus:
+          status === "Approved" ? "Approved" : "Rejected",
+      });
+    } catch (error) {
+      console.error("Failed to sync shared schedule review state", error);
+    }
 
     const refreshedStudents = getStudentsForBranch(currentBranch) as Student[];
     setStudents(refreshedStudents);

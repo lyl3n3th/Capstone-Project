@@ -179,17 +179,13 @@ export const mapStudentIdentityToAuthUser = (
 
 export const activateApprovedStudent = async (
   trackingNumber: string,
-  preferredStudentNumber?: string,
 ) => {
-  const resolvedPreferredStudentNumber =
-    preferredStudentNumber?.trim().toUpperCase() || null;
   let lastRetriableError: string | null = null;
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const { data, error } = await supabase
       .rpc("activate_approved_student", {
         p_tracking_number: trackingNumber.trim().toUpperCase(),
-        p_preferred_student_number: resolvedPreferredStudentNumber,
       })
       .returns<StudentPortalSnapshotRow[]>();
 
@@ -199,7 +195,7 @@ export const activateApprovedStudent = async (
 
     const message = getErrorMessage(error);
 
-    if (!resolvedPreferredStudentNumber && isStudentNumberConflictError(message)) {
+    if (isStudentNumberConflictError(message)) {
       lastRetriableError = message;
       continue;
     }

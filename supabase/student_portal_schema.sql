@@ -658,16 +658,9 @@ as $$
 declare
   v_application_id uuid;
   v_branch_id uuid;
-  v_branch_prefix text;
   v_student_id uuid;
   v_student_number text;
-  v_preferred_student_number text;
 begin
-  v_preferred_student_number := nullif(
-    upper(trim(coalesce(p_preferred_student_number, ''))),
-    ''
-  );
-
   select app.id, app.branch_id
   into v_application_id, v_branch_id
   from public.admission_applications app
@@ -678,8 +671,6 @@ begin
   if v_application_id is null then
     raise exception 'Tracking number "%" was not found.', p_tracking_number;
   end if;
-
-  v_branch_prefix := public.resolve_student_number_prefix(v_branch_id);
 
   update public.admission_applications app
   set application_status = 'accepted',
@@ -694,32 +685,7 @@ begin
   limit 1;
 
   if v_student_id is null then
-    if v_preferred_student_number is not null then
-      v_preferred_student_number := public.normalize_branch_student_number(
-        v_preferred_student_number,
-        v_branch_id
-      );
-
-      if (
-        v_branch_prefix is not null
-        and split_part(v_preferred_student_number, '-', 1) <> v_branch_prefix
-      ) then
-        raise exception 'Student number "%" does not match the % branch format.', v_preferred_student_number, v_branch_prefix;
-      end if;
-
-      if exists (
-        select 1
-        from public.student_profiles student
-        where upper(student.student_number) = v_preferred_student_number
-          and student.branch_id = v_branch_id
-      ) then
-        raise exception 'Student number "%" is already assigned to another student in this branch.', v_preferred_student_number;
-      end if;
-
-      v_student_number := v_preferred_student_number;
-    else
-      v_student_number := public.generate_student_number(v_branch_id);
-    end if;
+    v_student_number := public.generate_student_number(v_branch_id);
 
     insert into public.student_profiles (
       admission_application_id,
@@ -1214,7 +1180,9 @@ returns table (
   program_level text,
   track_name text,
   honor_label text,
+  honor_discount_percentage numeric,
   application_status text,
+  rejection_reason text,
   current_step smallint,
   first_name text,
   last_name text,
@@ -1226,6 +1194,9 @@ returns table (
   phone_number text,
   year_completion integer,
   applied_for_scholarship boolean,
+  scholarship_exam_score numeric,
+  effective_discount_percentage numeric,
+  effective_discount_source text,
   requirements_uploaded_at timestamptz,
   submitted_at timestamptz,
   created_at timestamptz,
@@ -1248,7 +1219,9 @@ as $$
     program.level as program_level,
     track.name as track_name,
     honor.label as honor_label,
+    coalesce(honor.tuition_discount_percent, 0)::numeric(5, 2) as honor_discount_percentage,
     app.application_status,
+    app.rejection_reason,
     app.current_step,
     app.first_name,
     app.last_name,
@@ -1260,6 +1233,25 @@ as $$
     app.phone_number,
     app.year_completion,
     app.applied_for_scholarship,
+    app.scholarship_exam_score,
+    public.calculate_admission_discount_percentage(
+      honor.tuition_discount_percent,
+      app.applied_for_scholarship,
+      app.scholarship_exam_score
+    ) as effective_discount_percentage,
+    case
+      when coalesce(app.applied_for_scholarship, false)
+        and app.scholarship_exam_score is not null
+        and app.scholarship_exam_score > coalesce(honor.tuition_discount_percent, 0)
+        then 'scholarship_exam'
+      when coalesce(honor.tuition_discount_percent, 0) > 0
+        then 'honor'
+      when coalesce(app.applied_for_scholarship, false)
+        and app.scholarship_exam_score is not null
+        and app.scholarship_exam_score > 0
+        then 'scholarship_exam'
+      else 'none'
+    end as effective_discount_source,
     app.requirements_uploaded_at,
     app.submitted_at,
     app.created_at,
@@ -1317,7 +1309,9 @@ as $$
     program.level,
     track.name,
     honor.label,
+    honor.tuition_discount_percent,
     app.application_status,
+    app.rejection_reason,
     app.current_step,
     app.first_name,
     app.last_name,
@@ -1329,6 +1323,7 @@ as $$
     app.phone_number,
     app.year_completion,
     app.applied_for_scholarship,
+    app.scholarship_exam_score,
     app.requirements_uploaded_at,
     app.submitted_at,
     app.created_at,
@@ -1677,20 +1672,7 @@ begin
   end if;
 
   if v_existing_student_id is null then
-    if v_requested_student_number is null then
-      v_result_student_number := public.generate_student_number(v_branch_id);
-    else
-      if exists (
-        select 1
-        from public.student_profiles student
-        where student.branch_id = v_branch_id
-          and upper(student.student_number) = upper(v_requested_student_number)
-      ) then
-        raise exception 'Student number "%" is already assigned in this branch.', v_requested_student_number;
-      end if;
-
-      v_result_student_number := v_requested_student_number;
-    end if;
+    v_result_student_number := public.generate_student_number(v_branch_id);
 
     insert into public.student_profiles (
       admission_application_id,

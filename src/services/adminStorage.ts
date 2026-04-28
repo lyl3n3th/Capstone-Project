@@ -337,6 +337,11 @@ const BRANCH_STORAGE_PREFIX = "aics-admin";
 const DEFAULT_BRANCH: AdminBranchName = "Bacoor";
 const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
 const DEFAULT_SECTION_SEMESTER = "1st Semester";
+const STORED_SEMESTER_ORDER = [
+  "1st Semester",
+  "2nd Semester",
+  "Summer",
+] as const;
 const STUDENT_NUMBER_FLOOR = 261000;
 const STUDENT_NUMBER_SUFFIX_LENGTH = 6;
 const REQUIREMENTS_BUCKET = "admission-requirements";
@@ -374,6 +379,7 @@ type SupabaseAdminAdmissionQueueRow = {
   phone_number: string;
   program_level: string;
   program_name: string;
+  rejection_reason: string | null;
   requirement_files: SupabaseRequirementFileRow[] | null;
   requirements_uploaded_at: string | null;
   scholarship_exam_score: number | string | null;
@@ -835,65 +841,113 @@ const getLatestApprovedStoredEnrollmentRequest = (
         right.id.localeCompare(left.id),
     )[0] ?? null;
 
+const getLinkedStoredStudentEnrollee = (
+  student: Pick<StudentStorageRecord, "branch" | "id" | "trackingNumber">,
+) =>
+  (
+    readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", student.branch) ?? []
+  ).find((record) => {
+    if (
+      student.trackingNumber &&
+      record.trackingNumber === student.trackingNumber
+    ) {
+      return true;
+    }
+
+    return record.studentNumber === student.id;
+  }) ?? null;
+
+const mergeStoredStudentOwnScheduleFallback = (
+  student: StudentStorageRecord,
+): StudentStorageRecord => {
+  const linkedEnrollee = getLinkedStoredStudentEnrollee(student);
+
+  if (!linkedEnrollee) {
+    return student;
+  }
+
+  const ownScheduleRequestStatus =
+    student.ownScheduleRequestStatus ?? linkedEnrollee.ownScheduleRequestStatus;
+
+  return {
+    ...student,
+    requestedOwnSchedule: Boolean(
+      student.requestedOwnSchedule ||
+        linkedEnrollee.requestedOwnSchedule ||
+        ownScheduleRequestStatus,
+    ),
+    ownScheduleRequestStatus,
+    ownScheduleAcademicYear:
+      student.ownScheduleAcademicYear || linkedEnrollee.ownScheduleAcademicYear,
+    ownScheduleSemester:
+      student.ownScheduleSemester || linkedEnrollee.ownScheduleSemester,
+  };
+};
+
 const resolveStoredStudentEnrollmentState = (
   student: StudentStorageRecord,
 ): StudentStorageRecord => {
+  const studentWithOwnScheduleFallback =
+    mergeStoredStudentOwnScheduleFallback(student);
   const approvedEnrollmentRequest = getLatestApprovedStoredEnrollmentRequest(student);
 
   if (!approvedEnrollmentRequest) {
-    return student;
+    return studentWithOwnScheduleFallback;
   }
 
   const hasApprovedOwnScheduleRequest =
     approvedEnrollmentRequest.irregularRequest?.mode === "own_schedule";
   const resolvedYearLevel =
-    approvedEnrollmentRequest.requestedYearLevel || student.yearLevel;
+    approvedEnrollmentRequest.requestedYearLevel ||
+    studentWithOwnScheduleFallback.yearLevel;
   const shouldApplyRequestedPlacement =
-    normalizeComparableStudentValue(student.yearLevel) !==
+    normalizeComparableStudentValue(studentWithOwnScheduleFallback.yearLevel) !==
       normalizeComparableStudentValue(resolvedYearLevel) ||
-    !student.section?.trim();
+    !studentWithOwnScheduleFallback.section?.trim();
   const resolvedSection = hasApprovedOwnScheduleRequest
     ? ""
     : approvedEnrollmentRequest.irregularRequest?.mode === "section_assignment"
       ? shouldApplyRequestedPlacement
         ? approvedEnrollmentRequest.irregularRequest.requestedSectionCode ||
-          student.section ||
+          studentWithOwnScheduleFallback.section ||
           ""
-        : student.section ||
+        : studentWithOwnScheduleFallback.section ||
           approvedEnrollmentRequest.irregularRequest.requestedSectionCode ||
           ""
       : shouldApplyRequestedPlacement
         ? buildStoredProgressedBlockSectionCode({
-            currentSectionCode: student.section,
+            currentSectionCode: studentWithOwnScheduleFallback.section,
             requestedYearLevel: resolvedYearLevel,
           }) ||
-          student.section ||
+          studentWithOwnScheduleFallback.section ||
           ""
-        : student.section ||
+        : studentWithOwnScheduleFallback.section ||
           buildStoredProgressedBlockSectionCode({
-            currentSectionCode: student.section,
+            currentSectionCode: studentWithOwnScheduleFallback.section,
             requestedYearLevel: resolvedYearLevel,
           }) ||
           "";
 
   return {
-    ...student,
+    ...studentWithOwnScheduleFallback,
     yearLevel: resolvedYearLevel,
     section: resolvedSection,
     requestedOwnSchedule:
-      hasApprovedOwnScheduleRequest || student.requestedOwnSchedule,
+      hasApprovedOwnScheduleRequest ||
+      studentWithOwnScheduleFallback.requestedOwnSchedule,
     ownScheduleRequestStatus: hasApprovedOwnScheduleRequest
       ? "Approved"
-      : student.ownScheduleRequestStatus,
+      : studentWithOwnScheduleFallback.ownScheduleRequestStatus,
     ownScheduleAcademicYear: hasApprovedOwnScheduleRequest
       ? approvedEnrollmentRequest.academicYear
-      : student.ownScheduleAcademicYear,
+      : studentWithOwnScheduleFallback.ownScheduleAcademicYear,
     ownScheduleSemester: hasApprovedOwnScheduleRequest
       ? normalizeStoredSemester(approvedEnrollmentRequest.semester)
-      : student.ownScheduleSemester,
+      : studentWithOwnScheduleFallback.ownScheduleSemester,
     ownScheduleSelectionStatus: hasApprovedOwnScheduleRequest
-      ? student.ownScheduleSelectionStatus || "Not Submitted"
-      : student.ownScheduleSelectionStatus,
+      ? studentWithOwnScheduleFallback.ownScheduleSelectionStatus ||
+        "Not Submitted"
+      : studentWithOwnScheduleFallback.ownScheduleSelectionStatus,
   };
 };
 
@@ -1067,6 +1121,28 @@ const normalizeStoredSemester = (value?: string | null) => {
   }
 
   return DEFAULT_SECTION_SEMESTER;
+};
+
+const getPreferredStartingSemester = (
+  subjects: Pick<StoredAcademicSubject, "semester">[],
+) => {
+  const semesters = Array.from(
+    new Set(subjects.map((subject) => normalizeStoredSemester(subject.semester))),
+  );
+
+  if (semesters.length === 0) {
+    return undefined;
+  }
+
+  return [...semesters].sort(
+    (left, right) =>
+      STORED_SEMESTER_ORDER.indexOf(
+        left as (typeof STORED_SEMESTER_ORDER)[number],
+      ) -
+        STORED_SEMESTER_ORDER.indexOf(
+          right as (typeof STORED_SEMESTER_ORDER)[number],
+        ) || left.localeCompare(right),
+  )[0];
 };
 
 const formatClockTime = (value?: string) => {
@@ -1900,6 +1976,7 @@ export const getStudentPortalSubjects = (
     | "section"
     | "requestedOwnSchedule"
     | "ownScheduleRequestStatus"
+    | "ownScheduleSemester"
     | "studentStatus"
   > &
     Pick<StudentStorageRecord, "id" | "trackingNumber">,
@@ -1965,7 +2042,19 @@ export const getStudentPortalSubjects = (
           )?.semester,
       )
     : undefined;
-  const effectiveSemester = plannedSemester || activeSectionSemester;
+  const ownScheduleSemester =
+    student.requestedOwnSchedule || student.ownScheduleRequestStatus === "Approved"
+      ? normalizeStoredSemester(student.ownScheduleSemester)
+      : undefined;
+  const defaultStartingSemester =
+    !plannedSemester && !activeSectionSemester
+      ? getPreferredStartingSemester(matchedSubjects)
+      : undefined;
+  const effectiveSemester =
+    plannedSemester ||
+    activeSectionSemester ||
+    ownScheduleSemester ||
+    defaultStartingSemester;
   const semesterScopedSubjects = effectiveSemester
     ? matchedSubjects.filter(
         (subject) => normalizeStoredSemester(subject.semester) === effectiveSemester,
@@ -3104,6 +3193,7 @@ const mapSupabaseApplicantToAdminRecord = async (
         : row.application_status === "rejected"
           ? "Rejected"
           : "Pending",
+    rejectionReason: row.rejection_reason || undefined,
     branch: normalizeBranchName(row.branch_name || row.branch_code),
     studentStatus: row.student_status_label,
     honorLabel: row.honor_label || "No Honor",

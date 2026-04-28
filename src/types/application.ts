@@ -106,6 +106,7 @@ export interface AdmissionApplicationSummary {
   effectiveDiscountPercentage: number;
   effectiveDiscountSource: AdmissionDiscountSource;
   applicationStatus: AdmissionApplicationStatus;
+  rejectionReason?: string;
   currentStep: number;
   firstName: string;
   lastName: string;

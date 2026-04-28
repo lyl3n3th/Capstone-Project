@@ -72,6 +72,16 @@ type SupabaseErrorLike = {
   message: string;
 };
 
+type EnrollmentRequestRow = {
+  id: string;
+  student_number: string;
+  tracking_number: string | null;
+  academic_year: string;
+  semester: string;
+  enrollment_status: EnrollmentRequestStatus;
+  payload: EnrollmentRequestRecord | null;
+};
+
 export interface EnrollmentRequestAttachmentUploadInput {
   trackingNumber?: string | null;
   studentNumber?: string | null;
@@ -97,6 +107,18 @@ const getErrorMessage = (error: SupabaseErrorLike) =>
     : error.hint
       ? `${error.message} ${error.hint}`.trim()
       : error.message;
+
+const getSingleRow = <T,>(data: unknown): T | null => {
+  if (Array.isArray(data)) {
+    return data.length > 0 ? (data[0] as T) : null;
+  }
+
+  if (data && typeof data === "object" && !("error" in data)) {
+    return data as T;
+  }
+
+  return null;
+};
 
 const createEnrollmentRequestAttachmentUrl = async (
   storagePath: string,
@@ -225,6 +247,147 @@ const matchesStudentRequest = (
 export const getRegularEnrollmentRequirementItems = () =>
   REGULAR_ENROLLMENT_REQUIREMENTS.map((item) => ({ ...item }));
 
+const mapEnrollmentRequestRow = (
+  row: EnrollmentRequestRow,
+  branch: string,
+): EnrollmentRequestRecord => {
+  const resolvedBranch = normalizeBranchName(row.payload?.branch || branch);
+
+  return {
+    ...(row.payload ?? {
+      id: row.id,
+      branch: resolvedBranch,
+      studentNumber: row.student_number,
+      trackingNumber: row.tracking_number || undefined,
+      fullName: "",
+      program: "",
+      currentYearLevel: "",
+      requestedYearLevel: "",
+      academicYear: row.academic_year,
+      semester: row.semester,
+      enrollmentStatus: row.enrollment_status,
+      requestDate: new Date().toLocaleDateString(),
+    }),
+    id: row.id,
+    branch: resolvedBranch,
+    studentNumber: row.student_number || row.payload?.studentNumber || "",
+    trackingNumber:
+      row.tracking_number || row.payload?.trackingNumber || undefined,
+    academicYear: row.academic_year,
+    semester: row.semester,
+    enrollmentStatus: row.enrollment_status,
+  };
+};
+
+const sanitizeEnrollmentRequestAttachments = (attachments?: AdminAttachment[]) =>
+  attachments?.map((attachment) => ({
+    ...attachment,
+    url: attachment.storagePath ? "#" : attachment.url,
+  }));
+
+const sanitizeEnrollmentRequestForStorage = (
+  request: EnrollmentRequestRecord,
+): EnrollmentRequestRecord => ({
+  ...request,
+  branch: normalizeBranchName(request.branch),
+  attachments: sanitizeEnrollmentRequestAttachments(request.attachments),
+});
+
+const mergeEnrollmentRequestAttachmentUrls = (
+  attachments?: AdminAttachment[],
+  referenceAttachments?: AdminAttachment[],
+) =>
+  attachments?.map((attachment, index) => {
+    const referenceAttachment = referenceAttachments?.[index];
+
+    return {
+      ...attachment,
+      url:
+        attachment.url && attachment.url !== "#"
+          ? attachment.url
+          : referenceAttachment?.storagePath === attachment.storagePath
+            ? referenceAttachment?.url || attachment.url
+            : attachment.url,
+    };
+  });
+
+const isSameEnrollmentRequestRecord = (
+  left: EnrollmentRequestRecord,
+  right: EnrollmentRequestRecord,
+) =>
+  left.id === right.id ||
+  (left.academicYear === right.academicYear &&
+    left.semester === right.semester &&
+    (matchesStudentRequest(left, right.studentNumber, right.trackingNumber) ||
+      matchesStudentRequest(right, left.studentNumber, left.trackingNumber)));
+
+const findEnrollmentRequestIndex = (
+  requests: EnrollmentRequestRecord[],
+  request: EnrollmentRequestRecord,
+) => requests.findIndex((candidate) => isSameEnrollmentRequestRecord(candidate, request));
+
+const shouldSyncLocalEnrollmentRequest = (
+  localRequest: EnrollmentRequestRecord,
+  remoteRequest?: EnrollmentRequestRecord | null,
+) => {
+  if (!remoteRequest) {
+    return true;
+  }
+
+  const localTimestamp = getRequestSortValue(localRequest);
+  const remoteTimestamp = getRequestSortValue(remoteRequest);
+
+  if (localTimestamp !== remoteTimestamp) {
+    return localTimestamp > remoteTimestamp;
+  }
+
+  return (
+    JSON.stringify(sanitizeEnrollmentRequestForStorage(localRequest)) !==
+    JSON.stringify(sanitizeEnrollmentRequestForStorage(remoteRequest))
+  );
+};
+
+const listEnrollmentRequestsFromSupabase = async (branch: string) => {
+  const { data, error } = await supabase
+    .rpc("list_enrollment_requests", {
+      p_branch: branch,
+    })
+    .returns<EnrollmentRequestRow[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  return sortEnrollmentRequests(
+    (Array.isArray(data) ? data : []).map((row) =>
+      mapEnrollmentRequestRow(row, branch),
+    ),
+  );
+};
+
+const upsertEnrollmentRequestToSupabase = async (
+  request: EnrollmentRequestRecord,
+) => {
+  const resolvedBranch = normalizeBranchName(request.branch);
+  const sanitizedRequest = sanitizeEnrollmentRequestForStorage(request);
+  const { data, error } = await supabase
+    .rpc("upsert_enrollment_request", {
+      p_payload: sanitizedRequest,
+    })
+    .returns<EnrollmentRequestRow[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<EnrollmentRequestRow>(data);
+  if (!row) {
+    throw new Error("Supabase did not return the saved enrollment request.");
+  }
+
+  return mapEnrollmentRequestRow(row, resolvedBranch);
+};
+
 export const readEnrollmentRequestsForBranch = (branch?: string | null) =>
   sortEnrollmentRequests(
     stripLegacyMockEnrollmentRequestRecords(
@@ -234,6 +397,34 @@ export const readEnrollmentRequestsForBranch = (branch?: string | null) =>
       ) ?? [],
     ),
   );
+
+export const fetchEnrollmentRequests = async (branch?: string | null) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const localRequests = readEnrollmentRequestsForBranch(resolvedBranch);
+  const remoteRequests = await listEnrollmentRequestsFromSupabase(resolvedBranch);
+  const requestsToSync = localRequests.filter((localRequest) => {
+    const matchingRemoteRequest =
+      remoteRequests.find((remoteRequest) =>
+        isSameEnrollmentRequestRecord(localRequest, remoteRequest),
+      ) ?? null;
+
+    return shouldSyncLocalEnrollmentRequest(localRequest, matchingRemoteRequest);
+  });
+
+  if (requestsToSync.length > 0) {
+    await Promise.all(
+      requestsToSync.map((request) => upsertEnrollmentRequestToSupabase(request)),
+    );
+  }
+
+  const nextRequests =
+    requestsToSync.length > 0
+      ? await listEnrollmentRequestsFromSupabase(resolvedBranch)
+      : remoteRequests;
+
+  writeEnrollmentRequestsForBranch(resolvedBranch, nextRequests);
+  return nextRequests;
+};
 
 export const writeEnrollmentRequestsForBranch = (
   branch: string | null | undefined,
@@ -334,27 +525,60 @@ export const getLatestApprovedEnrollmentRequestForStudent = ({
     status: "Approved",
   });
 
-export const saveEnrollmentRequest = (request: EnrollmentRequestRecord) => {
-  const resolvedBranch = normalizeBranchName(request.branch);
-  const existingRequests = readEnrollmentRequestsForBranch(resolvedBranch);
-  const existingIndex = existingRequests.findIndex(
-    (record) =>
-      record.id === request.id ||
-      (matchesStudentRequest(
-        record,
-        request.studentNumber,
-        request.trackingNumber,
-      ) &&
-        record.academicYear === request.academicYear &&
-        record.semester === request.semester),
+export const getLatestApprovedIrregularEnrollmentRequestForStudent = ({
+  branch,
+  studentNumber,
+  trackingNumber,
+}: {
+  branch?: string | null;
+  studentNumber?: string | null;
+  trackingNumber?: string | null;
+}) => {
+  const request = getLatestApprovedEnrollmentRequestForStudent({
+    branch,
+    studentNumber,
+    trackingNumber,
+  });
+
+  return request?.irregularRequest ? request : null;
+};
+
+export const hasLatestApprovedIrregularEnrollmentRequestForStudent = ({
+  branch,
+  studentNumber,
+  trackingNumber,
+}: {
+  branch?: string | null;
+  studentNumber?: string | null;
+  trackingNumber?: string | null;
+}) =>
+  Boolean(
+    getLatestApprovedIrregularEnrollmentRequestForStudent({
+      branch,
+      studentNumber,
+      trackingNumber,
+    }),
   );
+
+export const saveEnrollmentRequest = async (request: EnrollmentRequestRecord) => {
+  const savedRequest = await upsertEnrollmentRequestToSupabase(request);
+  const nextRequest: EnrollmentRequestRecord = {
+    ...savedRequest,
+    attachments: mergeEnrollmentRequestAttachmentUrls(
+      savedRequest.attachments,
+      request.attachments,
+    ),
+  };
+  const resolvedBranch = normalizeBranchName(nextRequest.branch);
+  const existingRequests = readEnrollmentRequestsForBranch(resolvedBranch);
+  const existingIndex = findEnrollmentRequestIndex(existingRequests, nextRequest);
   const nextRequests =
     existingIndex >= 0
       ? existingRequests.map((record, index) =>
-          index === existingIndex ? request : record,
+          index === existingIndex ? nextRequest : record,
         )
-      : [request, ...existingRequests];
+      : [nextRequest, ...existingRequests];
 
   writeEnrollmentRequestsForBranch(resolvedBranch, nextRequests);
-  return request;
+  return nextRequest;
 };

@@ -103,6 +103,7 @@ create table if not exists public.admission_applications (
   scholarship_exam_score numeric(5, 2),
   current_step smallint not null default 2,
   application_status text not null default 'draft',
+  rejection_reason text,
   requirements_uploaded_at timestamptz,
   submitted_at timestamptz,
   created_at timestamptz not null default timezone('utc', now()),
@@ -133,6 +134,9 @@ create table if not exists public.admission_applications (
 
 alter table public.admission_applications
   add column if not exists scholarship_exam_score numeric(5, 2);
+
+alter table public.admission_applications
+  add column if not exists rejection_reason text;
 
 do $$
 begin
@@ -405,6 +409,7 @@ returns table (
   effective_discount_percentage numeric,
   effective_discount_source text,
   application_status text,
+  rejection_reason text,
   current_step smallint,
   first_name text,
   last_name text,
@@ -449,6 +454,7 @@ as $$
       else 'none'
     end as effective_discount_source,
     app.application_status,
+    app.rejection_reason,
     app.current_step,
     app.first_name,
     app.last_name,
@@ -532,6 +538,7 @@ returns table (
   effective_discount_percentage numeric,
   effective_discount_source text,
   application_status text,
+  rejection_reason text,
   current_step smallint,
   first_name text,
   last_name text,
@@ -725,13 +732,15 @@ end;
 $$;
 
 drop function if exists public.update_admission_progress(text, smallint, text, boolean);
+drop function if exists public.update_admission_progress(text, smallint, text, boolean, numeric);
 
 create or replace function public.update_admission_progress(
   p_tracking_number text,
   p_current_step smallint,
   p_application_status text default null,
   p_mark_submitted boolean default false,
-  p_scholarship_exam_score numeric default null
+  p_scholarship_exam_score numeric default null,
+  p_rejection_reason text default null
 )
 returns table (
   application_id uuid,
@@ -749,6 +758,7 @@ returns table (
   effective_discount_percentage numeric,
   effective_discount_source text,
   application_status text,
+  rejection_reason text,
   current_step smallint,
   first_name text,
   last_name text,
@@ -773,6 +783,12 @@ begin
   update public.admission_applications as app
   set current_step = greatest(app.current_step, p_current_step),
       application_status = coalesce(p_application_status, app.application_status),
+      rejection_reason = case
+        when p_application_status is null then app.rejection_reason
+        when lower(trim(p_application_status)) = 'rejected'
+          then nullif(trim(coalesce(p_rejection_reason, '')), '')
+        else null
+      end,
       scholarship_exam_score = coalesce(
         round(p_scholarship_exam_score, 2),
         app.scholarship_exam_score
@@ -940,6 +956,7 @@ returns table (
   honor_label text,
   honor_discount_percentage numeric,
   application_status text,
+  rejection_reason text,
   current_step smallint,
   first_name text,
   last_name text,
@@ -976,6 +993,7 @@ as $$
     honor.label as honor_label,
     coalesce(honor.tuition_discount_percent, 0)::numeric(5, 2) as honor_discount_percentage,
     app.application_status,
+    app.rejection_reason,
     app.current_step,
     app.first_name,
     app.last_name,
@@ -1169,7 +1187,7 @@ grant execute on function public.upsert_admission_application(
   smallint,
   text
 ) to anon, authenticated;
-grant execute on function public.update_admission_progress(text, smallint, text, boolean, numeric) to anon, authenticated;
+grant execute on function public.update_admission_progress(text, smallint, text, boolean, numeric, text) to anon, authenticated;
 grant execute on function public.save_admission_requirement_file(
   text,
   text,

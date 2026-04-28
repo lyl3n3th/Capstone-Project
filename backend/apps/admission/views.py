@@ -179,11 +179,15 @@ def validate_decision_notification_payload(payload):
             )
             or "admission"
         ).lower(),
+        "portal_link": normalize_text(
+            payload.get("portal_link", payload.get("portalLink", ""))
+        )
+        or "",
     }
 
-    if not cleaned["decision_reason"]:
+    if cleaned["decision_status"] == "rejected" and not cleaned["decision_reason"]:
         errors.setdefault("decision_reason", []).append(
-            "Decision reason is required."
+            "Decision reason is required for rejected records."
         )
 
     if cleaned["email"]:
@@ -479,6 +483,7 @@ class AdmissionDecisionNotificationView(APIView):
                 tracking_number=cleaned["tracking_number"],
                 student_number=cleaned["student_number"],
                 record_type=cleaned["record_type"],
+                portal_link=cleaned["portal_link"],
             )
         else:
             try:
@@ -510,6 +515,7 @@ class AdmissionDecisionNotificationView(APIView):
                 tracking_number=tracking_target.tracking_number,
                 student_number=cleaned["student_number"],
                 record_type=cleaned["record_type"],
+                portal_link=cleaned["portal_link"],
             )
 
         deliveries = deliver_admission_decision_notification(

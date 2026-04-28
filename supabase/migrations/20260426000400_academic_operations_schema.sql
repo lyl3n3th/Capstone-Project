@@ -1321,6 +1321,703 @@ begin
 end;
 $$;
 
+create table if not exists public.branch_student_planning_states (
+  id uuid primary key default extensions.gen_random_uuid(),
+  branch_id uuid not null references public.admission_branches(id) on delete cascade,
+  student_number text not null,
+  tracking_number text,
+  requested_own_schedule boolean not null default false,
+  own_schedule_request_status text,
+  own_schedule_academic_year text,
+  own_schedule_semester text,
+  own_schedule_selection_status text,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint branch_student_planning_states_request_status_check
+    check (
+      own_schedule_request_status is null
+      or own_schedule_request_status in ('Pending', 'Approved', 'Rejected')
+    ),
+  constraint branch_student_planning_states_selection_status_check
+    check (
+      own_schedule_selection_status is null
+      or own_schedule_selection_status in (
+        'Not Submitted',
+        'Pending Approval',
+        'Approved',
+        'Rejected'
+      )
+    ),
+  constraint branch_student_planning_states_semester_check
+    check (
+      own_schedule_semester is null
+      or own_schedule_semester in ('1st Semester', '2nd Semester', 'Summer')
+    ),
+  unique (branch_id, student_number)
+);
+
+create table if not exists public.branch_student_subject_plans (
+  id uuid primary key default extensions.gen_random_uuid(),
+  branch_id uuid not null references public.admission_branches(id) on delete cascade,
+  external_id text not null,
+  student_number text,
+  tracking_number text,
+  semester text not null,
+  academic_year text not null,
+  source text not null,
+  payload jsonb not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint branch_student_subject_plans_source_check
+    check (
+      source in (
+        'transferee_validation',
+        'irregular_assignment',
+        'student_schedule_request',
+        'enrollment_request'
+      )
+    ),
+  constraint branch_student_subject_plans_semester_check
+    check (semester in ('1st Semester', '2nd Semester', 'Summer')),
+  unique (branch_id, external_id)
+);
+
+create table if not exists public.branch_student_schedule_requests (
+  id uuid primary key default extensions.gen_random_uuid(),
+  branch_id uuid not null references public.admission_branches(id) on delete cascade,
+  external_id text not null,
+  student_number text not null,
+  tracking_number text,
+  academic_year text not null,
+  semester text not null,
+  status text not null,
+  payload jsonb not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint branch_student_schedule_requests_status_check
+    check (status in ('Pending', 'Approved', 'Rejected')),
+  constraint branch_student_schedule_requests_semester_check
+    check (semester in ('1st Semester', '2nd Semester', 'Summer')),
+  unique (branch_id, external_id),
+  unique (branch_id, student_number, academic_year, semester)
+);
+
+create table if not exists public.branch_enrollment_requests (
+  id uuid primary key default extensions.gen_random_uuid(),
+  branch_id uuid not null references public.admission_branches(id) on delete cascade,
+  external_id text not null,
+  student_number text not null,
+  tracking_number text,
+  academic_year text not null,
+  semester text not null,
+  enrollment_status text not null,
+  payload jsonb not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint branch_enrollment_requests_status_check
+    check (enrollment_status in ('Pending', 'Approved', 'Rejected')),
+  constraint branch_enrollment_requests_semester_check
+    check (semester in ('1st Semester', '2nd Semester', 'Summer')),
+  unique (branch_id, external_id),
+  unique (branch_id, student_number, academic_year, semester)
+);
+
+create index if not exists branch_student_planning_states_branch_student_idx
+  on public.branch_student_planning_states (branch_id, student_number);
+
+create index if not exists branch_student_subject_plans_branch_student_idx
+  on public.branch_student_subject_plans (
+    branch_id,
+    student_number,
+    tracking_number,
+    academic_year,
+    semester
+  );
+
+create index if not exists branch_student_schedule_requests_branch_student_idx
+  on public.branch_student_schedule_requests (
+    branch_id,
+    student_number,
+    academic_year,
+    semester
+  );
+
+create index if not exists branch_enrollment_requests_branch_student_idx
+  on public.branch_enrollment_requests (
+    branch_id,
+    student_number,
+    tracking_number,
+    academic_year,
+    semester
+  );
+
+drop trigger if exists branch_student_planning_states_set_updated_at
+  on public.branch_student_planning_states;
+create trigger branch_student_planning_states_set_updated_at
+before update on public.branch_student_planning_states
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists branch_student_subject_plans_set_updated_at
+  on public.branch_student_subject_plans;
+create trigger branch_student_subject_plans_set_updated_at
+before update on public.branch_student_subject_plans
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists branch_student_schedule_requests_set_updated_at
+  on public.branch_student_schedule_requests;
+create trigger branch_student_schedule_requests_set_updated_at
+before update on public.branch_student_schedule_requests
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists branch_enrollment_requests_set_updated_at
+  on public.branch_enrollment_requests;
+create trigger branch_enrollment_requests_set_updated_at
+before update on public.branch_enrollment_requests
+for each row
+execute function public.set_updated_at();
+
+drop function if exists public.list_student_planning_states(text);
+
+create or replace function public.list_student_planning_states(
+  p_branch text default null
+)
+returns table (
+  student_number text,
+  tracking_number text,
+  requested_own_schedule boolean,
+  own_schedule_request_status text,
+  own_schedule_academic_year text,
+  own_schedule_semester text,
+  own_schedule_selection_status text
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    planning_state.student_number,
+    planning_state.tracking_number,
+    planning_state.requested_own_schedule,
+    planning_state.own_schedule_request_status,
+    planning_state.own_schedule_academic_year,
+    planning_state.own_schedule_semester,
+    planning_state.own_schedule_selection_status
+  from public.branch_student_planning_states planning_state
+  join public.admission_branches branch
+    on branch.id = planning_state.branch_id
+  where
+    p_branch is null
+    or lower(branch.code) = lower(trim(p_branch))
+    or lower(branch.name) = lower(trim(p_branch))
+  order by
+    planning_state.updated_at desc,
+    planning_state.student_number;
+$$;
+
+drop function if exists public.upsert_student_planning_state(jsonb);
+
+create or replace function public.upsert_student_planning_state(
+  p_payload jsonb
+)
+returns table (
+  student_number text,
+  tracking_number text,
+  requested_own_schedule boolean,
+  own_schedule_request_status text,
+  own_schedule_academic_year text,
+  own_schedule_semester text,
+  own_schedule_selection_status text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_branch_id uuid;
+  v_branch_name text;
+  v_student_number text;
+  v_semester text;
+begin
+  if trim(coalesce(p_payload->>'branch', '')) = ''
+    or trim(coalesce(p_payload->>'student_number', '')) = '' then
+    raise exception 'Branch and student number are required.';
+  end if;
+
+  select resolved.branch_id, resolved.branch_name
+  into v_branch_id, v_branch_name
+  from public.resolve_academic_branch(p_payload->>'branch') as resolved;
+
+  if v_branch_id is null then
+    raise exception 'Branch "%" is not configured in Supabase.', p_payload->>'branch';
+  end if;
+
+  v_student_number := trim(p_payload->>'student_number');
+  v_semester := nullif(trim(coalesce(p_payload->>'own_schedule_semester', '')), '');
+
+  if v_semester is not null then
+    v_semester := public.normalize_academic_semester(v_semester);
+  end if;
+
+  insert into public.branch_student_planning_states (
+    branch_id,
+    student_number,
+    tracking_number,
+    requested_own_schedule,
+    own_schedule_request_status,
+    own_schedule_academic_year,
+    own_schedule_semester,
+    own_schedule_selection_status
+  )
+  values (
+    v_branch_id,
+    v_student_number,
+    nullif(trim(coalesce(p_payload->>'tracking_number', '')), ''),
+    coalesce((p_payload->>'requested_own_schedule')::boolean, false),
+    nullif(trim(coalesce(p_payload->>'own_schedule_request_status', '')), ''),
+    nullif(trim(coalesce(p_payload->>'own_schedule_academic_year', '')), ''),
+    v_semester,
+    nullif(trim(coalesce(p_payload->>'own_schedule_selection_status', '')), '')
+  )
+  on conflict (branch_id, student_number) do update
+  set tracking_number = excluded.tracking_number,
+      requested_own_schedule = excluded.requested_own_schedule,
+      own_schedule_request_status = excluded.own_schedule_request_status,
+      own_schedule_academic_year = excluded.own_schedule_academic_year,
+      own_schedule_semester = excluded.own_schedule_semester,
+      own_schedule_selection_status = excluded.own_schedule_selection_status;
+
+  return query
+  select *
+  from public.list_student_planning_states(v_branch_name) planning_state
+  where planning_state.student_number = v_student_number
+  limit 1;
+end;
+$$;
+
+drop function if exists public.list_student_subject_plans(text);
+
+create or replace function public.list_student_subject_plans(
+  p_branch text default null
+)
+returns table (
+  id text,
+  student_number text,
+  tracking_number text,
+  semester text,
+  academic_year text,
+  source text,
+  payload jsonb
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    plan.external_id as id,
+    plan.student_number,
+    plan.tracking_number,
+    plan.semester,
+    plan.academic_year,
+    plan.source,
+    plan.payload
+  from public.branch_student_subject_plans plan
+  join public.admission_branches branch
+    on branch.id = plan.branch_id
+  where plan.is_active
+    and (
+      p_branch is null
+      or lower(branch.code) = lower(trim(p_branch))
+      or lower(branch.name) = lower(trim(p_branch))
+    )
+  order by
+    plan.updated_at desc,
+    plan.academic_year desc,
+    plan.semester,
+    plan.external_id;
+$$;
+
+drop function if exists public.upsert_student_subject_plan(jsonb);
+
+create or replace function public.upsert_student_subject_plan(
+  p_payload jsonb
+)
+returns table (
+  id text,
+  student_number text,
+  tracking_number text,
+  semester text,
+  academic_year text,
+  source text,
+  payload jsonb
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_branch_id uuid;
+  v_branch_name text;
+  v_external_id text;
+  v_semester text;
+begin
+  if trim(coalesce(p_payload->>'branch', '')) = ''
+    or trim(coalesce(p_payload->>'id', '')) = ''
+    or trim(coalesce(p_payload->>'academicYear', '')) = ''
+    or trim(coalesce(p_payload->>'semester', '')) = ''
+    or trim(coalesce(p_payload->>'source', '')) = '' then
+    raise exception 'Branch, plan id, academic year, semester, and source are required.';
+  end if;
+
+  select resolved.branch_id, resolved.branch_name
+  into v_branch_id, v_branch_name
+  from public.resolve_academic_branch(p_payload->>'branch') as resolved;
+
+  if v_branch_id is null then
+    raise exception 'Branch "%" is not configured in Supabase.', p_payload->>'branch';
+  end if;
+
+  v_external_id := trim(p_payload->>'id');
+  v_semester := public.normalize_academic_semester(p_payload->>'semester');
+
+  insert into public.branch_student_subject_plans (
+    branch_id,
+    external_id,
+    student_number,
+    tracking_number,
+    semester,
+    academic_year,
+    source,
+    payload
+  )
+  values (
+    v_branch_id,
+    v_external_id,
+    nullif(trim(coalesce(p_payload->>'studentNumber', '')), ''),
+    nullif(trim(coalesce(p_payload->>'trackingNumber', '')), ''),
+    v_semester,
+    trim(p_payload->>'academicYear'),
+    trim(p_payload->>'source'),
+    p_payload - 'branch'
+  )
+  on conflict (branch_id, external_id) do update
+  set student_number = excluded.student_number,
+      tracking_number = excluded.tracking_number,
+      semester = excluded.semester,
+      academic_year = excluded.academic_year,
+      source = excluded.source,
+      payload = excluded.payload,
+      is_active = true;
+
+  return query
+  select *
+  from public.list_student_subject_plans(v_branch_name) plan
+  where plan.id = v_external_id
+  limit 1;
+end;
+$$;
+
+drop function if exists public.delete_student_subject_plan(text, text);
+
+create or replace function public.delete_student_subject_plan(
+  p_branch text,
+  p_plan_id text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_branch_id uuid;
+begin
+  select resolved.branch_id
+  into v_branch_id
+  from public.resolve_academic_branch(p_branch) as resolved;
+
+  update public.branch_student_subject_plans plan
+  set is_active = false
+  where plan.branch_id = v_branch_id
+    and plan.external_id = trim(coalesce(p_plan_id, ''))
+    and plan.is_active;
+
+  if not found then
+    raise exception 'Student subject plan "%" was not found for branch "%".', p_plan_id, p_branch;
+  end if;
+end;
+$$;
+
+drop function if exists public.list_student_schedule_requests(text);
+
+create or replace function public.list_student_schedule_requests(
+  p_branch text default null
+)
+returns table (
+  id text,
+  student_number text,
+  tracking_number text,
+  academic_year text,
+  semester text,
+  status text,
+  payload jsonb
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    request.external_id as id,
+    request.student_number,
+    request.tracking_number,
+    request.academic_year,
+    request.semester,
+    request.status,
+    request.payload
+  from public.branch_student_schedule_requests request
+  join public.admission_branches branch
+    on branch.id = request.branch_id
+  where request.is_active
+    and (
+      p_branch is null
+      or lower(branch.code) = lower(trim(p_branch))
+      or lower(branch.name) = lower(trim(p_branch))
+    )
+  order by
+    request.updated_at desc,
+    request.academic_year desc,
+    request.semester,
+    request.external_id;
+$$;
+
+drop function if exists public.upsert_student_schedule_request(jsonb);
+
+create or replace function public.upsert_student_schedule_request(
+  p_payload jsonb
+)
+returns table (
+  id text,
+  student_number text,
+  tracking_number text,
+  academic_year text,
+  semester text,
+  status text,
+  payload jsonb
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_branch_id uuid;
+  v_branch_name text;
+  v_external_id text;
+  v_student_number text;
+  v_academic_year text;
+  v_semester text;
+  v_status text;
+begin
+  if trim(coalesce(p_payload->>'branch', '')) = ''
+    or trim(coalesce(p_payload->>'studentNumber', '')) = ''
+    or trim(coalesce(p_payload->>'academicYear', '')) = ''
+    or trim(coalesce(p_payload->>'semester', '')) = ''
+    or trim(coalesce(p_payload->>'status', '')) = '' then
+    raise exception 'Branch, student number, academic year, semester, and status are required.';
+  end if;
+
+  select resolved.branch_id, resolved.branch_name
+  into v_branch_id, v_branch_name
+  from public.resolve_academic_branch(p_payload->>'branch') as resolved;
+
+  if v_branch_id is null then
+    raise exception 'Branch "%" is not configured in Supabase.', p_payload->>'branch';
+  end if;
+
+  v_external_id := nullif(trim(coalesce(p_payload->>'id', '')), '');
+  if v_external_id is null then
+    v_external_id := 'schedule_request_' || replace(extensions.gen_random_uuid()::text, '-', '');
+  end if;
+
+  v_student_number := trim(p_payload->>'studentNumber');
+  v_academic_year := trim(p_payload->>'academicYear');
+  v_semester := public.normalize_academic_semester(p_payload->>'semester');
+  v_status := trim(p_payload->>'status');
+
+  insert into public.branch_student_schedule_requests (
+    branch_id,
+    external_id,
+    student_number,
+    tracking_number,
+    academic_year,
+    semester,
+    status,
+    payload
+  )
+  values (
+    v_branch_id,
+    v_external_id,
+    v_student_number,
+    nullif(trim(coalesce(p_payload->>'trackingNumber', '')), ''),
+    v_academic_year,
+    v_semester,
+    v_status,
+    p_payload
+  )
+  on conflict (branch_id, student_number, academic_year, semester) do update
+  set external_id = excluded.external_id,
+      tracking_number = excluded.tracking_number,
+      status = excluded.status,
+      semester = excluded.semester,
+      payload = excluded.payload,
+      is_active = true;
+
+  return query
+  select *
+  from public.list_student_schedule_requests(v_branch_name) request
+  where request.student_number = v_student_number
+    and request.academic_year = v_academic_year
+    and request.semester = v_semester
+  limit 1;
+end;
+$$;
+
+drop function if exists public.list_enrollment_requests(text);
+
+create or replace function public.list_enrollment_requests(
+  p_branch text default null
+)
+returns table (
+  id text,
+  student_number text,
+  tracking_number text,
+  academic_year text,
+  semester text,
+  enrollment_status text,
+  payload jsonb
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    request.external_id as id,
+    request.student_number,
+    request.tracking_number,
+    request.academic_year,
+    request.semester,
+    request.enrollment_status,
+    request.payload
+  from public.branch_enrollment_requests request
+  join public.admission_branches branch
+    on branch.id = request.branch_id
+  where request.is_active
+    and (
+      p_branch is null
+      or lower(branch.code) = lower(trim(p_branch))
+      or lower(branch.name) = lower(trim(p_branch))
+    )
+  order by
+    request.updated_at desc,
+    request.academic_year desc,
+    request.semester,
+    request.external_id;
+$$;
+
+drop function if exists public.upsert_enrollment_request(jsonb);
+
+create or replace function public.upsert_enrollment_request(
+  p_payload jsonb
+)
+returns table (
+  id text,
+  student_number text,
+  tracking_number text,
+  academic_year text,
+  semester text,
+  enrollment_status text,
+  payload jsonb
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_branch_id uuid;
+  v_branch_name text;
+  v_external_id text;
+  v_student_number text;
+  v_academic_year text;
+  v_semester text;
+  v_enrollment_status text;
+begin
+  if trim(coalesce(p_payload->>'branch', '')) = ''
+    or trim(coalesce(p_payload->>'studentNumber', '')) = ''
+    or trim(coalesce(p_payload->>'academicYear', '')) = ''
+    or trim(coalesce(p_payload->>'semester', '')) = ''
+    or trim(coalesce(p_payload->>'enrollmentStatus', '')) = '' then
+    raise exception 'Branch, student number, academic year, semester, and enrollment status are required.';
+  end if;
+
+  select resolved.branch_id, resolved.branch_name
+  into v_branch_id, v_branch_name
+  from public.resolve_academic_branch(p_payload->>'branch') as resolved;
+
+  if v_branch_id is null then
+    raise exception 'Branch "%" is not configured in Supabase.', p_payload->>'branch';
+  end if;
+
+  v_external_id := nullif(trim(coalesce(p_payload->>'id', '')), '');
+  if v_external_id is null then
+    v_external_id := 'enrollment_request_' || replace(extensions.gen_random_uuid()::text, '-', '');
+  end if;
+
+  v_student_number := trim(p_payload->>'studentNumber');
+  v_academic_year := trim(p_payload->>'academicYear');
+  v_semester := public.normalize_academic_semester(p_payload->>'semester');
+  v_enrollment_status := trim(p_payload->>'enrollmentStatus');
+
+  insert into public.branch_enrollment_requests (
+    branch_id,
+    external_id,
+    student_number,
+    tracking_number,
+    academic_year,
+    semester,
+    enrollment_status,
+    payload
+  )
+  values (
+    v_branch_id,
+    v_external_id,
+    v_student_number,
+    nullif(trim(coalesce(p_payload->>'trackingNumber', '')), ''),
+    v_academic_year,
+    v_semester,
+    v_enrollment_status,
+    p_payload
+  )
+  on conflict (branch_id, student_number, academic_year, semester) do update
+  set external_id = excluded.external_id,
+      tracking_number = excluded.tracking_number,
+      enrollment_status = excluded.enrollment_status,
+      semester = excluded.semester,
+      payload = excluded.payload,
+      is_active = true;
+
+  return query
+  select *
+  from public.list_enrollment_requests(v_branch_name) request
+  where request.student_number = v_student_number
+    and request.academic_year = v_academic_year
+    and request.semester = v_semester
+  limit 1;
+end;
+$$;
+
 alter table public.branch_academic_subjects enable row level security;
 alter table public.branch_academic_subject_prerequisites enable row level security;
 alter table public.branch_academic_instructors enable row level security;
@@ -1328,6 +2025,10 @@ alter table public.branch_class_sections enable row level security;
 alter table public.branch_assignment_rooms enable row level security;
 alter table public.branch_subject_assignments enable row level security;
 alter table public.branch_subject_assignment_slots enable row level security;
+alter table public.branch_student_planning_states enable row level security;
+alter table public.branch_student_subject_plans enable row level security;
+alter table public.branch_student_schedule_requests enable row level security;
+alter table public.branch_enrollment_requests enable row level security;
 
 revoke execute on function public.list_academic_subjects(text) from anon;
 revoke execute on function public.upsert_academic_subject(jsonb) from anon;
@@ -1344,19 +2045,37 @@ revoke execute on function public.delete_assignment_room(text, text) from anon;
 revoke execute on function public.list_subject_assignments(text) from anon;
 revoke execute on function public.upsert_subject_assignment(jsonb) from anon;
 revoke execute on function public.delete_subject_assignment(text, text) from anon;
+revoke execute on function public.list_student_planning_states(text) from anon;
+revoke execute on function public.upsert_student_planning_state(jsonb) from anon;
+revoke execute on function public.list_student_subject_plans(text) from anon;
+revoke execute on function public.upsert_student_subject_plan(jsonb) from anon;
+revoke execute on function public.delete_student_subject_plan(text, text) from anon;
+revoke execute on function public.list_student_schedule_requests(text) from anon;
+revoke execute on function public.upsert_student_schedule_request(jsonb) from anon;
+revoke execute on function public.list_enrollment_requests(text) from anon;
+revoke execute on function public.upsert_enrollment_request(jsonb) from anon;
 
-grant execute on function public.list_academic_subjects(text) to authenticated;
-grant execute on function public.upsert_academic_subject(jsonb) to authenticated;
-grant execute on function public.delete_academic_subject(text, text) to authenticated;
-grant execute on function public.list_academic_instructors(text) to authenticated;
-grant execute on function public.upsert_academic_instructor(jsonb) to authenticated;
-grant execute on function public.delete_academic_instructor(text, text) to authenticated;
-grant execute on function public.list_class_sections(text) to authenticated;
-grant execute on function public.upsert_class_section(jsonb) to authenticated;
-grant execute on function public.delete_class_section(text, text) to authenticated;
-grant execute on function public.list_assignment_rooms(text) to authenticated;
-grant execute on function public.upsert_assignment_room(text, text) to authenticated;
-grant execute on function public.delete_assignment_room(text, text) to authenticated;
-grant execute on function public.list_subject_assignments(text) to authenticated;
-grant execute on function public.upsert_subject_assignment(jsonb) to authenticated;
-grant execute on function public.delete_subject_assignment(text, text) to authenticated;
+grant execute on function public.list_academic_subjects(text) to anon, authenticated;
+grant execute on function public.upsert_academic_subject(jsonb) to anon, authenticated;
+grant execute on function public.delete_academic_subject(text, text) to anon, authenticated;
+grant execute on function public.list_academic_instructors(text) to anon, authenticated;
+grant execute on function public.upsert_academic_instructor(jsonb) to anon, authenticated;
+grant execute on function public.delete_academic_instructor(text, text) to anon, authenticated;
+grant execute on function public.list_class_sections(text) to anon, authenticated;
+grant execute on function public.upsert_class_section(jsonb) to anon, authenticated;
+grant execute on function public.delete_class_section(text, text) to anon, authenticated;
+grant execute on function public.list_assignment_rooms(text) to anon, authenticated;
+grant execute on function public.upsert_assignment_room(text, text) to anon, authenticated;
+grant execute on function public.delete_assignment_room(text, text) to anon, authenticated;
+grant execute on function public.list_subject_assignments(text) to anon, authenticated;
+grant execute on function public.upsert_subject_assignment(jsonb) to anon, authenticated;
+grant execute on function public.delete_subject_assignment(text, text) to anon, authenticated;
+grant execute on function public.list_student_planning_states(text) to anon, authenticated;
+grant execute on function public.upsert_student_planning_state(jsonb) to anon, authenticated;
+grant execute on function public.list_student_subject_plans(text) to anon, authenticated;
+grant execute on function public.upsert_student_subject_plan(jsonb) to anon, authenticated;
+grant execute on function public.delete_student_subject_plan(text, text) to anon, authenticated;
+grant execute on function public.list_student_schedule_requests(text) to anon, authenticated;
+grant execute on function public.upsert_student_schedule_request(jsonb) to anon, authenticated;
+grant execute on function public.list_enrollment_requests(text) to anon, authenticated;
+grant execute on function public.upsert_enrollment_request(jsonb) to anon, authenticated;

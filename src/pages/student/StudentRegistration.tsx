@@ -146,7 +146,6 @@ function StudentRegistration() {
 
         const activatedIdentity = await activateApprovedStudent(
           approvedEnrollee.trackingNumber,
-          approvedEnrollee.studentNumber || resolvedStudentNumber,
         );
         resolvedStudentNumber =
           activatedIdentity.studentNumber || resolvedStudentNumber;

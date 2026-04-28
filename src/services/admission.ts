@@ -40,6 +40,7 @@ type AdmissionSummaryRow = {
   last_name: string;
   program_level: AdmissionProgramLevel;
   program_name: string;
+  rejection_reason: string | null;
   requirements_uploaded_at: string | null;
   scholarship_exam_score: number | string | null;
   student_status_label: string;
@@ -384,6 +385,7 @@ const mapAdmissionSummary = (
     effectiveDiscountPercentage,
     effectiveDiscountSource,
     applicationStatus: row.application_status,
+    rejectionReason: row.rejection_reason || undefined,
     currentStep: row.current_step,
     firstName: row.first_name,
     lastName: row.last_name,
@@ -593,12 +595,14 @@ export const updateAdmissionProgress = async ({
   applicationStatus,
   markSubmitted = false,
   scholarshipExamScore = null,
+  rejectionReason,
 }: {
   trackingNumber: string;
   currentStep: number;
   applicationStatus?: AdmissionApplicationStatus;
   markSubmitted?: boolean;
   scholarshipExamScore?: number | null;
+  rejectionReason?: string;
 }) => {
   const { data, error } = await supabase
     .rpc("update_admission_progress", {
@@ -607,6 +611,7 @@ export const updateAdmissionProgress = async ({
       p_application_status: applicationStatus ?? null,
       p_mark_submitted: markSubmitted,
       p_scholarship_exam_score: scholarshipExamScore,
+      p_rejection_reason: rejectionReason?.trim() || null,
     })
     .returns<AdmissionSummaryRow[]>();
 

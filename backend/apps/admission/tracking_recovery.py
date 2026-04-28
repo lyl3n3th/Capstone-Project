@@ -41,6 +41,7 @@ class AdmissionDecisionNotificationTarget:
     tracking_number: str
     student_number: str
     record_type: str
+    portal_link: str
 
 
 def build_tracking_notification_target(
@@ -73,6 +74,7 @@ def build_decision_notification_target(
     tracking_number="",
     student_number="",
     record_type="admission",
+    portal_link="",
 ):
     return AdmissionDecisionNotificationTarget(
         email=normalize_email(email),
@@ -80,6 +82,7 @@ def build_decision_notification_target(
         tracking_number=normalize_tracking_number(tracking_number),
         student_number=student_number.strip() if isinstance(student_number, str) else "",
         record_type=(record_type or "admission").strip().lower(),
+        portal_link=normalize_portal_link(portal_link),
     )
 
 
@@ -95,6 +98,24 @@ def normalize_phone_number(value):
 
 def normalize_tracking_number(value):
     return value.strip().upper() if isinstance(value, str) else ""
+
+
+def normalize_portal_link(value):
+    normalized_value = value.strip() if isinstance(value, str) else ""
+    if not normalized_value:
+        return ""
+
+    if normalized_value.startswith(("http://", "https://")):
+        return normalized_value
+
+    site_url = getattr(settings, "SITE_URL", "").rstrip("/")
+    if not site_url:
+        return normalized_value
+
+    if normalized_value.startswith("/"):
+        return f"{site_url}{normalized_value}"
+
+    return f"{site_url}/{normalized_value}"
 
 
 def mask_email_address(value):
@@ -276,14 +297,16 @@ def get_record_type_copy(record_type):
     return "admission application"
 
 
-def build_decision_reference_line(target):
-    if target.record_type == "enrollment" and target.student_number:
-        return f"Student Number: {target.student_number}"
+def build_decision_reference_lines(target):
+    lines = []
+
     if target.tracking_number:
-        return f"Tracking Number: {target.tracking_number}"
+        lines.append(f"Tracking Number: {target.tracking_number}")
+
     if target.student_number:
-        return f"Student Number: {target.student_number}"
-    return ""
+        lines.append(f"Student Number: {target.student_number}")
+
+    return lines
 
 
 def build_submission_confirmation_email_message(target):
@@ -312,7 +335,7 @@ def build_decision_notification_email_message(target, *, decision_status, decisi
     record_copy = get_record_type_copy(target.record_type)
     support_email_line = get_support_email_line()
     normalized_status = (decision_status or "").strip().lower()
-    reference_line = build_decision_reference_line(target)
+    reference_lines = build_decision_reference_lines(target)
 
     if normalized_status == "accepted":
         decision_copy = (
@@ -334,8 +357,28 @@ def build_decision_notification_email_message(target, *, decision_status, decisi
     if decision_reason:
         lines.extend(["", f"Reason: {decision_reason}"])
 
-    if reference_line:
-        lines.extend(["", reference_line])
+    if reference_lines:
+        lines.extend(["", *reference_lines])
+
+    if normalized_status == "accepted" and target.portal_link:
+        lines.extend(
+            [
+                "",
+                "Student Portal Link:",
+                target.portal_link,
+                "",
+                "Important: You must register your student portal account first before signing in or accessing the student portal.",
+                "Use the assigned student number above, together with your approved email address and mobile number, during portal registration.",
+            ]
+        )
+    elif normalized_status == "accepted":
+        lines.extend(
+            [
+                "",
+                "Important: You must register your student portal account first before signing in or accessing the student portal.",
+                "Use the assigned student number above, together with your approved email address and mobile number, during portal registration.",
+            ]
+        )
 
     lines.extend(
         [

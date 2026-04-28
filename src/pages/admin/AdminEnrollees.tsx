@@ -32,7 +32,6 @@ import {
   fetchSupabaseAdmissionApplicants,
   getStudentSectionChoices,
   getStudentsForBranch,
-  getNextStudentNumber,
   mergeAdminEnrolleeRecords,
   normalizeBranchName,
   promoteApplicantToStoredStudent,
@@ -53,7 +52,21 @@ import type {
   StudentSubjectPlanItem,
   StudentSubjectPlanRecord,
 } from "../../services/adminStorage";
-import { saveAdminStudent } from "../../services/adminStudentsApi";
+import { fetchAdminStudents, saveAdminStudent } from "../../services/adminStudentsApi";
+import {
+  deleteAcademicInstructor,
+  deleteAcademicClassSection,
+  deleteAcademicSubject,
+  deleteAcademicSubjectAssignment,
+  fetchAcademicSnapshot,
+  saveAcademicInstructor,
+  saveAcademicAssignmentRoom,
+  saveAcademicClassSection,
+  saveAcademicSubject,
+  saveAcademicSubjectAssignment,
+  seedAcademicSnapshot,
+  type AcademicSnapshot,
+} from "../../services/academicData";
 import {
   getEstimatedCollegeTuition,
   getAdmissionRequirements,
@@ -66,9 +79,11 @@ import {
 } from "../../services/admissionSubmissionNotificationApi";
 import { activateApprovedStudent } from "../../services/auth";
 import {
+  fetchEnrollmentRequests,
   getRegularEnrollmentRequirementItems,
   hydrateEnrollmentRequestRecordAttachments,
   readEnrollmentRequestsForBranch,
+  saveEnrollmentRequest,
   type EnrollmentRequestRecord,
   writeEnrollmentRequestsForBranch,
 } from "../../services/enrollmentRequests";
@@ -77,6 +92,12 @@ import {
   formatScheduledAssignmentLabel,
 } from "../../services/enrollmentLoadPlanner";
 import { stripLegacyMockAdmissionRecords } from "../../services/legacyMockData";
+import {
+  deleteStudentSubjectPlan,
+  fetchStudentSubjectPlans,
+  saveStudentPlanningState,
+  saveStudentSubjectPlan,
+} from "../../services/studentPlanningApi";
 import "../../styles/admin/admin-enrolles.css";
 
 interface EnrolleesProps {
@@ -229,6 +250,14 @@ interface Instructor {
   contactNumber?: string;
 }
 
+interface InstructorFormState {
+  name: string;
+  employeeId: string;
+  department: string;
+  email: string;
+  contactNumber: string;
+}
+
 interface Schedule {
   day: string;
   startTime: string;
@@ -314,6 +343,47 @@ const getDecisionNotificationFeedback = (
   }
 };
 
+const getApprovalNotificationFeedback = (
+  notificationResult: AdmissionDecisionNotificationResponse,
+): { message: string; type: Toast["type"] } => {
+  switch (notificationResult.deliveries.email.status) {
+    case "sent":
+      return {
+        type: "success",
+        message: "Approval email sent with the student portal link.",
+      };
+    case "failed":
+      return {
+        type: "warning",
+        message: "Approval email could not be sent right now.",
+      };
+    default:
+      return {
+        type: "warning",
+        message: "Approval email delivery is not configured yet.",
+      };
+  }
+};
+
+const buildStudentPortalLoginLink = ({
+  branch,
+  studentNumber,
+}: {
+  branch: string;
+  studentNumber: string;
+}) => {
+  const params = new URLSearchParams({
+    branch: normalizeBranchName(branch),
+  });
+
+  if (studentNumber.trim()) {
+    params.set("studentNumber", studentNumber.trim());
+  }
+
+  const relativeLink = `/student/login?${params.toString()}`;
+  return new URL(relativeLink, window.location.origin).toString();
+};
+
 const normalizeStudentStatus = (value?: string | null) =>
   value?.trim().toLowerCase() ?? "";
 
@@ -379,6 +449,14 @@ const createDefaultSubjectForm = (): SubjectFormState => ({
   strand: DEFAULT_COLLEGE_COURSE,
   type: "major",
   prerequisiteSubjectIds: [],
+});
+
+const createDefaultInstructorForm = (): InstructorFormState => ({
+  name: "",
+  employeeId: "",
+  department: "",
+  email: "",
+  contactNumber: "",
 });
 
 const createDefaultTransfereeEvaluation = (
@@ -1472,6 +1550,9 @@ export default function AdminEnrollees({
   const [editingInstructor, setEditingInstructor] = useState<Instructor | null>(
     null,
   );
+  const [instructorForm, setInstructorForm] = useState<InstructorFormState>(
+    createDefaultInstructorForm(),
+  );
   const [editingAssignment, setEditingAssignment] =
     useState<SubjectAssignment | null>(null);
   const [selectedAssignmentIds, setSelectedAssignmentIds] = useState<string[]>(
@@ -1561,9 +1642,130 @@ export default function AdminEnrollees({
     normalizeSectionSemester(
       enrollmentRequests[0]?.semester || subjectAssignments[0]?.semester,
     ) || DEFAULT_SECTION_SEMESTER;
+  const resolveOwnScheduleAcademicYear = (
+    enrollee: Pick<Enrollee, "ownScheduleAcademicYear">,
+  ) => enrollee.ownScheduleAcademicYear?.trim() || reflectedAcademicYear;
+  const resolveOwnScheduleSemester = (
+    enrollee: Pick<Enrollee, "ownScheduleSemester">,
+  ) => normalizeSectionSemester(enrollee.ownScheduleSemester || DEFAULT_SECTION_SEMESTER);
+
+  const hasAcademicSnapshotData = (snapshot?: Partial<AcademicSnapshot> | null) =>
+    Boolean(
+      snapshot &&
+        (
+          (snapshot.subjects?.length ?? 0) > 0 ||
+          (snapshot.instructors?.length ?? 0) > 0 ||
+          (snapshot.classSections?.length ?? 0) > 0 ||
+          (snapshot.subjectAssignments?.length ?? 0) > 0 ||
+          (snapshot.assignmentRooms?.length ?? 0) > 0
+        ),
+    );
+
+  const mergeBranchStudentsIntoLocalCache = (students: StudentStorageRecord[]) => {
+    if (students.length === 0) {
+      return;
+    }
+
+    const existingStudents = readStoredStudents();
+    const branchStudentsByKey = new Map(
+      students.map((student) => [
+        `${normalizeBranchName(student.branch)}:${student.id}`,
+        student,
+      ]),
+    );
+    const preservedStudents = existingStudents.filter((student) => {
+      const key = `${normalizeBranchName(student.branch)}:${student.id}`;
+      return !branchStudentsByKey.has(key);
+    });
+
+    writeStoredStudents([...preservedStudents, ...students]);
+  };
+
+  const buildSectionAssignmentsFromSections = (
+    sectionsToMap: ClassSection[],
+    enrolleeRecords: Enrollee[],
+  ) =>
+    sectionsToMap.flatMap((section) =>
+      section.enrolleeIds.map((enrolleeId) => ({
+        enrolleeId,
+        enrolleeName:
+          enrolleeRecords.find((enrollee) => enrollee.id === enrolleeId)?.fullName ||
+          "Unknown student",
+        assignedSection: section.code,
+        assignedDate: new Date().toLocaleDateString(),
+        isManualOverride: false,
+      })),
+    );
+
+  const syncStoredStudentsToSupabase = async (studentNumbers: string[]) => {
+    const uniqueStudentNumbers = Array.from(
+      new Set(
+        studentNumbers
+          .map((studentNumber) => studentNumber.trim())
+          .filter((studentNumber) => studentNumber !== ""),
+      ),
+    );
+
+    if (uniqueStudentNumbers.length === 0) {
+      return;
+    }
+
+    const storedStudents = readStoredStudents();
+    const matchedStudents = storedStudents.filter(
+      (student) =>
+        normalizeBranchName(student.branch) === currentBranch &&
+        uniqueStudentNumbers.includes(student.id),
+    );
+
+    if (matchedStudents.length === 0) {
+      return;
+    }
+
+    try {
+      const syncedStudents = await Promise.all(
+        matchedStudents.map((student) => saveAdminStudent(student)),
+      );
+
+      if (syncedStudents.length > 0) {
+        mergeBranchStudentsIntoLocalCache(syncedStudents);
+      }
+    } catch (error) {
+      console.warn("Unable to sync updated students to Supabase.", error);
+    }
+  };
+
+  const syncClassSectionsToSupabase = async (sectionsToSync: ClassSection[]) => {
+    if (sectionsToSync.length === 0) {
+      return;
+    }
+
+    try {
+      await Promise.all(
+        sectionsToSync.map((section) =>
+          saveAcademicClassSection(currentBranch, section),
+        ),
+      );
+    } catch (error) {
+      console.warn("Unable to sync updated class sections to Supabase.", error);
+    }
+  };
 
   // Load class sections
-  const loadClassSections = () => {
+  const loadClassSections = async (
+    remoteSections?: ClassSection[] | null,
+  ): Promise<ClassSection[]> => {
+    if (remoteSections && remoteSections.length > 0) {
+      const normalizedRemoteSections = sortClassSections(
+        remoteSections.map((section) => ({
+          ...section,
+          semester: normalizeSectionSemester(section.semester),
+          enrolleeIds: normalizeStringList(section.enrolleeIds),
+        })),
+      );
+      setClassSections(normalizedRemoteSections);
+      return normalizedRemoteSections;
+    }
+
     const storedSections = readBranchScopedData<ClassSection[]>(
       storageScopes.classSections,
       currentBranch,
@@ -1691,21 +1893,33 @@ export default function AdminEnrollees({
         };
       });
 
-    setClassSections(
-      sortClassSections([...normalizedStoredSections, ...syncedSections]),
-    );
+    const nextSections = sortClassSections([
+      ...normalizedStoredSections,
+      ...syncedSections,
+    ]);
+    setClassSections(nextSections);
+    return nextSections;
   };
 
   // Load subjects - Updated with full SHS and College structure (Semester-based for SHS)
-  const loadSubjects = () => {
+  const loadSubjects = async (
+    remoteSubjects?: Subject[] | null,
+  ): Promise<Subject[]> => {
+    if (remoteSubjects && remoteSubjects.length > 0) {
+      const normalizedRemoteSubjects = normalizeSubjectCatalog(remoteSubjects);
+      setSubjects(normalizedRemoteSubjects);
+      return normalizedRemoteSubjects;
+    }
+
     const storedSubjects = readBranchScopedData<Subject[]>(
       storageScopes.subjects,
       currentBranch,
     );
 
     if (storedSubjects?.length) {
-      setSubjects(normalizeSubjectCatalog(storedSubjects));
-      return;
+      const normalizedStoredSubjects = normalizeSubjectCatalog(storedSubjects);
+      setSubjects(normalizedStoredSubjects);
+      return normalizedStoredSubjects;
     }
 
     const mockSubjects: Subject[] = [
@@ -2629,11 +2843,20 @@ export default function AdminEnrollees({
         isMinor: false,
       },
     ];
-    setSubjects(normalizeSubjectCatalog(mockSubjects));
+    const normalizedMockSubjects = normalizeSubjectCatalog(mockSubjects);
+    setSubjects(normalizedMockSubjects);
+    return normalizedMockSubjects;
   };
 
   // Load instructors with updated names
-  const loadInstructors = () => {
+  const loadInstructors = async (
+    remoteInstructors?: Instructor[] | null,
+  ): Promise<Instructor[]> => {
+    if (remoteInstructors && remoteInstructors.length > 0) {
+      setInstructors(remoteInstructors);
+      return remoteInstructors;
+    }
+
     const storedInstructors = readBranchScopedData<Instructor[]>(
       storageScopes.instructors,
       currentBranch,
@@ -2641,7 +2864,7 @@ export default function AdminEnrollees({
 
     if (storedInstructors?.length) {
       setInstructors(storedInstructors);
-      return;
+      return storedInstructors;
     }
 
     const mockInstructors: Instructor[] = [
@@ -2735,6 +2958,139 @@ export default function AdminEnrollees({
       },
     ];
     setInstructors(mockInstructors);
+    return mockInstructors;
+  };
+
+  const closeInstructorModal = () => {
+    setShowInstructorModal(false);
+    setEditingInstructor(null);
+    setInstructorForm(createDefaultInstructorForm());
+  };
+
+  const openCreateInstructorModal = () => {
+    setEditingInstructor(null);
+    setInstructorForm(createDefaultInstructorForm());
+    setShowInstructorModal(true);
+  };
+
+  const openEditInstructorModal = (instructor: Instructor) => {
+    setEditingInstructor(instructor);
+    setInstructorForm({
+      name: instructor.name,
+      employeeId: instructor.employeeId,
+      department: instructor.department,
+      email: instructor.email || "",
+      contactNumber: instructor.contactNumber || "",
+    });
+    setShowInstructorModal(true);
+  };
+
+  const handleSaveInstructor = async () => {
+    const nextName = instructorForm.name.trim();
+    const nextEmployeeId = instructorForm.employeeId.trim().toUpperCase();
+    const nextDepartment = instructorForm.department.trim();
+
+    if (!nextName || !nextEmployeeId || !nextDepartment) {
+      addToast("Instructor name, employee ID, and department are required.", "warning");
+      return;
+    }
+
+    if (
+      instructors.some(
+        (instructor) =>
+          instructor.id !== editingInstructor?.id &&
+          instructor.employeeId.trim().toLowerCase() ===
+            nextEmployeeId.toLowerCase(),
+      )
+    ) {
+      addToast("Instructor employee IDs must stay unique.", "warning");
+      return;
+    }
+
+    const nextInstructor: Instructor = {
+      id:
+        editingInstructor?.id ||
+        `instructor_${Date.now()}_${nextEmployeeId.toLowerCase()}`,
+      name: nextName,
+      employeeId: nextEmployeeId,
+      department: nextDepartment,
+      email: instructorForm.email.trim() || undefined,
+      contactNumber: instructorForm.contactNumber.trim() || undefined,
+    };
+
+    try {
+      const savedInstructor = await saveAcademicInstructor(
+        currentBranch,
+        nextInstructor,
+      );
+
+      setInstructors((prev) =>
+        editingInstructor
+          ? prev.map((instructor) =>
+              instructor.id === editingInstructor.id ? savedInstructor : instructor,
+            )
+          : [...prev, savedInstructor],
+      );
+
+      addToast(
+        editingInstructor
+          ? `${savedInstructor.name} updated successfully.`
+          : `${savedInstructor.name} added to instructors.`,
+        "success",
+      );
+      closeInstructorModal();
+    } catch (error) {
+      console.error("Failed to save shared instructor", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the instructor to shared academic data.",
+        "error",
+      );
+    }
+  };
+
+  const handleDeleteInstructor = async (instructor: Instructor) => {
+    const confirmed = window.confirm(
+      `Delete ${instructor.name}? Existing assignments will keep their schedule but lose the linked instructor reference.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteAcademicInstructor(currentBranch, instructor.id);
+
+      setInstructors((prev) =>
+        prev.filter((item) => item.id !== instructor.id),
+      );
+      setSubjectAssignments((prev) =>
+        prev.map((assignment) =>
+          assignment.instructorId === instructor.id
+            ? {
+                ...assignment,
+                instructorId: "",
+                instructorName: "To be assigned",
+              }
+            : assignment,
+        ),
+      );
+
+      if (editingInstructor?.id === instructor.id) {
+        closeInstructorModal();
+      }
+
+      addToast(`${instructor.name} deleted.`, "success");
+    } catch (error) {
+      console.error("Failed to delete shared instructor", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete the instructor from shared academic data.",
+        "error",
+      );
+    }
   };
 
   const loadInstructorEvaluationStatuses = () => {
@@ -2744,20 +3100,30 @@ export default function AdminEnrollees({
   };
 
   // Load subject assignments
-  const loadSubjectAssignments = () => {
+  const loadSubjectAssignments = async (
+    remoteAssignments?: SubjectAssignment[] | null,
+  ): Promise<SubjectAssignment[]> => {
+    if (remoteAssignments && remoteAssignments.length > 0) {
+      const normalizedRemoteAssignments = remoteAssignments.map((assignment) => ({
+        ...assignment,
+        semester: normalizeSectionSemester(assignment.semester),
+      }));
+      setSubjectAssignments(normalizedRemoteAssignments);
+      return normalizedRemoteAssignments;
+    }
+
     const storedAssignments = readBranchScopedData<SubjectAssignment[]>(
       storageScopes.subjectAssignments,
       currentBranch,
     );
 
     if (storedAssignments?.length) {
-      setSubjectAssignments(
-        storedAssignments.map((assignment) => ({
-          ...assignment,
-          semester: normalizeSectionSemester(assignment.semester),
-        })),
-      );
-      return;
+      const normalizedStoredAssignments = storedAssignments.map((assignment) => ({
+        ...assignment,
+        semester: normalizeSectionSemester(assignment.semester),
+      }));
+      setSubjectAssignments(normalizedStoredAssignments);
+      return normalizedStoredAssignments;
     }
 
     const mockAssignments: SubjectAssignment[] = [
@@ -2815,6 +3181,7 @@ export default function AdminEnrollees({
       },
     ];
     setSubjectAssignments(mockAssignments);
+    return mockAssignments;
   };
 
   const getSubjectFormPrerequisiteOptions = (
@@ -2940,7 +3307,7 @@ export default function AdminEnrollees({
     );
   };
 
-  const handleSaveSubject = () => {
+  const handleSaveSubject = async () => {
     const normalizedCode = subjectForm.code.trim().toUpperCase();
     const normalizedName = subjectForm.name.trim();
     const normalizedSemester = normalizeSectionSemester(subjectForm.semester);
@@ -2998,26 +3365,38 @@ export default function AdminEnrollees({
       ),
     };
 
-    setSubjects((prev) =>
-      normalizeSubjectCatalog(
-        editingSubject
-          ? prev.map((subject) =>
-              subject.id === editingSubject.id ? nextSubject : subject,
-            )
-          : [...prev, nextSubject],
-      ),
-    );
+    try {
+      const savedSubject = await saveAcademicSubject(currentBranch, nextSubject);
 
-    addToast(
-      editingSubject
-        ? `${nextSubject.code} updated successfully.`
-        : `${nextSubject.code} added to the subject catalog.`,
-      "success",
-    );
-    closeSubjectModal();
+      setSubjects((prev) =>
+        normalizeSubjectCatalog(
+          editingSubject
+            ? prev.map((subject) =>
+                subject.id === editingSubject.id ? savedSubject : subject,
+              )
+            : [...prev, savedSubject],
+        ),
+      );
+
+      addToast(
+        editingSubject
+          ? `${savedSubject.code} updated successfully.`
+          : `${savedSubject.code} added to the subject catalog.`,
+        "success",
+      );
+      closeSubjectModal();
+    } catch (error) {
+      console.error("Failed to save shared academic subject", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the subject to the shared catalog.",
+        "error",
+      );
+    }
   };
 
-  const handleDeleteSubject = (subject: Subject) => {
+  const handleDeleteSubject = async (subject: Subject) => {
     const confirmed = window.confirm(
       `Delete ${subject.code} - ${subject.name}? This will also remove its prerequisite links and any local schedule assignments using it.`,
     );
@@ -3026,28 +3405,30 @@ export default function AdminEnrollees({
       return;
     }
 
-    const removedAssignmentCount = subjectAssignments.filter(
-      (assignment) => assignment.subjectId === subject.id,
-    ).length;
+    try {
+      await deleteAcademicSubject(currentBranch, subject.id);
 
-    setSubjects((prev) =>
-      normalizeSubjectCatalog(
-        prev
-          .filter((item) => item.id !== subject.id)
-          .map((item) => ({
-            ...item,
-            prerequisiteSubjectIds: normalizeStringList(
-              item.prerequisiteSubjectIds,
-            ).filter((subjectId) => subjectId !== subject.id),
-          })),
-      ),
-    );
-    setSubjectAssignments((prev) =>
-      prev.filter((assignment) => assignment.subjectId !== subject.id),
-    );
-    setStudentSubjectPlans((prev) =>
-      Object.fromEntries(
-        Object.entries(prev).map(([key, plan]) => [
+      const removedAssignmentCount = subjectAssignments.filter(
+        (assignment) => assignment.subjectId === subject.id,
+      ).length;
+
+      setSubjects((prev) =>
+        normalizeSubjectCatalog(
+          prev
+            .filter((item) => item.id !== subject.id)
+            .map((item) => ({
+              ...item,
+              prerequisiteSubjectIds: normalizeStringList(
+                item.prerequisiteSubjectIds,
+              ).filter((subjectId) => subjectId !== subject.id),
+            })),
+        ),
+      );
+      setSubjectAssignments((prev) =>
+        prev.filter((assignment) => assignment.subjectId !== subject.id),
+      );
+      const nextStudentSubjectPlans = Object.fromEntries(
+        Object.entries(studentSubjectPlans).map(([key, plan]) => [
           key,
           {
             ...plan,
@@ -3063,36 +3444,52 @@ export default function AdminEnrollees({
             updatedAt: new Date().toISOString(),
           },
         ]),
-      ),
-    );
-    setTransfereeEvaluations((prev) =>
-      Object.fromEntries(
-        Object.entries(prev).map(([key, evaluation]) => [
-          key,
-          {
-            ...evaluation,
-            creditedSubjectIds: evaluation.creditedSubjectIds.filter(
-              (subjectId) => subjectId !== subject.id,
-            ),
-            assignedSubjectIds: evaluation.assignedSubjectIds.filter(
-              (subjectId) => subjectId !== subject.id,
-            ),
-            updatedAt: new Date().toISOString(),
-          },
-        ]),
-      ),
-    );
+      );
+      setStudentSubjectPlans(nextStudentSubjectPlans);
+      void Promise.all(
+        Object.values(nextStudentSubjectPlans).map((plan) =>
+          saveStudentSubjectPlan(currentBranch, plan),
+        ),
+      ).catch((error) => {
+        console.error("Failed to sync updated student subject plans", error);
+      });
+      setTransfereeEvaluations((prev) =>
+        Object.fromEntries(
+          Object.entries(prev).map(([key, evaluation]) => [
+            key,
+            {
+              ...evaluation,
+              creditedSubjectIds: evaluation.creditedSubjectIds.filter(
+                (subjectId) => subjectId !== subject.id,
+              ),
+              assignedSubjectIds: evaluation.assignedSubjectIds.filter(
+                (subjectId) => subjectId !== subject.id,
+              ),
+              updatedAt: new Date().toISOString(),
+            },
+          ]),
+        ),
+      );
 
-    if (editingSubject?.id === subject.id) {
-      closeSubjectModal();
+      if (editingSubject?.id === subject.id) {
+        closeSubjectModal();
+      }
+
+      addToast(
+        removedAssignmentCount > 0
+          ? `${subject.code} deleted and ${removedAssignmentCount} related assignment${removedAssignmentCount === 1 ? "" : "s"} removed.`
+          : `${subject.code} deleted from the catalog.`,
+        "success",
+      );
+    } catch (error) {
+      console.error("Failed to delete shared academic subject", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete the subject from the shared catalog.",
+        "error",
+      );
     }
-
-    addToast(
-      removedAssignmentCount > 0
-        ? `${subject.code} deleted and ${removedAssignmentCount} related assignment${removedAssignmentCount === 1 ? "" : "s"} removed.`
-        : `${subject.code} deleted from the catalog.`,
-      "success",
-    );
   };
 
   const getEligibleSubjectsForSection = (
@@ -3348,7 +3745,7 @@ export default function AdminEnrollees({
     setShowAssignmentDeleteModal(true);
   };
 
-  const handleSaveAssignment = () => {
+  const handleSaveAssignment = async () => {
     const selectedSubjects = subjects.filter((subject) =>
       assignmentForm.subjectIds.includes(subject.id),
     );
@@ -3389,31 +3786,56 @@ export default function AdminEnrollees({
         ]
       : [];
 
+    if (schedule.length > 0 && schedule[0].room.trim()) {
+      try {
+        await saveAcademicAssignmentRoom(currentBranch, schedule[0].room);
+        setCustomAssignmentRooms((prev) =>
+          getUniqueTrimmedValues([...prev, schedule[0].room]),
+        );
+      } catch (error) {
+        console.warn("Unable to sync assignment room to Supabase.", error);
+      }
+    }
+
     if (editingAssignment) {
       const subject = selectedSubjects[0];
+      const nextAssignment: SubjectAssignment = {
+        ...editingAssignment,
+        subjectId: subject.id,
+        subjectCode: subject.code,
+        subjectName: subject.name,
+        instructorId: instructor?.id || "",
+        instructorName: instructor?.name || "To be assigned",
+        sectionId: section.id,
+        sectionCode: section.code,
+        academicYear: assignmentForm.academicYear.trim() || "2026-2027",
+        semester: normalizeSectionSemester(assignmentForm.semester),
+        schedule,
+      };
 
-      setSubjectAssignments((prev) =>
-        prev.map((assignment) =>
-          assignment.id === editingAssignment.id
-            ? {
-                ...assignment,
-                subjectId: subject.id,
-                subjectCode: subject.code,
-                subjectName: subject.name,
-                instructorId: instructor?.id || "",
-                instructorName: instructor?.name || "To be assigned",
-                sectionId: section.id,
-                sectionCode: section.code,
-                academicYear: assignmentForm.academicYear.trim() || "2026-2027",
-                semester: normalizeSectionSemester(assignmentForm.semester),
-                schedule,
-              }
-            : assignment,
-        ),
-      );
+      try {
+        const savedAssignment = await saveAcademicSubjectAssignment(
+          currentBranch,
+          nextAssignment,
+        );
 
-      addToast("Assignment updated successfully.", "success");
-      closeAssignmentModal();
+        setSubjectAssignments((prev) =>
+          prev.map((assignment) =>
+            assignment.id === editingAssignment.id ? savedAssignment : assignment,
+          ),
+        );
+
+        addToast("Assignment updated successfully.", "success");
+        closeAssignmentModal();
+      } catch (error) {
+        console.error("Failed to save shared subject assignment", error);
+        addToast(
+          error instanceof Error
+            ? error.message
+            : "Unable to save the shared class assignment.",
+          "error",
+        );
+      }
       return;
     }
 
@@ -3433,15 +3855,31 @@ export default function AdminEnrollees({
       }),
     );
 
-    setSubjectAssignments((prev) => [...prev, ...newAssignments]);
-    addToast(
-      `${newAssignments.length} subject${newAssignments.length > 1 ? "s" : ""} assigned to ${section.code}.`,
-      "success",
-    );
-    closeAssignmentModal();
+    try {
+      const savedAssignments = await Promise.all(
+        newAssignments.map((assignment) =>
+          saveAcademicSubjectAssignment(currentBranch, assignment),
+        ),
+      );
+
+      setSubjectAssignments((prev) => [...prev, ...savedAssignments]);
+      addToast(
+        `${savedAssignments.length} subject${savedAssignments.length > 1 ? "s" : ""} assigned to ${section.code}.`,
+        "success",
+      );
+      closeAssignmentModal();
+    } catch (error) {
+      console.error("Failed to create shared subject assignments", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the shared class assignments.",
+        "error",
+      );
+    }
   };
 
-  const handleCreateRoomOption = () => {
+  const handleCreateRoomOption = async () => {
     const trimmedRoomName = newRoomName.trim();
 
     if (!trimmedRoomName) {
@@ -3463,40 +3901,70 @@ export default function AdminEnrollees({
       return;
     }
 
-    setCustomAssignmentRooms((prev) =>
-      getUniqueTrimmedValues([...prev, trimmedRoomName]),
-    );
-    setAssignmentForm((prev) => ({
-      ...prev,
-      room: trimmedRoomName,
-    }));
-    resetRoomCreator();
-    addToast(`Room ${trimmedRoomName} added.`, "success");
+    try {
+      const savedRoomName = await saveAcademicAssignmentRoom(
+        currentBranch,
+        trimmedRoomName,
+      );
+      setCustomAssignmentRooms((prev) =>
+        getUniqueTrimmedValues([...prev, savedRoomName]),
+      );
+      setAssignmentForm((prev) => ({
+        ...prev,
+        room: savedRoomName,
+      }));
+      resetRoomCreator();
+      addToast(`Room ${savedRoomName} added.`, "success");
+    } catch (error) {
+      console.error("Failed to save shared room option", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the room to shared academic data.",
+        "error",
+      );
+    }
   };
 
   const handleRemoveAssignment = (assignmentId: string) => {
     openAssignmentDeleteModal([assignmentId]);
   };
 
-  const handleConfirmAssignmentDelete = () => {
+  const handleConfirmAssignmentDelete = async () => {
     if (pendingAssignmentDeleteIds.length === 0) {
       return;
     }
 
-    setSubjectAssignments((prev) =>
-      prev.filter(
-        (assignment) => !pendingAssignmentDeleteIds.includes(assignment.id),
-      ),
-    );
-    setSelectedAssignmentIds((prev) =>
-      prev.filter((id) => !pendingAssignmentDeleteIds.includes(id)),
-    );
+    try {
+      await Promise.all(
+        pendingAssignmentDeleteIds.map((assignmentId) =>
+          deleteAcademicSubjectAssignment(currentBranch, assignmentId),
+        ),
+      );
 
-    addToast(
-      `${pendingAssignmentDeleteIds.length} assignment${pendingAssignmentDeleteIds.length === 1 ? "" : "s"} removed.`,
-      "info",
-    );
-    closeAssignmentDeleteModal();
+      setSubjectAssignments((prev) =>
+        prev.filter(
+          (assignment) => !pendingAssignmentDeleteIds.includes(assignment.id),
+        ),
+      );
+      setSelectedAssignmentIds((prev) =>
+        prev.filter((id) => !pendingAssignmentDeleteIds.includes(id)),
+      );
+
+      addToast(
+        `${pendingAssignmentDeleteIds.length} assignment${pendingAssignmentDeleteIds.length === 1 ? "" : "s"} removed.`,
+        "info",
+      );
+      closeAssignmentDeleteModal();
+    } catch (error) {
+      console.error("Failed to delete shared subject assignments", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete the shared class assignments.",
+        "error",
+      );
+    }
   };
 
   const detachEnrolleeFromSections = (enrolleeId: string) => {
@@ -3504,18 +3972,26 @@ export default function AdminEnrollees({
       prev.filter((assignment) => assignment.enrolleeId !== enrolleeId),
     );
 
-    setClassSections((prev) =>
-      prev.map((section) => {
-        if (!section.enrolleeIds.includes(enrolleeId)) {
-          return section;
-        }
+    const affectedSectionIds = new Set(
+      classSections
+        .filter((section) => section.enrolleeIds.includes(enrolleeId))
+        .map((section) => section.id),
+    );
+    const nextSections = classSections.map((section) => {
+      if (!section.enrolleeIds.includes(enrolleeId)) {
+        return section;
+      }
 
-        return {
-          ...section,
-          enrolleeIds: section.enrolleeIds.filter((id) => id !== enrolleeId),
-          currentEnrollees: Math.max(0, section.currentEnrollees - 1),
-        };
-      }),
+      return {
+        ...section,
+        enrolleeIds: section.enrolleeIds.filter((id) => id !== enrolleeId),
+        currentEnrollees: Math.max(0, section.currentEnrollees - 1),
+      };
+    });
+
+    setClassSections(nextSections);
+    void syncClassSectionsToSupabase(
+      nextSections.filter((section) => affectedSectionIds.has(section.id)),
     );
 
     setSelectedSection((prev) => {
@@ -3596,6 +4072,7 @@ export default function AdminEnrollees({
     );
 
     writeStoredStudents(nextStudents);
+    void syncStoredStudentsToSupabase([enrollee.studentNumber]);
   };
 
   const syncStoredSectionCode = (
@@ -3624,6 +4101,7 @@ export default function AdminEnrollees({
     );
 
     writeStoredStudents(nextStudents);
+    void syncStoredStudentsToSupabase(Array.from(studentNumbers));
   };
 
   const getTransfereeEvaluation = (enrollee: Enrollee) =>
@@ -3841,42 +4319,47 @@ export default function AdminEnrollees({
     updatedAt: string,
   ) => {
     const scheduledAssignments = getEnrollmentRequestScheduledAssignments(request);
+    const matchingEntry = getMatchingStudentSubjectPlanEntry(
+      request,
+      studentSubjectPlans,
+    );
+    const planKey =
+      matchingEntry?.[0] || request.trackingNumber || request.studentNumber;
+    const existingPlan = matchingEntry?.[1];
+    const assignedSubjects =
+      scheduledAssignments.length > 0
+        ? mapScheduledAssignmentsToStudentSubjectPlanItems(scheduledAssignments)
+        : [];
 
-    setStudentSubjectPlans((prev) => {
-      const matchingEntry = getMatchingStudentSubjectPlanEntry(request, prev);
-      const planKey =
-        matchingEntry?.[0] || request.trackingNumber || request.studentNumber;
-      const existingPlan = matchingEntry?.[1];
-      const assignedSubjects =
-        scheduledAssignments.length > 0
-          ? mapScheduledAssignmentsToStudentSubjectPlanItems(scheduledAssignments)
-          : [];
+    if (!planKey) {
+      return;
+    }
 
-      if (!planKey) {
-        return prev;
-      }
+    const nextPlan: StudentSubjectPlanRecord = {
+      id: planKey,
+      enrolleeId: existingPlan?.enrolleeId,
+      trackingNumber: request.trackingNumber || existingPlan?.trackingNumber,
+      studentNumber: request.studentNumber || existingPlan?.studentNumber,
+      semester: normalizeSectionSemester(request.semester),
+      academicYear: request.academicYear,
+      assignedSubjects,
+      creditedSubjects: existingPlan?.creditedSubjects ?? [],
+      scheduledAssignments:
+        scheduledAssignments.length > 0 ? scheduledAssignments : undefined,
+      notes:
+        request.notes ||
+        existingPlan?.notes ||
+        "Approved from enrollment request.",
+      updatedAt,
+      source: "enrollment_request",
+    };
 
-      return {
-        ...prev,
-        [planKey]: {
-          id: planKey,
-          enrolleeId: existingPlan?.enrolleeId,
-          trackingNumber: request.trackingNumber || existingPlan?.trackingNumber,
-          studentNumber: request.studentNumber || existingPlan?.studentNumber,
-          semester: normalizeSectionSemester(request.semester),
-          academicYear: request.academicYear,
-          assignedSubjects,
-          creditedSubjects: existingPlan?.creditedSubjects ?? [],
-          scheduledAssignments:
-            scheduledAssignments.length > 0 ? scheduledAssignments : undefined,
-          notes:
-            request.notes ||
-            existingPlan?.notes ||
-            "Approved from enrollment request.",
-          updatedAt,
-          source: "enrollment_request",
-        },
-      };
+    setStudentSubjectPlans((prev) => ({
+      ...prev,
+      [planKey]: nextPlan,
+    }));
+    void saveStudentSubjectPlan(currentBranch, nextPlan).catch((error) => {
+      console.error("Failed to sync enrollment request subject plan", error);
     });
   };
 
@@ -4003,17 +4486,21 @@ export default function AdminEnrollees({
     writeStoredStudents(nextStudentsWithApprovedTerm);
 
     if (request.irregularRequest?.mode === "own_schedule") {
-      setStudentSubjectPlans((prev) => {
-        const matchingEntry = getMatchingStudentSubjectPlanEntry(request, prev);
+      const matchingEntry = getMatchingStudentSubjectPlanEntry(
+        request,
+        studentSubjectPlans,
+      );
 
-        if (!matchingEntry) {
-          return prev;
-        }
-
-        const nextPlans = { ...prev };
+      if (matchingEntry) {
+        const nextPlans = { ...studentSubjectPlans };
         delete nextPlans[matchingEntry[0]];
-        return nextPlans;
-      });
+        setStudentSubjectPlans(nextPlans);
+        void deleteStudentSubjectPlan(currentBranch, matchingEntry[0]).catch(
+          (error) => {
+            console.error("Failed to delete shared student subject plan", error);
+          },
+        );
+      }
 
       updateStoredStudentOwnScheduleState({
         branch: request.branch,
@@ -4026,6 +4513,18 @@ export default function AdminEnrollees({
           ownScheduleSemester: normalizeSectionSemester(request.semester),
           ownScheduleSelectionStatus: "Not Submitted",
         },
+      });
+      void saveStudentPlanningState({
+        branch: request.branch,
+        studentNumber: request.studentNumber,
+        trackingNumber: request.trackingNumber,
+        requestedOwnSchedule: true,
+        ownScheduleRequestStatus: "Approved",
+        ownScheduleAcademicYear: request.academicYear,
+        ownScheduleSemester: normalizeSectionSemester(request.semester),
+        ownScheduleSelectionStatus: "Not Submitted",
+      }).catch((error) => {
+        console.error("Failed to sync shared student planning state", error);
       });
       reloadManagedSectionState();
       return updatedStudentRecord;
@@ -4042,6 +4541,18 @@ export default function AdminEnrollees({
         ownScheduleSemester: undefined,
         ownScheduleSelectionStatus: undefined,
       },
+    });
+    void saveStudentPlanningState({
+      branch: request.branch,
+      studentNumber: request.studentNumber,
+      trackingNumber: request.trackingNumber,
+      requestedOwnSchedule: false,
+      ownScheduleRequestStatus: undefined,
+      ownScheduleAcademicYear: undefined,
+      ownScheduleSemester: undefined,
+      ownScheduleSelectionStatus: undefined,
+    }).catch((error) => {
+      console.error("Failed to clear shared student planning state", error);
     });
 
     if (!updatedStudentRecord) {
@@ -4104,33 +4615,40 @@ export default function AdminEnrollees({
       evaluation.creditedSubjectIds,
     );
 
-    setStudentSubjectPlans((prev) => {
-      if (assignedSubjects.length === 0 && creditedSubjects.length === 0) {
-        if (!prev[planKey]) {
-          return prev;
-        }
-
-        const nextPlans = { ...prev };
-        delete nextPlans[planKey];
-        return nextPlans;
+    if (assignedSubjects.length === 0 && creditedSubjects.length === 0) {
+      if (!studentSubjectPlans[planKey]) {
+        return;
       }
 
-      return {
-        ...prev,
-        [planKey]: {
-          id: planKey,
-          enrolleeId: enrollee.id,
-          trackingNumber: enrollee.trackingNumber,
-          studentNumber: enrollee.studentNumber,
-          semester: normalizeSectionSemester(evaluation.plannedSemester),
-          academicYear:
-            evaluation.plannedAcademicYear.trim() || reflectedAcademicYear,
-          assignedSubjects,
-          creditedSubjects,
-          updatedAt: new Date().toISOString(),
-          source: "transferee_validation",
-        },
-      };
+      const nextPlans = { ...studentSubjectPlans };
+      delete nextPlans[planKey];
+      setStudentSubjectPlans(nextPlans);
+      void deleteStudentSubjectPlan(currentBranch, planKey).catch((error) => {
+        console.error("Failed to delete shared transferee subject plan", error);
+      });
+      return;
+    }
+
+    const nextPlan: StudentSubjectPlanRecord = {
+      id: planKey,
+      enrolleeId: enrollee.id,
+      trackingNumber: enrollee.trackingNumber,
+      studentNumber: enrollee.studentNumber,
+      semester: normalizeSectionSemester(evaluation.plannedSemester),
+      academicYear:
+        evaluation.plannedAcademicYear.trim() || reflectedAcademicYear,
+      assignedSubjects,
+      creditedSubjects,
+      updatedAt: new Date().toISOString(),
+      source: "transferee_validation",
+    };
+
+    setStudentSubjectPlans((prev) => ({
+      ...prev,
+      [planKey]: nextPlan,
+    }));
+    void saveStudentSubjectPlan(currentBranch, nextPlan).catch((error) => {
+      console.error("Failed to sync shared transferee subject plan", error);
     });
   };
 
@@ -4304,7 +4822,7 @@ export default function AdminEnrollees({
     });
   };
 
-  const handleSaveSection = () => {
+  const handleSaveSection = async () => {
     const normalizedSection = normalizeSectionLabel(newSection.section);
     const nextCapacity = Number(newSection.maxCapacity);
 
@@ -4352,7 +4870,7 @@ export default function AdminEnrollees({
     }
 
     if (editingSection) {
-      const updatedSection: ClassSection = {
+      const nextSectionDraft: ClassSection = {
         ...editingSection,
         semester: normalizeSectionSemester(newSection.semester),
         section: normalizedSection,
@@ -4360,59 +4878,74 @@ export default function AdminEnrollees({
         maxCapacity: nextCapacity,
       };
 
-      setClassSections((prev) =>
-        prev.map((section) =>
-          section.id === editingSection.id ? updatedSection : section,
-        ),
-      );
+      try {
+        const updatedSection = await saveAcademicClassSection(
+          currentBranch,
+          nextSectionDraft,
+        );
 
-      if (editingSection.code !== nextCode) {
-        setSectionAssignments((prev) =>
-          prev.map((assignment) =>
-            assignment.assignedSection === editingSection.code
-              ? { ...assignment, assignedSection: nextCode }
-              : assignment,
+        setClassSections((prev) =>
+          prev.map((section) =>
+            section.id === editingSection.id ? updatedSection : section,
           ),
         );
 
-        setSubjectAssignments((prev) =>
-          prev.map((assignment) =>
-            assignment.sectionId === editingSection.id
-              ? { ...assignment, sectionCode: nextCode }
-              : assignment,
-          ),
+        if (editingSection.code !== nextCode) {
+          setSectionAssignments((prev) =>
+            prev.map((assignment) =>
+              assignment.assignedSection === editingSection.code
+                ? { ...assignment, assignedSection: nextCode }
+                : assignment,
+            ),
+          );
+
+          setSubjectAssignments((prev) =>
+            prev.map((assignment) =>
+              assignment.sectionId === editingSection.id
+                ? { ...assignment, sectionCode: nextCode }
+                : assignment,
+            ),
+          );
+
+          setExpandedAssignmentSections((prev) => {
+            if (!Object.prototype.hasOwnProperty.call(prev, editingSection.code)) {
+              return prev;
+            }
+
+            const nextState = { ...prev, [nextCode]: prev[editingSection.code] };
+            delete nextState[editingSection.code];
+            return nextState;
+          });
+
+          setAssignmentFilter((prev) =>
+            prev.section === editingSection.code
+              ? { ...prev, section: nextCode }
+              : prev,
+          );
+
+          syncStoredSectionCode(editingSection, nextCode);
+        }
+
+        setSelectedSection((prev) =>
+          prev?.id === editingSection.id ? updatedSection : prev,
         );
 
-        setExpandedAssignmentSections((prev) => {
-          if (!Object.prototype.hasOwnProperty.call(prev, editingSection.code)) {
-            return prev;
-          }
-
-          const nextState = { ...prev, [nextCode]: prev[editingSection.code] };
-          delete nextState[editingSection.code];
-          return nextState;
-        });
-
-        setAssignmentFilter((prev) =>
-          prev.section === editingSection.code
-            ? { ...prev, section: nextCode }
-            : prev,
+        addToast(
+          editingSection.code === nextCode
+            ? `Updated ${editingSection.code} capacity to ${nextCapacity}.`
+            : `Renamed ${editingSection.code} to ${nextCode}.`,
+          "success",
         );
-
-        syncStoredSectionCode(editingSection, nextCode);
+        resetSectionForm();
+      } catch (error) {
+        console.error("Failed to save shared class section", error);
+        addToast(
+          error instanceof Error
+            ? error.message
+            : "Unable to save the shared class section.",
+          "error",
+        );
       }
-
-      setSelectedSection((prev) =>
-        prev?.id === editingSection.id ? updatedSection : prev,
-      );
-
-      addToast(
-        editingSection.code === nextCode
-          ? `Updated ${editingSection.code} capacity to ${nextCapacity}.`
-          : `Renamed ${editingSection.code} to ${nextCode}.`,
-        "success",
-      );
-      resetSectionForm();
       return;
     }
 
@@ -4429,9 +4962,20 @@ export default function AdminEnrollees({
       enrolleeIds: [],
     };
 
-    setClassSections((prev) => [...prev, newSec]);
-    resetSectionForm();
-    addToast(`Section ${nextCode} added`, "success");
+    try {
+      const savedSection = await saveAcademicClassSection(currentBranch, newSec);
+      setClassSections((prev) => [...prev, savedSection]);
+      resetSectionForm();
+      addToast(`Section ${savedSection.code} added`, "success");
+    } catch (error) {
+      console.error("Failed to create shared class section", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to create the shared class section.",
+        "error",
+      );
+    }
   };
 
   const assignEnrolleeToSection = (
@@ -4463,14 +5007,16 @@ export default function AdminEnrollees({
       return false;
     }
 
+    const nextSection: ClassSection = {
+      ...section,
+      currentEnrollees: section.currentEnrollees + 1,
+      enrolleeIds: [...section.enrolleeIds, enrollee.id],
+    };
+
     setClassSections((prev) =>
       prev.map((s) =>
         s.id === sectionId
-          ? {
-              ...s,
-              currentEnrollees: s.currentEnrollees + 1,
-              enrolleeIds: [...s.enrolleeIds, enrollee.id],
-            }
+          ? nextSection
           : s,
       ),
     );
@@ -4485,6 +5031,7 @@ export default function AdminEnrollees({
     setSectionAssignments((prev) => [...prev, newAssignment]);
     setPendingAssignments((prev) => prev.filter((item) => item.id !== enrollee.id));
     syncStudentSection(enrollee, section.code);
+    void syncClassSectionsToSupabase([nextSection]);
 
     addToast(`${enrollee.fullName} assigned to ${section.code}`, "success");
     return true;
@@ -4564,6 +5111,7 @@ export default function AdminEnrollees({
     assignments.forEach(({ enrollee, section }) => {
       syncStudentSection(enrollee, section.code);
     });
+    void syncClassSectionsToSupabase(updatedSections);
 
     addToast(
       unassignedStudents.length > 0
@@ -4604,7 +5152,7 @@ export default function AdminEnrollees({
     setMoveStudentFeedback(null);
   };
 
-  const handleDeleteSection = (section: ClassSection) => {
+  const handleDeleteSection = async (section: ClassSection) => {
     const normalizedSectionCode = normalizeSectionCodeValue(section.code);
     const linkedActiveStudents = getStudentsForBranch(currentBranch).filter(
       (student) =>
@@ -4647,54 +5195,66 @@ export default function AdminEnrollees({
       return;
     }
 
-    const deletedAssignmentIds = new Set(
-      linkedSubjectAssignments.map((assignment) => assignment.id),
-    );
+    try {
+      await deleteAcademicClassSection(currentBranch, section.id);
 
-    setClassSections((prev) => prev.filter((item) => item.id !== section.id));
-    setSubjectAssignments((prev) =>
-      prev.filter((assignment) => !deletedAssignmentIds.has(assignment.id)),
-    );
-    setSelectedAssignmentIds((prev) =>
-      prev.filter((assignmentId) => !deletedAssignmentIds.has(assignmentId)),
-    );
-    setPendingAssignmentDeleteIds((prev) =>
-      prev.filter((assignmentId) => !deletedAssignmentIds.has(assignmentId)),
-    );
-    setExpandedAssignmentSections((prev) => {
-      if (!Object.prototype.hasOwnProperty.call(prev, section.code)) {
-        return prev;
+      const deletedAssignmentIds = new Set(
+        linkedSubjectAssignments.map((assignment) => assignment.id),
+      );
+
+      setClassSections((prev) => prev.filter((item) => item.id !== section.id));
+      setSubjectAssignments((prev) =>
+        prev.filter((assignment) => !deletedAssignmentIds.has(assignment.id)),
+      );
+      setSelectedAssignmentIds((prev) =>
+        prev.filter((assignmentId) => !deletedAssignmentIds.has(assignmentId)),
+      );
+      setPendingAssignmentDeleteIds((prev) =>
+        prev.filter((assignmentId) => !deletedAssignmentIds.has(assignmentId)),
+      );
+      setExpandedAssignmentSections((prev) => {
+        if (!Object.prototype.hasOwnProperty.call(prev, section.code)) {
+          return prev;
+        }
+
+        const nextState = { ...prev };
+        delete nextState[section.code];
+        return nextState;
+      });
+      setAssignmentFilter((prev) =>
+        prev.section === section.code ? { ...prev, section: "All" } : prev,
+      );
+      setAssignmentAutoAssignSection((prev) =>
+        prev?.id === section.id ? null : prev,
+      );
+
+      if (editingSection?.id === section.id) {
+        resetSectionForm();
       }
 
-      const nextState = { ...prev };
-      delete nextState[section.code];
-      return nextState;
-    });
-    setAssignmentFilter((prev) =>
-      prev.section === section.code ? { ...prev, section: "All" } : prev,
-    );
-    setAssignmentAutoAssignSection((prev) =>
-      prev?.id === section.id ? null : prev,
-    );
+      if (selectedSection?.id === section.id) {
+        setSelectedSection(null);
+        setShowSectionStudents(false);
+      }
 
-    if (editingSection?.id === section.id) {
-      resetSectionForm();
+      addToast(
+        linkedSubjectAssignments.length > 0
+          ? `Deleted ${section.code} and removed ${linkedSubjectAssignments.length} linked subject assignment${linkedSubjectAssignments.length === 1 ? "" : "s"}.`
+          : `Deleted ${section.code}.`,
+        "success",
+      );
+    } catch (error) {
+      console.error("Failed to delete shared class section", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete the shared class section.",
+        "error",
+      );
     }
-
-    if (selectedSection?.id === section.id) {
-      setSelectedSection(null);
-      setShowSectionStudents(false);
-    }
-
-    addToast(
-      linkedSubjectAssignments.length > 0
-        ? `Deleted ${section.code} and removed ${linkedSubjectAssignments.length} linked subject assignment${linkedSubjectAssignments.length === 1 ? "" : "s"}.`
-        : `Deleted ${section.code}.`,
-      "success",
-    );
   };
 
-  const handleApplyStudentMove = () => {
+  const handleApplyStudentMove = async () => {
     if (!selectedMoveStudent) {
       return;
     }
@@ -4722,7 +5282,9 @@ export default function AdminEnrollees({
         throw new Error("No linked student record was found for this update.");
       }
 
-      loadClassSections();
+      const nextSections = await loadClassSections();
+      void syncStoredStudentsToSupabase([selectedMoveStudent.id]);
+      void syncClassSectionsToSupabase(nextSections);
       setPendingMoveSectionCode(updateResult.nextSection);
       setMoveStudentFeedback(
         updateResult.didChange
@@ -4760,7 +5322,20 @@ export default function AdminEnrollees({
   const loadEnrollmentRequests = async () => {
     setIsLoading(true);
     try {
-      const storedRequests = readEnrollmentRequestsForBranch(currentBranch);
+      const cachedRequests = readEnrollmentRequestsForBranch(currentBranch);
+      const storedRequests = await fetchEnrollmentRequests(currentBranch).catch(
+        (error) => {
+          if (cachedRequests.length > 0) {
+            console.warn(
+              "Unable to fetch shared enrollment requests. Using cached requests instead.",
+              error,
+            );
+            return cachedRequests;
+          }
+
+          throw error;
+        },
+      );
       const hydratedRequests = await Promise.all(
         storedRequests.map(hydrateEnrollmentRequestRecordAttachments),
       );
@@ -4786,7 +5361,7 @@ export default function AdminEnrollees({
     }
   };
 
-  const loadEnrollees = async () => {
+  const loadEnrollees = async (): Promise<Enrollee[]> => {
     setIsLoading(true);
     const storedEnrollees = stripLegacyMockAdmissionRecords(
       readBranchScopedData<Enrollee[]>(storageScopes.enrollees, currentBranch) ??
@@ -4815,7 +5390,6 @@ export default function AdminEnrollees({
           try {
             const activatedStudent = await activateApprovedStudent(
               enrollee.trackingNumber,
-              enrollee.studentNumber,
             );
 
             return {
@@ -4834,9 +5408,11 @@ export default function AdminEnrollees({
       );
 
       setEnrollees(syncedApprovedEnrollees);
+      return syncedApprovedEnrollees;
     } catch (error) {
       console.error("Failed to fetch enrollees", error);
       setEnrollees(storedEnrollees);
+      return storedEnrollees;
     } finally {
       setIsLoading(false);
     }
@@ -4897,18 +5473,97 @@ export default function AdminEnrollees({
         storageScopes.assignmentRooms,
         currentBranch,
       );
+      let remoteAcademicSnapshot: AcademicSnapshot | null = null;
+      let remoteStudentSubjectPlans: Record<string, StudentSubjectPlanRecord> | null =
+        null;
 
-      setSectionAssignments(storedSectionAssignments ?? []);
+      try {
+        remoteAcademicSnapshot = await fetchAcademicSnapshot(currentBranch);
+      } catch (error) {
+        console.warn("Unable to fetch shared academic data from Supabase.", error);
+      }
+
+      try {
+        remoteStudentSubjectPlans = await fetchStudentSubjectPlans(currentBranch);
+      } catch (error) {
+        console.warn("Unable to fetch shared student subject plans.", error);
+      }
+
+      try {
+        const remoteStudents = await fetchAdminStudents(currentBranch);
+        mergeBranchStudentsIntoLocalCache(remoteStudents);
+      } catch (error) {
+        console.warn("Unable to fetch shared student records from Supabase.", error);
+      }
+
       setTransfereeEvaluations(storedTransfereeEvaluations ?? {});
-      setStudentSubjectPlans(storedStudentSubjectPlans ?? {});
-      setCustomAssignmentRooms(getUniqueTrimmedValues(storedAssignmentRooms ?? []));
+      setStudentSubjectPlans(remoteStudentSubjectPlans ?? storedStudentSubjectPlans ?? {});
+
+      const fallbackRooms = getUniqueTrimmedValues(storedAssignmentRooms ?? []);
+      const remoteRooms = getUniqueTrimmedValues(
+        remoteAcademicSnapshot?.assignmentRooms ?? [],
+      );
+      const resolvedRoomOptions =
+        remoteRooms.length > 0 ? remoteRooms : fallbackRooms;
+      setCustomAssignmentRooms(resolvedRoomOptions);
+
       await loadEnrollmentRequests();
-      await loadEnrollees();
-      loadClassSections();
-      loadSubjects();
-      loadInstructors();
+      const loadedEnrollees = await loadEnrollees();
+      const loadedSections = await loadClassSections(
+        remoteAcademicSnapshot?.classSections,
+      );
+      const loadedSubjects = await loadSubjects(remoteAcademicSnapshot?.subjects);
+      const loadedInstructors = await loadInstructors(
+        remoteAcademicSnapshot?.instructors,
+      );
       loadInstructorEvaluationStatuses();
-      loadSubjectAssignments();
+      const loadedAssignments = await loadSubjectAssignments(
+        remoteAcademicSnapshot?.subjectAssignments,
+      );
+
+      const sharedSectionAssignments = buildSectionAssignmentsFromSections(
+        loadedSections,
+        loadedEnrollees,
+      );
+      const derivedSectionAssignments =
+        sharedSectionAssignments.length > 0
+          ? sharedSectionAssignments
+          : storedSectionAssignments && storedSectionAssignments.length > 0
+            ? storedSectionAssignments
+            : [];
+      setSectionAssignments(derivedSectionAssignments);
+
+      if (remoteAcademicSnapshot) {
+        const snapshotToSeed: Partial<AcademicSnapshot> = {
+          subjects:
+            remoteAcademicSnapshot.subjects.length === 0 ? loadedSubjects : [],
+          instructors:
+            remoteAcademicSnapshot.instructors.length === 0
+              ? loadedInstructors
+              : [],
+          classSections:
+            remoteAcademicSnapshot.classSections.length === 0
+              ? loadedSections
+              : [],
+          subjectAssignments:
+            remoteAcademicSnapshot.subjectAssignments.length === 0
+              ? loadedAssignments
+              : [],
+          assignmentRooms:
+            remoteAcademicSnapshot.assignmentRooms.length === 0
+              ? resolvedRoomOptions
+              : [],
+        };
+
+        if (hasAcademicSnapshotData(snapshotToSeed)) {
+          try {
+            await seedAcademicSnapshot(currentBranch, snapshotToSeed);
+          } catch (error) {
+            console.warn("Unable to seed shared academic data in Supabase.", error);
+          }
+        }
+      }
+
       setHasInitializedBranchData(true);
     };
 
@@ -4988,7 +5643,7 @@ export default function AdminEnrollees({
     updatePendingAssignments();
   }, [enrollees, sectionAssignments]);
 
-  const handleAttachmentStatusUpdate = (
+  const handleAttachmentStatusUpdate = async (
     requestId: string,
     attachmentIndex: number,
     status: Attachment["reviewStatus"],
@@ -5011,16 +5666,24 @@ export default function AdminEnrollees({
         : attachment,
     );
 
+    let savedRequest: EnrollmentRequest | null = null;
+
     if (request) {
+      try {
+        savedRequest = await saveEnrollmentRequest({
+          ...request,
+          attachments: updatedAttachments,
+          updatedAt,
+        });
+      } catch (error) {
+        console.error("Failed to save enrollment request attachment review", error);
+        addToast("Unable to update the enrollment requirement right now.", "error");
+        return;
+      }
+
       setEnrollmentRequests((prevRequests) =>
         prevRequests.map((record) =>
-          record.id === requestId
-            ? {
-                ...record,
-                attachments: updatedAttachments,
-                updatedAt,
-              }
-            : record,
+          record.id === requestId ? savedRequest || record : record,
         ),
       );
     }
@@ -5041,11 +5704,13 @@ export default function AdminEnrollees({
     if (selectedRequest?.id === requestId) {
       setSelectedRequest((prev) =>
         prev
-          ? {
-              ...prev,
-              attachments: updatedAttachments,
-              ...(request ? { updatedAt } : {}),
-            }
+          ? savedRequest && isEnrollmentRequest(prev)
+            ? savedRequest
+            : {
+                ...prev,
+                attachments: updatedAttachments,
+                ...(request ? { updatedAt } : {}),
+              }
           : null,
       );
     }
@@ -5100,11 +5765,11 @@ export default function AdminEnrollees({
       ownScheduleRequestStatus: status,
       ownScheduleAcademicYear:
         status === "Approved"
-          ? enrollee.ownScheduleAcademicYear || reflectedAcademicYear
+          ? resolveOwnScheduleAcademicYear(enrollee)
           : undefined,
       ownScheduleSemester:
         status === "Approved"
-          ? enrollee.ownScheduleSemester || reflectedSemester
+          ? resolveOwnScheduleSemester(enrollee)
           : undefined,
       ownScheduleDecisionAt: new Date().toISOString(),
     };
@@ -5284,6 +5949,7 @@ export default function AdminEnrollees({
                 currentStep: 4,
                 applicationStatus: "accepted",
                 scholarshipExamScore: resolvedScholarshipExamScore,
+                rejectionReason: "",
               });
             } catch (progressError) {
               console.warn(
@@ -5293,21 +5959,11 @@ export default function AdminEnrollees({
             }
 
             try {
-              const storedStudents = readStoredStudents();
-              const preferredStudentNumber =
-                syncedStudentNumber ||
-                storedStudents.find(
-                  (student) =>
-                    normalizeBranchName(student.branch) === currentBranch &&
-                    student.trackingNumber === enrolleeForApproval.trackingNumber,
-                )?.id ||
-                getNextStudentNumber(currentBranch, storedStudents);
               const activatedStudent = await activateApprovedStudent(
                 enrolleeForApproval.trackingNumber,
-                preferredStudentNumber,
               );
               syncedStudentNumber =
-                activatedStudent.studentNumber || preferredStudentNumber;
+                activatedStudent.studentNumber || syncedStudentNumber;
             } catch (activationError) {
               console.warn(
                 "Unable to activate the approved student in Supabase, keeping local admin state.",
@@ -5320,6 +5976,7 @@ export default function AdminEnrollees({
                 trackingNumber: enrolleeForApproval.trackingNumber,
                 currentStep: 4,
                 applicationStatus: "rejected",
+                rejectionReason,
               });
             } catch (syncError) {
               console.warn(
@@ -5344,6 +6001,7 @@ export default function AdminEnrollees({
                     resolvedAdmissionTuition?.effectiveDiscountPercentage ?? 0,
                   effectiveDiscountSource:
                     resolvedAdmissionTuition?.effectiveDiscountSource ?? "none",
+                  rejectionReason: undefined,
                 }).applicant,
               }
             : {
@@ -5376,7 +6034,52 @@ export default function AdminEnrollees({
             );
           }
 
-          if (!isApprove) {
+          if (isApprove) {
+            const applicantEmail = updatedEnrollee.personalInfo.email?.trim();
+
+            if (!updatedEnrollee.studentNumber) {
+              decisionNotificationFeedback = {
+                type: "warning",
+                message:
+                  "The approval email was skipped because no student number is available yet.",
+              };
+            } else if (!applicantEmail) {
+              decisionNotificationFeedback = {
+                type: "warning",
+                message:
+                  "The approval email was skipped because no applicant email is on file.",
+              };
+            } else {
+              try {
+                const notificationResult = await sendAdmissionDecisionNotification(
+                  {
+                    trackingNumber: updatedEnrollee.trackingNumber,
+                    email: applicantEmail,
+                    fullName: updatedEnrollee.fullName,
+                    studentNumber: updatedEnrollee.studentNumber,
+                    recordType: "admission",
+                    decisionStatus: "accepted",
+                    portalLink: buildStudentPortalLoginLink({
+                      branch: currentBranch,
+                      studentNumber: updatedEnrollee.studentNumber,
+                    }),
+                  },
+                );
+                decisionNotificationFeedback =
+                  getApprovalNotificationFeedback(notificationResult);
+              } catch (notificationError) {
+                console.warn(
+                  "Unable to send the admission approval email notification.",
+                  notificationError,
+                );
+                decisionNotificationFeedback = {
+                  type: "warning",
+                  message:
+                    "Admission approved, but the applicant email could not be sent right now.",
+                };
+              }
+            }
+          } else {
             const notificationPayload: SendAdmissionDecisionNotificationPayload =
               {
                 trackingNumber: enrolleeForApproval.trackingNumber,
@@ -5408,15 +6111,21 @@ export default function AdminEnrollees({
             }
           }
 
+          const approvedStudentNumberMessage = updatedEnrollee.studentNumber
+            ? `Student number ${updatedEnrollee.studentNumber} is now active`
+            : "The student number is still being finalized";
+
           addToast(
             isApprove
               ? updatedEnrollee.documentsSubmitted <
                 updatedEnrollee.totalDocuments
-                ? `Admission approved. Student number ${updatedEnrollee.studentNumber} is now active with ${updatedEnrollee.documentsSubmitted}/${updatedEnrollee.totalDocuments} credentials submitted.`
-                : `Admission approved successfully. Student number ${updatedEnrollee.studentNumber} is now active.`
+                ? `Admission approved. ${approvedStudentNumberMessage} with ${updatedEnrollee.documentsSubmitted}/${updatedEnrollee.totalDocuments} credentials submitted.${decisionNotificationFeedback ? ` ${decisionNotificationFeedback.message}` : ""}`
+                : `Admission approved successfully. ${approvedStudentNumberMessage}.${decisionNotificationFeedback ? ` ${decisionNotificationFeedback.message}` : ""}`
               : decisionNotificationFeedback?.message ||
                   "Admission rejected successfully.",
-            isApprove ? "success" : decisionNotificationFeedback?.type || "warning",
+            isApprove
+              ? decisionNotificationFeedback?.type || "success"
+              : decisionNotificationFeedback?.type || "warning",
           );
         } else {
           addToast("Record not found.", "error");
@@ -5468,14 +6177,15 @@ export default function AdminEnrollees({
           rejectionReason:
             selectedAction.action === "reject" ? rejectionReason : undefined,
         };
+        const savedRequest = await saveEnrollmentRequest(updatedRequest);
 
         if (selectedAction.action === "approve") {
           syncEnrollmentRequestSubjectPlan(
-            updatedRequest,
+            savedRequest,
             reviewedAt.toISOString(),
           );
           const updatedStudentRecord =
-            syncEnrollmentRequestStudentState(updatedRequest);
+            syncEnrollmentRequestStudentState(savedRequest);
 
           if (updatedStudentRecord) {
             try {
@@ -5491,7 +6201,7 @@ export default function AdminEnrollees({
 
         setEnrollmentRequests((prevRequests) =>
           prevRequests.map((req) =>
-            req.id === selectedAction.id ? updatedRequest : req,
+            req.id === selectedAction.id ? savedRequest : req,
           ),
         );
 
@@ -5519,10 +6229,10 @@ export default function AdminEnrollees({
             try {
               const notificationResult = await sendAdmissionDecisionNotification(
                 {
-                  trackingNumber: requestToUpdate.trackingNumber,
-                  studentNumber: requestToUpdate.studentNumber,
+                  trackingNumber: savedRequest.trackingNumber,
+                  studentNumber: savedRequest.studentNumber,
                   email: matchedStudent.email,
-                  fullName: requestToUpdate.fullName,
+                  fullName: savedRequest.fullName,
                   recordType: "enrollment",
                   decisionStatus: "rejected",
                   decisionReason: rejectionReason,
@@ -7186,7 +7896,7 @@ export default function AdminEnrollees({
                   <h3>Instructor Management</h3>
                   <button
                     className="action-btn add"
-                    onClick={() => setShowInstructorModal(true)}
+                    onClick={openCreateInstructorModal}
                   >
                     <FaPlus /> Add Instructor
                   </button>
@@ -7244,18 +7954,15 @@ export default function AdminEnrollees({
                         </button>
                         <button
                           className="action-btn edit"
-                          onClick={() => {
-                            setEditingInstructor(instructor);
-                            setShowInstructorModal(true);
-                          }}
+                          onClick={() => openEditInstructorModal(instructor)}
                         >
                           Edit
                         </button>
                         <button
                           className="action-btn delete"
-                          onClick={() =>
-                            addToast(`Deleted ${instructor.name}`, "success")
-                          }
+                          onClick={() => {
+                            void handleDeleteInstructor(instructor);
+                          }}
                         >
                           Delete
                         </button>
@@ -8079,10 +8786,7 @@ export default function AdminEnrollees({
                           <span>Target Academic Year</span>
                           <input
                             type="text"
-                            value={
-                              selectedRequest.ownScheduleAcademicYear ||
-                              reflectedAcademicYear
-                            }
+                            value={resolveOwnScheduleAcademicYear(selectedRequest)}
                             readOnly
                           />
                         </label>
@@ -8090,10 +8794,7 @@ export default function AdminEnrollees({
                           <span>Target Semester</span>
                           <input
                             type="text"
-                            value={
-                              selectedRequest.ownScheduleSemester ||
-                              reflectedSemester
-                            }
+                            value={resolveOwnScheduleSemester(selectedRequest)}
                             readOnly
                           />
                         </label>
@@ -9560,49 +10261,82 @@ export default function AdminEnrollees({
               </h2>
               <button
                 className="review-modal-close"
-                onClick={() => {
-                  setShowInstructorModal(false);
-                  setEditingInstructor(null);
-                }}
+                onClick={closeInstructorModal}
               >
                 ✕
               </button>
             </div>
             <div className="review-modal-body">
-              <form>
+              <form
+                id="instructor-config-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleSaveInstructor();
+                }}
+              >
                 <div className="form-group">
                   <label>Name</label>
                   <input
                     type="text"
-                    defaultValue={editingInstructor?.name || ""}
+                    value={instructorForm.name}
+                    onChange={(event) =>
+                      setInstructorForm((prev) => ({
+                        ...prev,
+                        name: event.target.value,
+                      }))
+                    }
                   />
                 </div>
                 <div className="form-group">
                   <label>Employee ID</label>
                   <input
                     type="text"
-                    defaultValue={editingInstructor?.employeeId || ""}
+                    value={instructorForm.employeeId}
+                    onChange={(event) =>
+                      setInstructorForm((prev) => ({
+                        ...prev,
+                        employeeId: event.target.value,
+                      }))
+                    }
                   />
                 </div>
                 <div className="form-group">
                   <label>Department</label>
                   <input
                     type="text"
-                    defaultValue={editingInstructor?.department || ""}
+                    value={instructorForm.department}
+                    onChange={(event) =>
+                      setInstructorForm((prev) => ({
+                        ...prev,
+                        department: event.target.value,
+                      }))
+                    }
                   />
                 </div>
                 <div className="form-group">
                   <label>Email</label>
                   <input
                     type="email"
-                    defaultValue={editingInstructor?.email || ""}
+                    value={instructorForm.email}
+                    onChange={(event) =>
+                      setInstructorForm((prev) => ({
+                        ...prev,
+                        email: event.target.value,
+                      }))
+                    }
                   />
                 </div>
                 <div className="form-group">
                   <label>Contact Number</label>
                   <input
                     type="text"
-                    defaultValue={editingInstructor?.contactNumber || ""}
+                    value={instructorForm.contactNumber}
+                    onChange={(event) =>
+                      setInstructorForm((prev) => ({
+                        ...prev,
+                        contactNumber: event.target.value,
+                      }))
+                    }
                   />
                 </div>
               </form>
@@ -9610,16 +10344,14 @@ export default function AdminEnrollees({
             <div className="review-modal-footer">
               <button
                 className="action-btn cancel"
-                onClick={() => {
-                  setShowInstructorModal(false);
-                  setEditingInstructor(null);
-                }}
+                onClick={closeInstructorModal}
               >
                 Cancel
               </button>
               <button
+                type="submit"
+                form="instructor-config-form"
                 className="action-btn approve"
-                onClick={() => addToast("Instructor saved", "success")}
               >
                 Save
               </button>
