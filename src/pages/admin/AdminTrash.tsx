@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { FaSearch, FaTrash, FaUndo } from "react-icons/fa";
+import { FiMenu, FiX } from "react-icons/fi";
 import { MdArchive } from "react-icons/md";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
@@ -10,9 +11,22 @@ import {
   normalizeBranchName,
   readBranchScopedData,
   readStoredStudents,
+  forgetDeletedStoredStudent,
+  rememberDeletedStoredStudent,
   writeBranchScopedData,
   writeStoredStudents,
 } from "../../services/adminStorage";
+import {
+  deleteAdminStudent,
+  updateAdminStudentStatus,
+} from "../../services/adminStudentsApi";
+import {
+  deleteEnrollmentRequest,
+  readEnrollmentRequestsForBranch,
+  saveEnrollmentRequest,
+  writeEnrollmentRequestsForBranch,
+  type EnrollmentRequestRecord,
+} from "../../services/enrollmentRequests";
 import "../../styles/admin/admin-trash.css";
 
 interface ArchiveProps {
@@ -54,7 +68,7 @@ interface Enrollee {
 
 interface ArchivedTrashItem {
   key: string;
-  kind: "Student" | "Enrollee";
+  kind: "Student" | "Enrollee" | "Enrollment Request";
   identifier: string;
   name: string;
   program: string;
@@ -62,6 +76,7 @@ interface ArchivedTrashItem {
   contact: string;
   student?: Student;
   enrollee?: Enrollee;
+  enrollmentRequest?: EnrollmentRequestRecord;
 }
 
 interface Toast {
@@ -91,6 +106,9 @@ export default function AdminTrash({
     () =>
       readBranchScopedData<Enrollee[]>("enrollees", currentBranch) ?? [],
   );
+  const [enrollmentRequests, setEnrollmentRequests] = useState<
+    EnrollmentRequestRecord[]
+  >(() => readEnrollmentRequestsForBranch(currentBranch));
   const [searchTerm, setSearchTerm] = useState("");
   const [recordTypeFilter, setRecordTypeFilter] = useState<
     "All Records" | ArchivedTrashItem["kind"]
@@ -131,6 +149,7 @@ export default function AdminTrash({
       setEnrollees(
         readBranchScopedData<Enrollee[]>("enrollees", currentBranch) ?? [],
       );
+      setEnrollmentRequests(readEnrollmentRequestsForBranch(currentBranch));
     } catch (error) {
       console.error("Failed to load archived records", error);
       addToast("Unable to load Archive records for this branch.", "error");
@@ -138,6 +157,7 @@ export default function AdminTrash({
       setEnrollees(
         readBranchScopedData<Enrollee[]>("enrollees", currentBranch) ?? [],
       );
+      setEnrollmentRequests(readEnrollmentRequestsForBranch(currentBranch));
     } finally {
       setIsLoading(false);
     }
@@ -159,6 +179,9 @@ export default function AdminTrash({
     (student) => student.status === "Archived",
   );
   const archivedEnrollees = enrollees.filter((enrollee) => enrollee.archivedAt);
+  const archivedEnrollmentRequests = enrollmentRequests.filter(
+    (request) => request.archivedAt,
+  );
 
   const archivedRecords = useMemo<ArchivedTrashItem[]>(() => {
     const studentRecords = archivedStudents.map((student) => ({
@@ -183,8 +206,20 @@ export default function AdminTrash({
       enrollee,
     }));
 
-    return [...studentRecords, ...enrolleeRecords];
-  }, [archivedEnrollees, archivedStudents]);
+    const enrollmentRequestRecords = archivedEnrollmentRequests.map((request) => ({
+      key: `enrollment-request-${request.id}`,
+      kind: "Enrollment Request" as const,
+      identifier:
+        request.studentNumber || request.trackingNumber || request.id,
+      name: request.fullName,
+      program: request.program,
+      yearLevel: request.requestedYearLevel,
+      contact: "",
+      enrollmentRequest: request,
+    }));
+
+    return [...studentRecords, ...enrolleeRecords, ...enrollmentRequestRecords];
+  }, [archivedEnrollees, archivedEnrollmentRequests, archivedStudents]);
 
   const availablePrograms = useMemo(
     () =>
@@ -278,6 +313,18 @@ export default function AdminTrash({
     error instanceof Error &&
     /tracking number\s+".*?"\s+was not found/i.test(error.message);
 
+  const isMissingSupabaseStudentError = (error: unknown) =>
+    error instanceof Error &&
+    /student number\s+".*?"\s+was not found|function public\.delete_admin_student/i.test(
+      error.message,
+    );
+
+  const isMissingSupabaseEnrollmentRequestDeleteError = (error: unknown) =>
+    error instanceof Error &&
+    /enrollment request\s+".*?"\s+was not found|function public\.delete_enrollment_request/i.test(
+      error.message,
+    );
+
   const resolveStudentLink = (student: Student) => {
     const linkedEnrollee =
       enrollees.find(
@@ -353,13 +400,40 @@ export default function AdminTrash({
     const { trackingNumber, studentNumber } = resolveStudentLink(student);
     const warnings: string[] = [];
 
+    rememberDeletedStoredStudent({
+      branch: student.branch || currentBranch,
+      id: studentNumber || student.id,
+      trackingNumber,
+      name: student.name,
+    });
+
     if (trackingNumber) {
       try {
         await deleteAdmissionApplication(trackingNumber);
       } catch (error) {
         if (!isMissingSupabaseAdmissionError(error)) {
-          throw error;
+          warnings.push(
+            error instanceof Error
+              ? error.message
+              : "Linked admission record could not be deleted.",
+          );
         }
+      }
+    }
+
+    try {
+      await deleteAdminStudent({
+        branch: student.branch || currentBranch,
+        studentNumber: studentNumber || student.id,
+        trackingNumber,
+      });
+    } catch (error) {
+      if (!isMissingSupabaseStudentError(error)) {
+        warnings.push(
+          error instanceof Error
+            ? error.message
+            : "Shared student record could not be deleted.",
+        );
       }
     }
 
@@ -394,12 +468,43 @@ export default function AdminTrash({
   };
 
   const deleteEnrolleeRecord = async (enrollee: Enrollee) => {
+    const warnings: string[] = [];
+
+    if (enrollee.studentNumber) {
+      rememberDeletedStoredStudent({
+        branch: enrollee.branch || currentBranch,
+        id: enrollee.studentNumber,
+        trackingNumber: enrollee.trackingNumber,
+        name: enrollee.fullName,
+      });
+
+      try {
+        await deleteAdminStudent({
+          branch: enrollee.branch || currentBranch,
+          studentNumber: enrollee.studentNumber,
+          trackingNumber: enrollee.trackingNumber,
+        });
+      } catch (error) {
+        if (!isMissingSupabaseStudentError(error)) {
+          warnings.push(
+            error instanceof Error
+              ? error.message
+              : "Shared student record could not be deleted.",
+          );
+        }
+      }
+    }
+
     if (enrollee.trackingNumber) {
       try {
         await deleteAdmissionApplication(enrollee.trackingNumber);
       } catch (error) {
         if (!isMissingSupabaseAdmissionError(error)) {
-          throw error;
+          warnings.push(
+            error instanceof Error
+              ? error.message
+              : "Linked admission record could not be deleted.",
+          );
         }
       }
     }
@@ -410,7 +515,33 @@ export default function AdminTrash({
       studentNumber: enrollee.studentNumber,
     });
 
-    return { warnings: [] as string[] };
+    return { warnings };
+  };
+
+  const deleteEnrollmentRequestRecord = async (
+    enrollmentRequest: EnrollmentRequestRecord,
+  ) => {
+    const warnings: string[] = [];
+
+    try {
+      await deleteEnrollmentRequest(enrollmentRequest);
+    } catch (error) {
+      if (!isMissingSupabaseEnrollmentRequestDeleteError(error)) {
+        warnings.push(
+          error instanceof Error
+            ? error.message
+            : "Shared enrollment request could not be deleted.",
+        );
+      }
+    }
+
+    const nextRequests = readEnrollmentRequestsForBranch(currentBranch).filter(
+      (request) => request.id !== enrollmentRequest.id,
+    );
+    setEnrollmentRequests(nextRequests);
+    writeEnrollmentRequestsForBranch(currentBranch, nextRequests);
+
+    return { warnings };
   };
 
   const deleteArchivedRecord = async (record: ArchivedTrashItem) => {
@@ -422,11 +553,21 @@ export default function AdminTrash({
       return deleteEnrolleeRecord(record.enrollee);
     }
 
+    if (record.enrollmentRequest) {
+      return deleteEnrollmentRequestRecord(record.enrollmentRequest);
+    }
+
     return { warnings: [] as string[] };
   };
 
   const handleRestoreStudent = async (student: Student) => {
     const restoreStudentLocally = () => {
+      forgetDeletedStoredStudent({
+        branch: student.branch || currentBranch,
+        id: student.id,
+        trackingNumber: student.trackingNumber,
+        name: student.name,
+      });
       setStudents((prev) =>
         prev.map((record) =>
           record.id === student.id
@@ -436,24 +577,33 @@ export default function AdminTrash({
       );
     };
 
-    if (!student.recordId) {
-      restoreStudentLocally();
-      addToast(`${student.name} has been restored successfully.`, "success");
-      return;
-    }
-
     try {
-      const response = await fetch(`${STUDENTS_API_URL}${student.recordId}/`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: "Incomplete" }),
+      try {
+        await updateAdminStudentStatus({
+          branch: student.branch || currentBranch,
+          studentNumber: student.id,
+          status: "Incomplete",
+        });
+      } catch (error) {
+        console.warn(
+          "Unable to sync restored student status to Supabase. Restoring locally.",
+          error,
+        );
+      }
+
+      if (student.recordId) {
+        const response = await fetch(`${STUDENTS_API_URL}${student.recordId}/`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ status: "Incomplete" }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData?.detail || "Failed to restore student.");
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData?.detail || "Failed to restore student.");
+        }
       }
 
       restoreStudentLocally();
@@ -511,6 +661,36 @@ export default function AdminTrash({
     addToast(`${enrollee.fullName} has been restored successfully.`, "success");
   };
 
+  const handleRestoreEnrollmentRequest = async (
+    enrollmentRequest: EnrollmentRequestRecord,
+  ) => {
+    const restoredRequest: EnrollmentRequestRecord = {
+      ...enrollmentRequest,
+      archivedAt: undefined,
+      archivedByRole: undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      const savedRequest = await saveEnrollmentRequest(restoredRequest);
+
+      setEnrollmentRequests((prev) =>
+        prev.map((request) =>
+          request.id === enrollmentRequest.id ? savedRequest : request,
+        ),
+      );
+      addToast("Enrollment request has been restored successfully.", "success");
+    } catch (error) {
+      console.error("Failed to restore enrollment request", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to restore enrollment request.",
+        "error",
+      );
+    }
+  };
+
   const handleDeleteEnrollee = (enrollee: Enrollee) => {
     void (async () => {
       const confirmed = window.confirm(
@@ -524,10 +704,12 @@ export default function AdminTrash({
       setIsProcessingTrash(true);
 
       try {
-        await deleteEnrolleeRecord(enrollee);
+        const result = await deleteEnrolleeRecord(enrollee);
         addToast(
-          `${enrollee.fullName} has been permanently deleted.`,
-          "success",
+          result.warnings.length > 0
+            ? `${enrollee.fullName} was deleted from Archive, but the linked shared student still needs cleanup.`
+            : `${enrollee.fullName} has been permanently deleted.`,
+          result.warnings.length > 0 ? "warning" : "success",
         );
       } catch (error) {
         console.error("Failed to delete enrollee", error);
@@ -535,6 +717,42 @@ export default function AdminTrash({
           error instanceof Error
             ? error.message
             : "Unable to delete enrollee.",
+          "error",
+        );
+      } finally {
+        setIsProcessingTrash(false);
+      }
+    })();
+  };
+
+  const handleDeleteEnrollmentRequest = (
+    enrollmentRequest: EnrollmentRequestRecord,
+  ) => {
+    void (async () => {
+      const confirmed = window.confirm(
+        `Delete enrollment request for ${enrollmentRequest.fullName} permanently? This action cannot be undone.`,
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      setIsProcessingTrash(true);
+
+      try {
+        const result = await deleteEnrollmentRequestRecord(enrollmentRequest);
+        addToast(
+          result.warnings.length > 0
+            ? "Enrollment request was deleted from Archive, but the shared request still needs cleanup."
+            : "Enrollment request has been permanently deleted.",
+          result.warnings.length > 0 ? "warning" : "success",
+        );
+      } catch (error) {
+        console.error("Failed to delete enrollment request", error);
+        addToast(
+          error instanceof Error
+            ? error.message
+            : "Unable to delete enrollment request.",
           "error",
         );
       } finally {
@@ -608,6 +826,11 @@ export default function AdminTrash({
 
     if (record.enrollee) {
       handleRestoreEnrollee(record.enrollee);
+      return;
+    }
+
+    if (record.enrollmentRequest) {
+      void handleRestoreEnrollmentRequest(record.enrollmentRequest);
     }
   };
 
@@ -619,6 +842,11 @@ export default function AdminTrash({
 
     if (record.enrollee) {
       handleDeleteEnrollee(record.enrollee);
+      return;
+    }
+
+    if (record.enrollmentRequest) {
+      handleDeleteEnrollmentRequest(record.enrollmentRequest);
     }
   };
 
@@ -641,7 +869,7 @@ export default function AdminTrash({
         aria-label={isSidebarOpen ? "Close menu" : "Open menu"}
         type="button"
       >
-        {isSidebarOpen ? "X" : "|||"}
+        {isSidebarOpen ? <FiX /> : <FiMenu />}
       </button>
 
       <main className="archive-content">
@@ -653,7 +881,7 @@ export default function AdminTrash({
           <p>
             {isLoading
               ? "Loading archived records..."
-              : "Archived students and enrollees for this branch appear here."}
+              : "Archived students, enrollees, and enrollment requests for this branch appear here."}
           </p>
         </header>
 
@@ -685,6 +913,7 @@ export default function AdminTrash({
             <option>All Records</option>
             <option>Student</option>
             <option>Enrollee</option>
+            <option>Enrollment Request</option>
           </select>
 
           <select
@@ -800,7 +1029,7 @@ export default function AdminTrash({
                       ? "Loading archived records..."
                       : archivedRecords.length > 0
                         ? "No archived records match the selected filters."
-                        : "No archived students or enrollees yet."}
+                        : "No archived records yet."}
                   </td>
                 </tr>
               )}

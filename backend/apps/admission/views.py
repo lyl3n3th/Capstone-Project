@@ -16,6 +16,7 @@ from .tracking_recovery import (
     build_decision_notification_target,
     build_tracking_notification_target,
     deliver_admission_decision_notification,
+    deliver_requirement_redo_notification,
     deliver_submission_tracking_notification,
     deliver_tracking_recovery,
     find_matching_admission_applications,
@@ -130,6 +131,48 @@ def validate_submission_notification_payload(payload):
         )
         or "submitted",
     }
+
+    if cleaned["email"]:
+        try:
+            validate_email(cleaned["email"])
+        except Exception:
+            errors.setdefault("email", []).append("Enter a valid email address.")
+
+    normalized_mobile = normalize_phone_number(cleaned["mobile"])
+    if cleaned["mobile"] and len(normalized_mobile) < 10:
+        errors.setdefault("mobile", []).append("Enter a valid mobile number.")
+    cleaned["mobile"] = normalized_mobile
+
+    return cleaned, errors
+
+
+def validate_requirement_redo_notification_payload(payload):
+    tracking_number, errors = validate_tracking_number_payload(payload)
+    cleaned = {
+        "tracking_number": tracking_number,
+        "requirement_name": normalize_text(
+            payload.get("requirement_name", payload.get("requirementName", ""))
+        )
+        or "",
+        "email": normalize_text(payload.get("email", "")) or "",
+        "mobile": normalize_text(
+            payload.get("mobile", payload.get("phone_number", payload.get("phoneNumber", "")))
+        )
+        or "",
+        "first_name": normalize_text(
+            payload.get("first_name", payload.get("firstName", ""))
+        )
+        or "",
+        "last_name": normalize_text(
+            payload.get("last_name", payload.get("lastName", ""))
+        )
+        or "",
+    }
+
+    if not cleaned["requirement_name"]:
+        errors.setdefault("requirement_name", []).append(
+            "Requirement name is required."
+        )
 
     if cleaned["email"]:
         try:
@@ -452,6 +495,65 @@ class AdmissionSubmissionNotificationView(APIView):
             "Tracking number confirmation sent to the registered contact details."
             if any_delivery_sent
             else "Tracking number confirmation prepared, but messaging is not configured."
+        )
+
+        return Response(
+            {
+                "message": message,
+                "tracking_number": notification_target.tracking_number,
+                "deliveries": deliveries,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class AdmissionRequirementRedoNotificationView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser]
+
+    def post(self, request):
+        cleaned, errors = validate_requirement_redo_notification_payload(request.data)
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        notification_target = None
+
+        if cleaned["email"] or cleaned["mobile"]:
+            notification_target = build_tracking_notification_target(
+                tracking_number=cleaned["tracking_number"],
+                email=cleaned["email"],
+                phone_number=cleaned["mobile"],
+                first_name=cleaned["first_name"],
+                last_name=cleaned["last_name"],
+                application_status="draft",
+            )
+        else:
+            try:
+                notification_target = find_tracking_notification_target(
+                    cleaned["tracking_number"],
+                )
+            except (ImproperlyConfigured, SupabaseRestError) as exc:
+                return Response(
+                    {"detail": str(exc)},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+        if not notification_target:
+            return Response(
+                {"detail": "No admission record matched this tracking number."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        deliveries = deliver_requirement_redo_notification(
+            notification_target,
+            requirement_name=cleaned["requirement_name"],
+        )
+        email_sent = deliveries["email"].get("status") == "sent"
+        message = (
+            "Credential reupload email sent to the applicant."
+            if email_sent
+            else "Credential reupload email prepared, but delivery is not configured."
         )
 
         return Response(

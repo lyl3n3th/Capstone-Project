@@ -6,6 +6,7 @@ import { IoDocumentText } from "react-icons/io5";
 import { MdFileUpload, MdRefresh } from "react-icons/md";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
+import StudentLoadingShell from "../../components/common/StudentLoadingShell";
 import { useStudent } from "../../hooks/useStudent";
 import {
   getStudentCredentialOverview,
@@ -17,6 +18,11 @@ import {
   getEffectiveAdmissionDiscountPercentage,
   uploadAdmissionRequirementFile,
 } from "../../services/admission";
+import {
+  buildStudentBalanceSummary,
+  getStudentPayments,
+  STUDENT_PAYMENTS_UPDATED_EVENT,
+} from "../../services/studentPayments";
 import "../../styles/main.css";
 import { ToastContainer } from "../../components/common/Toast";
 
@@ -80,6 +86,7 @@ function StudentHome() {
   const [selectingCredentialCode, setSelectingCredentialCode] = useState<
     string | null
   >(null);
+  const [paymentRecordsVersion, setPaymentRecordsVersion] = useState(0);
 
   const handleMenuClick = () => {
     setSidebarOpen(!sidebarOpen);
@@ -264,6 +271,24 @@ function StudentHome() {
     };
   }, [sidebarOpen]);
 
+  useEffect(() => {
+    const handleStudentPaymentsUpdated = () => {
+      setPaymentRecordsVersion((previousValue) => previousValue + 1);
+    };
+
+    window.addEventListener(
+      STUDENT_PAYMENTS_UPDATED_EVENT,
+      handleStudentPaymentsUpdated,
+    );
+
+    return () => {
+      window.removeEventListener(
+        STUDENT_PAYMENTS_UPDATED_EVENT,
+        handleStudentPaymentsUpdated,
+      );
+    };
+  }, []);
+
   const handleLogout = () => {
     console.log("Logging out...");
     addToast("Logging out...", "info");
@@ -309,6 +334,13 @@ function StudentHome() {
         trackingNumber: student.trackingNumber,
       })
     : null;
+  const honorCertificateApproved = Boolean(
+    credentialOverview?.items.some(
+      (item) =>
+        item.name.trim().toLowerCase() === "honor certificate" &&
+        item.reviewStatus === "Approved",
+      ),
+  );
   const totalUnits = currentTermSubjects.reduce(
     (sum, subject) => sum + (subject.units || 0),
     0,
@@ -321,8 +353,11 @@ function StudentHome() {
   });
   const effectiveDiscountPercentage = getEffectiveAdmissionDiscountPercentage({
     honorLabel: credentialOverview?.applicantRecord.honorLabel || "No Honor",
+    honorCertificateApproved,
     appliedForScholarship: Boolean(
-      credentialOverview?.applicantRecord.appliedForScholarship,
+      credentialOverview?.applicantRecord.appliedForScholarship ||
+        typeof credentialOverview?.applicantRecord.scholarshipExamScore ===
+          "number",
     ),
     scholarshipExamScore:
       credentialOverview?.applicantRecord.scholarshipExamScore ?? null,
@@ -330,8 +365,11 @@ function StudentHome() {
   const effectiveDiscountSourceLabel = getAdmissionDiscountSourceLabel(
     getAdmissionDiscountSource({
       honorLabel: credentialOverview?.applicantRecord.honorLabel || "No Honor",
+      honorCertificateApproved,
       appliedForScholarship: Boolean(
-        credentialOverview?.applicantRecord.appliedForScholarship,
+        credentialOverview?.applicantRecord.appliedForScholarship ||
+          typeof credentialOverview?.applicantRecord.scholarshipExamScore ===
+            "number",
       ),
       scholarshipExamScore:
         credentialOverview?.applicantRecord.scholarshipExamScore ?? null,
@@ -342,6 +380,20 @@ function StudentHome() {
     effectiveDiscountPercentage > 0
       ? estimatedBalance * (1 - effectiveDiscountPercentage / 100)
       : estimatedBalance;
+  const studentTuitionAssessment =
+    student?.programType !== "SHS" && totalUnits > 0 ? discountedBalance : 0;
+  const studentPayments = student
+    ? getStudentPayments({
+        branch: student.branch,
+        studentNumber: student.studentNumber,
+        trackingNumber: student.trackingNumber,
+      })
+    : [];
+  void paymentRecordsVersion;
+  const studentBalanceSummary = buildStudentBalanceSummary({
+    totalAssessment: studentTuitionAssessment,
+    payments: studentPayments,
+  });
 
   const getStatusClass = (status: string) => {
     switch (status) {
@@ -373,9 +425,18 @@ function StudentHome() {
 
   if (isLoading) {
     return (
-      <div className="s-portal">
-        <div style={{ minHeight: "100vh" }}></div>
-      </div>
+      <StudentLoadingShell
+        activePage="home"
+        currentDate={currentDate}
+        headerTitle="Dashboard"
+        onLogout={handleLogout}
+        onMenuClick={handleMenuClick}
+        onSidebarClose={handleSidebarClose}
+        skeletonTitle="Home"
+        studentData={studentData}
+        variant="dashboard"
+        sidebarOpen={sidebarOpen}
+      />
     );
   }
 
@@ -440,7 +501,7 @@ function StudentHome() {
                   <h3>Credential Status</h3>
                 </div>
                 <div className="s-card-value">
-                  {credentialSummary?.overallStatus || student?.status || "Regular"}
+                  {credentialSummary?.overallStatus || "Pending Documents"}
                 </div>
               </div>
             </div>
@@ -456,7 +517,7 @@ function StudentHome() {
               </div>
               <div className="s-card-value1">Student Number:</div>
               <div className="s-card-label1">
-                {student?.studentNumber || "BAC-261001"}
+                {student?.studentNumber || ""}
               </div>
               <div className="s-card-value1">Section:</div>
               <div className="s-card-label1">{student?.section || "TBA"}</div>
@@ -472,8 +533,9 @@ function StudentHome() {
               </div>
               <div className="s-balance-content">
                 <div className="s-balance-amount">
-                  {student?.programType !== "SHS" && totalUnits > 0
-                    ? balanceFormatter.format(discountedBalance)
+                  {student?.programType !== "SHS" &&
+                  studentBalanceSummary.totalAssessment > 0
+                    ? balanceFormatter.format(studentBalanceSummary.currentBalance)
                     : "Pending Assessment"}
                 </div>
                 <p>
@@ -483,6 +545,10 @@ function StudentHome() {
                 </p>
                 {student?.programType !== "SHS" ? (
                   <>
+                    <p>
+                      {balanceFormatter.format(studentBalanceSummary.totalPaid)} paid
+                      of {balanceFormatter.format(studentBalanceSummary.totalAssessment)}
+                    </p>
                     <p>
                       {totalUnits} unit(s) at{" "}
                       {balanceFormatter.format(tuitionPerUnit)} per unit

@@ -16,8 +16,11 @@ import {
 } from "./auth-context";
 import {
   loginStudentPortal,
+  loginStudentPortalWithEmail,
   mapStudentIdentityToAuthUser,
+  startStudentGoogleLogin,
 } from "../services/auth";
+import { supabase } from "../lib/supabase";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -38,6 +41,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextSession));
   }, []);
 
+  const createStudentSessionFromEmail = useCallback(
+    async (email: string) => {
+      const identity = await loginStudentPortalWithEmail({ email });
+      const user: AuthUser = mapStudentIdentityToAuthUser(identity);
+      const nextSession: AuthSession = {
+        user,
+        authenticatedAt: new Date().toISOString(),
+      };
+
+      persistSession(nextSession);
+      return user;
+    },
+    [persistSession],
+  );
+
   useEffect(() => {
     if (typeof window === "undefined") {
       setIsReady(true);
@@ -47,7 +65,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const storedSession = localStorage.getItem(AUTH_STORAGE_KEY);
 
     if (!storedSession) {
-      setIsReady(true);
+      void supabase.auth
+        .getSession()
+        .then(async ({ data }) => {
+          const email = data.session?.user.email;
+
+          if (!email) {
+            return;
+          }
+
+          await createStudentSessionFromEmail(email);
+          await supabase.auth.signOut();
+        })
+        .catch(async (error) => {
+          console.error("Failed to restore Google student session", error);
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          sessionStorage.setItem(
+            "student-google-login-error",
+            error instanceof Error
+              ? error.message
+              : "Unable to sign in with that Google account.",
+          );
+          await supabase.auth.signOut();
+        })
+        .finally(() => setIsReady(true));
       return;
     }
 
@@ -60,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsReady(true);
     }
-  }, []);
+  }, [createStudentSessionFromEmail]);
 
   const loginStudent = useCallback(
     async ({ studentNumber, password }: StudentLoginPayload) => {
@@ -80,13 +121,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [persistSession],
   );
 
+  const loginStudentWithEmail = useCallback(
+    async ({ email }: { email: string }) => {
+      return createStudentSessionFromEmail(email);
+    },
+    [createStudentSessionFromEmail],
+  );
+
+  const loginStudentWithGoogle = useCallback(
+    async () => {
+      await startStudentGoogleLogin();
+    },
+    [],
+  );
+
   const loginStaff = useCallback(
-    async ({ branch, fullName, employeeId, role }: StaffLoginPayload) => {
+    async ({ id, branch, fullName, employeeId, role }: StaffLoginPayload) => {
       const normalizedFullName = fullName.trim();
       const displayName = normalizedFullName || STAFF_ROLE_LABELS[role];
       const normalizedEmployeeId = employeeId.trim().toUpperCase();
       const user: AuthUser = {
-        id: normalizedEmployeeId || `${role}-${normalizedFullName.toLowerCase()}`,
+        id:
+          id?.trim() ||
+          normalizedEmployeeId ||
+          `${role}-${normalizedFullName.toLowerCase()}`,
         role,
         displayName,
         branch: branch.trim(),
@@ -129,6 +187,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     persistSession(null);
   }, [persistSession]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !isReady) {
+      return;
+    }
+
+    const logoutStaffWhenOffline = () => {
+      setSession((currentSession) => {
+        if (
+          currentSession?.user &&
+          currentSession.user.role !== "student" &&
+          !window.navigator.onLine
+        ) {
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          return null;
+        }
+
+        return currentSession;
+      });
+    };
+
+    logoutStaffWhenOffline();
+    window.addEventListener("offline", logoutStaffWhenOffline);
+
+    return () => {
+      window.removeEventListener("offline", logoutStaffWhenOffline);
+    };
+  }, [isReady]);
+
   const hasAnyRole = useCallback(
     (roles: AppRole[]) => {
       if (!session?.user) {
@@ -155,6 +241,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated: Boolean(session?.user),
       isReady,
       loginStudent,
+      loginStudentWithEmail,
+      loginStudentWithGoogle,
       loginStaff,
       updateCurrentUser,
       logout,
@@ -167,6 +255,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isReady,
       loginStaff,
       loginStudent,
+      loginStudentWithEmail,
+      loginStudentWithGoogle,
       logout,
       updateCurrentUser,
       session,

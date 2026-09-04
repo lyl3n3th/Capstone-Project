@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700;800&display=swap");
+
 /* ===== MAIN CSS ===== */
 @import "./components/progress.css";
 @import "./components/dropdown.css";
@@ -53,6 +55,261 @@ body {
 
 body {
   overflow-x: hidden;
+  font-family: "Open Sans", Arial, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: "Open Sans", Arial, sans-serif;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skeleton-page {
+  width: 100%;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.skeleton-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.skeleton-line,
+.skeleton-pill,
+.skeleton-icon,
+.skeleton-chart {
+  display: block;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, #e8edf5 25%, #f5f8fc 37%, #e8edf5 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.25s ease-in-out infinite;
+}
+
+.skeleton-line {
+  width: 100%;
+  height: 14px;
+  max-width: 100%;
+}
+
+.skeleton-line.eyebrow {
+  width: 140px;
+  height: 12px;
+  margin-bottom: 10px;
+}
+
+.skeleton-line.title {
+  width: min(280px, 70vw);
+  height: 34px;
+}
+
+.skeleton-line.short {
+  width: 34%;
+}
+
+.skeleton-line.medium {
+  width: 58%;
+}
+
+.skeleton-line.long {
+  width: 82%;
+}
+
+.skeleton-pill {
+  width: 100px;
+  height: 24px;
+  flex: 0 0 auto;
+}
+
+.skeleton-grid {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.skeleton-grid-three {
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+}
+
+.skeleton-grid-two {
+  grid-template-columns: minmax(0, 1.2fr) minmax(min(280px, 100%), 0.8fr);
+}
+
+.skeleton-card,
+.skeleton-panel-large,
+.skeleton-table-card,
+.skeleton-filter-row,
+.skeleton-action-row,
+.skeleton-form-card {
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.skeleton-card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.skeleton-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+}
+
+.skeleton-panel-large {
+  display: grid;
+  gap: 16px;
+  min-height: 240px;
+  padding: 18px;
+}
+
+.skeleton-chart {
+  width: min(220px, 60%);
+  aspect-ratio: 1;
+  justify-self: center;
+  align-self: center;
+  border-radius: 50%;
+}
+
+.skeleton-filter-row,
+.skeleton-action-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 12px;
+  padding: 16px;
+}
+
+.skeleton-action-row {
+  width: min(100%, 420px);
+  grid-template-columns: repeat(2, minmax(min(160px, 100%), 1fr));
+}
+
+.skeleton-table-card {
+  overflow: hidden;
+}
+
+.skeleton-table-header,
+.skeleton-table-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 0.8fr) minmax(120px, 1.6fr) minmax(70px, 0.8fr);
+  gap: 18px;
+  padding: 15px 18px;
+  border-bottom: 1px solid #e7edf5;
+  min-width: 0;
+}
+
+.skeleton-table-header {
+  background: #f7f9fc;
+}
+
+.skeleton-table-row:last-child {
+  border-bottom: 0;
+}
+
+.skeleton-form-card {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 18px;
+  padding: 20px;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}
+
+@media (max-width: 860px) {
+  .skeleton-page-header {
+    display: grid;
+    align-items: start;
+  }
+
+  .skeleton-grid-two,
+  .skeleton-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .skeleton-action-row {
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .skeleton-page {
+    gap: 12px;
+  }
+
+  .skeleton-page-header {
+    gap: 12px;
+  }
+
+  .skeleton-line.title {
+    height: 28px;
+    width: 100%;
+  }
+
+  .skeleton-pill {
+    width: 72px;
+    height: 20px;
+  }
+
+  .skeleton-card,
+  .skeleton-panel-large,
+  .skeleton-filter-row,
+  .skeleton-action-row,
+  .skeleton-form-card {
+    padding: 14px;
+  }
+
+  .skeleton-panel-large {
+    min-height: 180px;
+  }
+
+  .skeleton-chart {
+    width: min(160px, 70%);
+  }
+
+  .skeleton-table-header,
+  .skeleton-table-row {
+    grid-template-columns: 0.8fr 1.2fr;
+    gap: 12px;
+    padding: 13px 14px;
+  }
+
+  .skeleton-table-header .skeleton-line:nth-child(3),
+  .skeleton-table-row .skeleton-line:nth-child(3) {
+    display: none;
+  }
 }
 
 #root {
@@ -65,14 +322,68 @@ body {
 .admission-req-container,
 .confirmation-page-wrapper,
 .entrance-exam-page {
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    "Helvetica Neue",
-    sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
+}
+
+.admission-step1-page .progress-component,
+.admission-step2-page .progress-component,
+.admission-step3-page .progress-component,
+.confirmation-page-wrapper .progress-component,
+.entrance-exam-page .progress-component {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+@media (max-width: 420px) {
+  .admission-step1-page .steps,
+  .admission-step2-page .steps,
+  .admission-step3-page .steps,
+  .confirmation-page-wrapper .steps,
+  .entrance-exam-page .steps {
+    padding: 0 6px;
+  }
+
+  .admission-step1-page .steps .circle,
+  .admission-step2-page .steps .circle,
+  .admission-step3-page .steps .circle,
+  .confirmation-page-wrapper .steps .circle,
+  .entrance-exam-page .steps .circle {
+    width: 34px;
+    height: 34px;
+    border-width: 3px;
+    font-size: 13px;
+  }
+
+  .admission-step1-page .steps .progress-bar,
+  .admission-step2-page .steps .progress-bar,
+  .admission-step3-page .steps .progress-bar,
+  .confirmation-page-wrapper .steps .progress-bar,
+  .entrance-exam-page .steps .progress-bar {
+    top: 17px;
+    left: 24px;
+    width: calc(100% - 48px);
+  }
+
+  .admission-step1-page .steps .step p,
+  .admission-step2-page .steps .step p,
+  .admission-step3-page .steps .step p,
+  .confirmation-page-wrapper .steps .step p,
+  .entrance-exam-page .steps .step p {
+    max-width: 54px;
+    font-size: 8px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 340px) {
+  .admission-step1-page .steps .step p,
+  .admission-step2-page .steps .step p,
+  .admission-step3-page .steps .step p,
+  .confirmation-page-wrapper .steps .step p,
+  .entrance-exam-page .steps .step p {
+    display: none;
+  }
 }
 
 /* Toast Animation */

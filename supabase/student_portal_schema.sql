@@ -141,6 +141,25 @@ create index if not exists student_contact_details_email_idx
 create index if not exists student_contact_details_phone_idx
   on public.student_contact_details (phone_number);
 
+create or replace function public.sync_student_contact_email_to_admission()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.admission_applications app
+  set email = new.email,
+      updated_at = timezone('utc', now())
+  from public.student_profiles student
+  where student.id = new.student_id
+    and app.id = student.admission_application_id
+    and lower(trim(app.email::text)) <> lower(trim(new.email::text));
+
+  return new;
+end;
+$$;
+
 drop trigger if exists student_profiles_set_updated_at on public.student_profiles;
 create trigger student_profiles_set_updated_at
 before update on public.student_profiles
@@ -152,6 +171,13 @@ create trigger student_contact_details_set_updated_at
 before update on public.student_contact_details
 for each row
 execute function public.set_updated_at();
+
+drop trigger if exists student_contact_details_sync_email_to_admission
+  on public.student_contact_details;
+create trigger student_contact_details_sync_email_to_admission
+after insert or update of email on public.student_contact_details
+for each row
+execute function public.sync_student_contact_email_to_admission();
 
 drop trigger if exists student_portal_accounts_set_updated_at on public.student_portal_accounts;
 create trigger student_portal_accounts_set_updated_at
@@ -622,6 +648,7 @@ drop function if exists public.register_student_portal_account(
 );
 drop function if exists public.student_portal_login(text, text, text);
 drop function if exists public.student_portal_login(text, text);
+drop function if exists public.student_portal_email_login(text);
 drop function if exists public.activate_approved_student(text);
 drop function if exists public.activate_approved_student(text, text);
 
@@ -1052,6 +1079,121 @@ begin
   if not found then
     raise exception 'Invalid student number or password.';
   end if;
+
+  return query
+  select *
+  from public.get_student_portal_snapshot(v_student_id);
+end;
+$$;
+
+create or replace function public.student_portal_email_login(
+  p_email text
+)
+returns table (
+  student_id uuid,
+  student_number text,
+  tracking_number text,
+  branch text,
+  full_name text,
+  first_name text,
+  last_name text,
+  middle_name text,
+  program_name text,
+  track_name text,
+  year_level text,
+  section text,
+  email text,
+  phone_number text,
+  address text,
+  birth_date date,
+  sex text,
+  civil_status text,
+  portal_account_registered boolean
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  v_email text;
+  v_tracking_number text;
+  v_application_id uuid;
+  v_existing_student_id uuid;
+  v_student_id uuid;
+begin
+  v_email := lower(trim(coalesce(p_email, '')));
+
+  if v_email = '' then
+    raise exception 'Student email is required.';
+  end if;
+
+  select student.id
+  into v_student_id
+  from public.student_profiles student
+  join public.student_contact_details contact
+    on contact.student_id = student.id
+  where lower(trim(contact.email::text)) = v_email
+    and student.status = 'active'
+  order by student.approved_at desc nulls last, student.created_at desc
+  limit 1;
+
+  if v_student_id is not null then
+    update public.student_portal_accounts account
+    set last_login_at = timezone('utc', now())
+    where account.student_id = v_student_id
+      and account.status = 'active';
+
+    return query
+    select *
+    from public.get_student_portal_snapshot(v_student_id);
+
+    return;
+  end if;
+
+  select app.id, app.tracking_number
+  into v_application_id, v_tracking_number
+  from public.admission_applications app
+  where lower(trim(app.email::text)) = v_email
+    and app.application_status = 'accepted'
+  order by app.submitted_at desc nulls last, app.created_at desc
+  limit 1;
+
+  if v_application_id is null then
+    raise exception 'No active student record matched this email address.';
+  end if;
+
+  select student.id
+  into v_existing_student_id
+  from public.student_profiles student
+  where student.admission_application_id = v_application_id
+  limit 1;
+
+  if v_existing_student_id is not null then
+    raise exception 'No active student record matched this email address.';
+  end if;
+
+  perform 1
+  from public.activate_approved_student(v_tracking_number);
+
+  select student.id
+  into v_student_id
+  from public.student_profiles student
+  join public.student_contact_details contact
+    on contact.student_id = student.id
+  where lower(trim(contact.email::text)) = v_email
+    and student.status = 'active'
+    and student.admission_application_id = v_application_id
+  limit 1;
+
+  if v_student_id is null then
+    raise exception 'Unable to activate the accepted admission record for this email.';
+  end if;
+
+  update public.student_portal_accounts account
+  set last_login_at = timezone('utc', now())
+  where account.student_id = v_student_id
+    and account.status = 'active';
 
   return query
   select *
@@ -1672,7 +1814,20 @@ begin
   end if;
 
   if v_existing_student_id is null then
-    v_result_student_number := public.generate_student_number(v_branch_id);
+    if v_requested_student_number is null then
+      v_result_student_number := public.generate_student_number(v_branch_id);
+    else
+      if exists (
+        select 1
+        from public.student_profiles student
+        where student.branch_id = v_branch_id
+          and upper(student.student_number) = upper(v_requested_student_number)
+      ) then
+        raise exception 'Student number "%" is already assigned in this branch.', v_requested_student_number;
+      end if;
+
+      v_result_student_number := v_requested_student_number;
+    end if;
 
     insert into public.student_profiles (
       admission_application_id,
@@ -1765,6 +1920,107 @@ begin
   select *
   from public.list_admin_students(v_branch_name) student
   where student.student_number = v_result_student_number
+  limit 1;
+end;
+$$;
+
+drop function if exists public.update_admin_student_email(jsonb);
+
+create or replace function public.update_admin_student_email(
+  p_payload jsonb
+)
+returns table (
+  student_id uuid,
+  student_number text,
+  tracking_number text,
+  branch text,
+  full_name text,
+  first_name text,
+  last_name text,
+  middle_name text,
+  program text,
+  year_level text,
+  section text,
+  shs_track_type text,
+  strand_or_course text,
+  document_submitted_date date,
+  contact_number text,
+  email text,
+  address text,
+  status text,
+  student_status text,
+  requested_own_schedule boolean,
+  own_schedule_request_status text,
+  own_schedule_academic_year text,
+  own_schedule_semester text,
+  own_schedule_selection_status text,
+  birth_date date,
+  guardian_name text,
+  guardian_contact text,
+  sex text,
+  civil_status text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+#variable_conflict use_column
+declare
+  v_branch_id uuid;
+  v_branch_name text;
+  v_student_id uuid;
+  v_student_number text;
+begin
+  if trim(coalesce(p_payload->>'email', '')) = '' then
+    raise exception 'Email is required.';
+  end if;
+
+  select resolved.branch_id, resolved.branch_name
+  into v_branch_id, v_branch_name
+  from public.resolve_student_branch(p_payload->>'branch') as resolved;
+
+  if v_branch_id is null then
+    raise exception 'Branch "%" is not configured in Supabase.', p_payload->>'branch';
+  end if;
+
+  select student.id, student.student_number
+  into v_student_id, v_student_number
+  from public.student_profiles student
+  left join public.admission_applications app
+    on app.id = student.admission_application_id
+  where student.branch_id = v_branch_id
+    and (
+      upper(student.student_number) = upper(trim(coalesce(p_payload->>'student_number', '')))
+      or (
+        trim(coalesce(p_payload->>'tracking_number', '')) <> ''
+        and app.tracking_number = upper(trim(p_payload->>'tracking_number'))
+      )
+    )
+  limit 1;
+
+  if v_student_id is null then
+    raise exception 'Student "%" was not found in branch "%".', p_payload->>'student_number', v_branch_name;
+  end if;
+
+  update public.student_contact_details contact
+  set email = trim(lower(p_payload->>'email'))::citext
+  where contact.student_id = v_student_id;
+
+  if not found then
+    raise exception 'Student contact details were not found for "%".', v_student_number;
+  end if;
+
+  update public.admission_applications app
+  set email = trim(lower(p_payload->>'email'))::citext,
+      updated_at = timezone('utc', now())
+  from public.student_profiles student
+  where student.id = v_student_id
+    and app.id = student.admission_application_id;
+
+  return query
+  select *
+  from public.list_admin_students(v_branch_name) student
+  where student.student_number = v_student_number
   limit 1;
 end;
 $$;
@@ -1872,12 +2128,377 @@ begin
 end;
 $$;
 
+drop function if exists public.delete_admin_student(jsonb);
+
+create or replace function public.delete_admin_student(
+  p_payload jsonb
+)
+returns table (
+  student_number text,
+  tracking_number text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_branch_id uuid;
+  v_student_id uuid;
+  v_student_number text;
+  v_tracking_number text;
+begin
+  if trim(coalesce(p_payload->>'student_number', '')) = '' then
+    raise exception 'Student number is required.';
+  end if;
+
+  select resolved.branch_id
+  into v_branch_id
+  from public.resolve_student_branch(p_payload->>'branch') as resolved;
+
+  select student.id, student.student_number, app.tracking_number
+  into v_student_id, v_student_number, v_tracking_number
+  from public.student_profiles student
+  left join public.admission_applications app
+    on app.id = student.admission_application_id
+  where upper(student.student_number) = upper(trim(p_payload->>'student_number'))
+    and (
+      v_branch_id is null
+      or student.branch_id = v_branch_id
+    )
+    and (
+      trim(coalesce(p_payload->>'tracking_number', '')) = ''
+      or upper(coalesce(app.tracking_number, '')) =
+        upper(trim(p_payload->>'tracking_number'))
+    )
+  limit 1;
+
+  if v_student_id is null then
+    raise exception 'Student number "%" was not found.', p_payload->>'student_number';
+  end if;
+
+  delete from public.student_profiles student
+  where student.id = v_student_id;
+
+  return query
+  select v_student_number, v_tracking_number;
+end;
+$$;
+
 alter table public.student_profiles enable row level security;
 alter table public.student_contact_details enable row level security;
 alter table public.student_portal_accounts enable row level security;
 
+create table if not exists public.branch_student_number_settings (
+  branch_id uuid primary key references public.admission_branches(id) on delete cascade,
+  next_sequence bigint not null default 261001,
+  updated_at timestamptz not null default timezone('utc', now()),
+  constraint branch_student_number_settings_next_sequence_check
+    check (next_sequence between 0 and 1000000)
+);
+
+create or replace function public.get_default_branch_student_number_sequence(
+  p_branch_id uuid
+)
+returns bigint
+language sql
+stable
+set search_path = public
+as $$
+  select least(
+    1000000,
+    greatest(
+      coalesce(
+        max(public.extract_student_number_sequence(student.student_number)),
+        261000
+      ),
+      261000
+    ) + 1
+  )
+  from public.student_profiles student
+  where p_branch_id is null
+    or student.branch_id = p_branch_id;
+$$;
+
+create or replace function public.ensure_branch_student_number_setting(
+  p_branch_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.branch_student_number_settings (
+    branch_id,
+    next_sequence,
+    updated_at
+  )
+  values (
+    p_branch_id,
+    public.get_default_branch_student_number_sequence(p_branch_id),
+    timezone('utc', now())
+  )
+  on conflict (branch_id) do nothing;
+end;
+$$;
+
+create or replace function public.peek_branch_student_number(
+  p_branch_id uuid,
+  p_start_sequence bigint default null
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_candidate_sequence bigint;
+  v_branch_prefix text;
+  v_student_number text;
+begin
+  perform public.ensure_branch_student_number_setting(p_branch_id);
+
+  v_branch_prefix := public.resolve_student_number_prefix(p_branch_id);
+
+  if p_start_sequence is null then
+    select setting.next_sequence
+    into v_candidate_sequence
+    from public.branch_student_number_settings setting
+    where setting.branch_id = p_branch_id;
+  else
+    v_candidate_sequence := p_start_sequence;
+  end if;
+
+  loop
+    if v_candidate_sequence > 999999 then
+      return '';
+    end if;
+
+    if coalesce(v_branch_prefix, '') = '' then
+      v_student_number := lpad(v_candidate_sequence::text, 6, '0');
+    else
+      v_student_number := format(
+        '%s-%s',
+        v_branch_prefix,
+        lpad(v_candidate_sequence::text, 6, '0')
+      );
+    end if;
+
+    if not exists (
+      select 1
+      from public.student_profiles student
+      where student.branch_id = p_branch_id
+        and upper(student.student_number) = upper(v_student_number)
+    ) then
+      return v_student_number;
+    end if;
+
+    v_candidate_sequence := v_candidate_sequence + 1;
+  end loop;
+end;
+$$;
+
+create or replace function public.get_branch_student_number_setting(
+  p_branch text
+)
+returns table (
+  branch text,
+  prefix text,
+  next_sequence bigint,
+  next_digits text,
+  next_student_number text,
+  updated_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_branch_id uuid;
+  v_branch_name text;
+  v_prefix text;
+begin
+  select resolved.branch_id, resolved.branch_name
+  into v_branch_id, v_branch_name
+  from public.resolve_student_branch(p_branch) as resolved;
+
+  if v_branch_id is null then
+    raise exception 'Branch "%" is not configured in Supabase.', p_branch;
+  end if;
+
+  perform public.ensure_branch_student_number_setting(v_branch_id);
+
+  v_prefix := public.resolve_student_number_prefix(v_branch_id);
+
+  return query
+  select
+    v_branch_name,
+    coalesce(v_prefix, ''),
+    setting.next_sequence,
+    case
+      when setting.next_sequence > 999999 then ''
+      else lpad(setting.next_sequence::text, 6, '0')
+    end,
+    public.peek_branch_student_number(v_branch_id, setting.next_sequence),
+    setting.updated_at
+  from public.branch_student_number_settings setting
+  where setting.branch_id = v_branch_id;
+end;
+$$;
+
+create or replace function public.set_branch_student_number_setting(
+  p_branch text,
+  p_next_digits text
+)
+returns table (
+  branch text,
+  prefix text,
+  next_sequence bigint,
+  next_digits text,
+  next_student_number text,
+  updated_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_branch_id uuid;
+  v_next_digits text;
+  v_next_sequence bigint;
+begin
+  select resolved.branch_id
+  into v_branch_id
+  from public.resolve_student_branch(p_branch) as resolved;
+
+  if v_branch_id is null then
+    raise exception 'Branch "%" is not configured in Supabase.', p_branch;
+  end if;
+
+  v_next_digits := regexp_replace(trim(coalesce(p_next_digits, '')), '\D', '', 'g');
+
+  if v_next_digits !~ '^[0-9]{6}$' then
+    raise exception 'Student number start must be exactly 6 digits.';
+  end if;
+
+  v_next_sequence := v_next_digits::bigint;
+
+  insert into public.branch_student_number_settings (
+    branch_id,
+    next_sequence,
+    updated_at
+  )
+  values (
+    v_branch_id,
+    v_next_sequence,
+    timezone('utc', now())
+  )
+  on conflict (branch_id) do update
+  set next_sequence = excluded.next_sequence,
+      updated_at = excluded.updated_at;
+
+  return query
+  select *
+  from public.get_branch_student_number_setting(p_branch);
+end;
+$$;
+
+create or replace function public.generate_student_number(
+  p_branch_id uuid
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_candidate_sequence bigint;
+  v_branch_prefix text;
+  v_student_number text;
+begin
+  perform pg_advisory_xact_lock(2610, coalesce(hashtext(p_branch_id::text), 0));
+  perform public.ensure_branch_student_number_setting(p_branch_id);
+
+  v_branch_prefix := public.resolve_student_number_prefix(p_branch_id);
+
+  select setting.next_sequence
+  into v_candidate_sequence
+  from public.branch_student_number_settings setting
+  where setting.branch_id = p_branch_id
+  for update;
+
+  loop
+    if v_candidate_sequence > 999999 then
+      raise exception 'No student numbers are available for this branch. Please set a new 6-digit start value.';
+    end if;
+
+    if coalesce(v_branch_prefix, '') = '' then
+      v_student_number := lpad(v_candidate_sequence::text, 6, '0');
+    else
+      v_student_number := format(
+        '%s-%s',
+        v_branch_prefix,
+        lpad(v_candidate_sequence::text, 6, '0')
+      );
+    end if;
+
+    exit when not exists (
+      select 1
+      from public.student_profiles student
+      where student.branch_id = p_branch_id
+        and upper(student.student_number) = upper(v_student_number)
+    );
+
+    v_candidate_sequence := v_candidate_sequence + 1;
+  end loop;
+
+  update public.branch_student_number_settings setting
+  set next_sequence = v_candidate_sequence + 1,
+      updated_at = timezone('utc', now())
+  where setting.branch_id = p_branch_id;
+
+  return v_student_number;
+end;
+$$;
+
+create or replace function public.get_next_admin_student_number(
+  p_branch text
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_branch_id uuid;
+  v_student_number text;
+begin
+  select resolved.branch_id
+  into v_branch_id
+  from public.resolve_student_branch(p_branch) as resolved;
+
+  if v_branch_id is null then
+    raise exception 'Branch "%" is not configured in Supabase.', p_branch;
+  end if;
+
+  v_student_number := public.peek_branch_student_number(v_branch_id);
+
+  if trim(coalesce(v_student_number, '')) = '' then
+    raise exception 'No student numbers are available for this branch. Please set a new 6-digit start value.';
+  end if;
+
+  return v_student_number;
+end;
+$$;
+
 grant execute on function public.generate_student_number() to anon, authenticated;
 grant execute on function public.generate_student_number(uuid) to anon, authenticated;
+grant execute on function public.sync_student_contact_email_to_admission() to anon, authenticated;
+grant execute on function public.get_default_branch_student_number_sequence(uuid) to anon, authenticated;
+grant execute on function public.ensure_branch_student_number_setting(uuid) to anon, authenticated;
+grant execute on function public.peek_branch_student_number(uuid, bigint) to anon, authenticated;
+grant execute on function public.get_branch_student_number_setting(text) to anon, authenticated;
+grant execute on function public.set_branch_student_number_setting(text, text) to anon, authenticated;
 grant execute on function public.get_student_activation_status(text) to anon, authenticated;
 grant execute on function public.activate_approved_student(text, text) to anon, authenticated;
 grant execute on function public.delete_admission_application(text) to anon, authenticated;
@@ -1889,6 +2510,7 @@ grant execute on function public.register_student_portal_account(
   text
 ) to anon, authenticated;
 grant execute on function public.student_portal_login(text, text) to anon, authenticated;
+grant execute on function public.student_portal_email_login(text) to anon, authenticated;
 grant execute on function public.reset_student_portal_password(
   text,
   text,
@@ -1899,4 +2521,6 @@ grant execute on function public.get_admin_admission_queue(text) to anon, authen
 grant execute on function public.list_admin_students(text) to anon, authenticated;
 grant execute on function public.get_next_admin_student_number(text) to anon, authenticated;
 grant execute on function public.upsert_admin_student(jsonb) to anon, authenticated;
+grant execute on function public.update_admin_student_email(jsonb) to anon, authenticated;
 grant execute on function public.set_admin_student_status(jsonb) to anon, authenticated;
+grant execute on function public.delete_admin_student(jsonb) to anon, authenticated;

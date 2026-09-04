@@ -5,10 +5,9 @@ import type {
 } from "../types/application";
 import { supabase } from "../lib/supabase";
 import {
-  getAdmissionDiscountSource,
   getAdmissionRequirements,
-  getEffectiveAdmissionDiscountPercentage,
-  getHonorDiscountPercentage,
+  getEstimatedCollegeTuition,
+  normalizeAdmissionYearLevel,
   normalizeBranchCode,
 } from "./admission";
 import {
@@ -16,10 +15,15 @@ import {
   type EnrollmentRetakeChoiceGroup,
   type EnrollmentRetakeRequestItem,
 } from "./enrollmentLoadPlanner";
+import type { StoredStudentGradeRecord } from "./studentGrades";
 import { stripLegacyMockStudentRecords } from "./legacyMockData";
 import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
+import {
+  toDisplayCapitalization,
+  toNameCapitalization,
+} from "../utils/textFormatting";
 
-export type AdminBranchName = "Bacoor" | "Taytay" | "GMA";
+export type AdminBranchName = string;
 
 export type AdminApplicantStatus = "Pending" | "Approved" | "Rejected";
 
@@ -43,6 +47,13 @@ export interface AdminPersonalInformation {
   address: string;
   yearLevel: string;
   guardianContact: string;
+  middleName?: string;
+  sex?: string;
+  civilStatus?: string;
+  lastSchoolAttended?: string;
+  yearCompletion?: string;
+  requestedYearLevel?: string;
+  strandOrCourse?: string;
 }
 
 export interface AdminEnrolleeRecord {
@@ -111,6 +122,14 @@ export interface StudentStorageRecord {
   guardianContact?: string;
   gender?: "Male" | "Female";
   civilStatus?: string;
+}
+
+interface DeletedStoredStudentMarker {
+  branch: string;
+  studentNumber?: string;
+  trackingNumber?: string;
+  name?: string;
+  deletedAt: string;
 }
 
 export interface StudentPortalSubject {
@@ -267,6 +286,7 @@ type StoredAcademicSubject = {
   yearLevel: string;
   semester: string;
   strand?: string;
+  prerequisiteSubjectIds?: string[];
 };
 
 type StoredSchedule = {
@@ -303,14 +323,6 @@ type StoredClassSection = {
   enrolleeIds?: string[];
 };
 
-type StoredSectionAssignmentRecord = {
-  enrolleeId: string;
-  enrolleeName: string;
-  assignedSection: string;
-  assignedDate: string;
-  isManualOverride: boolean;
-};
-
 type StoredEnrollmentIrregularRequestRecord = {
   mode: "own_schedule" | "section_assignment";
   requestedSectionId?: string;
@@ -333,6 +345,7 @@ type StoredEnrollmentRequestRecord = {
 };
 
 const STUDENT_STORAGE_KEY = "aics-students";
+const DELETED_STUDENT_STORAGE_KEY = "aics-deleted-students";
 const BRANCH_STORAGE_PREFIX = "aics-admin";
 const DEFAULT_BRANCH: AdminBranchName = "Bacoor";
 const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
@@ -375,10 +388,12 @@ type SupabaseAdminAdmissionQueueRow = {
   honor_discount_percentage: number | string;
   honor_label: string | null;
   last_name: string;
+  last_school_attended?: string | null;
   middle_name: string | null;
   phone_number: string;
   program_level: string;
   program_name: string;
+  requested_year_level: string | null;
   rejection_reason: string | null;
   requirement_files: SupabaseRequirementFileRow[] | null;
   requirements_uploaded_at: string | null;
@@ -467,7 +482,21 @@ const mapProgramNameToAdminProgram = (programName: string) =>
 const mapAdminProgramToAdmissionProgram = (program: string) =>
   program === "SHS" ? "Senior High School" : "College";
 
-const getInitialYearLevel = (program: string, studentStatus: string) => {
+const getInitialYearLevel = (
+  program: string,
+  studentStatus: string,
+  requestedYearLevel?: string | null,
+) => {
+  const programName = mapAdminProgramToAdmissionProgram(program);
+  const normalizedRequestedYearLevel = normalizeAdmissionYearLevel(
+    programName,
+    requestedYearLevel,
+  );
+
+  if (studentStatus === "Transferee" && normalizedRequestedYearLevel) {
+    return normalizedRequestedYearLevel;
+  }
+
   if (program === "SHS") {
     return "Grade 11";
   }
@@ -490,7 +519,8 @@ const resolveShsTrackType = (strandOrCourse: string) => {
 };
 
 export const normalizeBranchName = (branch?: string | null): AdminBranchName => {
-  const normalizedBranch = branch?.trim().toLowerCase();
+  const trimmedBranch = branch?.trim();
+  const normalizedBranch = trimmedBranch?.toLowerCase();
 
   if (!normalizedBranch) {
     return DEFAULT_BRANCH;
@@ -511,10 +541,10 @@ export const normalizeBranchName = (branch?: string | null): AdminBranchName => 
     return "Bacoor";
   }
 
-  return DEFAULT_BRANCH;
+  return toDisplayCapitalization(trimmedBranch || DEFAULT_BRANCH);
 };
 
-const STUDENT_NUMBER_PREFIX_BY_BRANCH: Record<AdminBranchName, string> = {
+const STUDENT_NUMBER_PREFIX_BY_BRANCH: Record<string, string> = {
   Bacoor: "BAC",
   Taytay: "TAY",
   GMA: "GMA",
@@ -526,8 +556,21 @@ const BRANCH_BY_STUDENT_NUMBER_PREFIX: Record<string, AdminBranchName> = {
   GMA: "GMA",
 };
 
-export const getStudentNumberPrefix = (branch?: string | null) =>
-  STUDENT_NUMBER_PREFIX_BY_BRANCH[normalizeBranchName(branch)];
+const buildDynamicStudentNumberPrefix = (branch?: string | null) => {
+  const normalizedBranch = normalizeBranchName(branch);
+  const compactBranch = normalizedBranch.replace(/[^A-Za-z0-9]/g, "");
+
+  return (compactBranch.slice(0, 3).toUpperCase() || "STD").padEnd(3, "X");
+};
+
+export const getStudentNumberPrefix = (branch?: string | null) => {
+  const normalizedBranch = normalizeBranchName(branch);
+
+  return (
+    STUDENT_NUMBER_PREFIX_BY_BRANCH[normalizedBranch] ||
+    buildDynamicStudentNumberPrefix(normalizedBranch)
+  );
+};
 
 export const getBranchFromStudentNumber = (
   studentNumber?: string | null,
@@ -560,6 +603,38 @@ export type InstructorEvaluationStatusMap = Record<
   string,
   InstructorEvaluationStatusRecord
 >;
+
+export interface EvaluationQuestionRecord {
+  id: string;
+  text: string;
+  type?: "rating" | "essay";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvaluationQuestionCategoryRecord {
+  id: string;
+  name: string;
+  questions: EvaluationQuestionRecord[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InstructorEvaluationSubmissionRecord {
+  id: string;
+  instructorId: string;
+  instructorName: string;
+  studentNumber: string;
+  studentName: string;
+  yearLevel: string;
+  section: string;
+  academicYear: string;
+  semester: string;
+  subjectIds: string[];
+  subjectCodes: string[];
+  responses: Record<string, number | string>;
+  submittedAt: string;
+}
 
 const getStudentNumberSequenceValue = (
   studentNumber?: string | null,
@@ -673,9 +748,11 @@ export const isValidStudentNumber = (
   }
 
   const prefix = getStudentNumberPrefix(branch);
-  return new RegExp(`^${prefix}-\\d{${STUDENT_NUMBER_SUFFIX_LENGTH}}$`).test(
-    normalizedValue,
-  );
+  const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  return new RegExp(
+    `^${escapedPrefix}-\\d{${STUDENT_NUMBER_SUFFIX_LENGTH}}$`,
+  ).test(normalizedValue);
 };
 
 export const getStudentNumberExample = (branch?: string | null) =>
@@ -686,20 +763,112 @@ export const getStudentNumberExample = (branch?: string | null) =>
 export const getBranchStorageKey = (scope: string, branch?: string | null) =>
   `${BRANCH_STORAGE_PREFIX}:${scope}:${normalizeBranchName(branch).toLowerCase()}`;
 
+export const getKnownAdminBranches = (): AdminBranchName[] => {
+  const branches = new Set<AdminBranchName>([DEFAULT_BRANCH]);
+
+  readStoredStudents().forEach((student) => {
+    branches.add(normalizeBranchName(student.branch));
+  });
+
+  if (typeof window !== "undefined") {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const storageKey = window.localStorage.key(index);
+
+      if (!storageKey?.startsWith(`${BRANCH_STORAGE_PREFIX}:`)) {
+        continue;
+      }
+
+      const branch = storageKey.split(":").slice(2).join(":");
+      if (branch) {
+        branches.add(normalizeBranchName(branch));
+      }
+    }
+  }
+
+  return Array.from(branches).sort((left, right) => left.localeCompare(right));
+};
+
 export const readBranchScopedData = <T,>(
   scope: string,
   branch?: string | null,
 ): T | null => readStorageItem<T>(getBranchStorageKey(scope, branch));
+
+const SUPABASE_MIRRORED_BRANCH_SCOPES = new Set([
+  "enrollees",
+  "section-assignments",
+  "transferee-evaluations",
+  "instructor-departments",
+  "student-subject-plans",
+  "student-schedule-requests",
+  "instructor-grade-change-requests",
+]);
+
+const getBranchScopeSupabaseErrorMessage = (error: {
+  details?: string | null;
+  hint?: string | null;
+  message: string;
+}) =>
+  error.details
+    ? `${error.message} ${error.details}`.trim()
+    : error.hint
+      ? `${error.message} ${error.hint}`.trim()
+      : error.message;
+
+export const fetchAndCacheBranchScopedData = async <T,>(
+  scope: string,
+  branch?: string | null,
+) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const { data, error } = await supabase.rpc("get_branch_local_storage_record", {
+    p_branch: resolvedBranch,
+    p_scope: scope,
+  });
+
+  if (error) {
+    throw new Error(getBranchScopeSupabaseErrorMessage(error));
+  }
+
+  if (data === null || typeof data === "undefined") {
+    return readBranchScopedData<T>(scope, resolvedBranch);
+  }
+
+  writeStorageItem(getBranchStorageKey(scope, resolvedBranch), data);
+  return data as T;
+};
 
 export const writeBranchScopedData = (
   scope: string,
   branch: string | null | undefined,
   value: unknown,
 ) => {
-  writeStorageItem(getBranchStorageKey(scope, branch), value);
+  const resolvedBranch = normalizeBranchName(branch);
+  writeStorageItem(getBranchStorageKey(scope, resolvedBranch), value);
+
+  if (!SUPABASE_MIRRORED_BRANCH_SCOPES.has(scope)) {
+    return;
+  }
+
+  void supabase
+    .rpc("upsert_branch_local_storage_record", {
+      p_branch: resolvedBranch,
+      p_scope: scope,
+      p_payload: value,
+    })
+    .then(({ error }) => {
+      if (error) {
+        console.warn(
+          `Unable to sync ${scope} to Supabase; local cache was updated.`,
+          error,
+        );
+      }
+    });
 };
 
 const INSTRUCTOR_EVALUATION_STATUS_SCOPE = "instructor-evaluations";
+const EVALUATION_QUESTIONNAIRE_SCOPE = "evaluation-questionnaire";
+const EVALUATION_SUBMISSIONS_SCOPE = "evaluation-submissions";
+export const INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT =
+  "aics:instructor-evaluation-submissions-updated";
 
 export const readInstructorEvaluationStatuses = (
   branch?: string | null,
@@ -736,19 +905,612 @@ export const setInstructorEvaluationStatus = ({
   return nextStatuses;
 };
 
+export const fetchInstructorEvaluationStatuses = async (
+  branch?: string | null,
+): Promise<InstructorEvaluationStatusMap> => {
+  const normalizedBranch = normalizeBranchName(branch);
+  const { data, error } = await supabase
+    .from("instructor_evaluation_statuses")
+    .select("instructor_id,is_open,updated_at")
+    .eq("branch", normalizedBranch);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const statuses = (data ?? []).reduce<InstructorEvaluationStatusMap>(
+    (nextStatuses, row) => ({
+      ...nextStatuses,
+      [row.instructor_id]: {
+        instructorId: row.instructor_id,
+        isOpen: Boolean(row.is_open),
+        updatedAt: row.updated_at || new Date().toISOString(),
+      },
+    }),
+    {},
+  );
+
+  writeBranchScopedData(INSTRUCTOR_EVALUATION_STATUS_SCOPE, branch, statuses);
+  return statuses;
+};
+
+export const saveInstructorEvaluationStatusToBackend = async ({
+  branch,
+  instructorId,
+  isOpen,
+}: {
+  branch?: string | null;
+  instructorId: string;
+  isOpen: boolean;
+}) => {
+  const updatedAt = new Date().toISOString();
+  const { error } = await supabase
+    .from("instructor_evaluation_statuses")
+    .upsert(
+      {
+        branch: normalizeBranchName(branch),
+        instructor_id: instructorId,
+        is_open: isOpen,
+        updated_at: updatedAt,
+      },
+      { onConflict: "branch,instructor_id" },
+    );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+};
+
+export const readEvaluationQuestionnaire = (
+  branch?: string | null,
+): EvaluationQuestionCategoryRecord[] =>
+  readBranchScopedData<EvaluationQuestionCategoryRecord[]>(
+    EVALUATION_QUESTIONNAIRE_SCOPE,
+    branch,
+  ) ?? [];
+
+export const writeEvaluationQuestionnaire = (
+  branch: string | null | undefined,
+  categories: EvaluationQuestionCategoryRecord[],
+) => {
+  writeBranchScopedData(EVALUATION_QUESTIONNAIRE_SCOPE, branch, categories);
+  return categories;
+};
+
+export const fetchEvaluationQuestionnaire = async (
+  branch?: string | null,
+): Promise<EvaluationQuestionCategoryRecord[]> => {
+  const normalizedBranch = normalizeBranchName(branch);
+  const { data: categories, error: categoryError } = await supabase
+    .from("evaluation_questionnaire_categories")
+    .select("id,name,created_at,updated_at,sort_order")
+    .eq("branch", normalizedBranch)
+    .order("sort_order", { ascending: true });
+
+  if (categoryError) {
+    throw new Error(categoryError.message);
+  }
+
+  const categoryIds = (categories ?? []).map((category) => category.id);
+  const { data: questions, error: questionError } = await supabase
+    .from("evaluation_questionnaire_questions")
+    .select("id,category_id,text,question_type,created_at,updated_at,sort_order")
+    .eq("branch", normalizedBranch)
+    .in("category_id", categoryIds.length > 0 ? categoryIds : [""]);
+
+  if (questionError) {
+    throw new Error(questionError.message);
+  }
+
+  const questionsByCategory = new Map<string, EvaluationQuestionRecord[]>();
+
+  (questions ?? [])
+    .sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0))
+    .forEach((question) => {
+      const existingQuestions = questionsByCategory.get(question.category_id) ?? [];
+      existingQuestions.push({
+        id: question.id,
+        text: question.text,
+        type: question.question_type === "essay" ? "essay" : "rating",
+        createdAt: question.created_at,
+        updatedAt: question.updated_at,
+      });
+      questionsByCategory.set(question.category_id, existingQuestions);
+    });
+
+  const questionnaire = (categories ?? []).map((category) => ({
+    id: category.id,
+    name: category.name,
+    questions: questionsByCategory.get(category.id) ?? [],
+    createdAt: category.created_at,
+    updatedAt: category.updated_at,
+  }));
+
+  writeEvaluationQuestionnaire(branch, questionnaire);
+  return questionnaire;
+};
+
+export const saveEvaluationQuestionnaireToBackend = async (
+  branch: string | null | undefined,
+  categories: EvaluationQuestionCategoryRecord[],
+) => {
+  const normalizedBranch = normalizeBranchName(branch);
+  const { data: existingCategories, error: existingCategoryError } =
+    await supabase
+      .from("evaluation_questionnaire_categories")
+      .select("id")
+      .eq("branch", normalizedBranch);
+
+  if (existingCategoryError) {
+    throw new Error(existingCategoryError.message);
+  }
+
+  const nextCategoryIds = new Set(categories.map((category) => category.id));
+  const staleCategoryIds = (existingCategories ?? [])
+    .map((category) => category.id)
+    .filter((categoryId) => !nextCategoryIds.has(categoryId));
+
+  if (staleCategoryIds.length > 0) {
+    const { error } = await supabase
+      .from("evaluation_questionnaire_categories")
+      .delete()
+      .in("id", staleCategoryIds);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+
+  if (categories.length > 0) {
+    const { error: categoryError } = await supabase
+      .from("evaluation_questionnaire_categories")
+      .upsert(
+        categories.map((category, index) => ({
+          id: category.id,
+          branch: normalizedBranch,
+          name: category.name,
+          sort_order: index,
+          created_at: category.createdAt,
+          updated_at: category.updatedAt,
+        })),
+      );
+
+    if (categoryError) {
+      throw new Error(categoryError.message);
+    }
+  }
+
+  const nextQuestionIds = new Set(
+    categories.flatMap((category) =>
+      category.questions.map((question) => question.id),
+    ),
+  );
+  const { data: existingQuestions, error: existingQuestionError } =
+    await supabase
+      .from("evaluation_questionnaire_questions")
+      .select("id")
+      .eq("branch", normalizedBranch);
+
+  if (existingQuestionError) {
+    throw new Error(existingQuestionError.message);
+  }
+
+  const staleQuestionIds = (existingQuestions ?? [])
+    .map((question) => question.id)
+    .filter((questionId) => !nextQuestionIds.has(questionId));
+
+  if (staleQuestionIds.length > 0) {
+    const { error } = await supabase
+      .from("evaluation_questionnaire_questions")
+      .delete()
+      .in("id", staleQuestionIds);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+
+  const questionRows = categories.flatMap((category) =>
+    category.questions.map((question, index) => ({
+      id: question.id,
+      category_id: category.id,
+      branch: normalizedBranch,
+      text: question.text,
+      question_type: question.type || "rating",
+      sort_order: index,
+      created_at: question.createdAt,
+      updated_at: question.updatedAt,
+    })),
+  );
+
+  if (questionRows.length > 0) {
+    const { error } = await supabase
+      .from("evaluation_questionnaire_questions")
+      .upsert(questionRows);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+  }
+};
+
+export const readInstructorEvaluationSubmissions = (
+  branch?: string | null,
+): InstructorEvaluationSubmissionRecord[] =>
+  readBranchScopedData<InstructorEvaluationSubmissionRecord[]>(
+    EVALUATION_SUBMISSIONS_SCOPE,
+    branch,
+  ) ?? [];
+
+export const saveInstructorEvaluationSubmission = (
+  branch: string | null | undefined,
+  submission: InstructorEvaluationSubmissionRecord,
+) => {
+  const existingSubmissions = readInstructorEvaluationSubmissions(branch);
+  const nextSubmissions = [
+    ...existingSubmissions.filter((record) => record.id !== submission.id),
+    submission,
+  ];
+
+  writeBranchScopedData(EVALUATION_SUBMISSIONS_SCOPE, branch, nextSubmissions);
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT),
+    );
+  }
+
+  return nextSubmissions;
+};
+
+export const fetchInstructorEvaluationSubmissions = async (
+  branch?: string | null,
+): Promise<InstructorEvaluationSubmissionRecord[]> => {
+  const normalizedBranch = normalizeBranchName(branch);
+  const { data, error } = await supabase
+    .from("instructor_evaluation_submissions")
+    .select("*")
+    .eq("branch", normalizedBranch);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const submissions = (data ?? []).map((row) => ({
+    id: row.id,
+    instructorId: row.instructor_id,
+    instructorName: row.instructor_name,
+    studentNumber: row.student_number,
+    studentName: row.student_name,
+    yearLevel: row.year_level,
+    section: row.section,
+    academicYear: row.academic_year,
+    semester: row.semester,
+    subjectIds: row.subject_ids ?? [],
+    subjectCodes: row.subject_codes ?? [],
+    responses: row.responses ?? {},
+    submittedAt: row.submitted_at,
+  }));
+
+  writeBranchScopedData(EVALUATION_SUBMISSIONS_SCOPE, branch, submissions);
+  return submissions;
+};
+
+export const saveInstructorEvaluationSubmissionToBackend = async (
+  branch: string | null | undefined,
+  submission: InstructorEvaluationSubmissionRecord,
+) => {
+  const { error } = await supabase
+    .from("instructor_evaluation_submissions")
+    .upsert({
+      id: submission.id,
+      branch: normalizeBranchName(branch),
+      instructor_id: submission.instructorId,
+      instructor_name: submission.instructorName,
+      student_number: submission.studentNumber,
+      student_name: submission.studentName,
+      year_level: submission.yearLevel,
+      section: submission.section,
+      academic_year: submission.academicYear,
+      semester: submission.semester,
+      subject_ids: submission.subjectIds,
+      subject_codes: submission.subjectCodes,
+      responses: submission.responses,
+      submitted_at: submission.submittedAt,
+    });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+};
+
 export const getCurrentSession = () =>
   readStorageItem<AuthSession>(AUTH_STORAGE_KEY);
 
 export const getCurrentBranch = () =>
   normalizeBranchName(getCurrentSession()?.user.branch);
 
+const normalizeDeletedStudentMarkerValue = (value?: string | null) =>
+  (value || "").trim().toUpperCase();
+
+const readDeletedStoredStudentMarkers = (): DeletedStoredStudentMarker[] =>
+  readStorageItem<DeletedStoredStudentMarker[]>(DELETED_STUDENT_STORAGE_KEY) ?? [];
+
+const writeDeletedStoredStudentMarkers = (
+  markers: DeletedStoredStudentMarker[],
+) => {
+  const markerMap = new Map<string, DeletedStoredStudentMarker>();
+
+  markers.forEach((marker) => {
+    const branch = normalizeBranchName(marker.branch);
+    const studentNumber = normalizeDeletedStudentMarkerValue(
+      marker.studentNumber,
+    );
+    const trackingNumber = normalizeDeletedStudentMarkerValue(
+      marker.trackingNumber,
+    );
+    const name = normalizeDeletedStudentMarkerValue(marker.name);
+
+    if (!studentNumber && !trackingNumber && !name) {
+      return;
+    }
+
+    const key = [branch, studentNumber, trackingNumber, name].join("::");
+    markerMap.set(key, {
+      branch,
+      studentNumber: studentNumber || undefined,
+      trackingNumber: trackingNumber || undefined,
+      name: name || undefined,
+      deletedAt: marker.deletedAt || new Date().toISOString(),
+    });
+  });
+
+  writeStorageItem(DELETED_STUDENT_STORAGE_KEY, Array.from(markerMap.values()));
+};
+
+export const isStoredStudentDeleted = (
+  student: Pick<
+    StudentStorageRecord,
+    "branch" | "id" | "trackingNumber" | "name"
+  > &
+    Partial<Pick<StudentStorageRecord, "status">>,
+) => {
+  const branch = normalizeBranchName(student.branch);
+  const studentNumber = normalizeDeletedStudentMarkerValue(student.id);
+  const trackingNumber = normalizeDeletedStudentMarkerValue(student.trackingNumber);
+  const name = normalizeDeletedStudentMarkerValue(student.name);
+
+  return readDeletedStoredStudentMarkers().some((marker) => {
+    if (normalizeBranchName(marker.branch) !== branch) {
+      return false;
+    }
+
+    const markerStudentNumber = normalizeDeletedStudentMarkerValue(
+      marker.studentNumber,
+    );
+    const markerTrackingNumber = normalizeDeletedStudentMarkerValue(
+      marker.trackingNumber,
+    );
+    const markerName = normalizeDeletedStudentMarkerValue(marker.name);
+
+    return Boolean(
+      (studentNumber && markerStudentNumber === studentNumber) ||
+        (trackingNumber && markerTrackingNumber === trackingNumber) ||
+        (name && markerName === name),
+    );
+  });
+};
+
+export const rememberDeletedStoredStudent = (
+  student: Pick<StudentStorageRecord, "branch" | "id" | "trackingNumber" | "name">,
+) => {
+  writeDeletedStoredStudentMarkers([
+    ...readDeletedStoredStudentMarkers(),
+    {
+      branch: normalizeBranchName(student.branch),
+      studentNumber: student.id,
+      trackingNumber: student.trackingNumber,
+      name: student.name,
+      deletedAt: new Date().toISOString(),
+    },
+  ]);
+};
+
+export const forgetDeletedStoredStudent = (
+  student: Pick<StudentStorageRecord, "branch" | "id" | "trackingNumber" | "name">,
+) => {
+  const branch = normalizeBranchName(student.branch);
+  const studentNumber = normalizeDeletedStudentMarkerValue(student.id);
+  const trackingNumber = normalizeDeletedStudentMarkerValue(student.trackingNumber);
+  const name = normalizeDeletedStudentMarkerValue(student.name);
+
+  writeDeletedStoredStudentMarkers(
+    readDeletedStoredStudentMarkers().filter((marker) => {
+      if (normalizeBranchName(marker.branch) !== branch) {
+        return true;
+      }
+
+      const markerStudentNumber = normalizeDeletedStudentMarkerValue(
+        marker.studentNumber,
+      );
+      const markerTrackingNumber = normalizeDeletedStudentMarkerValue(
+        marker.trackingNumber,
+      );
+      const markerName = normalizeDeletedStudentMarkerValue(marker.name);
+
+      return !(
+        (studentNumber && markerStudentNumber === studentNumber) ||
+        (trackingNumber && markerTrackingNumber === trackingNumber) ||
+        (name && markerName === name)
+      );
+    }),
+  );
+};
+
+const normalizeStoredStudentCapitalization = (
+  student: StudentStorageRecord,
+): StudentStorageRecord => ({
+  ...student,
+  name: toNameCapitalization(student.name),
+  program: toDisplayCapitalization(student.program),
+  yearLevel: toDisplayCapitalization(student.yearLevel),
+  section: toDisplayCapitalization(student.section),
+  shsTrackType: toDisplayCapitalization(student.shsTrackType),
+  strandOrCourse: toDisplayCapitalization(student.strandOrCourse),
+  address: toDisplayCapitalization(student.address),
+  branch: normalizeBranchName(student.branch),
+  studentStatus: toDisplayCapitalization(student.studentStatus),
+  guardianName: toNameCapitalization(student.guardianName),
+  civilStatus: toDisplayCapitalization(student.civilStatus),
+});
+
+const isRetainedStoredStudentRecord = (student: StudentStorageRecord) =>
+  (student.status as string).trim().toLowerCase() !== "graduated";
+
+const normalizeAdminPersonalInformationCapitalization = (
+  personalInfo: AdminPersonalInformation,
+): AdminPersonalInformation => ({
+  ...personalInfo,
+  fullName: toNameCapitalization(personalInfo.fullName),
+  middleName: toNameCapitalization(personalInfo.middleName),
+  program: toDisplayCapitalization(personalInfo.program),
+  guardianName: toNameCapitalization(personalInfo.guardianName),
+  address: toDisplayCapitalization(personalInfo.address),
+  yearLevel: toDisplayCapitalization(personalInfo.yearLevel),
+  sex: toDisplayCapitalization(personalInfo.sex),
+  civilStatus: toDisplayCapitalization(personalInfo.civilStatus),
+  lastSchoolAttended: toDisplayCapitalization(personalInfo.lastSchoolAttended),
+  requestedYearLevel: toDisplayCapitalization(personalInfo.requestedYearLevel),
+  strandOrCourse: toDisplayCapitalization(personalInfo.strandOrCourse),
+});
+
+const normalizeAdminEnrolleeCapitalization = (
+  enrollee: AdminEnrolleeRecord,
+): AdminEnrolleeRecord => ({
+  ...enrollee,
+  fullName: toNameCapitalization(enrollee.fullName),
+  program: toDisplayCapitalization(enrollee.program),
+  yearLevel: toDisplayCapitalization(enrollee.yearLevel),
+  strandOrCourse: toDisplayCapitalization(enrollee.strandOrCourse),
+  branch: normalizeBranchName(enrollee.branch),
+  studentStatus: toDisplayCapitalization(enrollee.studentStatus),
+  personalInfo: normalizeAdminPersonalInformationCapitalization(
+    enrollee.personalInfo,
+  ),
+});
+
 export const readStoredStudents = () =>
-  stripLegacyMockStudentRecords(
-    readStorageItem<StudentStorageRecord[]>(STUDENT_STORAGE_KEY) ?? [],
+  dedupeStoredStudents(
+    stripLegacyMockStudentRecords(
+      readStorageItem<StudentStorageRecord[]>(STUDENT_STORAGE_KEY) ?? [],
+    )
+      .map(normalizeStoredStudentCapitalization)
+      .filter(isRetainedStoredStudentRecord)
+      .filter((student) => !isStoredStudentDeleted(student)),
   );
 
+const normalizeStudentIdentityText = (value?: string | null) =>
+  (value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+function getStoredStudentDeduplicationKey(student: StudentStorageRecord) {
+  const resolvedBranch = normalizeBranchName(student.branch);
+  const trackingNumber = student.trackingNumber?.trim().toUpperCase();
+  const email = normalizeStudentIdentityText(student.email);
+  const name = normalizeStudentIdentityText(student.name);
+  const birthDate = normalizeStudentIdentityText(student.birthDate);
+  const identity =
+    trackingNumber ||
+    (email && name ? `email:${email}:${name}` : "") ||
+    (name && birthDate ? `name:${name}:${birthDate}` : "") ||
+    student.id?.trim().toUpperCase() ||
+    email ||
+    name;
+
+  return `${resolvedBranch}:${identity}`;
+}
+
+const resolveMergedStudentStatus = (
+  existingStudent: StudentStorageRecord,
+  nextStudent: StudentStorageRecord,
+) => {
+  const existingStatus = (existingStudent.status || "").trim().toLowerCase();
+  const nextStatus = (nextStudent.status || "").trim().toLowerCase();
+
+  if (existingStatus === "archived" || nextStatus === "archived") {
+    return "Archived";
+  }
+
+  if (existingStatus === "graduated" || nextStatus === "graduated") {
+    return "Graduated";
+  }
+
+  return nextStudent.status || existingStudent.status;
+};
+
+export function dedupeStoredStudents(students: StudentStorageRecord[]) {
+  const studentsByKey = new Map<string, StudentStorageRecord>();
+
+  students.forEach((student) => {
+    const key = getStoredStudentDeduplicationKey(student);
+
+    if (!key.endsWith(":")) {
+      const existingStudent = studentsByKey.get(key);
+      studentsByKey.set(
+        key,
+        existingStudent
+          ? {
+              ...student,
+              id: existingStudent.trackingNumber
+                ? existingStudent.id
+                : student.trackingNumber
+                  ? student.id
+                  : existingStudent.id || student.id,
+              trackingNumber:
+                existingStudent.trackingNumber || student.trackingNumber,
+              section: student.section || existingStudent.section,
+              requestedOwnSchedule:
+                student.requestedOwnSchedule ||
+                existingStudent.requestedOwnSchedule,
+              ownScheduleRequestStatus:
+                student.ownScheduleRequestStatus ||
+                existingStudent.ownScheduleRequestStatus,
+              ownScheduleAcademicYear:
+                student.ownScheduleAcademicYear ||
+                existingStudent.ownScheduleAcademicYear,
+              ownScheduleSemester:
+                student.ownScheduleSemester || existingStudent.ownScheduleSemester,
+              ownScheduleSelectionStatus:
+                student.ownScheduleSelectionStatus ||
+                existingStudent.ownScheduleSelectionStatus,
+              status: resolveMergedStudentStatus(existingStudent, student),
+            }
+          : student,
+      );
+      return;
+    }
+
+    studentsByKey.set(
+      `${key}:${studentsByKey.size}`,
+      student,
+    );
+  });
+
+  return Array.from(studentsByKey.values());
+}
+
 export const writeStoredStudents = (students: StudentStorageRecord[]) => {
-  writeStorageItem(STUDENT_STORAGE_KEY, stripLegacyMockStudentRecords(students));
+  writeStorageItem(
+    STUDENT_STORAGE_KEY,
+    dedupeStoredStudents(
+      stripLegacyMockStudentRecords(students)
+        .map(normalizeStoredStudentCapitalization)
+        .filter(isRetainedStoredStudentRecord)
+        .filter((student) => !isStoredStudentDeleted(student)),
+    ),
+  );
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(STORED_STUDENTS_UPDATED_EVENT));
@@ -1086,8 +1848,104 @@ const matchesStrandOrCourse = (
   return left.includes(right) || right.includes(left);
 };
 
+const normalizeYearLevelForComparison = (value?: string | null) =>
+  (value || "").trim().toLowerCase();
+
+const yearLevelsMatch = (
+  leftValue?: string | null,
+  rightValue?: string | null,
+) =>
+  normalizeYearLevelForComparison(leftValue) ===
+  normalizeYearLevelForComparison(rightValue);
+
+const getStoredProgramYearLevelOptions = (program: string) =>
+  program === "SHS"
+    ? ["Grade 11", "Grade 12"]
+    : ["1st Year", "2nd Year", "3rd Year", "4th Year"];
+
+const getStoredSubjectYearLevelRank = (program: string, yearLevel: string) => {
+  const options = getStoredProgramYearLevelOptions(program);
+  const matchedIndex = options.findIndex(
+    (option) => option.toLowerCase() === yearLevel.trim().toLowerCase(),
+  );
+
+  return matchedIndex === -1 ? options.length : matchedIndex;
+};
+
+const subjectIsAtOrBeforeYearLevel = (
+  subject: Pick<StoredAcademicSubject, "program" | "yearLevel">,
+  yearLevel: string,
+) =>
+  getStoredSubjectYearLevelRank(subject.program, subject.yearLevel) <=
+  getStoredSubjectYearLevelRank(subject.program, yearLevel);
+
+const getStoredSubjectSemesterRank = (semester: string) => {
+  const normalizedSemester = normalizeStoredSemester(semester);
+  const matchedIndex = STORED_SEMESTER_ORDER.findIndex(
+    (option) => option.toLowerCase() === normalizedSemester.toLowerCase(),
+  );
+
+  return matchedIndex === -1 ? STORED_SEMESTER_ORDER.length : matchedIndex;
+};
+
+const compareStoredSubjectSequence = (
+  left: Pick<StoredAcademicSubject, "program" | "yearLevel" | "semester" | "code" | "name">,
+  right: Pick<StoredAcademicSubject, "program" | "yearLevel" | "semester" | "code" | "name">,
+) =>
+  getStoredSubjectYearLevelRank(left.program, left.yearLevel) -
+    getStoredSubjectYearLevelRank(right.program, right.yearLevel) ||
+  getStoredSubjectSemesterRank(left.semester) -
+    getStoredSubjectSemesterRank(right.semester) ||
+  left.code.localeCompare(right.code) ||
+  left.name.localeCompare(right.name);
+
 const normalizeStoredSectionCode = (value?: string | null) =>
   value?.trim().toUpperCase() || "";
+
+const isActiveStoredStudent = (student: StudentStorageRecord) =>
+  (student.status || "").trim().toLowerCase() !== "archived";
+
+const getStoredStudentSectionCounts = (
+  students: StudentStorageRecord[],
+  branch: string,
+) =>
+  students.reduce((counts, student) => {
+    if (
+      normalizeBranchName(student.branch) !== branch ||
+      !isActiveStoredStudent(student)
+    ) {
+      return counts;
+    }
+
+    const sectionCode = normalizeStoredSectionCode(student.section);
+
+    if (!sectionCode) {
+      return counts;
+    }
+
+    counts.set(sectionCode, (counts.get(sectionCode) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>());
+
+const applyStoredStudentSectionCounts = (
+  sections: StoredClassSection[],
+  students: StudentStorageRecord[],
+  branch: string,
+) => {
+  const sectionCounts = getStoredStudentSectionCounts(students, branch);
+
+  return sections.map((section) => {
+    const currentEnrollees =
+      sectionCounts.get(normalizeStoredSectionCode(section.code)) ?? 0;
+
+    return {
+      ...section,
+      currentEnrollees,
+      maxCapacity: Math.max(Number(section.maxCapacity ?? 0), currentEnrollees, 1),
+      enrolleeIds: [],
+    };
+  });
+};
 
 const normalizeStoredSemester = (value?: string | null) => {
   const normalized = value?.trim().toLowerCase() || "";
@@ -1121,6 +1979,135 @@ const normalizeStoredSemester = (value?: string | null) => {
   }
 
   return DEFAULT_SECTION_SEMESTER;
+};
+
+const isTerminalStoredGradeRecord = (record: StoredStudentGradeRecord) => {
+  if (record.programType !== "College") {
+    return true;
+  }
+
+  const normalizedPeriod = record.gradingPeriod.trim().toLowerCase();
+  const normalizedSemester = record.semester.trim().toLowerCase();
+
+  return (
+    normalizedPeriod === normalizedSemester ||
+    normalizedPeriod.includes("final") ||
+    normalizedPeriod.includes("overall")
+  );
+};
+
+const getStoredGradeAcademicYearSortValue = (academicYear?: string) => {
+  const match = academicYear?.match(/\d{4}/);
+  return match ? Number(match[0]) : 0;
+};
+
+const compareStoredGradeRecords = (
+  left: StoredStudentGradeRecord,
+  right: StoredStudentGradeRecord,
+) =>
+  getStoredGradeAcademicYearSortValue(left.academicYear) -
+    getStoredGradeAcademicYearSortValue(right.academicYear) ||
+  getStoredSubjectSemesterRank(left.semester) -
+    getStoredSubjectSemesterRank(right.semester) ||
+  left.updatedAt.localeCompare(right.updatedAt) ||
+  left.gradingPeriod.localeCompare(right.gradingPeriod);
+
+const normalizeStoredSubjectCompletionCode = (code?: string | null) =>
+  code?.trim().toUpperCase() || "";
+
+const getCompletedSubjectCodes = (gradeRecords: StoredStudentGradeRecord[]) => {
+  const latestTerminalRecordsBySubject = new Map<string, StoredStudentGradeRecord>();
+
+  gradeRecords.filter(isTerminalStoredGradeRecord).forEach((record) => {
+    const subjectCode = normalizeStoredSubjectCompletionCode(record.subjectCode);
+
+    if (!subjectCode) {
+      return;
+    }
+
+    const existingRecord = latestTerminalRecordsBySubject.get(subjectCode);
+
+    if (!existingRecord || compareStoredGradeRecords(record, existingRecord) >= 0) {
+      latestTerminalRecordsBySubject.set(subjectCode, record);
+    }
+  });
+
+  return new Set(
+    Array.from(latestTerminalRecordsBySubject.values())
+      .filter((record) => record.evaluation === "Passed")
+      .map((record) => normalizeStoredSubjectCompletionCode(record.subjectCode)),
+  );
+};
+
+const getLatestTerminalGradeRecordsBySubjectCode = (
+  gradeRecords: StoredStudentGradeRecord[],
+) => {
+  const latestRecordsBySubject = new Map<string, StoredStudentGradeRecord>();
+
+  gradeRecords.filter(isTerminalStoredGradeRecord).forEach((record) => {
+    const subjectCode = normalizeStoredSubjectCompletionCode(record.subjectCode);
+
+    if (!subjectCode) {
+      return;
+    }
+
+    const existingRecord = latestRecordsBySubject.get(subjectCode);
+
+    if (!existingRecord || compareStoredGradeRecords(record, existingRecord) >= 0) {
+      latestRecordsBySubject.set(subjectCode, record);
+    }
+  });
+
+  return latestRecordsBySubject;
+};
+
+const subjectIsCompletedByGrades = (
+  subject: Pick<StoredAcademicSubject, "code">,
+  completedSubjectCodes: Set<string>,
+) => completedSubjectCodes.has(normalizeStoredSubjectCompletionCode(subject.code));
+
+const getStoredSubjectLookupKeys = (
+  subject: Pick<StoredAcademicSubject, "id" | "code">,
+) =>
+  [
+    subject.id,
+    subject.code,
+    normalizeStoredSubjectCompletionCode(subject.code),
+  ].filter(Boolean);
+
+const subjectPrerequisitesArePassed = ({
+  subject,
+  subjects,
+  latestGradeRecordsBySubjectCode,
+}: {
+  subject: Pick<StoredAcademicSubject, "prerequisiteSubjectIds">;
+  subjects: Pick<StoredAcademicSubject, "id" | "code">[];
+  latestGradeRecordsBySubjectCode: Map<string, StoredStudentGradeRecord>;
+}) => {
+  const prerequisiteIds = subject.prerequisiteSubjectIds ?? [];
+
+  if (prerequisiteIds.length === 0) {
+    return true;
+  }
+
+  const subjectsByKey = new Map<string, Pick<StoredAcademicSubject, "id" | "code">>();
+
+  subjects.forEach((candidate) => {
+    getStoredSubjectLookupKeys(candidate).forEach((key) => {
+      subjectsByKey.set(key, candidate);
+    });
+  });
+
+  return prerequisiteIds.every((prerequisiteId) => {
+    const prerequisiteSubject = subjectsByKey.get(prerequisiteId);
+    const prerequisiteCode = normalizeStoredSubjectCompletionCode(
+      prerequisiteSubject?.code || prerequisiteId,
+    );
+    const latestGradeRecord =
+      latestGradeRecordsBySubjectCode.get(prerequisiteCode);
+
+    return latestGradeRecord?.evaluation === "Passed";
+  });
 };
 
 const getPreferredStartingSemester = (
@@ -1189,6 +2176,16 @@ const formatScheduleRooms = (schedule: StoredSchedule[] = []) =>
 const sortPortalSubjects = (subjects: StudentPortalSubject[]) =>
   [...subjects].sort((left, right) => left.code.localeCompare(right.code));
 
+const storedSubjectMatchesAssignment = (
+  subject: Pick<StoredAcademicSubject, "id" | "code" | "semester">,
+  assignment: Pick<StoredSubjectAssignment, "subjectId" | "subjectCode" | "semester">,
+) =>
+  normalizeStoredSemester(subject.semester) ===
+    normalizeStoredSemester(assignment.semester) &&
+  ((Boolean(assignment.subjectId) && subject.id === assignment.subjectId) ||
+    normalizeStoredSubjectCompletionCode(subject.code) ===
+      normalizeStoredSubjectCompletionCode(assignment.subjectCode));
+
 const mapStoredSubjectsToPortalSubjects = (
   subjects: StoredAcademicSubject[],
   academicYear = "2026-2027",
@@ -1218,11 +2215,7 @@ const mapStoredAssignmentsToPortalSubjects = (
   sortPortalSubjects(
     assignments.map((assignment) => {
       const subjectDetails = storedSubjects.find(
-        (subject) =>
-          (subject.id === assignment.subjectId ||
-            subject.code === assignment.subjectCode) &&
-          normalizeStoredSemester(subject.semester) ===
-            normalizeStoredSemester(assignment.semester),
+        (subject) => storedSubjectMatchesAssignment(subject, assignment),
       );
 
       return {
@@ -1270,9 +2263,15 @@ const mapScheduledAssignmentsToPortalSubjects = (
   assignments: StudentScheduledAssignmentItem[],
   plannedSubjects: StudentSubjectPlanItem[] = [],
   storedSubjects: StoredAcademicSubject[] = [],
+  termOverride?: { academicYear?: string; semester?: string },
 ) =>
   sortPortalSubjects(
     assignments.map((assignment) => {
+      const resolvedSemester = normalizeStoredSemester(
+        termOverride?.semester || assignment.semester,
+      );
+      const resolvedAcademicYear =
+        termOverride?.academicYear || assignment.academicYear;
       const matchingPlannedSubject = plannedSubjects.find((item) =>
         subjectPlanItemMatches(item, assignment.subjectId, assignment.subjectCode),
       );
@@ -1299,8 +2298,8 @@ const mapScheduledAssignmentsToPortalSubjects = (
         professor: assignment.instructorName || "TBA",
         days: formatScheduleDays(assignment.schedule),
         time: formatScheduleTime(assignment.schedule),
-        semester: normalizeStoredSemester(assignment.semester),
-        academicYear: assignment.academicYear,
+        semester: resolvedSemester,
+        academicYear: resolvedAcademicYear,
       };
     }),
   );
@@ -1309,10 +2308,16 @@ export const getStudentPortalSubjectsFromScheduledAssignments = ({
   branch,
   assignments,
   plannedSubjects = [],
+  academicYear,
+  semester,
+  useProvidedTermForScheduledAssignments = false,
 }: {
   branch?: string | null;
   assignments: StudentScheduledAssignmentItem[];
   plannedSubjects?: StudentSubjectPlanItem[];
+  academicYear?: string;
+  semester?: string;
+  useProvidedTermForScheduledAssignments?: boolean;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
   const storedSubjects =
@@ -1322,12 +2327,38 @@ export const getStudentPortalSubjectsFromScheduledAssignments = ({
         semester: normalizeStoredSemester(subject.semester),
       }),
     );
-
-  return mapScheduledAssignmentsToPortalSubjects(
+  const scheduledPortalSubjects = mapScheduledAssignmentsToPortalSubjects(
     assignments,
     plannedSubjects,
     storedSubjects,
+    useProvidedTermForScheduledAssignments
+      ? { academicYear, semester }
+      : undefined,
   );
+  const scheduledSubjectKeys = new Set(
+    assignments.flatMap((assignment) => [
+      assignment.subjectId,
+      assignment.subjectCode,
+    ]),
+  );
+  const unscheduledPlannedSubjects = plannedSubjects.filter(
+    (subject) =>
+      !scheduledSubjectKeys.has(subject.subjectId) &&
+      !scheduledSubjectKeys.has(subject.subjectCode),
+  );
+
+  if (unscheduledPlannedSubjects.length === 0) {
+    return scheduledPortalSubjects;
+  }
+
+  return sortPortalSubjects([
+    ...scheduledPortalSubjects,
+    ...mapPlanItemsToPortalSubjects(
+      unscheduledPlannedSubjects,
+      semester || assignments[0]?.semester || "1st Semester",
+      academicYear || assignments[0]?.academicYear || "2026-2027",
+    ),
+  ]);
 };
 
 const subjectPlanItemMatches = (
@@ -1569,6 +2600,13 @@ export const syncApprovedStudentNumber = ({
 const getAttachmentKey = (attachment: Pick<AdminAttachment, "name">) =>
   attachment.name.trim().toLowerCase();
 
+const hasApprovedHonorCertificate = (attachments: AdminAttachment[] = []) =>
+  attachments.some(
+    (attachment) =>
+      getAttachmentKey(attachment) === "honor certificate" &&
+      attachment.reviewStatus === "Approved",
+  );
+
 const hasRealAttachmentUrl = (attachment: Pick<AdminAttachment, "url">) =>
   !!attachment.url && attachment.url !== "#";
 
@@ -1647,49 +2685,59 @@ export const mergeAdminEnrolleeRecords = (
       mergedAttachments,
       authoritativeSubmittedCount,
     );
+    const mergedHonorLabel =
+      record.honorLabel ?? existingRecord?.honorLabel ?? "No Honor";
+    const mergedAppliedForScholarship =
+      record.appliedForScholarship ??
+      existingRecord?.appliedForScholarship ??
+      false;
+    const mergedScholarshipExamScore =
+      record.scholarshipExamScore ??
+      existingRecord?.scholarshipExamScore ??
+      null;
+    const tuitionEstimate = getEstimatedCollegeTuition({
+      honorLabel: mergedHonorLabel,
+      honorCertificateApproved: hasApprovedHonorCertificate(mergedAttachments),
+      appliedForScholarship: mergedAppliedForScholarship,
+      scholarshipExamScore: mergedScholarshipExamScore,
+    });
+
+    const mergedRecord = existingRecord
+      ? {
+          ...existingRecord,
+          ...record,
+          documentsSubmitted: submittedAttachments.length,
+          totalDocuments: existingRecord.totalDocuments || record.totalDocuments,
+          strandOrCourse:
+            existingRecord.strandOrCourse || record.strandOrCourse,
+          honorLabel: mergedHonorLabel,
+          honorDiscountPercentage: tuitionEstimate.honorDiscountPercentage,
+          appliedForScholarship: mergedAppliedForScholarship,
+          scholarshipExamScore: mergedScholarshipExamScore,
+          effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
+          effectiveDiscountSource: tuitionEstimate.effectiveDiscountSource,
+          personalInfo: {
+            ...existingRecord.personalInfo,
+            ...record.personalInfo,
+          },
+          attachments: mergedAttachments,
+          status: record.status || existingRecord.status,
+          studentNumber: record.studentNumber || existingRecord.studentNumber,
+          convertedAt: record.convertedAt || existingRecord.convertedAt,
+        }
+      : {
+          ...record,
+          honorLabel: mergedHonorLabel,
+          honorDiscountPercentage: tuitionEstimate.honorDiscountPercentage,
+          appliedForScholarship: mergedAppliedForScholarship,
+          scholarshipExamScore: mergedScholarshipExamScore,
+          effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
+          effectiveDiscountSource: tuitionEstimate.effectiveDiscountSource,
+        };
 
     mergedRecords.set(
       record.trackingNumber,
-      existingRecord
-        ? {
-            ...existingRecord,
-            ...record,
-            documentsSubmitted: submittedAttachments.length,
-            totalDocuments: existingRecord.totalDocuments || record.totalDocuments,
-            strandOrCourse:
-              existingRecord.strandOrCourse || record.strandOrCourse,
-            honorLabel:
-              record.honorLabel ?? existingRecord.honorLabel ?? "No Honor",
-            honorDiscountPercentage:
-              record.honorDiscountPercentage ??
-              existingRecord.honorDiscountPercentage ??
-              0,
-            appliedForScholarship:
-              record.appliedForScholarship ??
-              existingRecord.appliedForScholarship ??
-              false,
-            scholarshipExamScore:
-              record.scholarshipExamScore ??
-              existingRecord.scholarshipExamScore ??
-              null,
-            effectiveDiscountPercentage:
-              record.effectiveDiscountPercentage ??
-              existingRecord.effectiveDiscountPercentage ??
-              0,
-            effectiveDiscountSource:
-              record.effectiveDiscountSource ??
-              existingRecord.effectiveDiscountSource ??
-              "none",
-            personalInfo: {
-              ...existingRecord.personalInfo,
-              ...record.personalInfo,
-            },
-            attachments: mergedAttachments,
-            status: record.status || existingRecord.status,
-            studentNumber: record.studentNumber || existingRecord.studentNumber,
-            convertedAt: record.convertedAt || existingRecord.convertedAt,
-          }
-        : record,
+      normalizeAdminEnrolleeCapitalization(mergedRecord),
     );
   });
 
@@ -1729,8 +2777,13 @@ export const getStudentRequirementSnapshot = ({
     allAttachments,
     applicantRecord.documentsSubmitted,
   );
+  const acceptedSubmittedAttachments = submittedAttachments.filter(
+    (attachment) => attachment.reviewStatus !== "Rejected",
+  );
   const submittedNames = new Set(
-    submittedAttachments.map((attachment) => attachment.name.trim().toLowerCase()),
+    acceptedSubmittedAttachments.map((attachment) =>
+      attachment.name.trim().toLowerCase(),
+    ),
   );
   const pendingRequirements = allRequirements.filter(
     (requirement) => !submittedNames.has(requirement.name.trim().toLowerCase()),
@@ -1738,13 +2791,13 @@ export const getStudentRequirementSnapshot = ({
 
   return {
     applicantRecord,
-    submittedAttachments,
+    submittedAttachments: acceptedSubmittedAttachments,
     pendingRequirements,
     summary: {
       total: allRequirements.length,
-      submitted: submittedAttachments.length,
+      submitted: acceptedSubmittedAttachments.length,
       pending: pendingRequirements.length,
-      approved: submittedAttachments.filter(
+      approved: acceptedSubmittedAttachments.filter(
         (attachment) => attachment.reviewStatus === "Approved",
       ).length,
       rejected: submittedAttachments.filter(
@@ -1788,17 +2841,22 @@ export const getStudentCredentialOverview = ({
   const items: StudentPortalCredentialItem[] = allRequirements.map(
     (requirement) => {
       const attachment = attachmentsByName.get(requirement.name.trim().toLowerCase());
-      const hasFile = !!attachment && hasRealAttachmentUrl(attachment);
+      const isRejected = attachment?.reviewStatus === "Rejected";
+      const hasFile =
+        !!attachment && hasRealAttachmentUrl(attachment) && !isRejected;
       const isSubmitted =
         hasFile ||
-        snapshot.submittedAttachments.some(
-          (submittedAttachment) =>
-            getAttachmentKey(submittedAttachment) ===
-            requirement.name.trim().toLowerCase(),
-        );
+        (!isRejected &&
+          snapshot.submittedAttachments.some(
+            (submittedAttachment) =>
+              getAttachmentKey(submittedAttachment) ===
+              requirement.name.trim().toLowerCase(),
+          ));
       const reviewStatus = isSubmitted
         ? attachment?.reviewStatus || "Pending"
-        : "Pending";
+        : attachment?.reviewStatus === "Rejected"
+          ? "Rejected"
+          : "Pending";
 
       return {
         code: requirement.code,
@@ -1848,6 +2906,7 @@ export const syncStudentCredentialUpload = async ({
   mimeType,
   storagePath,
   storageBucket = REQUIREMENTS_BUCKET,
+  reviewStatus = "Pending",
 }: {
   branch?: string | null;
   trackingNumber?: string | null;
@@ -1856,6 +2915,7 @@ export const syncStudentCredentialUpload = async ({
   mimeType?: string | null;
   storagePath: string;
   storageBucket?: string;
+  reviewStatus?: NonNullable<AdminAttachment["reviewStatus"]>;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
   const storedEnrollees =
@@ -1881,7 +2941,7 @@ export const syncStudentCredentialUpload = async ({
       name: requirementName,
       type: mimeType || "file",
       url: signedUrl,
-      reviewStatus: "Pending",
+      reviewStatus,
     };
 
     const nextAttachments =
@@ -1894,17 +2954,90 @@ export const syncStudentCredentialUpload = async ({
       nextAttachments,
       record.documentsSubmitted,
     ).length;
+    const hasRejectedAttachments = nextAttachments.some(
+      (attachment) => attachment.reviewStatus === "Rejected",
+    );
+    const tuitionEstimate = getEstimatedCollegeTuition({
+      honorLabel: record.honorLabel,
+      honorCertificateApproved: hasApprovedHonorCertificate(nextAttachments),
+      appliedForScholarship: record.appliedForScholarship,
+      scholarshipExamScore: record.scholarshipExamScore,
+    });
 
     return {
       ...record,
       attachments: nextAttachments,
       documentsSubmitted: submittedAttachmentCount,
       totalDocuments: Math.max(record.totalDocuments, nextAttachments.length),
+      rejectionReason: hasRejectedAttachments ? record.rejectionReason : undefined,
+      honorDiscountPercentage: tuitionEstimate.honorDiscountPercentage,
+      effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
+      effectiveDiscountSource: tuitionEstimate.effectiveDiscountSource,
     };
   });
 
   writeBranchScopedData("enrollees", resolvedBranch, nextEnrollees);
   return nextEnrollees;
+};
+
+export const removeStudentCredentialUpload = ({
+  branch,
+  trackingNumber,
+  studentNumber,
+  requirementName,
+}: {
+  branch?: string | null;
+  trackingNumber?: string | null;
+  studentNumber?: string | null;
+  requirementName: string;
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedEnrollees =
+    readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ?? [];
+  const requirementKey = requirementName.trim().toLowerCase();
+  let updatedRecord: AdminEnrolleeRecord | null = null;
+
+  const nextEnrollees = storedEnrollees.map((record) => {
+    const isTargetRecord =
+      (trackingNumber && record.trackingNumber === trackingNumber) ||
+      (studentNumber && record.studentNumber === studentNumber);
+
+    if (!isTargetRecord) {
+      return record;
+    }
+
+    const nextAttachments = (record.attachments ?? []).filter(
+      (attachment) => getAttachmentKey(attachment) !== requirementKey,
+    );
+    const submittedAttachmentCount = getEffectiveSubmittedAttachments(
+      nextAttachments,
+      nextAttachments.length,
+    ).length;
+    const tuitionEstimate = getEstimatedCollegeTuition({
+      honorLabel: record.honorLabel,
+      honorCertificateApproved: hasApprovedHonorCertificate(nextAttachments),
+      appliedForScholarship: record.appliedForScholarship,
+      scholarshipExamScore: record.scholarshipExamScore,
+    });
+
+    updatedRecord = {
+      ...record,
+      attachments: nextAttachments,
+      documentsSubmitted: submittedAttachmentCount,
+      honorDiscountPercentage: tuitionEstimate.honorDiscountPercentage,
+      effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
+      effectiveDiscountSource: tuitionEstimate.effectiveDiscountSource,
+    };
+
+    return updatedRecord;
+  });
+
+  if (!updatedRecord) {
+    return null;
+  }
+
+  writeBranchScopedData("enrollees", resolvedBranch, nextEnrollees);
+  return updatedRecord;
 };
 
 export const updateStudentRequirementReviewStatus = ({
@@ -1949,10 +3082,19 @@ export const updateStudentRequirementReviewStatus = ({
         ? { ...attachment, reviewStatus: status }
         : attachment,
     );
+    const tuitionEstimate = getEstimatedCollegeTuition({
+      honorLabel: record.honorLabel,
+      honorCertificateApproved: hasApprovedHonorCertificate(nextAttachments),
+      appliedForScholarship: record.appliedForScholarship,
+      scholarshipExamScore: record.scholarshipExamScore,
+    });
 
     updatedRecord = {
       ...record,
       attachments: nextAttachments,
+      honorDiscountPercentage: tuitionEstimate.honorDiscountPercentage,
+      effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
+      effectiveDiscountSource: tuitionEstimate.effectiveDiscountSource,
     };
 
     return updatedRecord;
@@ -2022,23 +3164,37 @@ export const getStudentPortalSubjects = (
     storedAssignments[0]?.academicYear ||
     activeStudentSubjectPlan?.academicYear ||
     "2026-2027";
-  const matchedSubjects = storedSubjects.filter(
+  const exactMatchedSubjects = storedSubjects.filter(
     (subject) =>
       subject.program === student.program &&
-      subject.yearLevel === student.yearLevel &&
+      yearLevelsMatch(subject.yearLevel, student.yearLevel) &&
       matchesStrandOrCourse(
         resolveStoredSubjectStrandOrCourse(subject),
         student.strandOrCourse,
       ),
   );
+  const matchedSubjects =
+    exactMatchedSubjects.length > 0
+      ? exactMatchedSubjects
+      : storedSubjects.filter(
+          (subject) =>
+            subject.program === student.program &&
+            yearLevelsMatch(subject.yearLevel, student.yearLevel),
+        );
   const matchedSection = student.section
-    ? storedSections.find((section) => section.code === student.section)
+    ? storedSections.find(
+        (section) =>
+          normalizeStoredSectionCode(section.code) ===
+          normalizeStoredSectionCode(student.section),
+      )
     : undefined;
   const activeSectionSemester = student.section
     ? normalizeStoredSemester(
         matchedSection?.semester ||
           storedAssignments.find(
-            (assignment) => assignment.sectionCode === student.section,
+            (assignment) =>
+              normalizeStoredSectionCode(assignment.sectionCode) ===
+              normalizeStoredSectionCode(student.section),
           )?.semester,
       )
     : undefined;
@@ -2126,8 +3282,9 @@ export const getStudentPortalSubjects = (
 
     if (student.section) {
       const plannedAssignments = storedAssignments.filter(
-        (assignment) =>
-          assignment.sectionCode === student.section &&
+          (assignment) =>
+          normalizeStoredSectionCode(assignment.sectionCode) ===
+            normalizeStoredSectionCode(student.section) &&
           (!effectiveSemester ||
             normalizeStoredSemester(assignment.semester) === effectiveSemester) &&
           plannedSubjects.some((item) =>
@@ -2146,12 +3303,8 @@ export const getStudentPortalSubjects = (
         );
         const remainingCatalogSubjects = plannedCatalogSubjects.filter(
           (subject) =>
-            !plannedAssignments.some(
-              (assignment) =>
-                (assignment.subjectId === subject.id ||
-                  assignment.subjectCode === subject.code) &&
-                normalizeStoredSemester(assignment.semester) ===
-                  normalizeStoredSemester(subject.semester),
+            !plannedAssignments.some((assignment) =>
+              storedSubjectMatchesAssignment(subject, assignment),
             ),
         );
 
@@ -2183,20 +3336,13 @@ export const getStudentPortalSubjects = (
   if (student.section) {
     const sectionAssignments = storedAssignments.filter(
       (assignment) =>
-        assignment.sectionCode === student.section &&
+        normalizeStoredSectionCode(assignment.sectionCode) ===
+          normalizeStoredSectionCode(student.section) &&
         (!effectiveSemester ||
           normalizeStoredSemester(assignment.semester) === effectiveSemester) &&
         !creditedPlanSubjects.some((item) =>
           subjectPlanItemMatches(item, assignment.subjectId, assignment.subjectCode),
-        ) &&
-        (storedSubjects.length === 0 ||
-          creditedScopedSubjects.some(
-            (subject) =>
-              (subject.id === assignment.subjectId ||
-                subject.code === assignment.subjectCode) &&
-              normalizeStoredSemester(subject.semester) ===
-                normalizeStoredSemester(assignment.semester),
-          )),
+        ),
     );
 
     if (sectionAssignments.length > 0) {
@@ -2209,17 +3355,11 @@ export const getStudentPortalSubjects = (
         sectionAssignments,
         storedSubjects,
       );
-      const assignedSubjectKeys = new Set(
-        sectionAssignments.map(
-          (assignment) =>
-            `${assignment.subjectId}:${assignment.subjectCode}:${assignment.semester}`,
-        ),
-      );
       const remainingCatalogSubjects = creditedScopedSubjects.filter(
         (subject) =>
           assignedSemesters.has(subject.semester) &&
-          !assignedSubjectKeys.has(
-            `${subject.id}:${subject.code}:${subject.semester}`,
+          !sectionAssignments.some((assignment) =>
+            storedSubjectMatchesAssignment(subject, assignment),
           ),
       );
 
@@ -2270,19 +3410,27 @@ export const getStudentPortalSubjectsForTerm = ({
     academicYear || storedAssignments[0]?.academicYear || "2026-2027";
   const normalizedSemester = normalizeStoredSemester(semester);
 
-  return mapStoredSubjectsToPortalSubjects(
-    storedSubjects.filter(
-      (subject) =>
-        subject.program === program &&
-        subject.yearLevel === yearLevel &&
-        normalizeStoredSemester(subject.semester) === normalizedSemester &&
-        matchesStrandOrCourse(
-          resolveStoredSubjectStrandOrCourse(subject),
-          strandOrCourse,
-        ),
-    ),
-    resolvedAcademicYear,
+  const exactTermSubjects = storedSubjects.filter(
+    (subject) =>
+      subject.program === program &&
+      yearLevelsMatch(subject.yearLevel, yearLevel) &&
+      normalizeStoredSemester(subject.semester) === normalizedSemester &&
+      matchesStrandOrCourse(
+        resolveStoredSubjectStrandOrCourse(subject),
+        strandOrCourse,
+      ),
   );
+  const termSubjects =
+    exactTermSubjects.length > 0
+      ? exactTermSubjects
+      : storedSubjects.filter(
+          (subject) =>
+            subject.program === program &&
+            yearLevelsMatch(subject.yearLevel, yearLevel) &&
+            normalizeStoredSemester(subject.semester) === normalizedSemester,
+        );
+
+  return mapStoredSubjectsToPortalSubjects(termSubjects, resolvedAcademicYear);
 };
 
 export const getStudentPortalSubjectsForSectionTerm = ({
@@ -2323,17 +3471,26 @@ export const getStudentPortalSubjectsForSectionTerm = ({
   const resolvedAcademicYear =
     academicYear || storedAssignments[0]?.academicYear || "2026-2027";
   const normalizedSemester = normalizeStoredSemester(semester);
-  const normalizedSectionCode = sectionCode?.trim() || "";
-  const semesterScopedSubjects = storedSubjects.filter(
+  const normalizedSectionCode = normalizeStoredSectionCode(sectionCode);
+  const exactSemesterScopedSubjects = storedSubjects.filter(
     (subject) =>
       subject.program === program &&
-      subject.yearLevel === yearLevel &&
+      yearLevelsMatch(subject.yearLevel, yearLevel) &&
       subject.semester === normalizedSemester &&
       matchesStrandOrCourse(
         resolveStoredSubjectStrandOrCourse(subject),
         strandOrCourse,
       ),
   );
+  const semesterScopedSubjects =
+    exactSemesterScopedSubjects.length > 0
+      ? exactSemesterScopedSubjects
+      : storedSubjects.filter(
+          (subject) =>
+            subject.program === program &&
+            yearLevelsMatch(subject.yearLevel, yearLevel) &&
+            subject.semester === normalizedSemester,
+        );
 
   if (!normalizedSectionCode) {
     return mapStoredSubjectsToPortalSubjects(
@@ -2345,15 +3502,8 @@ export const getStudentPortalSubjectsForSectionTerm = ({
   const sectionAssignments = storedAssignments.filter(
     (assignment) =>
       assignment.academicYear === resolvedAcademicYear &&
-      assignment.sectionCode === normalizedSectionCode &&
-      assignment.semester === normalizedSemester &&
-      (storedSubjects.length === 0 ||
-        semesterScopedSubjects.some(
-          (subject) =>
-            (subject.id === assignment.subjectId ||
-              subject.code === assignment.subjectCode) &&
-            subject.semester === assignment.semester,
-        )),
+      normalizeStoredSectionCode(assignment.sectionCode) === normalizedSectionCode &&
+      assignment.semester === normalizedSemester,
   );
 
   if (sectionAssignments.length === 0) {
@@ -2367,15 +3517,11 @@ export const getStudentPortalSubjectsForSectionTerm = ({
     sectionAssignments,
     storedSubjects,
   );
-  const assignedSubjectKeys = new Set(
-    sectionAssignments.map(
-      (assignment) =>
-        `${assignment.subjectId}:${assignment.subjectCode}:${assignment.semester}`,
-    ),
-  );
   const remainingCatalogSubjects = semesterScopedSubjects.filter(
     (subject) =>
-      !assignedSubjectKeys.has(`${subject.id}:${subject.code}:${subject.semester}`),
+      !sectionAssignments.some((assignment) =>
+        storedSubjectMatchesAssignment(subject, assignment),
+      ),
   );
 
   return sortPortalSubjects([
@@ -2406,6 +3552,10 @@ export const getEnrollmentSectionChoices = ({
   const storedSections =
     readBranchScopedData<StoredClassSection[]>("class-sections", resolvedBranch) ??
     [];
+  const studentSectionCounts = getStoredStudentSectionCounts(
+    readStoredStudents(),
+    resolvedBranch,
+  );
   const storedAssignments =
     readBranchScopedData<StoredSubjectAssignment[]>(
       "subject-assignments",
@@ -2435,13 +3585,14 @@ export const getEnrollmentSectionChoices = ({
 
       return (
         sectionProgram === program &&
-        sectionYearLevel === yearLevel &&
+        yearLevelsMatch(sectionYearLevel, yearLevel) &&
         sectionSemester === normalizedSemester &&
         matchesStrandOrCourse(sectionStrandOrCourse, strandOrCourse)
       );
     })
     .map((section) => {
-      const currentEnrollees = Math.max(0, Number(section.currentEnrollees ?? 0));
+      const currentEnrollees =
+        studentSectionCounts.get(normalizeStoredSectionCode(section.code)) ?? 0;
       const maxCapacity = Math.max(
         currentEnrollees,
         Number(section.maxCapacity ?? 0),
@@ -2495,6 +3646,10 @@ export const getStudentSectionChoices = ({
   const storedSections =
     readBranchScopedData<StoredClassSection[]>("class-sections", resolvedBranch) ??
     [];
+  const studentSectionCounts = getStoredStudentSectionCounts(
+    readStoredStudents(),
+    resolvedBranch,
+  );
   const storedAssignments =
     readBranchScopedData<StoredSubjectAssignment[]>(
       "subject-assignments",
@@ -2513,12 +3668,13 @@ export const getStudentSectionChoices = ({
       return (
         normalizeStoredSectionCode(section.code) === normalizedCurrentSectionCode ||
         (sectionProgram === program &&
-          sectionYearLevel === yearLevel &&
+          yearLevelsMatch(sectionYearLevel, yearLevel) &&
           matchesStrandOrCourse(sectionStrandOrCourse, strandOrCourse))
       );
     })
     .map((section) => {
-      const currentEnrollees = Math.max(0, Number(section.currentEnrollees ?? 0));
+      const currentEnrollees =
+        studentSectionCounts.get(normalizeStoredSectionCode(section.code)) ?? 0;
       const parsedMaxCapacity = Number(section.maxCapacity ?? 0);
       const hasCapacityLimit =
         Number.isFinite(parsedMaxCapacity) && parsedMaxCapacity > 0;
@@ -2642,7 +3798,7 @@ export const updateStoredStudentSection = ({
     );
   }
 
-  if (targetSectionYearLevel !== targetStudent.yearLevel) {
+  if (!yearLevelsMatch(targetSectionYearLevel, targetStudent.yearLevel)) {
     throw new Error(
       `${normalizedNextSectionCode} does not match the student's year level.`,
     );
@@ -2659,27 +3815,13 @@ export const updateStoredStudentSection = ({
     );
   }
 
-  const branchEnrollees =
-    readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ?? [];
-  const linkedEnrollee =
-    branchEnrollees.find(
-      (record) =>
-        Boolean(trackingNumber) && record.trackingNumber === trackingNumber,
-    ) ??
-    branchEnrollees.find(
-      (record) =>
-        Boolean(studentNumber) &&
-        (record.studentNumber === studentNumber || record.studentNumber === targetStudent.id),
-    ) ??
-    null;
-  const linkedEnrolleeId = linkedEnrollee?.id || "";
-  const targetEnrolleeIds = targetSection.enrolleeIds ?? [];
-  const isAlreadyLinkedToTarget =
-    Boolean(linkedEnrolleeId) && targetEnrolleeIds.includes(linkedEnrolleeId);
-  const targetCurrentEnrollees = Math.max(
-    0,
-    Number(targetSection.currentEnrollees ?? 0),
+  const currentStudentSectionCounts = getStoredStudentSectionCounts(
+    storedStudents,
+    resolvedBranch,
   );
+  const isAlreadyLinkedToTarget = previousSection === normalizedNextSectionCode;
+  const targetCurrentEnrollees =
+    currentStudentSectionCounts.get(normalizedNextSectionCode) ?? 0;
   const parsedTargetCapacity = Number(targetSection.maxCapacity ?? 0);
   const hasTargetCapacityLimit =
     Number.isFinite(parsedTargetCapacity) && parsedTargetCapacity > 0;
@@ -2700,87 +3842,12 @@ export const updateStoredStudentSection = ({
   );
   writeStoredStudents(nextStudents);
 
-  const nextSections = storedSections.map((section) => {
-    if (normalizeStoredSectionCode(section.code) === previousSection) {
-      const existingEnrolleeIds = section.enrolleeIds ?? [];
-      const nextEnrolleeIds =
-        linkedEnrolleeId && existingEnrolleeIds.includes(linkedEnrolleeId)
-          ? existingEnrolleeIds.filter((enrolleeId) => enrolleeId !== linkedEnrolleeId)
-          : existingEnrolleeIds;
-
-      return {
-        ...section,
-        currentEnrollees: Math.max(
-          0,
-          Number(section.currentEnrollees ?? 0) - 1,
-        ),
-        enrolleeIds: nextEnrolleeIds,
-      };
-    }
-
-    if (
-      normalizeStoredSectionCode(section.code) === normalizedNextSectionCode
-    ) {
-      const existingEnrolleeIds = section.enrolleeIds ?? [];
-      const shouldAddLinkedEnrollee =
-        Boolean(linkedEnrolleeId) &&
-        !existingEnrolleeIds.includes(linkedEnrolleeId);
-
-      return {
-        ...section,
-        currentEnrollees: isAlreadyLinkedToTarget
-          ? Math.max(0, Number(section.currentEnrollees ?? 0))
-          : Math.max(0, Number(section.currentEnrollees ?? 0)) + 1,
-        enrolleeIds: shouldAddLinkedEnrollee
-          ? [...existingEnrolleeIds, linkedEnrolleeId]
-          : existingEnrolleeIds,
-      };
-    }
-
-    return section;
-  });
+  const nextSections = applyStoredStudentSectionCounts(
+    storedSections,
+    nextStudents,
+    resolvedBranch,
+  );
   writeBranchScopedData("class-sections", resolvedBranch, nextSections);
-
-  if (linkedEnrolleeId) {
-    const storedSectionAssignments =
-      readBranchScopedData<StoredSectionAssignmentRecord[]>(
-        "section-assignments",
-        resolvedBranch,
-      ) ?? [];
-    const assignmentDate = new Date().toLocaleDateString();
-    const existingAssignmentIndex = storedSectionAssignments.findIndex(
-      (assignment) => assignment.enrolleeId === linkedEnrolleeId,
-    );
-    const nextSectionAssignments =
-      existingAssignmentIndex >= 0
-        ? storedSectionAssignments.map((assignment, index) =>
-            index === existingAssignmentIndex
-              ? {
-                  ...assignment,
-                  assignedSection: normalizedNextSectionCode,
-                  assignedDate: assignmentDate,
-                  isManualOverride: true,
-                }
-              : assignment,
-          )
-        : [
-            {
-              enrolleeId: linkedEnrolleeId,
-              enrolleeName:
-                linkedEnrollee?.fullName || targetStudent.name || "Student",
-              assignedSection: normalizedNextSectionCode,
-              assignedDate: assignmentDate,
-              isManualOverride: true,
-            },
-            ...storedSectionAssignments,
-          ];
-
-    writeBranchScopedData(
-      "section-assignments",
-      resolvedBranch,
-      nextSectionAssignments,
-    );
-  }
 
   return {
     student: updatedStudent,
@@ -2909,6 +3976,7 @@ export const getStudentScheduleChoiceGroups = ({
   strandOrCourse,
   semester,
   academicYear,
+  gradeRecords,
 }: {
   branch?: string | null;
   program: string;
@@ -2916,40 +3984,144 @@ export const getStudentScheduleChoiceGroups = ({
   strandOrCourse?: string;
   semester: string;
   academicYear?: string;
+  gradeRecords?: StoredStudentGradeRecord[];
 }): StudentScheduleChoiceGroup[] => {
   const resolvedBranch = normalizeBranchName(branch);
   const storedSubjects =
-    readBranchScopedData<StoredAcademicSubject[]>("subjects", resolvedBranch) ?? [];
+    (
+      readBranchScopedData<StoredAcademicSubject[]>("subjects", resolvedBranch) ?? []
+    ).map((subject) => ({
+      ...subject,
+      semester: normalizeStoredSemester(subject.semester),
+    }));
   const storedAssignments =
-    readBranchScopedData<StoredSubjectAssignment[]>(
-      "subject-assignments",
-      resolvedBranch,
-    ) ?? [];
+    (
+      readBranchScopedData<StoredSubjectAssignment[]>(
+        "subject-assignments",
+        resolvedBranch,
+      ) ?? []
+    ).map((assignment) => ({
+      ...assignment,
+      semester: normalizeStoredSemester(assignment.semester),
+    }));
   const resolvedAcademicYear =
     academicYear || storedAssignments[0]?.academicYear || "2026-2027";
   const normalizedSemester = normalizeStoredSemester(semester);
+  const matchingTermAssignments = storedAssignments.filter(
+    (assignment) =>
+      assignment.academicYear === resolvedAcademicYear &&
+      assignment.semester === normalizedSemester,
+  );
+  const semesterFallbackAssignments =
+    matchingTermAssignments.length > 0
+      ? matchingTermAssignments
+      : storedAssignments.filter(
+          (assignment) => assignment.semester === normalizedSemester,
+        );
+  const hasGradeEligibilityContext = Array.isArray(gradeRecords);
+  const subjectYearLevelFilter = hasGradeEligibilityContext
+    ? (subject: StoredAcademicSubject) =>
+        subjectIsAtOrBeforeYearLevel(subject, yearLevel)
+    : (subject: StoredAcademicSubject) =>
+        yearLevelsMatch(subject.yearLevel, yearLevel);
+  const exactSubjectMatches = storedSubjects.filter(
+    (subject) =>
+      subject.program === program &&
+      subjectYearLevelFilter(subject) &&
+      subject.semester === normalizedSemester &&
+      matchesStrandOrCourse(
+        resolveStoredSubjectStrandOrCourse(subject),
+        strandOrCourse,
+      ),
+  );
+  const matchedSubjects =
+    exactSubjectMatches.length > 0
+      ? exactSubjectMatches
+      : storedSubjects.filter(
+          (subject) =>
+            subject.program === program &&
+            subjectYearLevelFilter(subject) &&
+            subject.semester === normalizedSemester,
+        );
+  const completedSubjectCodes = getCompletedSubjectCodes(gradeRecords ?? []);
+  const latestGradeRecordsBySubjectCode =
+    getLatestTerminalGradeRecordsBySubjectCode(gradeRecords ?? []);
+  const relaxedSubjectMatches = hasGradeEligibilityContext
+    ? matchedSubjects.filter(
+        (subject) =>
+          !subjectIsCompletedByGrades(subject, completedSubjectCodes) &&
+          subjectPrerequisitesArePassed({
+            subject,
+            subjects: storedSubjects,
+            latestGradeRecordsBySubjectCode,
+          }),
+      )
+    : matchedSubjects;
 
-  return storedSubjects
-    .filter(
-      (subject) =>
-        subject.program === program &&
-        subject.yearLevel === yearLevel &&
-        normalizeStoredSemester(subject.semester) === normalizedSemester &&
-        matchesStrandOrCourse(
-          resolveStoredSubjectStrandOrCourse(subject),
-          strandOrCourse,
+  if (matchedSubjects.length === 0) {
+    const assignmentGroups = new Map<string, StudentScheduleChoiceGroup>();
+
+    semesterFallbackAssignments.forEach((assignment) => {
+      const subjectKey =
+        assignment.subjectId || assignment.subjectCode.trim().toUpperCase();
+      const existingGroup = assignmentGroups.get(subjectKey);
+      const nextOption: StudentScheduledAssignmentItem = {
+        assignmentId: assignment.id,
+        subjectId: assignment.subjectId || subjectKey,
+        subjectCode: assignment.subjectCode,
+        subjectName: assignment.subjectName,
+        instructorId: assignment.instructorId,
+        instructorName: assignment.instructorName,
+        sectionId: assignment.sectionId,
+        sectionCode: assignment.sectionCode,
+        schedule: assignment.schedule,
+        academicYear: assignment.academicYear,
+        semester: assignment.semester,
+      };
+
+      if (existingGroup) {
+        existingGroup.assignmentOptions.push(nextOption);
+        return;
+      }
+
+      assignmentGroups.set(subjectKey, {
+        subjectId: assignment.subjectId || subjectKey,
+        subjectCode: assignment.subjectCode,
+        subjectName: assignment.subjectName,
+        assignmentOptions: [nextOption],
+      });
+    });
+
+    return Array.from(assignmentGroups.values())
+      .map((group) => ({
+        ...group,
+        assignmentOptions: group.assignmentOptions.sort(
+          (left, right) =>
+            left.subjectCode.localeCompare(right.subjectCode) ||
+            (left.sectionCode || "").localeCompare(right.sectionCode || ""),
         ),
-    )
+      }))
+      .sort(
+        (left, right) =>
+          left.subjectCode.localeCompare(right.subjectCode) ||
+          left.subjectName.localeCompare(right.subjectName),
+      );
+  }
+
+  if (relaxedSubjectMatches.length === 0) {
+    return [];
+  }
+
+  return relaxedSubjectMatches
+    .sort(compareStoredSubjectSequence)
     .map((subject) => ({
       subjectId: subject.id,
       subjectCode: subject.code,
       subjectName: subject.name,
       units: subject.units,
-      assignmentOptions: storedAssignments
+      assignmentOptions: semesterFallbackAssignments
         .filter(
           (assignment) =>
-            assignment.academicYear === resolvedAcademicYear &&
-            normalizeStoredSemester(assignment.semester) === normalizedSemester &&
             (assignment.subjectId === subject.id ||
               assignment.subjectCode === subject.code),
         )
@@ -2984,12 +4156,21 @@ export const getStudentScheduleSelectionRequest = ({
   branch,
   studentNumber,
   trackingNumber,
+  academicYear,
+  semester,
 }: {
   branch?: string | null;
   studentNumber?: string | null;
   trackingNumber?: string | null;
+  academicYear?: string | null;
+  semester?: string | null;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
+  const normalizedStudentNumber = studentNumber
+    ? normalizeStudentNumberInput(studentNumber, resolvedBranch)
+    : "";
+  const normalizedSemester = semester ? normalizeStoredSemester(semester) : "";
+  const normalizedAcademicYear = academicYear?.trim() || "";
   const requests =
     readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
       "student-schedule-requests",
@@ -2998,15 +4179,27 @@ export const getStudentScheduleSelectionRequest = ({
 
   return (
     requests.find((request) => {
-      if (
+      const matchesTrackingNumber = Boolean(
         trackingNumber &&
         request.trackingNumber &&
-        request.trackingNumber === trackingNumber
-      ) {
-        return true;
+          request.trackingNumber === trackingNumber,
+      );
+      const matchesTerm =
+        (!normalizedAcademicYear ||
+          request.academicYear.trim() === normalizedAcademicYear) &&
+        (!normalizedSemester ||
+          normalizeStoredSemester(request.semester) === normalizedSemester);
+
+      if (matchesTrackingNumber) {
+        return matchesTerm;
       }
 
-      return Boolean(studentNumber) && request.studentNumber === studentNumber;
+      return (
+        Boolean(normalizedStudentNumber && request.studentNumber) &&
+        normalizeStudentNumberInput(request.studentNumber, resolvedBranch) ===
+          normalizedStudentNumber &&
+        matchesTerm
+      );
     }) ?? null
   );
 };
@@ -3020,10 +4213,15 @@ export const saveStudentScheduleSelectionRequest = (
       "student-schedule-requests",
       resolvedBranch,
     ) ?? [];
+  const normalizedRequestStudentNumber = normalizeStudentNumberInput(
+    request.studentNumber,
+    resolvedBranch,
+  );
   const existingIndex = existingRequests.findIndex(
     (record) =>
       record.id === request.id ||
-      (record.studentNumber === request.studentNumber &&
+      (normalizeStudentNumberInput(record.studentNumber, resolvedBranch) ===
+        normalizedRequestStudentNumber &&
         record.semester === request.semester &&
         record.academicYear === request.academicYear),
   );
@@ -3091,8 +4289,11 @@ export const updateStoredStudentOwnScheduleState = ({
 };
 
 export const getDefaultBranchEnrollees = (
-  _branch: string | null | undefined,
-): AdminEnrolleeRecord[] => [];
+  branch: string | null | undefined,
+): AdminEnrolleeRecord[] => {
+  void branch;
+  return [];
+};
 
 const getSignedRequirementUrl = async (
   storagePath: string,
@@ -3119,7 +4320,11 @@ const mapSupabaseApplicantToAdminRecord = async (
     .join(" ")
     .trim();
   const program = mapProgramNameToAdminProgram(row.program_name);
-  const yearLevel = getInitialYearLevel(program, row.student_status_label);
+  const yearLevel = getInitialYearLevel(
+    program,
+    row.student_status_label,
+    row.requested_year_level,
+  );
   const requirements = getAdmissionRequirements(
     row.student_status_label,
     row.program_name,
@@ -3129,26 +4334,6 @@ const mapSupabaseApplicantToAdminRecord = async (
     ? row.requirement_files
     : [];
   const scholarshipExamScore = toOptionalNumber(row.scholarship_exam_score);
-  const honorDiscountPercentage =
-    toOptionalNumber(row.honor_discount_percentage) ??
-    getHonorDiscountPercentage(row.honor_label || "No Honor");
-  const effectiveDiscountPercentage =
-    toOptionalNumber(row.effective_discount_percentage) ??
-    getEffectiveAdmissionDiscountPercentage({
-      honorLabel: row.honor_label,
-      appliedForScholarship: row.applied_for_scholarship,
-      scholarshipExamScore,
-    });
-  const effectiveDiscountSource =
-    row.effective_discount_source === "honor" ||
-    row.effective_discount_source === "scholarship_exam" ||
-    row.effective_discount_source === "none"
-      ? row.effective_discount_source
-      : getAdmissionDiscountSource({
-          honorLabel: row.honor_label,
-          appliedForScholarship: row.applied_for_scholarship,
-          scholarshipExamScore,
-        });
   const attachments = await Promise.all(
     requirements.map(async (requirement) => {
       const uploadedFile = requirementFiles.find(
@@ -3175,6 +4360,12 @@ const mapSupabaseApplicantToAdminRecord = async (
       };
     }),
   );
+  const tuitionEstimate = getEstimatedCollegeTuition({
+    honorLabel: row.honor_label,
+    honorCertificateApproved: hasApprovedHonorCertificate(attachments),
+    appliedForScholarship: row.applied_for_scholarship,
+    scholarshipExamScore,
+  });
 
   return {
     id: row.tracking_number,
@@ -3197,11 +4388,11 @@ const mapSupabaseApplicantToAdminRecord = async (
     branch: normalizeBranchName(row.branch_name || row.branch_code),
     studentStatus: row.student_status_label,
     honorLabel: row.honor_label || "No Honor",
-    honorDiscountPercentage,
+    honorDiscountPercentage: tuitionEstimate.honorDiscountPercentage,
     appliedForScholarship: row.applied_for_scholarship,
     scholarshipExamScore,
-    effectiveDiscountPercentage,
-    effectiveDiscountSource,
+    effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
+    effectiveDiscountSource: tuitionEstimate.effectiveDiscountSource,
     personalInfo: {
       fullName,
       birthDate: "",
@@ -3212,6 +4403,16 @@ const mapSupabaseApplicantToAdminRecord = async (
       address: row.address || "",
       yearLevel,
       guardianContact: "",
+      middleName: row.middle_name || "",
+      sex: row.sex || "",
+      civilStatus: row.civil_status || "",
+      lastSchoolAttended: row.last_school_attended || "",
+      yearCompletion:
+        row.year_completion === null || row.year_completion === undefined
+          ? ""
+          : String(row.year_completion),
+      requestedYearLevel: row.requested_year_level || yearLevel,
+      strandOrCourse: row.track_name || "",
     },
     attachments,
   };
@@ -3231,7 +4432,10 @@ export const fetchSupabaseAdmissionApplicants = async (
   }
 
   const queueRows = Array.isArray(data) ? data : [];
-  return Promise.all(queueRows.map(mapSupabaseApplicantToAdminRecord));
+  const applicantRecords = await Promise.all(
+    queueRows.map(mapSupabaseApplicantToAdminRecord),
+  );
+  return applicantRecords.map(normalizeAdminEnrolleeCapitalization);
 };
 
 export const upsertSubmittedApplicant = ({
@@ -3244,22 +4448,38 @@ export const upsertSubmittedApplicant = ({
   const branch = normalizeBranchName(application.branchName || draft?.branch);
   const storageKey = getBranchStorageKey("enrollees", branch);
   const existingApplicants =
-    readStorageItem<AdminEnrolleeRecord[]>(storageKey) ??
-    getDefaultBranchEnrollees(branch);
+    (
+      readStorageItem<AdminEnrolleeRecord[]>(storageKey) ??
+      getDefaultBranchEnrollees(branch)
+    ).map(normalizeAdminEnrolleeCapitalization);
   const fullName = [draft?.fname || application.firstName, draft?.middle_name, draft?.lname || application.lastName]
     .filter((value) => typeof value === "string" && value.trim() !== "")
     .join(" ")
     .trim();
   const program = mapProgramNameToAdminProgram(application.programName);
   const strandOrCourse = application.trackName;
-  const yearLevel = getInitialYearLevel(program, application.studentStatus);
+  const yearLevel = getInitialYearLevel(
+    program,
+    application.studentStatus,
+    draft?.requested_year_level ||
+      draft?.requestedYearLevel ||
+      application.requestedYearLevel,
+  );
   const honorLabel = draft?.honor || application.honorLabel || "No Honor";
   const requirementList = getAdmissionRequirements(
     application.studentStatus,
     application.programName,
     honorLabel,
   );
-  const applicantRecord: AdminEnrolleeRecord = {
+  const tuitionEstimate = getEstimatedCollegeTuition({
+    honorLabel,
+    honorCertificateApproved: false,
+    appliedForScholarship: Boolean(
+      draft?.apply_scholarship ?? application.appliedForScholarship,
+    ),
+    scholarshipExamScore: application.scholarshipExamScore,
+  });
+  const applicantRecord: AdminEnrolleeRecord = normalizeAdminEnrolleeCapitalization({
     id: application.trackingNumber,
     trackingNumber: application.trackingNumber,
     fullName: fullName || `${application.firstName} ${application.lastName}`.trim(),
@@ -3273,13 +4493,13 @@ export const upsertSubmittedApplicant = ({
     branch,
     studentStatus: application.studentStatus,
     honorLabel,
-    honorDiscountPercentage: application.honorDiscountPercentage,
+    honorDiscountPercentage: tuitionEstimate.honorDiscountPercentage,
     appliedForScholarship: Boolean(
       draft?.apply_scholarship ?? application.appliedForScholarship,
     ),
     scholarshipExamScore: application.scholarshipExamScore,
-    effectiveDiscountPercentage: application.effectiveDiscountPercentage,
-    effectiveDiscountSource: application.effectiveDiscountSource,
+    effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
+    effectiveDiscountSource: tuitionEstimate.effectiveDiscountSource,
     requestedOwnSchedule: Boolean(draft?.requestOwnSchedule),
     ownScheduleRequestStatus: draft?.requestOwnSchedule ? "Pending" : undefined,
     ownScheduleRequestSubmittedAt: draft?.requestOwnSchedule
@@ -3295,9 +4515,20 @@ export const upsertSubmittedApplicant = ({
       address: draft?.address || "",
       yearLevel,
       guardianContact: "",
+      middleName: draft?.middle_name || draft?.mname || "",
+      sex: draft?.sex || "",
+      civilStatus: draft?.civil_status || "",
+      lastSchoolAttended: draft?.last_school_attended || draft?.lastSchool || "",
+      yearCompletion: draft?.year_completion || draft?.yearCompletion || "",
+      requestedYearLevel:
+        draft?.requested_year_level ||
+        draft?.requestedYearLevel ||
+        application.requestedYearLevel ||
+        yearLevel,
+      strandOrCourse,
     },
     attachments: [],
-  };
+  });
 
   const existingApplicantIndex = existingApplicants.findIndex(
     (applicant) => applicant.trackingNumber === application.trackingNumber,
@@ -3318,62 +4549,76 @@ export const upsertSubmittedApplicant = ({
         )
       : [applicantRecord, ...existingApplicants];
 
-  writeStorageItem(storageKey, nextApplicants);
+  writeStorageItem(
+    storageKey,
+    nextApplicants.map(normalizeAdminEnrolleeCapitalization),
+  );
   return nextApplicants;
 };
 
 export const promoteApplicantToStoredStudent = (
   applicant: AdminEnrolleeRecord,
 ) => {
+  const normalizedApplicant = normalizeAdminEnrolleeCapitalization(applicant);
   const existingStudents = readStoredStudents();
   const existingStudent = findStoredStudent({
-    branch: applicant.branch,
-    studentNumber: applicant.studentNumber,
-    trackingNumber: applicant.trackingNumber,
+    branch: normalizedApplicant.branch,
+    studentNumber: normalizedApplicant.studentNumber,
+    trackingNumber: normalizedApplicant.trackingNumber,
   });
   const studentNumber =
     existingStudent?.id ||
-    applicant.studentNumber ||
-    getNextStudentNumber(applicant.branch, existingStudents);
-  const { firstName, middleName, lastName } = splitFullName(applicant.fullName);
+    normalizedApplicant.studentNumber ||
+    getNextStudentNumber(normalizedApplicant.branch, existingStudents);
+  const { firstName, middleName, lastName } = splitFullName(
+    normalizedApplicant.fullName,
+  );
+  const applicantSex = normalizedApplicant.personalInfo.sex;
+  const resolvedGender =
+    applicantSex === "Male" || applicantSex === "Female"
+      ? applicantSex
+      : existingStudent?.gender;
 
   const studentRecord: StudentStorageRecord = {
     id: studentNumber,
     name:
-      applicant.fullName ||
+      normalizedApplicant.fullName ||
       [firstName, middleName, lastName].filter(Boolean).join(" "),
-    program: applicant.program,
-    yearLevel: applicant.yearLevel,
+    program: normalizedApplicant.program,
+    yearLevel: normalizedApplicant.yearLevel,
     section: existingStudent?.section || "",
     shsTrackType:
-      applicant.program === "SHS"
-        ? resolveShsTrackType(applicant.strandOrCourse)
+      normalizedApplicant.program === "SHS"
+        ? resolveShsTrackType(normalizedApplicant.strandOrCourse)
         : "",
-    strandOrCourse: applicant.strandOrCourse,
-    documentSubmitted: applicant.applicationDate,
-    contact: applicant.personalInfo.contactNumber,
-    email: applicant.personalInfo.email,
-    address: applicant.personalInfo.address,
+    strandOrCourse: normalizedApplicant.strandOrCourse,
+    documentSubmitted: normalizedApplicant.applicationDate,
+    contact: normalizedApplicant.personalInfo.contactNumber,
+    email: normalizedApplicant.personalInfo.email,
+    address: normalizedApplicant.personalInfo.address,
     status:
-      applicant.documentsSubmitted >= applicant.totalDocuments
+      normalizedApplicant.documentsSubmitted >= normalizedApplicant.totalDocuments
         ? "Complete"
         : "Incomplete",
-    branch: normalizeBranchName(applicant.branch),
-    trackingNumber: applicant.trackingNumber,
-    studentStatus: applicant.studentStatus,
-    requestedOwnSchedule: applicant.requestedOwnSchedule,
-    ownScheduleRequestStatus: applicant.ownScheduleRequestStatus,
-    ownScheduleAcademicYear: applicant.ownScheduleAcademicYear,
-    ownScheduleSemester: applicant.ownScheduleSemester,
+    branch: normalizeBranchName(normalizedApplicant.branch),
+    trackingNumber: normalizedApplicant.trackingNumber,
+    studentStatus: normalizedApplicant.studentStatus,
+    requestedOwnSchedule: normalizedApplicant.requestedOwnSchedule,
+    ownScheduleRequestStatus: normalizedApplicant.ownScheduleRequestStatus,
+    ownScheduleAcademicYear: normalizedApplicant.ownScheduleAcademicYear,
+    ownScheduleSemester: normalizedApplicant.ownScheduleSemester,
     ownScheduleSelectionStatus:
-      applicant.ownScheduleRequestStatus === "Approved"
+      normalizedApplicant.ownScheduleRequestStatus === "Approved"
         ? "Not Submitted"
         : undefined,
-    birthDate: applicant.personalInfo.birthDate,
-    guardianName: applicant.personalInfo.guardianName,
-    guardianContact: applicant.personalInfo.guardianContact,
-    gender: existingStudent?.gender || "Male",
-    civilStatus: existingStudent?.civilStatus || "Single",
+    birthDate: normalizedApplicant.personalInfo.birthDate,
+    guardianName: normalizedApplicant.personalInfo.guardianName,
+    guardianContact: normalizedApplicant.personalInfo.guardianContact,
+    gender: resolvedGender,
+    civilStatus:
+      existingStudent?.civilStatus ||
+      normalizedApplicant.personalInfo.civilStatus ||
+      "Single",
   };
 
   const nextStudents = existingStudent
@@ -3389,7 +4634,7 @@ export const promoteApplicantToStoredStudent = (
   writeStoredStudents(nextStudents);
 
   const updatedApplicant: AdminEnrolleeRecord = {
-    ...applicant,
+    ...normalizedApplicant,
     studentNumber,
     status: "Approved",
     convertedAt: new Date().toISOString(),

@@ -14,7 +14,12 @@ from django.utils.text import slugify
 import sqlparse
 
 from .models import BackupHistory
-from .repository import create_backup_history, get_backup_history, update_backup_history
+from .repository import (
+    create_backup_history,
+    get_backup_history,
+    save_backup_snapshot,
+    update_backup_history,
+)
 from .storage import (
     delete_backup_blob,
     download_backup_blob,
@@ -658,12 +663,30 @@ def restore_branch_backup(history):
         manifest = json.loads(archive.read("metadata/manifest.json").decode("utf-8"))
         branch_id = manifest.get("branch") or history.branch
         if manifest.get("snapshot_format") == "json":
+            students = _read_archive_json_member(
+                archive,
+                "data/students.json",
+                required=True,
+            )
+            alumni = _read_archive_json_member(
+                archive,
+                "data/alumni.json",
+                required=True,
+            )
+            save_backup_snapshot(branch_id, students, alumni)
             return update_backup_history(
                 history.id,
                 status=BackupHistory.STATUS_COMPLETED,
                 progress=RESTORE_PROGRESS_STEPS["finished"],
                 restore_finished_at=timezone.now(),
                 error_message="",
+                metadata={
+                    **(history.metadata or {}),
+                    "snapshot_format": "json",
+                    "student_count": len(students),
+                    "alumni_count": len(alumni),
+                    "record_count": len(students) + len(alumni),
+                },
             ) or history
 
         model_labels = manifest.get("models") or []

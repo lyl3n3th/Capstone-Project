@@ -9,14 +9,14 @@
   left: 0;
   top: 0;
   bottom: 0;
-  height: 100vh;
+  height: 100dvh;
   overflow-y: auto;
   box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
   z-index: 120;
 }
 
 .admin-sidebar-header {
-  padding: 24px 24px;
+  padding: 14px 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   flex-shrink: 0;
 }
@@ -38,7 +38,7 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  padding-top: 18px;
+  padding-top: 0;
   margin-top: 0;
 }
 
@@ -83,6 +83,9 @@
   height: 44px;
   border-radius: 50%;
   object-fit: cover;
+  background: #ffffff;
+  padding: 0;
+  box-sizing: border-box;
   display: block;
 }
 
@@ -196,7 +199,7 @@
 }
 
 .admin-sidebar-footer {
-  padding: 16px;
+  padding: 10px 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   flex-shrink: 0;
 }
@@ -234,15 +237,73 @@
   display: none;
 }
 
-@media (max-width: 1440px) {
+@media (min-width: 1024px) {
+  .admin-sidebar {
+    overflow: hidden;
+  }
 
-    .admin-sidebar-header {
-        padding: 14px 20px;
-    }
+  .admin-sidebar-header {
+    padding-top: clamp(10px, 1.8vh, 14px);
+    padding-bottom: clamp(10px, 1.8vh, 14px);
+  }
 
-    .admin-sidebar-footer {
-    padding: 12px;
-    }
+  .admin-user-card {
+    gap: clamp(10px, 1.7vh, 14px);
+  }
+
+  .admin-user-avatar,
+  .admin-user-avatar-image {
+    width: 44px;
+    height: 44px;
+  }
+
+  .admin-sidebar-nav {
+    min-height: 0;
+    padding: clamp(2px, 0.5vh, 8px) 0;
+  }
+
+  .admin-sidebar-nav li {
+    margin: clamp(1px, 0.45vh, 4px) 0;
+  }
+
+  .admin-nav-link {
+    gap: 16px;
+    padding-top: clamp(8px, 1.55vh, 16px);
+    padding-bottom: clamp(8px, 1.55vh, 16px);
+    font-size: 16px;
+  }
+
+  .admin-nav-icon {
+    font-size: 20px;
+  }
+
+  .admin-sidebar-footer {
+    padding-top: clamp(8px, 1.3vh, 10px);
+    padding-bottom: clamp(8px, 1.3vh, 10px);
+  }
+
+  .admin-logout-btn {
+    padding-top: clamp(8px, 1.45vh, 12px);
+    padding-bottom: clamp(8px, 1.45vh, 12px);
+    font-size: 16px;
+  }
+
+  .admin-logout-btn svg {
+    font-size: 20px;
+  }
+}
+
+@media (min-width: 1024px) and (max-height: 640px) {
+  .admin-user-role,
+  .admin-branch-name {
+    margin-top: 2px;
+    line-height: 1.2;
+  }
+
+  .admin-nav-link {
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
 }
 
 @media (max-width: 1023px) {

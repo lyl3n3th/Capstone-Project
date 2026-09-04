@@ -363,3 +363,58 @@
     margin-top: 24px;
   }
 }
+
+@media (max-width: 360px) {
+  .admission-step1-page {
+    gap: 14px;
+    padding: 14px 8px 24px;
+  }
+
+  .admission-step1-card {
+    padding: 18px 12px 22px;
+    border-radius: 12px;
+  }
+
+  .admission-step1-card .choices {
+    min-height: 76px;
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  .admission-step1-card .choices .circle1 {
+    width: 38px;
+    height: 38px;
+    margin-right: 10px;
+    font-size: 16px;
+  }
+
+  .admission-step1-card .choices .location {
+    font-size: 14px;
+  }
+
+  .admission-step1-card .choices .campus {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .admission-step1-title {
+    font-size: 20px;
+  }
+
+  .admission-step1-title > p {
+    font-size: 11px;
+  }
+
+  .admission-step1-card .choices2 {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .admission-step1-card .btn1,
+  .admission-step1-card .btn2 {
+    width: 100%;
+    max-width: none;
+    padding: 11px 14px;
+    font-size: 14px;
+  }
+}

@@ -7,7 +7,9 @@ import {
 } from "react-icons/fa";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
+import StudentLoadingShell from "../../components/common/StudentLoadingShell";
 import { useStudent } from "../../hooks/useStudent";
+import aicsLogo from "../../assets/images/AICS_Logo.png";
 import type {
   StudentPortalSubject,
   StudentScheduleChoiceGroup,
@@ -23,6 +25,7 @@ import {
   saveStudentPlanningState,
   saveStudentScheduleRequest,
 } from "../../services/studentPlanningApi";
+import { getStudentGradeRecords } from "../../services/studentGrades";
 import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
 
@@ -229,6 +232,24 @@ const getOwnScheduleSelectionLabel = (
   return "Not Submitted";
 };
 
+const mapScheduleRequestStatusToSelectionStatus = (
+  status?: StudentScheduleSelectionRequestRecord["status"],
+): "Not Submitted" | "Pending Approval" | "Approved" | "Rejected" => {
+  if (status === "Approved") {
+    return "Approved";
+  }
+
+  if (status === "Rejected") {
+    return "Rejected";
+  }
+
+  if (status === "Pending") {
+    return "Pending Approval";
+  }
+
+  return "Not Submitted";
+};
+
 const getOwnScheduleStatusMessage = (
   status?: "Not Submitted" | "Pending Approval" | "Approved" | "Rejected",
 ) => {
@@ -283,6 +304,622 @@ const getOwnScheduleSubjectsEmptyStateMessage = ({
   return "No subjects found for the selected academic year and semester.";
 };
 
+const sanitizePdfText = (value: unknown) =>
+  String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const escapePdfText = (value: unknown) =>
+  sanitizePdfText(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+
+const wrapPdfText = (value: unknown, maxCharacters: number) => {
+  const text = sanitizePdfText(value);
+
+  if (!text) {
+    return [""];
+  }
+
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let currentLine = "";
+
+  words.forEach((word) => {
+    if (!currentLine) {
+      currentLine = word;
+      return;
+    }
+
+    if (`${currentLine} ${word}`.length <= maxCharacters) {
+      currentLine = `${currentLine} ${word}`;
+      return;
+    }
+
+    lines.push(currentLine);
+    currentLine = word;
+  });
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  return lines.length > 0 ? lines : [""];
+};
+
+type PdfObjectChunk = string | ArrayBuffer;
+
+type PdfImageResource = {
+  name: string;
+  width: number;
+  height: number;
+  data: ArrayBuffer;
+};
+
+const getPdfChunkLength = (chunk: PdfObjectChunk, encoder: TextEncoder) =>
+  typeof chunk === "string" ? encoder.encode(chunk).length : chunk.byteLength;
+
+const getImageDataUrlBytes = (dataUrl: string) => {
+  const base64 = dataUrl.split(",")[1] || "";
+  const binary = window.atob(base64);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return buffer;
+};
+
+const loadPdfJpegImage = async (
+  source: string,
+  name: string,
+): Promise<PdfImageResource | null> => {
+  try {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.src = source;
+
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("Unable to load schedule logo."));
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      return null;
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0);
+
+    return {
+      name,
+      width: canvas.width,
+      height: canvas.height,
+      data: getImageDataUrlBytes(canvas.toDataURL("image/jpeg", 0.92)),
+    };
+  } catch (error) {
+    console.warn("Schedule PDF logo was skipped.", error);
+    return null;
+  }
+};
+
+const buildPdfDocument = (
+  pageContents: string[],
+  imageResources: PdfImageResource[],
+  pageSize: { width: number; height: number },
+) => {
+  const encoder = new TextEncoder();
+  const objects: PdfObjectChunk[][] = [];
+  const addObject = (content: PdfObjectChunk | PdfObjectChunk[]) => {
+    objects.push(Array.isArray(content) ? content : [content]);
+    return objects.length;
+  };
+  const fontObjectId = addObject(
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  );
+  const boldFontObjectId = addObject(
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+  );
+  const imageObjectIds = imageResources.map((imageResource) =>
+    addObject([
+      `<< /Type /XObject /Subtype /Image /Width ${imageResource.width} /Height ${imageResource.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${imageResource.data.byteLength} >>\nstream\n`,
+      imageResource.data,
+      "\nendstream",
+    ]),
+  );
+  const pageObjectIds: number[] = [];
+  const imageResourceDictionary =
+    imageResources.length > 0
+      ? ` /XObject << ${imageResources
+          .map(
+            (imageResource, index) =>
+              `/${imageResource.name} ${imageObjectIds[index]} 0 R`,
+          )
+          .join(" ")} >>`
+      : "";
+
+  pageContents.forEach((content) => {
+    const contentLength = encoder.encode(content).length;
+    const contentObjectId = addObject(
+      `<< /Length ${contentLength} >>\nstream\n${content}\nendstream`,
+    );
+    const pageObjectId = addObject(
+      `<< /Type /Page /Parent 0 0 R /MediaBox [0 0 ${pageSize.width} ${pageSize.height}] /Resources << /Font << /F1 ${fontObjectId} 0 R /F2 ${boldFontObjectId} 0 R >>${imageResourceDictionary} >> /Contents ${contentObjectId} 0 R >>`,
+    );
+    pageObjectIds.push(pageObjectId);
+  });
+
+  const pagesObjectId = addObject(
+    `<< /Type /Pages /Kids [${pageObjectIds
+      .map((pageObjectId) => `${pageObjectId} 0 R`)
+      .join(" ")}] /Count ${pageObjectIds.length} >>`,
+  );
+  const catalogObjectId = addObject(
+    `<< /Type /Catalog /Pages ${pagesObjectId} 0 R >>`,
+  );
+
+  pageObjectIds.forEach((pageObjectId) => {
+    objects[pageObjectId - 1] = objects[pageObjectId - 1].map((chunk) =>
+      typeof chunk === "string"
+        ? chunk.replace("/Parent 0 0 R", `/Parent ${pagesObjectId} 0 R`)
+        : chunk,
+    );
+  });
+
+  const chunks: PdfObjectChunk[] = ["%PDF-1.4\n"];
+  const offsets: number[] = [0];
+  let byteOffset = encoder.encode("%PDF-1.4\n").length;
+  const pushChunk = (chunk: PdfObjectChunk) => {
+    chunks.push(chunk);
+    byteOffset += getPdfChunkLength(chunk, encoder);
+  };
+
+  objects.forEach((objectContent, index) => {
+    offsets.push(byteOffset);
+    pushChunk(`${index + 1} 0 obj\n`);
+    objectContent.forEach((chunk) => pushChunk(chunk));
+    pushChunk("\nendobj\n");
+  });
+
+  const xrefOffset = byteOffset;
+  const xrefEntries = offsets
+    .map((offset, index) =>
+      index === 0
+        ? "0000000000 65535 f "
+        : `${offset.toString().padStart(10, "0")} 00000 n `,
+    )
+    .join("\n");
+  chunks.push(
+    `xref\n0 ${objects.length + 1}\n${xrefEntries}\ntrailer\n<< /Size ${
+      objects.length + 1
+    } /Root ${catalogObjectId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`,
+  );
+
+  return new Blob(chunks, { type: "application/pdf" });
+};
+
+const normalizeReportFilePart = (value: string) =>
+  sanitizePdfText(value).replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") ||
+  "schedule";
+
+const splitScheduleParts = (value?: string) =>
+  sanitizePdfText(value)
+    .split(/\s*\/\s*|\s*,\s*/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && part.toUpperCase() !== "TBA");
+
+const normalizeScheduleDayLabel = (value: string) => {
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized.startsWith("mon")) {
+    return "M";
+  }
+
+  if (normalized.startsWith("tue")) {
+    return "T";
+  }
+
+  if (normalized.startsWith("wed")) {
+    return "W";
+  }
+
+  if (normalized.startsWith("thu") || normalized === "th") {
+    return "TH";
+  }
+
+  if (normalized.startsWith("fri")) {
+    return "F";
+  }
+
+  if (normalized.startsWith("sat")) {
+    return "SAT";
+  }
+
+  if (normalized.startsWith("sun")) {
+    return "SUN";
+  }
+
+  return value.toUpperCase();
+};
+
+const getSubjectScheduleLines = (subject: StudentPortalSubject) => {
+  const days = splitScheduleParts(subject.days);
+  const times = splitScheduleParts(subject.time);
+  const lineCount = Math.max(days.length, times.length);
+
+  if (lineCount > 0) {
+    return Array.from({ length: lineCount }, (_, index) => ({
+      day: days[index] ? normalizeScheduleDayLabel(days[index]) : "",
+      time: times[index] || times[0] || "",
+    }));
+  }
+
+  const scheduleParts = splitScheduleParts(subject.schedule);
+  const parsedLines = scheduleParts.map((part) => {
+    const match = part.match(/^([A-Za-z]{1,9})\s+(.+)$/);
+
+    if (!match) {
+      return { day: "", time: part };
+    }
+
+    return {
+      day: normalizeScheduleDayLabel(match[1]),
+      time: match[2],
+    };
+  });
+
+  return parsedLines.length > 0 ? parsedLines : [{ day: "TBA", time: "TBA" }];
+};
+
+const formatScheduleSemesterLabel = (semester: string) =>
+  semester.replace(/\bSemester\b/i, "Sem.");
+
+const buildSchedulePdf = async ({
+  studentName,
+  studentNumber,
+  program,
+  branch,
+  yearLevel,
+  academicYear,
+  semester,
+  subjects,
+  isSHS,
+}: {
+  studentName: string;
+  studentNumber: string;
+  program: string;
+  branch: string;
+  yearLevel: string;
+  academicYear: string;
+  semester: string;
+  subjects: StudentPortalSubject[];
+  isSHS: boolean;
+}) => {
+  const pageWidth = 595;
+  const pageHeight = 842;
+  const margin = 36;
+  const tableWidth = pageWidth - margin * 2;
+  const columns = [70, 210, 46, 112, 85];
+  const brandColor = [0.02, 0.38, 0.53] as const;
+  const headerFillColor = [0.9, 0.96, 0.98] as const;
+  const textColor = [0.05, 0.09, 0.16] as const;
+  const gridColor = [0.25, 0.31, 0.36] as const;
+  const logoResource = await loadPdfJpegImage(aicsLogo, "AicsLogo");
+  const imageResources = logoResource ? [logoResource] : [];
+  const pages: string[] = [];
+  let commands: string[] = [];
+  let y = margin;
+
+  const rgb = (color: readonly number[]) =>
+    color.map((channel) => channel.toFixed(3)).join(" ");
+  const getHelveticaCharacterWidth = (character: string, bold: boolean) => {
+    if (character === " ") {
+      return 278;
+    }
+
+    if ("ilI.,'!:;|".includes(character)) {
+      return bold ? 278 : 222;
+    }
+
+    if ("mwMW".includes(character)) {
+      return bold ? 889 : 833;
+    }
+
+    if ("ABCDEFGHKNOPQRSTUVXYZ".includes(character)) {
+      return bold ? 722 : 667;
+    }
+
+    if ("JL".includes(character)) {
+      return bold ? 611 : 556;
+    }
+
+    if ("0123456789".includes(character)) {
+      return 556;
+    }
+
+    if (character === "/") {
+      return 278;
+    }
+
+    if (character === "-") {
+      return 333;
+    }
+
+    return bold ? 556 : 500;
+  };
+  const estimateTextWidth = (value: string, fontSize: number, bold = false) =>
+    Array.from(sanitizePdfText(value)).reduce(
+      (sum, character) => sum + getHelveticaCharacterWidth(character, bold),
+      0,
+    ) *
+    (fontSize / 1000);
+  const addText = (
+    value: unknown,
+    x: number,
+    baselineY: number,
+    options: {
+      size?: number;
+      bold?: boolean;
+      align?: "left" | "center" | "right";
+      color?: readonly number[];
+    } = {},
+  ) => {
+    const text = sanitizePdfText(value);
+    const size = options.size ?? 10;
+    const bold = options.bold ?? false;
+    const color = options.color ?? textColor;
+    let textX = x;
+
+    if (options.align === "center") {
+      textX = x - estimateTextWidth(text, size, bold) / 2;
+    } else if (options.align === "right") {
+      textX = x - estimateTextWidth(text, size, bold);
+    }
+
+    commands.push(
+      `BT /${bold ? "F2" : "F1"} ${size} Tf ${rgb(color)} rg 1 0 0 1 ${textX.toFixed(
+        2,
+      )} ${(pageHeight - baselineY).toFixed(2)} Tm (${escapePdfText(text)}) Tj ET`,
+    );
+  };
+  const addRect = (
+    x: number,
+    topY: number,
+    width: number,
+    height: number,
+    mode: "S" | "f" | "B",
+    fillColor?: readonly number[],
+  ) => {
+    if (fillColor) {
+      commands.push(`${rgb(fillColor)} rg`);
+    }
+    commands.push(`${rgb(gridColor)} RG 0.7 w`);
+    commands.push(
+      `${x.toFixed(2)} ${(pageHeight - topY - height).toFixed(2)} ${width.toFixed(
+        2,
+      )} ${height.toFixed(2)} re ${mode}`,
+    );
+  };
+  const addLine = (x1: number, y1: number, x2: number, y2: number) => {
+    commands.push(`${rgb(gridColor)} RG 0.7 w`);
+    commands.push(
+      `${x1.toFixed(2)} ${(pageHeight - y1).toFixed(2)} m ${x2.toFixed(
+        2,
+      )} ${(pageHeight - y2).toFixed(2)} l S`,
+    );
+  };
+  const addImage = (
+    image: PdfImageResource,
+    x: number,
+    topY: number,
+    width: number,
+    height: number,
+  ) => {
+    commands.push(
+      `q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${x.toFixed(2)} ${(
+        pageHeight -
+        topY -
+        height
+      ).toFixed(2)} cm /${image.name} Do Q`,
+    );
+  };
+  const drawTableHeader = () => {
+    const headerHeight = 30;
+    const headers = ["Subject Code", "Subject Title", "Day", "Time", "INST."];
+    let x = margin;
+
+    addRect(margin, y, tableWidth, headerHeight, "B", headerFillColor);
+    headers.forEach((header, index) => {
+      if (index > 0) {
+        addLine(x, y, x, y + headerHeight);
+      }
+      addText(header, x + columns[index] / 2, y + 19, {
+        size: 8,
+        bold: true,
+        align: "center",
+        color: brandColor,
+      });
+      x += columns[index];
+    });
+
+    y += headerHeight;
+  };
+  const startPage = (continued = false) => {
+    if (commands.length > 0) {
+      pages.push(commands.join("\n"));
+      commands = [];
+    }
+
+    y = margin;
+
+    if (!continued) {
+      if (logoResource) {
+        addImage(logoResource, pageWidth / 2 - 26, y - 20, 52, 52);
+      }
+
+      y += 58;
+      addText("ASIAN INSTITUTE OF COMPUTER STUDIES", pageWidth / 2, y, {
+        size: 18,
+        bold: true,
+        align: "center",
+        color: textColor,
+      });
+      y += 18;
+      addText(`${branch || "Bacoor"} Branch`.toUpperCase(), pageWidth / 2, y, {
+        size: 15,
+        bold: true,
+        align: "center",
+        color: textColor,
+      });
+      y += 44;
+      addText(subjects[0]?.section || "Class Schedule", pageWidth / 2, y, {
+        size: 21,
+        bold: true,
+        align: "center",
+        color: textColor,
+      });
+      y += 24;
+      addText(
+        `${isSHS ? "Senior High School" : "College"} / ${yearLevel || "Year Level"} / ${formatScheduleSemesterLabel(
+          semester || "Semester",
+        )} / SY ${academicYear || "Academic Year"}`,
+        pageWidth / 2,
+        y,
+        {
+          size: 14,
+          bold: true,
+          align: "center",
+          color: textColor,
+        },
+      );
+      y += 28;
+      addText(`Student: ${studentName || "Student"}`, margin, y, { size: 9 });
+      addText(`Student Number: ${studentNumber || "N/A"}`, pageWidth / 2, y, {
+        size: 9,
+      });
+      addText(`Program: ${program || "N/A"}`, margin, y + 16, { size: 9 });
+      y += 32;
+    } else {
+      addText("Class Schedule (continued)", margin, y, {
+        size: 14,
+        bold: true,
+        color: brandColor,
+      });
+      y += 20;
+    }
+
+    drawTableHeader();
+  };
+  const drawFooter = () => {
+    const totalUnits = subjects.reduce(
+      (sum, subject) => sum + (subject.units || 0),
+      0,
+    );
+    const footerText = !isSHS && totalUnits > 0
+      ? `Total Subjects: ${subjects.length}   Total Units: ${totalUnits}`
+      : `Total Subjects: ${subjects.length}`;
+
+    addText(footerText, margin, pageHeight - 24, {
+      size: 8,
+      bold: true,
+      color: brandColor,
+    });
+    addText(
+      `Generated on ${new Date().toLocaleDateString()}`,
+      pageWidth - margin,
+      pageHeight - 24,
+      { size: 8, align: "right" },
+    );
+  };
+
+  startPage();
+
+  subjects.forEach((subject) => {
+    const scheduleLines = getSubjectScheduleLines(subject);
+    const titleLines = wrapPdfText(subject.title, 35);
+    const instructorLines = wrapPdfText(subject.professor || "TBA", 12);
+    const maxLines = Math.max(
+      titleLines.length,
+      scheduleLines.length,
+      instructorLines.length,
+      1,
+    );
+    const rowHeight = Math.max(36, maxLines * 11 + 16);
+
+    if (y + rowHeight > pageHeight - 38) {
+      drawFooter();
+      startPage(true);
+    }
+
+    let x = margin;
+    addRect(margin, y, tableWidth, rowHeight, "S");
+    columns.forEach((width, index) => {
+      if (index > 0) {
+        addLine(x, y, x, y + rowHeight);
+      }
+      x += width;
+    });
+
+    addText(subject.code || "N/A", margin + 7, y + rowHeight / 2 + 3, {
+      size: 9.5,
+    });
+
+    titleLines.forEach((line, index) => {
+      addText(line, margin + columns[0] + 8, y + 17 + index * 11, {
+        size: 9.5,
+      });
+    });
+
+    scheduleLines.forEach((line, index) => {
+      addText(line.day, margin + columns[0] + columns[1] + columns[2] / 2, y + 17 + index * 11, {
+        size: 9.5,
+        align: "center",
+      });
+      addText(
+        line.time,
+        margin + columns[0] + columns[1] + columns[2] + columns[3] / 2,
+        y + 17 + index * 11,
+        { size: 8.5, align: "center" },
+      );
+    });
+
+    instructorLines.forEach((line, index) => {
+      addText(
+        line,
+        margin +
+          columns[0] +
+          columns[1] +
+          columns[2] +
+          columns[3] +
+          columns[4] / 2,
+        y + 17 + index * 11,
+        { size: 8.5, align: "center" },
+      );
+    });
+
+    y += rowHeight;
+  });
+
+  drawFooter();
+  pages.push(commands.join("\n"));
+
+  return buildPdfDocument(pages, imageResources, {
+    width: pageWidth,
+    height: pageHeight,
+  });
+};
+
 function StudentSubjects() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const {
@@ -308,14 +945,20 @@ function StudentSubjects() {
   const { toasts, addToast, removeToast } = useToast();
 
   const isSHS = student?.programType === "SHS";
+  const hasApprovedOwnScheduleTerm = Boolean(
+    student?.requestedOwnSchedule &&
+      currentTerm?.source === "approved_enrollment",
+  );
   const hasOwnScheduleRequest = Boolean(
     student?.requestedOwnSchedule ||
       student?.ownScheduleRequestStatus === "Approved" ||
+      hasApprovedOwnScheduleTerm ||
       currentTerm?.source === "own_schedule",
   );
   const supportsOwnSchedule = Boolean(
     hasOwnScheduleRequest &&
       (student?.ownScheduleRequestStatus === "Approved" ||
+        hasApprovedOwnScheduleTerm ||
         currentTerm?.source === "own_schedule"),
   );
   const resolvedOwnScheduleRequestStatus =
@@ -331,8 +974,20 @@ function StudentSubjects() {
     currentTerm?.semester ||
     scheduleRequest?.semester ||
     "1st Semester";
+  const scheduleRequestMatchesOwnScheduleTerm = Boolean(
+    scheduleRequest &&
+      scheduleRequest.academicYear === ownScheduleAcademicYear &&
+      scheduleRequest.semester === ownScheduleSemester,
+  );
+  const ownScheduleSelectionStatus =
+    scheduleRequestMatchesOwnScheduleTerm
+      ? mapScheduleRequestStatusToSelectionStatus(scheduleRequest?.status)
+      : currentTerm?.source === "approved_enrollment" &&
+          student?.ownScheduleSelectionStatus === "Approved"
+        ? "Not Submitted"
+        : student?.ownScheduleSelectionStatus;
   const showOwnSchedulePlanner =
-    supportsOwnSchedule && student?.ownScheduleSelectionStatus !== "Approved";
+    supportsOwnSchedule && ownScheduleSelectionStatus !== "Approved";
   const showIrregularSections =
     student?.status === "Irregular" || hasOwnScheduleRequest;
   const isMissingSyncedAcademicData =
@@ -340,12 +995,26 @@ function StudentSubjects() {
   const subjectsEmptyStateMessage = hasOwnScheduleRequest
     ? getOwnScheduleSubjectsEmptyStateMessage({
         requestStatus: resolvedOwnScheduleRequestStatus,
-        selectionStatus: student?.ownScheduleSelectionStatus,
+        selectionStatus: ownScheduleSelectionStatus,
         showOwnSchedulePlanner,
       })
     : isMissingSyncedAcademicData
       ? "No official subjects are posted yet for your current term."
       : "No subjects found for the selected academic year and semester.";
+  const studentGradeRecords = useMemo(
+    () =>
+      student?.studentNumber
+        ? getStudentGradeRecords({
+            branch: student.branch,
+            studentId: student.studentNumber,
+          }).filter(
+            (record) =>
+              record.programType ===
+              (student.programType === "SHS" ? "SHS" : "College"),
+          )
+        : [],
+    [student?.branch, student?.programType, student?.studentNumber],
+  );
 
   useEffect(() => {
     if (!student || !supportsOwnSchedule) {
@@ -368,14 +1037,24 @@ function StudentSubjects() {
         branch: student.branch,
         studentNumber: student.studentNumber,
         trackingNumber: student.trackingNumber,
+        academicYear:
+          student.ownScheduleAcademicYear ||
+          currentTerm?.academicYear ||
+          "2026-2027",
+        semester:
+          student.ownScheduleSemester ||
+          currentTerm?.semester ||
+          "1st Semester",
       });
       const nextAcademicYear =
-        nextScheduleRequest?.academicYear ||
         student.ownScheduleAcademicYear ||
+        currentTerm?.academicYear ||
+        nextScheduleRequest?.academicYear ||
         "2026-2027";
       const nextSemester =
-        nextScheduleRequest?.semester ||
         student.ownScheduleSemester ||
+        currentTerm?.semester ||
+        nextScheduleRequest?.semester ||
         "1st Semester";
       const nextChoiceGroups = getStudentScheduleChoiceGroups({
         branch: student.branch,
@@ -384,6 +1063,7 @@ function StudentSubjects() {
         strandOrCourse: student.program,
         semester: nextSemester,
         academicYear: nextAcademicYear,
+        gradeRecords: studentGradeRecords,
       });
 
       if (isCancelled) {
@@ -410,6 +1090,9 @@ function StudentSubjects() {
   }, [
     student,
     supportsOwnSchedule,
+    currentTerm?.academicYear,
+    currentTerm?.semester,
+    studentGradeRecords,
   ]);
 
   const availableAcademicYears = useMemo(() => {
@@ -488,9 +1171,58 @@ function StudentSubjects() {
     [allSubjects, effectiveAcademicYear, effectiveSemester],
   );
 
+  const visibleScheduleChoiceGroups = useMemo(() => {
+    if (!supportsOwnSchedule) {
+      return scheduleChoiceGroups;
+    }
+
+    const groupsBySubject = new Map<string, StudentScheduleChoiceGroup>();
+
+    scheduleChoiceGroups.forEach((group) => {
+      groupsBySubject.set(group.subjectId || group.subjectCode, group);
+      groupsBySubject.set(group.subjectCode, group);
+    });
+
+    const shouldUsePortalSubjectFallback = scheduleChoiceGroups.length === 0;
+
+    if (!shouldUsePortalSubjectFallback) {
+      return Array.from(new Set(groupsBySubject.values())).sort(
+        (left, right) =>
+          left.subjectCode.localeCompare(right.subjectCode) ||
+          left.subjectName.localeCompare(right.subjectName),
+      );
+    }
+
+    filteredSubjects.forEach((subject) => {
+      const existingGroup =
+        groupsBySubject.get(subject.id) || groupsBySubject.get(subject.code);
+
+      if (existingGroup) {
+        return;
+      }
+
+      const plannedGroup: StudentScheduleChoiceGroup = {
+        subjectId: subject.id || subject.code,
+        subjectCode: subject.code,
+        subjectName: subject.title,
+        units: subject.units,
+        assignmentOptions: [],
+      };
+
+      groupsBySubject.set(plannedGroup.subjectId, plannedGroup);
+      groupsBySubject.set(plannedGroup.subjectCode, plannedGroup);
+    });
+
+    return Array.from(new Set(groupsBySubject.values())).sort(
+      (left, right) =>
+        left.subjectCode.localeCompare(right.subjectCode) ||
+        left.subjectName.localeCompare(right.subjectName),
+    );
+  }, [filteredSubjects, scheduleChoiceGroups, supportsOwnSchedule]);
+
   const selectedOwnScheduleAssignments = useMemo(
     () =>
-      scheduleChoiceGroups.flatMap((group) => {
+      visibleScheduleChoiceGroups.flatMap((group) => {
         const assignmentId = selectedAssignmentsBySubject[group.subjectId];
         const selectedAssignment = group.assignmentOptions.find(
           (assignment) => assignment.assignmentId === assignmentId,
@@ -498,7 +1230,7 @@ function StudentSubjects() {
 
         return selectedAssignment ? [selectedAssignment] : [];
       }),
-    [scheduleChoiceGroups, selectedAssignmentsBySubject],
+    [selectedAssignmentsBySubject, visibleScheduleChoiceGroups],
   );
 
   const ownScheduleConflicts = useMemo(
@@ -613,57 +1345,42 @@ function StudentSubjects() {
     }
   };
 
-  const handleDownloadSchedule = () => {
+  const handleDownloadSchedule = async () => {
     if (filteredSubjects.length === 0) {
       addToast("No official subjects are available to download yet.", "warning");
       return;
     }
 
-    let scheduleText = `CLASS SCHEDULE\n`;
-    scheduleText += `${"=".repeat(50)}\n\n`;
-    scheduleText += `Student: ${student?.firstName} ${student?.lastName}\n`;
-    scheduleText += `Student Number: ${student?.studentNumber}\n`;
-    scheduleText += `Program: ${student?.program}\n`;
-    scheduleText += `Academic Year: ${effectiveAcademicYear}\n`;
-    scheduleText += `Semester: ${effectiveSemester}\n`;
-    scheduleText += `\n${"=".repeat(50)}\n\n`;
+    try {
+      const schedulePdf = await buildSchedulePdf({
+        studentName: student
+          ? `${student.firstName} ${student.lastName}`.trim()
+          : "Student",
+        studentNumber: student?.studentNumber || "",
+        program: student?.program || "",
+        branch: student?.branch || "",
+        yearLevel: currentTerm?.yearLevel || student?.yearLevel || "",
+        academicYear: effectiveAcademicYear,
+        semester: effectiveSemester,
+        subjects: filteredSubjects,
+        isSHS,
+      });
+      const url = URL.createObjectURL(schedulePdf);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `class_schedule_${normalizeReportFilePart(
+        effectiveAcademicYear,
+      )}_${normalizeReportFilePart(effectiveSemester)}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
 
-    filteredSubjects.forEach((subject, index) => {
-      scheduleText += `${index + 1}. ${subject.code} - ${subject.title}\n`;
-      if (subject.section) {
-        scheduleText += `   Section: ${subject.section}\n`;
-      }
-      scheduleText += `   Schedule: ${subject.schedule}\n`;
-      scheduleText += `   Room: ${subject.room}\n`;
-      scheduleText += `   Professor: ${subject.professor}\n`;
-      if (subject.units && !isSHS) {
-        scheduleText += `   Units: ${subject.units}\n`;
-      }
-      scheduleText += `\n`;
-    });
-
-    scheduleText += `${"=".repeat(50)}\n`;
-    scheduleText += `Total Subjects: ${filteredSubjects.length}\n`;
-    if (!isSHS && filteredSubjects.some((subject) => subject.units)) {
-      const totalUnits = filteredSubjects.reduce(
-        (sum, subject) => sum + (subject.units || 0),
-        0,
-      );
-      scheduleText += `Total Units: ${totalUnits}\n`;
+      addToast("Schedule PDF downloaded successfully!", "success");
+    } catch (error) {
+      console.error("Failed to generate schedule PDF", error);
+      addToast("Unable to generate the schedule PDF.", "error");
     }
-    scheduleText += `\nGenerated on: ${new Date().toLocaleDateString()}\n`;
-
-    const blob = new Blob([scheduleText], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `class_schedule_${effectiveAcademicYear}_${effectiveSemester}.txt`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-
-    addToast("Schedule downloaded successfully!", "success");
   };
 
   useEffect(() => {
@@ -709,9 +1426,18 @@ function StudentSubjects() {
 
   if (isLoading && !student) {
     return (
-      <div className="s-portal">
-        <div style={{ minHeight: "100vh" }}></div>
-      </div>
+      <StudentLoadingShell
+        activePage="subjects"
+        currentDate={currentDate}
+        headerTitle="Current Subjects"
+        onLogout={handleLogout}
+        onMenuClick={handleMenuClick}
+        onSidebarClose={handleSidebarClose}
+        skeletonTitle="Subjects"
+        studentData={studentData}
+        variant="table"
+        sidebarOpen={sidebarOpen}
+      />
     );
   }
 
@@ -751,7 +1477,7 @@ function StudentSubjects() {
                 <h2>Own Schedule Admission</h2>
                 <p>
                   {getOwnScheduleStatusMessage(
-                    student?.ownScheduleSelectionStatus,
+                    ownScheduleSelectionStatus,
                   )}
                 </p>
               </div>
@@ -760,7 +1486,7 @@ function StudentSubjects() {
                 <span>{ownScheduleSemester}</span>
                 <span>
                   {getOwnScheduleSelectionLabel(
-                    student?.ownScheduleSelectionStatus,
+                    ownScheduleSelectionStatus,
                   )}
                 </span>
               </div>
@@ -773,7 +1499,7 @@ function StudentSubjects() {
                 <div className="s-summary-card">
                   <h4>Available Subjects</h4>
                   <div className="s-summary-value">
-                    {scheduleChoiceGroups.length}
+                    {visibleScheduleChoiceGroups.length}
                   </div>
                 </div>
                 <div className="s-summary-card">
@@ -813,8 +1539,8 @@ function StudentSubjects() {
 
               <div className="s-own-schedule-grid">
                 <div className="s-own-schedule-subjects">
-                  {scheduleChoiceGroups.length > 0 ? (
-                    scheduleChoiceGroups.map((group) => {
+                  {visibleScheduleChoiceGroups.length > 0 ? (
+                    visibleScheduleChoiceGroups.map((group) => {
                       const selectedAssignment = group.assignmentOptions.find(
                         (assignment) =>
                           assignment.assignmentId ===
@@ -1002,7 +1728,7 @@ function StudentSubjects() {
               </button>
               <button
                 className="s-download-btn"
-                onClick={handleDownloadSchedule}
+                onClick={() => void handleDownloadSchedule()}
               >
                 <FaDownload /> Download Schedule
               </button>

@@ -10,7 +10,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.admin_panel.automation import is_automated_backup_due
-from apps.admin_panel.models import BackupHistory
+from apps.admin_panel.models import BackupHistory, BackupSnapshot
 from apps.admin_panel.repository import BackupSettingsRecord
 
 
@@ -241,3 +241,45 @@ class BackupArchiveApiTests(TestCase):
             response["Content-Disposition"],
         )
         self.assertEqual(response.content, b"zip-payload")
+
+    @patch("apps.admin_panel.services.download_backup_blob")
+    def test_restore_json_backup_completes_inline(self, download_blob_mock):
+        download_blob_mock.return_value = self._build_snapshot_zip()
+        source_history = BackupHistory.objects.create(
+            branch="Bacoor",
+            backup_type=BackupHistory.TYPE_MANUAL,
+            file_path="branches/bacoor/manual/bacoor_backup.zip",
+            sql_file_path="",
+            backup_filename="bacoor_backup.zip",
+            storage_bucket="local-media",
+            status=BackupHistory.STATUS_COMPLETED,
+            progress=100,
+            metadata={"snapshot_format": "json"},
+        )
+
+        response = self.client.post(
+            "/api/admin/backup/restore/",
+            {"backup_history_id": str(source_history.id)},
+            format="json",
+            HTTP_X_USER_ROLE="admin",
+            HTTP_X_USER_BRANCH="Bacoor",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data["backup_type"], BackupHistory.TYPE_RESTORE)
+        self.assertEqual(response.data["status"], BackupHistory.STATUS_COMPLETED)
+        self.assertEqual(response.data["progress"], 100)
+        self.assertEqual(str(response.data["restored_from"]), str(source_history.id))
+
+        restore_history = BackupHistory.objects.get(pk=response.data["id"])
+        self.assertEqual(restore_history.status, BackupHistory.STATUS_COMPLETED)
+        self.assertEqual(restore_history.progress, 100)
+        restored_snapshot = BackupSnapshot.objects.get(branch="Bacoor")
+        self.assertEqual(
+            restored_snapshot.students,
+            [{"id": "S-1", "branch": "Bacoor"}],
+        )
+        self.assertEqual(
+            restored_snapshot.alumni,
+            [{"id": "A-1", "becameAlumniOn": "2026-04-24"}],
+        )

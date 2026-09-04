@@ -330,6 +330,32 @@ def build_submission_confirmation_email_message(target):
     return "\n".join(lines)
 
 
+def build_requirement_redo_email_message(target, *, requirement_name):
+    applicant_name = " ".join(
+        part for part in [target.first_name, target.last_name] if part
+    ).strip() or "Applicant"
+    normalized_requirement_name = (
+        requirement_name.strip()
+        if isinstance(requirement_name, str) and requirement_name.strip()
+        else "the selected credential"
+    )
+    support_email_line = get_support_email_line()
+    lines = [
+        f"Hello {applicant_name},",
+        "",
+        "One of your AICS admission credentials needs to be reuploaded.",
+        f"Credential: {normalized_requirement_name}",
+        f"Tracking Number: {target.tracking_number}",
+        "",
+        "Use this tracking number on the admission portal to return to the Upload Requirements page and submit the corrected file.",
+    ]
+
+    if support_email_line:
+        lines.extend(["", support_email_line])
+
+    return "\n".join(lines)
+
+
 def build_decision_notification_email_message(target, *, decision_status, decision_reason):
     recipient_name = target.full_name or "Student"
     record_copy = get_record_type_copy(target.record_type)
@@ -367,16 +393,16 @@ def build_decision_notification_email_message(target, *, decision_status, decisi
                 "Student Portal Link:",
                 target.portal_link,
                 "",
-                "Important: You must register your student portal account first before signing in or accessing the student portal.",
-                "Use the assigned student number above, together with your approved email address and mobile number, during portal registration.",
+                "Important: You may now log in to the student portal using the email address you used in your admission application.",
+                "Your assigned student number is included above for your school records.",
             ]
         )
     elif normalized_status == "accepted":
         lines.extend(
             [
                 "",
-                "Important: You must register your student portal account first before signing in or accessing the student portal.",
-                "Use the assigned student number above, together with your approved email address and mobile number, during portal registration.",
+                "Important: You may now log in to the student portal using the email address you used in your admission application.",
+                "Your assigned student number is included above for your school records.",
             ]
         )
 
@@ -511,6 +537,33 @@ def deliver_submission_tracking_notification(target):
         email_message=build_submission_confirmation_email_message(target),
         sms_message=build_submission_confirmation_sms_message(target),
     )
+
+
+def deliver_requirement_redo_notification(target, *, requirement_name):
+    normalized_email = normalize_email(target.email)
+    email_delivery = {
+        "status": "not_configured",
+        "destination": mask_email_address(normalized_email),
+    }
+
+    if normalized_email and is_email_delivery_configured():
+        try:
+            send_delivery_email(
+                destination_email=normalized_email,
+                subject="AICS admission credential reupload required",
+                message=build_requirement_redo_email_message(
+                    target,
+                    requirement_name=requirement_name,
+                ),
+            )
+            email_delivery["status"] = "sent"
+        except TrackingRecoveryDeliveryError as exc:
+            email_delivery["status"] = "failed"
+            email_delivery["error"] = str(exc)
+
+    return {
+        "email": email_delivery,
+    }
 
 
 def deliver_admission_decision_notification(

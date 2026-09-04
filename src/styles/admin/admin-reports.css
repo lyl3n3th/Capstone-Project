@@ -7,7 +7,7 @@
   display: flex;
   min-height: 100vh;
   background: #f3f4f6;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
   color: #111827;
   position: relative;
   width: 100%;
@@ -312,11 +312,14 @@
   background: rgba(15, 23, 42, 0.45);
   backdrop-filter: blur(2px);
   z-index: 1200;
+  overflow: auto;
 }
 
 .report-modal-card {
-  width: min(1120px, 100%);
-  max-height: 88vh;
+  width: min(1180px, 100%);
+  height: min(88vh, calc(100vh - 48px));
+  max-height: min(88vh, calc(100vh - 48px));
+  min-height: min(620px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -332,6 +335,11 @@
   gap: 16px;
   padding: 24px 28px 18px;
   border-bottom: 1px solid #e5e7eb;
+}
+
+.report-modal-header > div {
+  min-width: 0;
+  flex: 1;
 }
 
 .report-modal-header h2 {
@@ -367,10 +375,12 @@
 
 .report-modal-body {
   padding: 20px 28px 28px;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(320px, 1fr);
   gap: 18px;
+  flex: 1;
+  min-height: 0;
 }
 
 .report-modal-summary {
@@ -417,12 +427,15 @@
   border: 1px solid #e5e7eb;
   border-radius: 18px;
   overflow: auto;
+  min-height: 320px;
+  max-height: 100%;
+  -webkit-overflow-scrolling: touch;
 }
 
 .report-status-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 860px;
+  min-width: 920px;
 }
 
 .report-status-table th {
@@ -434,7 +447,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  text-align: left;
+  text-align: center;
 }
 
 .report-status-table td {
@@ -443,6 +456,7 @@
   vertical-align: top;
   color: #334155;
   font-size: 14px;
+  text-align: center;
 }
 
 .report-status-table tbody tr:last-child td {
@@ -548,6 +562,11 @@
     align-items: stretch;
   }
 
+  .report-modal-header {
+    position: relative;
+    padding-right: 64px;
+  }
+
   .report-secondary-btn {
     width: 100%;
     justify-content: center;
@@ -569,7 +588,17 @@
   }
 
   .report-modal-overlay {
-    padding: 14px;
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .report-modal-card {
+    width: 100%;
+    height: auto;
+    min-height: calc(100vh - 24px);
+    max-height: none;
+    border-radius: 16px;
+    overflow: visible;
   }
 
   .report-modal-header,
@@ -578,8 +607,73 @@
     padding-right: 18px;
   }
 
+  .report-modal-header {
+    gap: 12px;
+    padding-top: 18px;
+    padding-bottom: 14px;
+  }
+
+  .report-modal-header h2 {
+    font-size: 20px;
+  }
+
+  .report-modal-close {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    align-self: auto;
+  }
+
   .report-modal-summary {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .report-modal-stat {
+    padding: 12px 14px;
+    gap: 4px;
+  }
+
+  .report-modal-stat strong {
+    font-size: 22px;
+  }
+
+  .report-modal-body {
+    overflow: visible;
+    grid-template-rows: auto minmax(420px, auto);
+    gap: 12px;
+  }
+
+  .report-modal-table-wrapper {
+    border-radius: 12px;
+    min-height: 420px;
+    max-height: 62vh;
+  }
+
+  .report-status-table {
+    min-width: 760px;
+  }
+
+  .report-status-table th,
+  .report-status-table td {
+    padding: 10px 8px;
+    font-size: 11px;
+  }
+
+  .report-status-table th {
+    font-size: 10px;
+    letter-spacing: 0.02em;
+  }
+
+  .report-status-report-cell strong {
+    font-size: 12px;
+  }
+
+  .report-status-report-cell p,
+  .report-status-report-cell span,
+  .report-attachment-link,
+  .report-no-attachment {
+    font-size: 11px;
   }
 }
 
@@ -603,5 +697,31 @@
 
   .upload-subtext {
     font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .report-modal-overlay {
+    padding: 8px;
+  }
+
+  .report-modal-card {
+    min-height: calc(100vh - 16px);
+    border-radius: 12px;
+  }
+
+  .report-modal-header,
+  .report-modal-body {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .report-modal-body {
+    grid-template-rows: auto minmax(460px, auto);
+  }
+
+  .report-modal-table-wrapper {
+    min-height: 460px;
+    max-height: 66vh;
   }
 }

@@ -10,8 +10,8 @@ import {
   FaSave,
   FaTrash,
   FaUndo,
-  FaUpload,
 } from "react-icons/fa";
+import { FiMenu, FiX } from "react-icons/fi";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
 import {
@@ -24,10 +24,10 @@ import {
   fetchBackupSnapshot,
   fetchBackupSettings,
   fetchBackupStatus,
+  restoreLocalBackupArchive,
   saveBackupSettings,
   startBackupRestore,
   type BackupHistoryRecord,
-  uploadBackupArchive,
 } from "../../services/backupApi";
 import "../../styles/admin/admin-backup.css";
 
@@ -95,6 +95,7 @@ export default function AdminBackup({
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [isUploadingBackup, setIsUploadingBackup] = useState(false);
   const [downloadingBackupId, setDownloadingBackupId] = useState<string | null>(null);
+  const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
   const [isSettingsDirty, setIsSettingsDirty] = useState(false);
   const [pageLoadError, setPageLoadError] = useState<string | null>(null);
   const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
@@ -347,27 +348,24 @@ export default function AdminBackup({
     }
   };
 
-  const handleUploadArchive = async () => {
+  const handleRestoreLocalArchive = async () => {
     if (!selectedUploadFile) {
-      addToast("Choose a backup ZIP file to upload.", "warning");
+      addToast("Choose a backup ZIP file to restore.", "warning");
       return;
     }
 
     try {
       setIsUploadingBackup(true);
-      const uploadedBackup = await uploadBackupArchive(selectedUploadFile);
-      const mappedBackup = mapBackupRecord(uploadedBackup);
-      setBackups((prev) => [
-        mappedBackup,
-        ...prev.filter((item) => item.id !== mappedBackup.id),
-      ]);
-      setHistoryPage(0);
+      addToast(`Restore clicked for ${selectedUploadFile.name}. Reading ZIP...`, "info");
+      const snapshot = await restoreLocalBackupArchive(selectedUploadFile);
       clearSelectedUploadFile();
-      await loadBackupData({ showErrorToast: false, preserveDirtySettings: true });
-      addToast("Backup ZIP uploaded and added to backup history.", "success");
+      addToast(
+        `Restored ${snapshot.students.length} student${snapshot.students.length === 1 ? "" : "s"} and ${snapshot.alumni.length} alumni record${snapshot.alumni.length === 1 ? "" : "s"} from the selected ZIP.`,
+        "success",
+      );
     } catch (error) {
       addToast(
-        error instanceof Error ? error.message : "Failed to upload backup ZIP.",
+        error instanceof Error ? error.message : "Failed to restore backup ZIP.",
         "error",
       );
     } finally {
@@ -393,26 +391,55 @@ export default function AdminBackup({
   };
 
   const handleRestore = async (backupId: string, backupName: string) => {
+    if (restoringBackupId) {
+      addToast("A restore is already running. Please wait for it to finish.", "warning");
+      return;
+    }
+
+    const finishRestore = async () => {
+      const snapshot = await fetchBackupSnapshot(backupId);
+      applyBackupSnapshot(snapshot);
+      await loadBackupData({ showErrorToast: false, preserveDirtySettings: true });
+      addToast(`Restore completed for ${backupName}.`, "success");
+    };
+
+    addToast(`Restore clicked for ${backupName}. Starting now...`, "info");
+    setRestoringBackupId(backupId);
+
     try {
       const restoreJob = await startBackupRestore(backupId);
-      addToast(`Restore started for ${backupName}.`, "info");
+
+      if (restoreJob.status === "completed") {
+        await finishRestore();
+        setRestoringBackupId(null);
+        return;
+      }
+
+      if (restoreJob.status === "failed") {
+        addToast(
+          restoreJob.error_message || `Restore failed for ${backupName}.`,
+          "error",
+        );
+        setRestoringBackupId(null);
+        return;
+      }
+
+      addToast(`Restore job is running for ${backupName}.`, "info");
 
       const restorePoll = window.setInterval(async () => {
         try {
           const restoreStatus = await fetchBackupStatus(restoreJob.id);
           if (restoreStatus.status === "completed") {
             window.clearInterval(restorePoll);
-            const snapshot = await fetchBackupSnapshot(backupId);
-            if (snapshot.snapshot_format === "json") {
-              applyBackupSnapshot(snapshot);
-            }
-            addToast(`Restore completed for ${backupName}.`, "success");
+            await finishRestore();
+            setRestoringBackupId(null);
           } else if (restoreStatus.status === "failed") {
             window.clearInterval(restorePoll);
             addToast(
               restoreStatus.error_message || `Restore failed for ${backupName}.`,
               "error",
             );
+            setRestoringBackupId(null);
           }
         } catch (error) {
           window.clearInterval(restorePoll);
@@ -422,6 +449,7 @@ export default function AdminBackup({
               : "Failed to track restore progress.",
             "error",
           );
+          setRestoringBackupId(null);
         }
       }, 3000);
     } catch (error) {
@@ -429,6 +457,7 @@ export default function AdminBackup({
         error instanceof Error ? error.message : "Failed to start restore.",
         "error",
       );
+      setRestoringBackupId(null);
     }
   };
 
@@ -470,7 +499,7 @@ export default function AdminBackup({
         onClick={handleSidebarToggle}
         aria-label={isSidebarOpen ? "Close menu" : "Open menu"}
       >
-        {isSidebarOpen ? "X" : "Menu"}
+        {isSidebarOpen ? <FiX /> : <FiMenu />}
       </button>
 
       <main className="backup-content">
@@ -637,13 +666,13 @@ export default function AdminBackup({
 
                 <div className="summary-card upload-backup-card">
                   <div className="summary-icon amber">
-                    <FaUpload />
+                    <FaUndo />
                   </div>
                   <div className="summary-text upload-backup-text">
-                    <h4>Upload Backup ZIP</h4>
+                    <h4>Restore Backup ZIP</h4>
                     <p>
-                      Upload an existing AICSync backup ZIP so it appears in
-                      backup history and can be restored after a system issue.
+                      Restore student and alumni data directly from a local
+                      AICSync backup ZIP without adding it to backup history.
                     </p>
 
                     <div className="upload-backup-controls">
@@ -663,11 +692,11 @@ export default function AdminBackup({
                         <button
                           type="button"
                           className="upload-backup-btn"
-                          onClick={() => void handleUploadArchive()}
+                          onClick={() => void handleRestoreLocalArchive()}
                           disabled={!selectedUploadFile || isUploadingBackup}
                         >
-                          <FaUpload />
-                          {isUploadingBackup ? "Uploading..." : "Upload ZIP"}
+                          <FaUndo />
+                          {isUploadingBackup ? "Restoring..." : "Restore"}
                         </button>
                         {selectedUploadFile ? (
                           <button
@@ -785,9 +814,13 @@ export default function AdminBackup({
                               className="action-btn restore"
                               onClick={() => void handleRestore(backup.id, backup.name)}
                               title="Restore backup"
-                              disabled={backup.rawStatus !== "completed"}
+                              disabled={
+                                backup.rawStatus !== "completed" ||
+                                restoringBackupId !== null
+                              }
                             >
-                              <FaUndo /> Restore
+                              <FaUndo />
+                              {restoringBackupId === backup.id ? "Restoring..." : "Restore"}
                             </button>
                             <button
                               className="action-btn delete"

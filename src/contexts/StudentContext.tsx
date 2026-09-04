@@ -8,6 +8,7 @@ import {
 import { studentApi, type StudentPortalCurrentTerm } from "../services/studentApi";
 import { STUDENT_GRADE_RECORDS_UPDATED_EVENT } from "../services/studentGrades";
 import type { Student } from "../types/student";
+import { AUTH_STORAGE_KEY } from "../types/user";
 import { StudentContext } from "./student-context";
 
 export const StudentProvider: React.FC<{ children: React.ReactNode }> = ({
@@ -28,6 +29,7 @@ export const StudentProvider: React.FC<{ children: React.ReactNode }> = ({
   const loadStudentRef = useRef<(showLoading?: boolean) => Promise<void>>(
     async () => {},
   );
+  const studentRef = useRef<Student | null>(null);
 
   const applyPortalData = (portalData: {
     student: Student;
@@ -36,6 +38,7 @@ export const StudentProvider: React.FC<{ children: React.ReactNode }> = ({
     credentialItems: StudentPortalCredentialItem[];
     credentialSummary: StudentPortalCredentialSummary | null;
   }) => {
+    studentRef.current = portalData.student;
     setStudent(portalData.student);
     setSubjects(portalData.subjects);
     setCurrentTerm(portalData.currentTerm);
@@ -50,8 +53,34 @@ export const StudentProvider: React.FC<{ children: React.ReactNode }> = ({
       const portalData = await studentApi.getStudentPortalData();
       applyPortalData(portalData);
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const shouldEndSession =
+        /student session is missing/i.test(errorMessage) ||
+        /already been transferred to alumni/i.test(errorMessage) ||
+        /can no longer access the student portal/i.test(errorMessage);
+
       setError("Failed to load profile data");
       console.error(err);
+
+      if (shouldEndSession && typeof window !== "undefined") {
+        setStudent(null);
+        studentRef.current = null;
+        setSubjects([]);
+        setCurrentTerm(null);
+        setCredentialItems([]);
+        setCredentialSummary(null);
+        window.localStorage.removeItem(AUTH_STORAGE_KEY);
+        window.location.replace("/student/login");
+        return;
+      }
+
+      if (!studentRef.current) {
+        setStudent(null);
+        setSubjects([]);
+        setCurrentTerm(null);
+        setCredentialItems([]);
+        setCredentialSummary(null);
+      }
     } finally {
       setIsLoading(false);
     }

@@ -3,12 +3,7 @@
   display: flex;
   min-height: 100vh;
   background: #f3f4f6;
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
   color: #111827;
 }
 
@@ -189,9 +184,10 @@
 
 .pie-container {
   width: 100%;
-  height: 360px;
+  height: clamp(280px, 38vw, 360px);
   min-width: 0;
-  min-height: 300px;
+  min-height: 280px;
+  max-height: 360px;
 }
 
 .dashboard-program-legend {
@@ -254,34 +250,55 @@
 }
 
 .admission-portal-card {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 380px);
+  align-items: stretch;
+  gap: 18px;
   margin-bottom: 28px;
-  padding: 18px 20px;
-  border: 1px solid #bfdbfe;
-  border-radius: 18px;
-  background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+  padding: 20px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: #ffffff;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
 }
 
 .admission-portal-copy {
+  position: relative;
   flex: 1;
   min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid #e0f2fe;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(248, 250, 252, 0.98));
+  overflow: hidden;
 }
 
 .admission-portal-card.is-readonly {
-  justify-content: flex-start;
+  grid-template-columns: 1fr;
 }
 
 .admission-portal-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.admission-portal-control-group {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  width: min(214px, 100%);
-  flex-shrink: 0;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #f8fafc;
 }
 
 .admission-portal-pill {
@@ -308,16 +325,18 @@
 }
 
 .admission-portal-card h3 {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   color: #1a3d5c;
-  font-size: 18px;
+  font-size: clamp(18px, 2vw, 22px);
+  line-height: 1.2;
 }
 
 .admission-portal-card p {
   margin: 0;
   color: #475569;
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 13.5px;
+  line-height: 1.55;
+  max-width: 72ch;
 }
 
 .admission-portal-meta {
@@ -330,14 +349,21 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
   color: #1e3a8a;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 700;
 }
 
 .admission-portal-date-input {
-  min-height: 40px;
-  padding: 0 12px;
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 38px 0 13px;
   border: 1px solid #93c5fd;
   border-radius: 10px;
   background: #ffffff;
@@ -354,11 +380,27 @@
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
 }
 
+.admission-portal-date-input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.admission-portal-date-input::-webkit-datetime-edit {
+  min-width: 0;
+}
+
 .admission-portal-helper {
   margin: 0 !important;
   color: #64748b !important;
   font-size: 12px !important;
-  line-height: 1.35 !important;
+  line-height: 1.4 !important;
 }
 
 .admission-portal-helper.is-error {
@@ -366,7 +408,10 @@
 }
 
 .admission-portal-toggle {
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
+  min-height: 42px;
   padding: 11px 14px;
   border: none;
   border-radius: 12px;
@@ -395,7 +440,10 @@
 }
 
 .admission-portal-secondary {
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
+  min-height: 42px;
   padding: 11px 14px;
   border: 1px solid #f59e0b;
   border-radius: 12px;
@@ -414,6 +462,56 @@
   transform: translateY(-1px);
   box-shadow: 0 10px 18px rgba(180, 83, 9, 0.1);
   background: #ffedd5;
+}
+
+.admission-portal-toggle:disabled,
+.admission-portal-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+  transform: none;
+  box-shadow: none;
+}
+
+.admission-student-number-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admission-student-number-input-row {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  overflow: hidden;
+  border: 1px solid #93c5fd;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.admission-student-number-prefix {
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-right: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admission-student-number-input {
+  flex: 1;
+  min-width: 0;
+  padding-right: 13px;
+  border: none;
+  border-radius: 0;
+  text-align: center;
+  letter-spacing: 0.08em;
+}
+
+.admission-student-number-input:focus {
+  box-shadow: none;
 }
 
 /* Program Details */
@@ -481,6 +579,14 @@
   .admin-menu-toggle {
     display: flex;
   }
+
+  .admission-portal-card {
+    grid-template-columns: 1fr;
+  }
+
+  .admission-portal-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* Mobile Small Screens */
@@ -498,7 +604,8 @@
   }
 
   .pie-container {
-    height: 300px;
+    height: clamp(280px, 78vw, 320px);
+    max-height: 320px;
   }
 
   .dashboard-program-legend {
@@ -510,11 +617,17 @@
   }
 
   .admission-portal-card {
-    align-items: stretch;
-    padding: 18px;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .admission-portal-copy,
+  .admission-portal-control-group {
+    padding: 14px;
   }
 
   .admission-portal-actions {
+    grid-template-columns: 1fr;
     width: 100%;
   }
 

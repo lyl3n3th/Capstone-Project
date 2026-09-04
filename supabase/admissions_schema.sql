@@ -98,7 +98,7 @@ create table if not exists public.admission_applications (
   email citext not null,
   phone_number text not null,
   last_school_attended text not null,
-  year_completion integer not null,
+  year_completion integer,
   applied_for_scholarship boolean not null default false,
   scholarship_exam_score numeric(5, 2),
   current_step smallint not null default 2,

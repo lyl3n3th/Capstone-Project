@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { FaPaperPlane, FaTrash, FaPaperclip } from "react-icons/fa";
+import { FiMenu, FiX } from "react-icons/fi";
 import { BsPaperclip, BsX } from "react-icons/bs";
 import { ToastContainer } from "../../components/common/Toast";
 import AdminSidebar from "../../components/admin/AdminSidebar";
@@ -260,7 +261,7 @@ export default function AdminReports({
         onClick={handleSidebarToggle}
         aria-label={isSidebarOpen ? "Close menu" : "Open menu"}
       >
-        {isSidebarOpen ? "X" : "|||"}
+        {isSidebarOpen ? <FiX /> : <FiMenu />}
       </button>
 
       <main className="report-content">

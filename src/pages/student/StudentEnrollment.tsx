@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FaCheckCircle, FaSpinner } from "react-icons/fa";
+import { FaSpinner } from "react-icons/fa";
 import { IoDocumentText } from "react-icons/io5";
-import { MdDownload, MdFileUpload } from "react-icons/md";
+import { MdFileUpload } from "react-icons/md";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
+import StudentLoadingShell from "../../components/common/StudentLoadingShell";
 import { ToastContainer } from "../../components/common/Toast";
 import { useStudent } from "../../hooks/useStudent";
 import {
+  fetchInstructorEvaluationSubmissions,
   getEnrollmentRetakeChoiceGroups,
   getStudentCredentialOverview,
   getStudentPortalSubjectsForTerm,
+  INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
+  readInstructorEvaluationSubmissions,
+  type InstructorEvaluationSubmissionRecord,
   type StudentPortalSubject,
 } from "../../services/adminStorage";
 import {
@@ -17,6 +22,7 @@ import {
   getAdmissionDiscountSource,
   getEffectiveAdmissionDiscountPercentage,
   getHonorDiscountPercentage,
+  getScholarshipExamDiscountPercentage,
 } from "../../services/admission";
 import {
   buildEnrollmentSubjectKey,
@@ -26,6 +32,7 @@ import {
   getRequiredShsQuarterLabels,
   getRetakeEvaluationLabel,
   isCollegeTerminalGradeRecord,
+  isRetakeEvaluation,
 } from "../../services/enrollmentLoadPlanner";
 import {
   ENROLLMENT_REQUESTS_UPDATED_EVENT,
@@ -41,6 +48,7 @@ import {
   STUDENT_GRADE_RECORDS_UPDATED_EVENT,
   type StoredStudentGradeRecord,
 } from "../../services/studentGrades";
+import { getCurrentTermEvaluationLockStatus } from "../../services/studentEvaluationLock";
 import type { Student } from "../../types/student";
 import "../../styles/main.css";
 
@@ -57,12 +65,12 @@ type UploadedEnrollmentFile = {
   storagePath?: string;
   storageBucket?: string;
   uploadedAt?: string;
+  reviewStatus?: "Pending" | "Approved" | "Rejected";
 };
 
 type EnrollmentRequirementItem = {
   key: string;
   label: string;
-  allowsDownload?: boolean;
 };
 
 type EnrollmentGradePostingSummary = {
@@ -522,6 +530,15 @@ const getNextAcademicPlacement = (
       : ["1st Year", "2nd Year", "3rd Year", "4th Year"];
   const normalizedSemester = getNormalizedSemester(currentSemester);
 
+  if (student.programType === "SHS" && normalizedSemester === "1st Semester") {
+    return {
+      yearLevel: student.yearLevel,
+      semester: "2nd Semester",
+      academicYear: currentAcademicYear,
+      hasNextTerm: false,
+    };
+  }
+
   if (normalizedSemester === "1st Semester") {
     return {
       yearLevel: student.yearLevel,
@@ -550,11 +567,12 @@ const getNextAcademicPlacement = (
   };
 };
 
-const getEnrollmentRequirementItems = (): EnrollmentRequirementItem[] =>
-  getRegularEnrollmentRequirementItems().map((requirement) => ({
+const getEnrollmentRequirementItems = (
+  program?: string | null,
+): EnrollmentRequirementItem[] =>
+  getRegularEnrollmentRequirementItems(program).map((requirement) => ({
     key: requirement.key,
     label: requirement.name,
-    allowsDownload: requirement.key === "clearance",
   }));
 
 const getFallbackEnrollmentSubjects = ({
@@ -711,6 +729,7 @@ const mapAttachmentsToUploadedFiles = (
         storagePath: storedAttachment.storagePath,
         storageBucket: storedAttachment.storageBucket,
         uploadedAt: storedAttachment.uploadedAt,
+        reviewStatus: storedAttachment.reviewStatus,
         url: hasViewableAttachmentUrl(storedAttachment.url)
           ? storedAttachment.url
           : previousFiles[requirement.key]?.url,
@@ -719,30 +738,6 @@ const mapAttachmentsToUploadedFiles = (
     },
     {},
   );
-
-const getStatusToneClass = (label: string) => {
-  const normalized = normalizeAcademicToken(label);
-
-  if (
-    normalized.includes("approved") ||
-    normalized.includes("complete") ||
-    normalized.includes("ready") ||
-    normalized.includes("eligible") ||
-    normalized.includes("regular")
-  ) {
-    return "s-status-completed";
-  }
-
-  if (
-    normalized.includes("reupload") ||
-    normalized.includes("rejected") ||
-    normalized.includes("redo")
-  ) {
-    return "s-status-warning";
-  }
-
-  return "s-status-pending";
-};
 
 function StudentEnrollment() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -753,6 +748,9 @@ function StudentEnrollment() {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
   const [enrollmentRequestsVersion, setEnrollmentRequestsVersion] = useState(0);
+  const [evaluationSubmissions, setEvaluationSubmissions] = useState<
+    InstructorEvaluationSubmissionRecord[]
+  >([]);
   const [isRetakePlanModalOpen, setIsRetakePlanModalOpen] = useState(false);
   const [selectedRetakeAssignmentsBySubject, setSelectedRetakeAssignmentsBySubject] =
     useState<Record<string, string>>({});
@@ -821,8 +819,11 @@ function StudentEnrollment() {
             academicYear: nextPlacement.academicYear,
           })
         : [];
-  const enrollmentRequirements = useMemo(() => getEnrollmentRequirementItems(), []);
   const isCollegeStudent = Boolean(student && student.programType !== "SHS");
+  const enrollmentRequirements = useMemo(
+    () => getEnrollmentRequirementItems(storageProgram),
+    [storageProgram],
+  );
   const studentGradeRecords = useMemo(
     () => {
       void gradeRecordsVersion;
@@ -866,6 +867,12 @@ function StudentEnrollment() {
       }),
     [currentSemester, currentTermGradeRecords, currentTermSubjects, storageProgram],
   );
+  const evaluationLockStatus = getCurrentTermEvaluationLockStatus({
+    student,
+    subjects,
+    currentTerm,
+    submissions: evaluationSubmissions,
+  });
   const retakeSubjectAlerts = useMemo(
     () =>
       student && nextPlacement.hasNextTerm
@@ -908,6 +915,22 @@ function StudentEnrollment() {
     activeEnrollmentRequest?.requestedLoad?.mode === "retake"
       ? activeEnrollmentRequest.requestedLoad
       : null;
+  const getEnrollmentRequirementAttachment = (
+    requirement: EnrollmentRequirementItem,
+  ) => {
+    const requirementIndex = enrollmentRequirements.findIndex(
+      (item) => item.key === requirement.key,
+    );
+
+    return requirementIndex >= 0
+      ? activeEnrollmentRequest?.attachments?.[requirementIndex]
+      : undefined;
+  };
+  const isEnrollmentRequirementRedo = (
+    requirement: EnrollmentRequirementItem,
+  ) =>
+    activeEnrollmentRequest?.enrollmentStatus === "Pending" &&
+    getEnrollmentRequirementAttachment(requirement)?.reviewStatus === "Rejected";
   const isRegularFlowStudent = student?.status === "Regular";
   const supportsIrregularEnrollmentRequest = Boolean(
     student && storageProgram === "College" && student.status === "Irregular",
@@ -977,19 +1000,34 @@ function StudentEnrollment() {
   const tuitionPerUnit = 600;
   const estimatedTuition = totalUnits * tuitionPerUnit;
   const honorLabel = credentialOverview?.applicantRecord.honorLabel || "No Honor";
-  const scholarshipApplied = Boolean(
-    credentialOverview?.applicantRecord.appliedForScholarship,
+  const honorCertificateApproved = Boolean(
+    credentialOverview?.items.some(
+      (item) =>
+        item.name.trim().toLowerCase() === "honor certificate" &&
+        item.reviewStatus === "Approved",
+    ),
   );
   const scholarshipExamScore =
     credentialOverview?.applicantRecord.scholarshipExamScore;
-  const honorDiscount = getHonorDiscountPercentage(honorLabel);
+  const scholarshipApplied = Boolean(
+    credentialOverview?.applicantRecord.appliedForScholarship ||
+      typeof scholarshipExamScore === "number",
+  );
+  const scholarshipExamDiscount = scholarshipApplied
+    ? getScholarshipExamDiscountPercentage(scholarshipExamScore)
+    : 0;
+  const honorDiscount = honorCertificateApproved
+    ? getHonorDiscountPercentage(honorLabel)
+    : 0;
   const effectiveDiscountPercentage = getEffectiveAdmissionDiscountPercentage({
     honorLabel,
+    honorCertificateApproved,
     appliedForScholarship: scholarshipApplied,
     scholarshipExamScore,
   });
   const effectiveDiscountSource = getAdmissionDiscountSource({
     honorLabel,
+    honorCertificateApproved,
     appliedForScholarship: scholarshipApplied,
     scholarshipExamScore,
   });
@@ -1003,6 +1041,11 @@ function StudentEnrollment() {
     credentialSummary?.overallStatus || "Pending Documents";
   const hasSupportedEnrollmentFlow =
     isRegularFlowStudent || supportsIrregularEnrollmentRequest;
+  const isShsFirstSemesterAutoProgressionTerm =
+    storageProgram === "SHS" && currentSemester === "1st Semester";
+  const hasBlockingShsCurrentFailures =
+    storageProgram === "SHS" &&
+    currentTermGradeRecords.some((record) => isRetakeEvaluation(record.evaluation));
   const isLevelUpTerm = Boolean(
     student && nextPlacement.yearLevel !== student.yearLevel,
   );
@@ -1019,6 +1062,8 @@ function StudentEnrollment() {
     Boolean(
       student &&
         gradePostingSummary.isComplete &&
+        !hasBlockingShsCurrentFailures &&
+        !evaluationLockStatus.isLocked &&
         nextPlacement.hasNextTerm &&
         (isRegularFlowStudent
           ? hasCollegeRetakePlanner || assignedSubjects.length > 0
@@ -1033,6 +1078,12 @@ function StudentEnrollment() {
         ? "Request Pending"
       : activeEnrollmentRequest?.enrollmentStatus === "Rejected"
           ? "Needs Resubmission"
+          : hasBlockingShsCurrentFailures
+            ? "Has Failed Grades"
+            : evaluationLockStatus.isLocked
+              ? "Evaluation Locked"
+          : isShsFirstSemesterAutoProgressionTerm
+            ? "Waiting for Quarter Completion"
           : isEligibleForEnrollment
             ? supportsIrregularEnrollmentRequest
               ? "Eligible with Own Schedule Request"
@@ -1052,6 +1103,12 @@ function StudentEnrollment() {
           ? "Your last request was rejected. Reupload the required files and submit again."
           : !hasSupportedEnrollmentFlow
             ? "This enrollment page currently supports regular students and eligible college irregular schedule requests only."
+            : hasBlockingShsCurrentFailures
+              ? "At least one senior high grade is below 75. Failed subjects must be resolved before semester progression or year-level enrollment."
+            : evaluationLockStatus.isLocked
+              ? `Current term is locked until you submit all instructor evaluations. Completed ${evaluationLockStatus.completedCount}/${evaluationLockStatus.requiredCount}. Pending: ${evaluationLockStatus.pendingInstructorNames.join(", ")}.`
+            : isShsFirstSemesterAutoProgressionTerm
+              ? "Senior high students do not submit a new enrollment for 2nd Semester. Once all 1st and 2nd quarter grades are posted and passing, the portal automatically moves to 2nd Semester subjects."
             : !gradePostingSummary.isComplete
               ? gradePostingSummary.note
               : supportsIrregularEnrollmentRequest
@@ -1111,9 +1168,49 @@ function StudentEnrollment() {
     addToast("Logging out...", "info");
   };
 
+  useEffect(() => {
+    const syncEvaluationSubmissions = () => {
+      setEvaluationSubmissions(readInstructorEvaluationSubmissions(student?.branch));
+
+      if (!student?.branch) {
+        return;
+      }
+
+      void fetchInstructorEvaluationSubmissions(student.branch)
+        .then(setEvaluationSubmissions)
+        .catch((error) => {
+          console.warn("Failed to sync evaluation submissions.", error);
+        });
+    };
+
+    syncEvaluationSubmissions();
+
+    window.addEventListener("storage", syncEvaluationSubmissions);
+    window.addEventListener(
+      INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
+      syncEvaluationSubmissions,
+    );
+
+    return () => {
+      window.removeEventListener("storage", syncEvaluationSubmissions);
+      window.removeEventListener(
+        INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
+        syncEvaluationSubmissions,
+      );
+    };
+  }, [student?.branch]);
+
   const handleFileUpload = async (requirement: EnrollmentRequirementItem) => {
     if (!student) {
       addToast("Student record is still loading.", "warning");
+      return;
+    }
+
+    if (isShsFirstSemesterAutoProgressionTerm) {
+      addToast(
+        "Senior high students do not need a new enrollment request for 2nd Semester.",
+        "info",
+      );
       return;
     }
 
@@ -1149,8 +1246,37 @@ function StudentEnrollment() {
             storagePath: uploadedAttachment.storagePath,
             storageBucket: uploadedAttachment.storageBucket,
             uploadedAt: uploadedAttachment.uploadedAt,
+            reviewStatus: "Pending",
           },
         }));
+
+        if (
+          activeEnrollmentRequest?.enrollmentStatus === "Pending" &&
+          isEnrollmentRequirementRedo(requirement)
+        ) {
+          const requirementIndex = enrollmentRequirements.findIndex(
+            (item) => item.key === requirement.key,
+          );
+          const nextAttachments = [...(activeEnrollmentRequest.attachments ?? [])];
+
+          nextAttachments[requirementIndex] = {
+            ...uploadedAttachment,
+            reviewStatus: "Pending",
+          };
+
+          await saveEnrollmentRequest({
+            ...activeEnrollmentRequest,
+            attachments: nextAttachments,
+            updatedAt: new Date().toISOString(),
+          });
+          setEnrollmentRequestsVersion((previousValue) => previousValue + 1);
+          addToast(
+            `${requirement.label} resent successfully. Waiting for review.`,
+            "success",
+          );
+          return;
+        }
+
         addToast(`${requirement.label} uploaded successfully.`, "success");
       } catch (error) {
         console.error("Upload failed:", error);
@@ -1166,47 +1292,6 @@ function StudentEnrollment() {
     };
 
     input.click();
-  };
-
-  const handleDownloadClearance = () => {
-    const clearanceText = `STUDENT CLEARANCE FORM
-${"=".repeat(50)}
-
-Student Name: ${studentName}
-Student Number: ${student?.studentNumber || "-"}
-Program: ${programLabel}
-Strand/Course: ${student?.program || "-"}
-Current Level: ${student?.yearLevel || "-"}
-Academic Year: ${currentAcademicYear}
-
-${"=".repeat(50)}
-
-CLEARANCE STATUS:
-
-[ ] Instructor Clearance
-[ ] Faculty Clearance
-[ ] Registrar Clearance
-[ ] Department Clearance
-
-${"=".repeat(50)}
-
-Note: This clearance requires physical signatures from authorized personnel.
-Downloaded clearance is not valid without complete signatures.
-
-Generated on: ${new Date().toLocaleDateString()}
-`;
-
-    const blob = new Blob([clearanceText], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `clearance_${student?.studentNumber || "student"}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    addToast("Clearance downloaded successfully.", "success");
   };
 
   const openRetakePlanModal = () => {
@@ -1268,9 +1353,27 @@ Generated on: ${new Date().toLocaleDateString()}
       return;
     }
 
+    if (hasBlockingShsCurrentFailures) {
+      addToast(
+        "Senior high grades below 75 must be resolved before enrollment can continue.",
+        "warning",
+      );
+      return;
+    }
+
+    if (evaluationLockStatus.isLocked) {
+      addToast(
+        `Complete all current-term instructor evaluations first. Pending: ${evaluationLockStatus.pendingInstructorNames.join(", ")}.`,
+        "warning",
+      );
+      return;
+    }
+
     if (!nextPlacement.hasNextTerm) {
       addToast(
-        "A next enrollment term is not available yet for this student record.",
+        isShsFirstSemesterAutoProgressionTerm
+          ? "Senior high students automatically move to 2nd Semester after all 1st and 2nd quarter grades are posted and passing."
+          : "A next enrollment term is not available yet for this student record.",
         "warning",
       );
       return;
@@ -1408,68 +1511,6 @@ Generated on: ${new Date().toLocaleDateString()}
       console.error("Failed to save enrollment request", error);
       addToast("Unable to submit the enrollment request right now.", "error");
     }
-  };
-
-  const handleDownloadConfirmation = () => {
-    if (enrollmentStatus.status !== "Approved") {
-      addToast(
-        "Enrollment confirmation is only available after approval.",
-        "warning",
-      );
-      return;
-    }
-
-    const confirmationText = `ENROLLMENT CONFIRMATION
-${"=".repeat(50)}
-
-Asian Institute of Computer Studies
-${student?.branch || "Bacoor"} Branch
-
-${"=".repeat(50)}
-
-Student Name: ${studentName}
-Student Number: ${student?.studentNumber || "-"}
-Program: ${programLabel}
-Strand/Course: ${student?.program || "-"}
-Grade Level: ${enrollmentStatus.gradeLevel}
-Semester: ${enrollmentStatus.semester}
-Academic Year: ${nextPlacement.academicYear}
-
-${"=".repeat(50)}
-
-ASSIGNED SUBJECTS:
-
-${assignedSubjects.length > 0
-  ? assignedSubjects
-      .map(
-        (subject, index) =>
-          `${index + 1}. ${subject.code} - ${subject.title}${subject.units ? ` (${subject.units} units)` : ""}`,
-      )
-      .join("\n")
-  : "No subjects assigned yet."}
-
-${"=".repeat(50)}
-
-Enrollment Status: ${enrollmentStatus.status}
-Enrollment Date: ${enrollmentStatus.enrollmentDate}
-
-This confirms that the student is officially enrolled for the upcoming term.
-
-Registrar's Signature: ___________________
-Date: ${new Date().toLocaleDateString()}
-`;
-
-    const blob = new Blob([confirmationText], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `enrollment_confirmation_${student?.studentNumber || "student"}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    addToast("Enrollment confirmation downloaded.", "success");
   };
 
   useEffect(() => {
@@ -1652,9 +1693,18 @@ Date: ${new Date().toLocaleDateString()}
 
   if (isLoading && !student) {
     return (
-      <div className="s-portal">
-        <div style={{ minHeight: "100vh" }}></div>
-      </div>
+      <StudentLoadingShell
+        activePage="enrollment"
+        currentDate={currentDate}
+        headerTitle="Enrollment"
+        onLogout={handleLogout}
+        onMenuClick={handleMenuClick}
+        onSidebarClose={handleSidebarClose}
+        skeletonTitle="Enrollment"
+        studentData={studentData}
+        variant="form"
+        sidebarOpen={sidebarOpen}
+      />
     );
   }
 
@@ -1693,13 +1743,7 @@ Date: ${new Date().toLocaleDateString()}
               <h3>Enrollment Eligibility</h3>
               <div className="s-eligibility-item">
                 <span className="s-eligibility-label">Student Flow:</span>
-                <span
-                  className={`s-eligibility-value ${
-                    hasSupportedEnrollmentFlow
-                      ? "s-status-completed"
-                      : "s-status-warning"
-                  }`}
-                >
+                <span className="s-eligibility-value">
                   {isRegularFlowStudent
                     ? "Regular Student"
                     : supportsIrregularEnrollmentRequest
@@ -1718,10 +1762,18 @@ Date: ${new Date().toLocaleDateString()}
                 <span className="s-eligibility-value">{currentSemester}</span>
               </div>
               <div className="s-eligibility-item">
+                <span className="s-eligibility-label">Term Lock:</span>
+                <span className="s-eligibility-value">
+                  {evaluationLockStatus.requiredCount === 0
+                    ? "No instructor evaluations required"
+                    : evaluationLockStatus.isLocked
+                      ? `Locked (${evaluationLockStatus.completedCount}/${evaluationLockStatus.requiredCount} evaluations)`
+                      : "Unlocked"}
+                </span>
+              </div>
+              <div className="s-eligibility-item">
                 <span className="s-eligibility-label">Semester Grades:</span>
-                <span
-                  className={`s-eligibility-value ${getStatusToneClass(gradePostingSummary.statusLabel)}`}
-                >
+                <span className="s-eligibility-value">
                   {gradePostingSummary.totalSubjects > 0
                     ? `${gradePostingSummary.postedSubjects}/${gradePostingSummary.totalSubjects} ${gradePostingSummary.statusLabel}`
                     : gradePostingSummary.statusLabel}
@@ -1729,9 +1781,7 @@ Date: ${new Date().toLocaleDateString()}
               </div>
               <div className="s-eligibility-item">
                 <span className="s-eligibility-label">Next Enrollment Term:</span>
-                <span
-                  className={`s-eligibility-value ${nextPlacement.hasNextTerm ? "s-status-completed" : "s-status-warning"}`}
-                >
+                <span className="s-eligibility-value">
                   {nextPlacement.hasNextTerm
                     ? `${nextPlacement.yearLevel} - ${nextPlacement.semester}`
                     : "No next term available"}
@@ -1739,17 +1789,13 @@ Date: ${new Date().toLocaleDateString()}
               </div>
               <div className="s-eligibility-item">
                 <span className="s-eligibility-label">Eligibility Result:</span>
-                <span
-                  className={`s-eligibility-value ${getStatusToneClass(eligibilityStatusLabel)}`}
-                >
+                <span className="s-eligibility-value">
                   {eligibilityStatusLabel}
                 </span>
               </div>
               <div className="s-eligibility-item">
                 <span className="s-eligibility-label">Portal Requirement Status:</span>
-                <span
-                  className={`s-eligibility-value ${getStatusToneClass(portalRequirementStatus)}`}
-                >
+                <span className="s-eligibility-value">
                   {portalRequirementStatus}
                 </span>
               </div>
@@ -1931,14 +1977,18 @@ Date: ${new Date().toLocaleDateString()}
             </div>
             <div className="s-note-content">
               <p>
-                Assigned subjects now follow the next enrollment term based on
-                the student&apos;s current year level and semester.
+                {isShsFirstSemesterAutoProgressionTerm
+                  ? "Senior high students continue to 2nd Semester automatically after passing 1st and 2nd quarter grades."
+                  : "Assigned subjects now follow the next enrollment term based on the student's current year level and semester."}
               </p>
               <p className="s-notice-text">
-                Upcoming term:{" "}
-                {nextPlacement.hasNextTerm
-                  ? `${nextPlacement.yearLevel} - ${nextPlacement.semester} (${nextPlacement.academicYear})`
-                  : "No next enrollment term is available yet."}
+                {isShsFirstSemesterAutoProgressionTerm
+                  ? "2nd Semester subjects will appear as the current load once the grade check passes."
+                  : `Upcoming term: ${
+                      nextPlacement.hasNextTerm
+                        ? `${nextPlacement.yearLevel} - ${nextPlacement.semester} (${nextPlacement.academicYear})`
+                        : "No next enrollment term is available yet."
+                    }`}
               </p>
             </div>
           </div>
@@ -1950,13 +2000,8 @@ Date: ${new Date().toLocaleDateString()}
                 <div className="s-requirement-item" key={requirement.key}>
                   <span className="s-requirement-label">{requirement.label}</span>
                   <div className="s-requirement-actions">
-                    {requirement.allowsDownload && (
-                      <button
-                        className="s-download-btn-small"
-                        onClick={handleDownloadClearance}
-                      >
-                        <MdDownload /> Download
-                      </button>
+                    {isEnrollmentRequirementRedo(requirement) && (
+                      <span className="s-file-name">Needs reupload</span>
                     )}
                     {hasViewableAttachmentUrl(
                       uploadedFiles[requirement.key]?.url,
@@ -1978,7 +2023,12 @@ Date: ${new Date().toLocaleDateString()}
                     <button
                       className="s-upload-btn"
                       onClick={() => void handleFileUpload(requirement)}
-                      disabled={uploadingId === requirement.key || isRequestLocked}
+                      disabled={
+                        uploadingId === requirement.key ||
+                        (isRequestLocked &&
+                          !isEnrollmentRequirementRedo(requirement)) ||
+                        isShsFirstSemesterAutoProgressionTerm
+                      }
                     >
                       {uploadingId === requirement.key ? (
                         <FaSpinner className="s-spin" />
@@ -2110,33 +2160,20 @@ Date: ${new Date().toLocaleDateString()}
                         : "Not applicable"}
                   </span>
                 </div>
+                <div className="s-finance-stat">
+                  <span className="s-finance-label">Exam Discount</span>
+                  <span className="s-finance-value">
+                    {scholarshipExamDiscount}%
+                  </span>
+                </div>
                 <p className="s-finance-note">
-                  If you applied for scholarship and have an academic honor,
-                  the higher percentage between your scholarship exam score and
-                  honor discount will be used. Maintain the required criteria
-                  each term to keep the discount active.
+                  Honor discounts only count after your Honor Certificate is
+                  uploaded and approved. The scholarship exam is 60 items and
+                  can provide up to a 50% discount.
                 </p>
               </div>
             </div>
           )}
-
-          <div className="s-note-card s-warning-note">
-            <div className="s-note-icon">
-              <FaCheckCircle />
-            </div>
-            <div className="s-note-content">
-              <p>
-                Regular students can submit the standard enrollment request from
-                this page, and eligible college irregular students can submit an
-                own-schedule request for the next term.
-              </p>
-              <p className="s-notice-text">
-                Notice: Clearance stays required, and the grades requirement now
-                uses the semester grades certificate. College retake requests
-                must also complete the plan load before submission.
-              </p>
-            </div>
-          </div>
 
           <div className="s-status-section">
             <h3>Enrollment Status</h3>
@@ -2195,13 +2232,6 @@ Date: ${new Date().toLocaleDateString()}
               disabled={!isEligibleForEnrollment}
             >
               {enrollButtonLabel}
-            </button>
-            <button
-              className="s-download-confirmation-btn"
-              onClick={handleDownloadConfirmation}
-              disabled={enrollmentStatus.status !== "Approved"}
-            >
-              <MdDownload /> Download Enrollment Confirmation
             </button>
           </div>
         </main>

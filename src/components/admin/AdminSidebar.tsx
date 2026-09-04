@@ -12,7 +12,6 @@ import {
 } from "react-icons/md";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
-import { useStoredProfileImage } from "../../hooks/useStoredProfileImage";
 import AccountSettingsModal, {
   type AccountSettingsDraft,
 } from "../common/AccountSettingsModal";
@@ -21,6 +20,7 @@ import {
   updateStaffMember,
   type StaffMember,
 } from "../../services/staffApi";
+import aicsLogo from "../../assets/images/AICS_Logo.png";
 import "../../styles/admin/admin-sidebar.css";
 
 interface AdminSidebarProps {
@@ -57,16 +57,9 @@ export default function AdminSidebar({
   const [isLoadingAccount, setIsLoadingAccount] = useState(false);
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
-  const { profileImage } = useStoredProfileImage(currentUser);
   const isRegistrarView = loggedInRole === "Registrar";
   const displayName = loggedInUsername.trim() || "Administrator";
   const branchName = currentUser?.branch?.trim() || "Bacoor";
-  const userInitials = displayName
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((namePart) => namePart[0].toUpperCase())
-    .join("");
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -175,6 +168,8 @@ export default function AdminSidebar({
   const handleUpdateAccount = async ({
     firstName,
     lastName,
+    email,
+    contactNumber,
     newPassword,
   }: AccountSettingsDraft) => {
     if (!editableAccount) {
@@ -190,6 +185,8 @@ export default function AdminSidebar({
         ...editableAccount,
         first_name: firstName,
         last_name: lastName,
+        email: email ?? editableAccount.email,
+        contact_number: contactNumber ?? editableAccount.contact_number,
         password: newPassword,
       });
       const nextDisplayName =
@@ -204,6 +201,8 @@ export default function AdminSidebar({
         displayName: nextDisplayName,
         firstName: updatedAccount.first_name,
         lastName: updatedAccount.last_name,
+        email: updatedAccount.email,
+        contactNumber: updatedAccount.contact_number,
       });
       setShowEditModal(false);
       setShowProfileMenu(false);
@@ -233,15 +232,11 @@ export default function AdminSidebar({
                 }
                 aria-label={`${displayName} profile`}
               >
-                {profileImage ? (
-                  <img
-                    src={profileImage}
-                    alt={`${displayName} profile`}
-                    className="admin-user-avatar-image"
-                  />
-                ) : (
-                  <div className="admin-user-avatar">{userInitials}</div>
-                )}
+                <img
+                  src={aicsLogo}
+                  alt="AICS logo"
+                  className="admin-user-avatar-image"
+                />
               </button>
 
               {showProfileMenu ? (
@@ -314,6 +309,8 @@ export default function AdminSidebar({
             ? {
                 firstName: editableAccount.first_name,
                 lastName: editableAccount.last_name,
+                email: editableAccount.email,
+                contactNumber: editableAccount.contact_number,
               }
             : null
         }

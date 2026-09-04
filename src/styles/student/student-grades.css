@@ -101,6 +101,12 @@
   background: #1A3D5C;
 }
 
+.s-generate-btn:disabled {
+  background: #7b8791;
+  cursor: not-allowed;
+  opacity: 0.82;
+}
+
 /* Filter Panel */
 .s-filter-panel {
   background: white;
@@ -198,9 +204,9 @@
 /* Table Container */
 .s-grades-table-container {
   background: white;
-  border-radius: 12px;
+  border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  min-width: 800px;
+  min-width: 680px;
 }
 
 /* Table Styles */
@@ -215,8 +221,8 @@
 }
 
 .s-grades-table th {
-  padding: 14px 16px;
-  font-size: 14px;
+  padding: 10px 12px;
+  font-size: 13px;
   font-weight: 600;
   color: #333;
   text-align: left;
@@ -224,8 +230,8 @@
 }
 
 .s-grades-table td {
-  padding: 12px 16px;
-  font-size: 14px;
+  padding: 9px 12px;
+  font-size: 13px;
   color: #666;
   border-bottom: 1px solid #e0e0e0;
 }
@@ -246,11 +252,11 @@
 }
 
 .s-subject-title {
-  line-height: 1.4;
+  line-height: 1.35;
   word-break: break-word;
   white-space: normal;
-  min-width: 200px;
-  max-width: 350px;
+  min-width: 170px;
+  max-width: 300px;
 }
 
 .s-grade-value {
@@ -258,15 +264,15 @@
   text-align: center;
   color: #333;
   white-space: nowrap;
-  min-width: 70px;
+  min-width: 56px;
 }
 
 .s-grade-status-cell {
-  min-width: 150px;
+  min-width: 120px;
 }
 
 .s-instructor-name {
-  min-width: 180px;
+  min-width: 150px;
   white-space: normal;
 }
 
@@ -274,9 +280,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 6px 12px;
+  padding: 5px 9px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -302,6 +308,31 @@
   color: #b53737;
 }
 
+.s-grade-status svg {
+  font-size: 10px;
+}
+
+.s-locked-grade-cell,
+.s-summary-locked {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #51606f;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.s-locked-grade-cell svg,
+.s-summary-locked svg {
+  font-size: 12px;
+  color: #7b8791;
+}
+
+.s-summary-locked {
+  font-size: 16px;
+}
+
 .s-no-data {
   text-align: center;
   padding: 40px !important;
@@ -324,7 +355,7 @@
 }
 
 .s-grades-table-college {
-  min-width: 1100px;
+  min-width: 900px;
 }
 
 /* Fixed Header for Grades Page */
@@ -382,33 +413,46 @@
   }
   
   .s-grades-table-container {
-    min-width: 700px;
+    min-width: 620px;
   }
 
   .s-grades-table-college {
-    min-width: 1100px;
-  }
-  
-  .s-grades-table th,
-  .s-grades-table td {
-    padding: 10px 12px;
-    font-size: 13px;
-  }
-}
-
-@media (max-width: 480px) {
-  .s-grades-table-container {
-    min-width: 700px;
-  }
-
-  .s-grades-table-college {
-    min-width: 1100px;
+    min-width: 820px;
   }
   
   .s-grades-table th,
   .s-grades-table td {
     padding: 8px 10px;
     font-size: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .s-grades-table-container {
+    min-width: 560px;
+  }
+
+  .s-grades-table-college {
+    min-width: 760px;
+  }
+  
+  .s-grades-table th,
+  .s-grades-table td {
+    padding: 7px 8px;
+    font-size: 12px;
+  }
+
+  .s-subject-title {
+    min-width: 145px;
+    max-width: 220px;
+  }
+
+  .s-grade-status-cell {
+    min-width: 104px;
+  }
+
+  .s-instructor-name {
+    min-width: 120px;
   }
 
   .s-grades-banner-description {

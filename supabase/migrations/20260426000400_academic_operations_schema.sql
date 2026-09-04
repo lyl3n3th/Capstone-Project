@@ -987,11 +987,11 @@ begin
     v_branch_id,
     v_room_name
   )
-  on conflict (branch_id, room_name) do update
+  on conflict on constraint branch_assignment_rooms_branch_id_room_name_key do update
   set is_active = true;
 
   return query
-  select *
+  select room.room_name
   from public.list_assignment_rooms(v_branch_name) room
   where room.room_name = v_room_name
   limit 1;
@@ -1353,7 +1353,8 @@ create table if not exists public.branch_student_planning_states (
       own_schedule_semester is null
       or own_schedule_semester in ('1st Semester', '2nd Semester', 'Summer')
     ),
-  unique (branch_id, student_number)
+  constraint branch_student_planning_states_student_unique
+    unique (branch_id, student_number)
 );
 
 create table if not exists public.branch_student_subject_plans (
@@ -1380,7 +1381,8 @@ create table if not exists public.branch_student_subject_plans (
     ),
   constraint branch_student_subject_plans_semester_check
     check (semester in ('1st Semester', '2nd Semester', 'Summer')),
-  unique (branch_id, external_id)
+  constraint branch_student_subject_plans_external_unique
+    unique (branch_id, external_id)
 );
 
 create table if not exists public.branch_student_schedule_requests (
@@ -1400,8 +1402,10 @@ create table if not exists public.branch_student_schedule_requests (
     check (status in ('Pending', 'Approved', 'Rejected')),
   constraint branch_student_schedule_requests_semester_check
     check (semester in ('1st Semester', '2nd Semester', 'Summer')),
-  unique (branch_id, external_id),
-  unique (branch_id, student_number, academic_year, semester)
+  constraint branch_student_schedule_requests_external_unique
+    unique (branch_id, external_id),
+  constraint branch_student_schedule_requests_student_term_unique
+    unique (branch_id, student_number, academic_year, semester)
 );
 
 create table if not exists public.branch_enrollment_requests (
@@ -1421,8 +1425,10 @@ create table if not exists public.branch_enrollment_requests (
     check (enrollment_status in ('Pending', 'Approved', 'Rejected')),
   constraint branch_enrollment_requests_semester_check
     check (semester in ('1st Semester', '2nd Semester', 'Summer')),
-  unique (branch_id, external_id),
-  unique (branch_id, student_number, academic_year, semester)
+  constraint branch_enrollment_requests_external_unique
+    unique (branch_id, external_id),
+  constraint branch_enrollment_requests_student_term_unique
+    unique (branch_id, student_number, academic_year, semester)
 );
 
 create index if not exists branch_student_planning_states_branch_student_idx
@@ -1538,6 +1544,7 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+#variable_conflict use_column
 declare
   v_branch_id uuid;
   v_branch_name text;
@@ -1584,7 +1591,7 @@ begin
     v_semester,
     nullif(trim(coalesce(p_payload->>'own_schedule_selection_status', '')), '')
   )
-  on conflict (branch_id, student_number) do update
+  on conflict on constraint branch_student_planning_states_student_unique do update
   set tracking_number = excluded.tracking_number,
       requested_own_schedule = excluded.requested_own_schedule,
       own_schedule_request_status = excluded.own_schedule_request_status,
@@ -1660,6 +1667,7 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+#variable_conflict use_column
 declare
   v_branch_id uuid;
   v_branch_name text;
@@ -1705,7 +1713,7 @@ begin
     trim(p_payload->>'source'),
     p_payload - 'branch'
   )
-  on conflict (branch_id, external_id) do update
+  on conflict on constraint branch_student_subject_plans_external_unique do update
   set student_number = excluded.student_number,
       tracking_number = excluded.tracking_number,
       semester = excluded.semester,
@@ -1812,6 +1820,7 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+#variable_conflict use_column
 declare
   v_branch_id uuid;
   v_branch_name text;
@@ -1867,7 +1876,7 @@ begin
     v_status,
     p_payload
   )
-  on conflict (branch_id, student_number, academic_year, semester) do update
+  on conflict on constraint branch_student_schedule_requests_student_term_unique do update
   set external_id = excluded.external_id,
       tracking_number = excluded.tracking_number,
       status = excluded.status,
@@ -1945,6 +1954,7 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+#variable_conflict use_column
 declare
   v_branch_id uuid;
   v_branch_name text;
@@ -2000,7 +2010,7 @@ begin
     v_enrollment_status,
     p_payload
   )
-  on conflict (branch_id, student_number, academic_year, semester) do update
+  on conflict on constraint branch_enrollment_requests_student_term_unique do update
   set external_id = excluded.external_id,
       tracking_number = excluded.tracking_number,
       enrollment_status = excluded.enrollment_status,

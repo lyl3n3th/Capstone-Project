@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 
 from apps.core.models import StaffAccount
 from apps.manager.models import Branch, ManagerProfile, Report
+from apps.manager.repository import create_report
 
 User = get_user_model()
 
@@ -114,6 +115,25 @@ class ReportApiTests(TestCase):
         self.assertEqual(response.data["sender_name"], "Supabase Admin")
         self.assertEqual(response.data["branch_name"], "Bacoor")
 
+    def test_branch_admin_can_create_report_for_custom_branch_from_headers(self):
+        response = self.client.post(
+            "/api/manager/reports/",
+            {
+                "branch": "DSF Branch",
+                "subject": "Custom Branch Report",
+                "message": "Created from a newly managed branch.",
+            },
+            format="multipart",
+            HTTP_X_EMPLOYEE_ID="SUPABASE-DSF-001",
+            HTTP_X_USER_ROLE="admin",
+            HTTP_X_USER_BRANCH="DSF Branch",
+            HTTP_X_USER_NAME="DSF Admin",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["sender_name"], "DSF Admin")
+        self.assertEqual(response.data["branch_name"], "DSF Branch")
+
     def test_non_branch_admin_cannot_create_report(self):
         self.client.force_authenticate(user=self.registrar_user)
 
@@ -210,3 +230,50 @@ class ReportApiTests(TestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["branch_name"], "Bacoor")
         self.assertTrue(response.data[0]["is_reviewed"])
+
+    @patch("apps.manager.repository.use_supabase_reports", return_value=True)
+    @patch("apps.manager.repository._client")
+    def test_supabase_report_creation_registers_custom_branch(
+        self,
+        mock_client_factory,
+        _mock_use_supabase_reports,
+    ):
+        mock_client = mock_client_factory.return_value
+        mock_client.insert.side_effect = [
+            [{"code": "dsf_branch", "name": "DSF Branch"}],
+            [
+                {
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "sender": "SUPABASE-DSF-001",
+                    "sender_name": "DSF Admin",
+                    "branch": "DSF Branch",
+                    "subject": "Custom Branch Report",
+                    "message": "Created from a newly managed branch.",
+                    "attachment_url": "",
+                    "is_deleted": False,
+                    "is_reviewed": False,
+                    "reviewed_at": None,
+                    "created_at": "2026-09-04T00:00:00Z",
+                }
+            ],
+        ]
+
+        report = create_report(
+            sender_identifier="SUPABASE-DSF-001",
+            sender_name="DSF Admin",
+            branch_name="DSF Branch",
+            subject="Custom Branch Report",
+            message="Created from a newly managed branch.",
+        )
+
+        mock_client.insert.assert_any_call(
+            "admission_branches",
+            {
+                "code": "dsf_branch",
+                "name": "DSF Branch",
+                "is_active": True,
+            },
+            upsert=True,
+            on_conflict="code",
+        )
+        self.assertEqual(report.branch_name, "DSF Branch")

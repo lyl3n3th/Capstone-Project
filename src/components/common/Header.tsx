@@ -5,6 +5,7 @@ import { MdCameraAlt } from "react-icons/md";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useStoredProfileImage } from "../../hooks/useStoredProfileImage";
+import SystemAlertModal from "./SystemAlertModal";
 
 interface HeaderProps {
   title: string;
@@ -21,9 +22,9 @@ function Header({
   title,
   onMenuClick,
   studentData = {
-    name: "Hener C. Verdida",
-    id: "BAC-261001",
-    progrm: "SHS",
+    name: "Student",
+    id: "",
+    progrm: "",
   },
   currentDate,
 }: HeaderProps) {
@@ -34,6 +35,10 @@ function Header({
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { profileImage, updateProfileImage } = useStoredProfileImage(currentUser);
+  const [systemAlert, setSystemAlert] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -84,7 +89,11 @@ function Header({
       setShowProfileMenu(false);
     } catch (error) {
       console.error("Failed to update student profile image", error);
-      alert(error instanceof Error ? error.message : "Failed to update picture.");
+      setSystemAlert({
+        title: "Unable to Update Picture",
+        message:
+          error instanceof Error ? error.message : "Failed to update picture.",
+      });
     } finally {
       event.target.value = "";
     }
@@ -128,6 +137,7 @@ function Header({
     ) : null;
 
   return (
+    <>
     <header className="s-header" aria-label={title}>
       <div className="s-header-left">
         <button className="s-menu-toggle" onClick={onMenuClick}>
@@ -171,6 +181,13 @@ function Header({
         onChange={handleProfileImageChange}
       />
     </header>
+    <SystemAlertModal
+      isOpen={Boolean(systemAlert)}
+      title={systemAlert?.title || ""}
+      message={systemAlert?.message || ""}
+      onClose={() => setSystemAlert(null)}
+    />
+    </>
   );
 }
 

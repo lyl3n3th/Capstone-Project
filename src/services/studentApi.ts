@@ -1,7 +1,10 @@
 import type { Student } from "../types/student";
 import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
+import { isCachedAlumniStudent } from "./backupApi";
 import {
   getStudentCredentialOverview,
+  getStudentsForBranch,
+  normalizeStudentNumberInput,
   normalizeBranchName,
   readStoredStudents,
   writeStoredStudents,
@@ -12,7 +15,12 @@ import {
 } from "./adminStorage";
 import { fetchAndCacheAcademicSnapshot } from "./academicData";
 import { fetchAdminStudents, saveAdminStudent } from "./adminStudentsApi";
-import { fetchStudentSubjectPlans } from "./studentPlanningApi";
+import {
+  fetchStudentPlanningStates,
+  fetchStudentScheduleRequests,
+  fetchStudentSubjectPlans,
+  mergeStudentPlanningStateIntoStudent,
+} from "./studentPlanningApi";
 import {
   fetchEnrollmentRequests,
   hasLatestApprovedIrregularEnrollmentRequestForStudent,
@@ -22,6 +30,11 @@ import {
   type StudentPortalCurrentTerm,
 } from "./studentPortalResolver";
 import { getStudentAcademicStanding } from "./studentGrades";
+import { fetchAndCacheStudentPaymentsForBranch } from "./studentPayments";
+import {
+  toDisplayCapitalization,
+  toNameCapitalization,
+} from "../utils/textFormatting";
 export type { StudentPortalCurrentTerm } from "./studentPortalResolver";
 
 export interface StudentPortalData {
@@ -32,127 +45,20 @@ export interface StudentPortalData {
   currentTerm: StudentPortalCurrentTerm;
 }
 
-const mockStudent: Student = {
-  id: "1",
-  studentNumber: "BAC-261001",
-  firstName: "Hener",
-  lastName: "Verdida",
-  middleName: "C.",
-  email: "hener.verdida@gmail.com",
-  contactNumber: "0912 345 6789",
-  address:
-    "Blk 15 Lot 8, Phase 2, Green Valley Subdivision, Molino 3, Bacoor, Cavite",
-  program: "Technical Livelihood Track - ICT",
-  yearLevel: "Grade 11",
-  branch: "Bacoor",
-  programType: "SHS",
-  gender: "Male",
-  birthday: "2008-01-15",
-  status: "Regular",
-  civilStatus: "Single",
-  religion: "Roman Catholic",
-  guardianName: "Erlinda C. Verdida",
-  guardianContact: "0923 456 7890",
-};
-
-const fallbackSubjectsSHS: StudentPortalSubject[] = [
-  {
-    id: "shs-1",
-    code: "ENG112",
-    title: "Reading and Writing Skills",
-    schedule: "MWF 8:00 AM-9:00 AM",
-    room: "Room 101",
-    professor: "Prof. Santos",
-    days: "MWF",
-    time: "8:00 AM - 9:00 AM",
-    semester: "1st Semester",
-    academicYear: "2026-2027",
-  },
-  {
-    id: "shs-2",
-    code: "FIL112",
-    title: "Pagbabasa at Pagsusuri ng Iba't-ibang Teksto",
-    schedule: "TTH 10:00 AM-11:30 AM",
-    room: "Room 102",
-    professor: "Prof. Reyes",
-    days: "TTH",
-    time: "10:00 AM - 11:30 AM",
-    semester: "1st Semester",
-    academicYear: "2026-2027",
-  },
-  {
-    id: "shs-3",
-    code: "NTS112",
-    title: "Physical Science",
-    schedule: "MWF 10:30 AM-11:30 AM",
-    room: "Room 103",
-    professor: "Prof. Garcia",
-    days: "MWF",
-    time: "10:30 AM - 11:30 AM",
-    semester: "1st Semester",
-    academicYear: "2026-2027",
-  },
-  {
-    id: "shs-4",
-    code: "CP1121",
-    title: "Computer Programming 2 (.NET Technology NC III)",
-    schedule: "TTH 1:00 PM-3:00 PM",
-    room: "Computer Lab 1",
-    professor: "Prof. Cruz",
-    days: "TTH",
-    time: "1:00 PM - 3:00 PM",
-    semester: "1st Semester",
-    academicYear: "2026-2027",
-  },
-];
-
-const fallbackSubjectsCollege: StudentPortalSubject[] = [
-  {
-    id: "college-1",
-    code: "CC101",
-    title: "Introduction to Computing",
-    units: 3,
-    schedule: "MWF 8:00 AM-9:00 AM",
-    room: "Room 101",
-    professor: "Prof. Santos",
-    days: "MWF",
-    time: "8:00 AM - 9:00 AM",
-    semester: "1st Semester",
-    academicYear: "2026-2027",
-  },
-  {
-    id: "college-2",
-    code: "MATH101",
-    title: "College Algebra",
-    units: 3,
-    schedule: "TTH 10:00 AM-11:30 AM",
-    room: "Room 102",
-    professor: "Prof. Reyes",
-    days: "TTH",
-    time: "10:00 AM - 11:30 AM",
-    semester: "1st Semester",
-    academicYear: "2026-2027",
-  },
-  {
-    id: "college-3",
-    code: "ENGL101",
-    title: "English Communication",
-    units: 3,
-    schedule: "MWF 10:30 AM-11:30 AM",
-    room: "Room 103",
-    professor: "Prof. Garcia",
-    days: "MWF",
-    time: "10:30 AM - 11:30 AM",
-    semester: "1st Semester",
-    academicYear: "2026-2027",
-  },
-];
+const DEFAULT_STUDENT_EMAIL = "";
+const DEFAULT_STUDENT_CONTACT = "";
+const DEFAULT_STUDENT_ADDRESS = "";
+const DEFAULT_STUDENT_PROGRAM = "";
+const DEFAULT_STUDENT_YEAR_LEVEL = "";
+const DEFAULT_STUDENT_BRANCH = "Bacoor";
+const DEFAULT_STUDENT_GENDER: Student["gender"] = "Male";
+const DEFAULT_STUDENT_CIVIL_STATUS = "";
+const DEFAULT_STUDENT_RELIGION = "";
+const DEFAULT_STUDENT_GUARDIAN_NAME = "";
+const DEFAULT_STUDENT_GUARDIAN_CONTACT = "";
 
 const wait = (durationMs: number) =>
   new Promise((resolve) => setTimeout(resolve, durationMs));
-
-const getFallbackSubjects = (programType: Student["programType"]) =>
-  programType === "SHS" ? fallbackSubjectsSHS : fallbackSubjectsCollege;
 
 const getCurrentStudentSessionUser = (): AuthSession["user"] | null => {
   if (typeof window === "undefined") {
@@ -179,76 +85,57 @@ const getCurrentStudentSessionUser = (): AuthSession["user"] | null => {
   }
 };
 
-const getStudentSessionOverrides = (
-  sessionUser = getCurrentStudentSessionUser(),
-): Partial<Student> => {
-  if (!sessionUser) {
-    return {};
+const studentNumbersMatch = (
+  leftValue?: string | null,
+  rightValue?: string | null,
+  branch?: string | null,
+) => {
+  if (!leftValue || !rightValue) {
+    return false;
   }
 
-  try {
-    const derivedFirstName =
-      sessionUser.firstName ||
-      sessionUser.displayName.split(" ")[0] ||
-      mockStudent.firstName;
-    const derivedLastName =
-      sessionUser.lastName ||
-      sessionUser.displayName
-        .split(" ")
-        .slice(1)
-        .join(" ") ||
-      mockStudent.lastName;
+  const normalizedLeft =
+    normalizeStudentNumberInput(leftValue, branch) ||
+    normalizeStudentNumberInput(leftValue);
+  const normalizedRight =
+    normalizeStudentNumberInput(rightValue, branch) ||
+    normalizeStudentNumberInput(rightValue);
 
-    return {
-      id: sessionUser.id,
-      studentNumber: sessionUser.studentNumber || mockStudent.studentNumber,
-      trackingNumber: sessionUser.trackingNumber,
-      firstName: derivedFirstName,
-      lastName: derivedLastName,
-      middleName: sessionUser.middleName,
-      email: sessionUser.email || mockStudent.email,
-      contactNumber: sessionUser.contactNumber || mockStudent.contactNumber,
-      address: sessionUser.address || mockStudent.address,
-      program: sessionUser.program || mockStudent.program,
-      yearLevel: sessionUser.yearLevel || mockStudent.yearLevel,
-      branch: sessionUser.branch || mockStudent.branch,
-      section: sessionUser.section,
-      programType: sessionUser.programType || mockStudent.programType,
-      gender: sessionUser.gender || mockStudent.gender,
-      birthday: sessionUser.birthDate || mockStudent.birthday,
-      civilStatus: sessionUser.civilStatus || mockStudent.civilStatus,
-    };
-  } catch (error) {
-    console.error("Failed to read student session overrides", error);
-    return {};
-  }
+  return normalizedLeft.toUpperCase() === normalizedRight.toUpperCase();
 };
-
-const buildSessionBackedPortalStudent = (
-  sessionUser: AuthSession["user"],
-): Student => {
-  const sessionOverrides = getStudentSessionOverrides(sessionUser);
-
-  return {
-    ...mockStudent,
-    ...sessionOverrides,
-    id: sessionUser.id || sessionOverrides.studentNumber || mockStudent.id,
-    studentNumber:
-      sessionUser.studentNumber || sessionOverrides.studentNumber || mockStudent.studentNumber,
-    trackingNumber: sessionUser.trackingNumber,
-    status: "Regular",
-  };
-};
-
-const buildCurrentTermFallback = (yearLevel: string): StudentPortalCurrentTerm => ({
-  yearLevel,
-  academicYear: "2026-2027",
-  semester: "1st Semester",
-  source: "fallback",
-});
 
 const mergeStudentIntoLocalCache = (student: StudentStorageRecord) => {
   const currentBranch = normalizeBranchName(student.branch);
+  const existingStudent =
+    readStoredStudents().find((storedStudent) => {
+      if (normalizeBranchName(storedStudent.branch) !== currentBranch) {
+        return false;
+      }
+
+      if (storedStudent.id === student.id) {
+        return true;
+      }
+
+      return Boolean(
+        storedStudent.trackingNumber &&
+          student.trackingNumber &&
+          storedStudent.trackingNumber === student.trackingNumber,
+      );
+    }) ?? null;
+  const studentWithPlanningFallback: StudentStorageRecord = {
+    ...student,
+    requestedOwnSchedule:
+      student.requestedOwnSchedule || existingStudent?.requestedOwnSchedule,
+    ownScheduleRequestStatus:
+      student.ownScheduleRequestStatus || existingStudent?.ownScheduleRequestStatus,
+    ownScheduleAcademicYear:
+      student.ownScheduleAcademicYear || existingStudent?.ownScheduleAcademicYear,
+    ownScheduleSemester:
+      student.ownScheduleSemester || existingStudent?.ownScheduleSemester,
+    ownScheduleSelectionStatus:
+      student.ownScheduleSelectionStatus ||
+      existingStudent?.ownScheduleSelectionStatus,
+  };
   const nextStudents = [
     ...readStoredStudents().filter((storedStudent) => {
       if (normalizeBranchName(storedStudent.branch) !== currentBranch) {
@@ -265,10 +152,11 @@ const mergeStudentIntoLocalCache = (student: StudentStorageRecord) => {
         storedStudent.trackingNumber === student.trackingNumber
       );
     }),
-    student,
+    studentWithPlanningFallback,
   ];
 
   writeStoredStudents(nextStudents);
+  return studentWithPlanningFallback;
 };
 
 const getStoredStudentRecordForCurrentSession = (
@@ -283,7 +171,7 @@ const getStoredStudentRecordForCurrentSession = (
     return (
       readStoredStudents().find(
         (student) =>
-          student.id === sessionUser.studentNumber &&
+          studentNumbersMatch(student.id, sessionUser.studentNumber, currentBranch) &&
           normalizeBranchName(student.branch) === currentBranch,
       ) || null
     );
@@ -300,15 +188,14 @@ const syncStudentPortalAcademicCache = async (
     return;
   }
 
-  try {
-    await Promise.all([
-      fetchAndCacheAcademicSnapshot(branch),
-      fetchStudentSubjectPlans(branch),
-      fetchEnrollmentRequests(branch),
-    ]);
-  } catch (error) {
-    console.warn("Failed to fetch shared student portal data.", error);
-  }
+  await Promise.all([
+    fetchAndCacheAcademicSnapshot(branch),
+    fetchAndCacheStudentPaymentsForBranch(branch),
+    fetchStudentPlanningStates(branch),
+    fetchStudentSubjectPlans(branch),
+    fetchStudentScheduleRequests(branch),
+    fetchEnrollmentRequests(branch),
+  ]);
 };
 
 const fetchRemoteStudentRecordForCurrentSession = async (
@@ -318,43 +205,100 @@ const fetchRemoteStudentRecordForCurrentSession = async (
     return null;
   }
 
-  try {
-    const remoteStudents = await fetchAdminStudents(sessionUser.branch);
-    const remoteStudent =
-      remoteStudents.find(
-        (student) =>
-          student.id === sessionUser.studentNumber ||
-          (sessionUser.trackingNumber &&
-            student.trackingNumber === sessionUser.trackingNumber),
-      ) ?? null;
+  const remoteStudents = await fetchAdminStudents(sessionUser.branch);
+  const remoteStudent =
+    remoteStudents.find(
+      (student) =>
+        studentNumbersMatch(
+          student.id,
+          sessionUser.studentNumber,
+          sessionUser.branch,
+        ) ||
+        (sessionUser.trackingNumber &&
+          student.trackingNumber === sessionUser.trackingNumber),
+    ) ?? null;
 
-    if (!remoteStudent) {
-      return null;
-    }
-
-    mergeStudentIntoLocalCache(remoteStudent);
-    return remoteStudent;
-  } catch (error) {
-    console.warn("Failed to fetch shared student record for current session.", error);
+  if (!remoteStudent) {
     return null;
   }
+
+  const [planningStates, scheduleRequests] = await Promise.all([
+    fetchStudentPlanningStates(sessionUser.branch),
+    fetchStudentScheduleRequests(sessionUser.branch),
+  ]);
+  const matchingPlanningState =
+    planningStates.find(
+      (state) =>
+        state.studentNumber === remoteStudent.id ||
+        (remoteStudent.trackingNumber &&
+          state.trackingNumber === remoteStudent.trackingNumber),
+    ) ?? null;
+  const approvedScheduleRequest =
+    scheduleRequests.find(
+      (request) =>
+        request.status === "Approved" &&
+        (request.studentNumber === remoteStudent.id ||
+          (remoteStudent.trackingNumber &&
+            request.trackingNumber === remoteStudent.trackingNumber)),
+    ) ?? null;
+  const remoteStudentWithPlanning = matchingPlanningState
+    ? mergeStudentPlanningStateIntoStudent(remoteStudent, matchingPlanningState)
+    : approvedScheduleRequest
+      ? {
+          ...remoteStudent,
+          requestedOwnSchedule: true,
+          ownScheduleRequestStatus: "Approved" as const,
+          ownScheduleAcademicYear: approvedScheduleRequest.academicYear,
+          ownScheduleSemester: approvedScheduleRequest.semester,
+          ownScheduleSelectionStatus: "Approved" as const,
+        }
+      : remoteStudent;
+  const cachedRemoteStudent = mergeStudentIntoLocalCache(
+    remoteStudentWithPlanning,
+  );
+  const resolvedStudent =
+    getStudentsForBranch(sessionUser.branch).find(
+      (student) =>
+        student.id === cachedRemoteStudent.id ||
+        (cachedRemoteStudent.trackingNumber &&
+          student.trackingNumber === cachedRemoteStudent.trackingNumber),
+    ) ?? cachedRemoteStudent;
+
+  return resolvedStudent;
 };
 
 const getStudentPortalDataForCurrentSession = async (): Promise<StudentPortalData> => {
   await wait(300);
 
   const sessionUser = getCurrentStudentSessionUser();
+  if (!sessionUser) {
+    throw new Error("Student session is missing. Please log in again.");
+  }
+
+  if (
+    isCachedAlumniStudent({
+      studentNumber: sessionUser.studentNumber,
+      trackingNumber: sessionUser.trackingNumber,
+      branch: sessionUser.branch,
+    })
+  ) {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+    throw new Error(
+      "This student has already been transferred to Alumni and can no longer access the student portal.",
+    );
+  }
+
   await syncStudentPortalAcademicCache(sessionUser?.branch);
   let storedStudent = getStoredStudentRecordForCurrentSession(sessionUser);
 
-  if (sessionUser) {
-    const remoteStudent = await fetchRemoteStudentRecordForCurrentSession(
-      sessionUser,
-    );
+  const remoteStudent = await fetchRemoteStudentRecordForCurrentSession(
+    sessionUser,
+  );
 
-    if (remoteStudent) {
-      storedStudent = remoteStudent;
-    }
+  if (remoteStudent) {
+    storedStudent = remoteStudent;
   }
 
   if (storedStudent) {
@@ -379,31 +323,7 @@ const getStudentPortalDataForCurrentSession = async (): Promise<StudentPortalDat
     };
   }
 
-  if (sessionUser) {
-    const student = buildSessionBackedPortalStudent(sessionUser);
-    const credentialOverview = getStudentCredentialOverview({
-      branch: student.branch,
-      studentNumber: student.studentNumber,
-      trackingNumber: student.trackingNumber,
-    });
-
-    return {
-      student,
-      subjects: [],
-      credentialItems: credentialOverview?.items ?? [],
-      credentialSummary: credentialOverview?.summary ?? null,
-      currentTerm: buildCurrentTermFallback(student.yearLevel),
-    };
-  }
-
-  const fallbackStudent = { ...mockStudent, ...getStudentSessionOverrides() };
-  return {
-    student: fallbackStudent,
-    subjects: getFallbackSubjects(fallbackStudent.programType),
-    credentialItems: [],
-    credentialSummary: null,
-    currentTerm: buildCurrentTermFallback(fallbackStudent.yearLevel),
-  };
+  throw new Error("Student record could not be loaded. Please log in again.");
 };
 
 const buildFullName = ({
@@ -457,12 +377,14 @@ const mapStoredStudentToPortalStudent = (
   storedStudent: StudentStorageRecord,
 ): Student => {
   const fullNameParts = storedStudent.name.trim().split(/\s+/).filter(Boolean);
-  const firstName = fullNameParts[0] || "Student";
+  const firstName = toNameCapitalization(fullNameParts[0]) || "Student";
   const lastName =
-    fullNameParts.length > 1 ? fullNameParts[fullNameParts.length - 1] : "";
+    fullNameParts.length > 1
+      ? toNameCapitalization(fullNameParts[fullNameParts.length - 1])
+      : "";
   const middleName =
     fullNameParts.length > 2
-      ? fullNameParts.slice(1, -1).join(" ")
+      ? toNameCapitalization(fullNameParts.slice(1, -1).join(" "))
       : undefined;
 
   return {
@@ -472,23 +394,33 @@ const mapStoredStudentToPortalStudent = (
     firstName,
     lastName,
     middleName,
-    email: storedStudent.email || mockStudent.email,
-    contactNumber: storedStudent.contact || mockStudent.contactNumber,
-    address: storedStudent.address || mockStudent.address,
+    email: storedStudent.email || DEFAULT_STUDENT_EMAIL,
+    contactNumber: storedStudent.contact || DEFAULT_STUDENT_CONTACT,
+    address:
+      toDisplayCapitalization(storedStudent.address) || DEFAULT_STUDENT_ADDRESS,
     program:
-      storedStudent.strandOrCourse || storedStudent.program || mockStudent.program,
-    yearLevel: storedStudent.yearLevel || mockStudent.yearLevel,
-    branch: storedStudent.branch || mockStudent.branch,
-    section: storedStudent.section,
+      toDisplayCapitalization(storedStudent.strandOrCourse) ||
+      toDisplayCapitalization(storedStudent.program) ||
+      DEFAULT_STUDENT_PROGRAM,
+    yearLevel:
+      toDisplayCapitalization(storedStudent.yearLevel) ||
+      DEFAULT_STUDENT_YEAR_LEVEL,
+    branch:
+      toDisplayCapitalization(storedStudent.branch) || DEFAULT_STUDENT_BRANCH,
+    section: toDisplayCapitalization(storedStudent.section) || undefined,
     programType: storedStudent.program === "SHS" ? "SHS" : "BS",
-    gender: storedStudent.gender || mockStudent.gender,
-    birthday: storedStudent.birthDate || mockStudent.birthday,
+    gender: storedStudent.gender || DEFAULT_STUDENT_GENDER,
+    birthday: storedStudent.birthDate,
     status: getPortalStudentStatus(storedStudent),
-    civilStatus: storedStudent.civilStatus || mockStudent.civilStatus,
-    religion: mockStudent.religion,
-    guardianName: storedStudent.guardianName || mockStudent.guardianName,
+    civilStatus:
+      toDisplayCapitalization(storedStudent.civilStatus) ||
+      DEFAULT_STUDENT_CIVIL_STATUS,
+    religion: DEFAULT_STUDENT_RELIGION,
+    guardianName:
+      toNameCapitalization(storedStudent.guardianName) ||
+      DEFAULT_STUDENT_GUARDIAN_NAME,
     guardianContact:
-      storedStudent.guardianContact || mockStudent.guardianContact,
+      storedStudent.guardianContact || DEFAULT_STUDENT_GUARDIAN_CONTACT,
     requestedOwnSchedule: storedStudent.requestedOwnSchedule,
     ownScheduleRequestStatus: storedStudent.ownScheduleRequestStatus,
     ownScheduleAcademicYear: storedStudent.ownScheduleAcademicYear,
@@ -511,16 +443,20 @@ const persistStudentProfileUpdate = async (
 
   const nextStudentRecord: StudentStorageRecord = {
     ...storedStudent,
-    name: nextName,
+    name: toNameCapitalization(nextName),
     email: data.email ?? storedStudent.email,
     contact: data.contactNumber ?? storedStudent.contact,
-    address: data.address ?? storedStudent.address,
+    address: toDisplayCapitalization(data.address ?? storedStudent.address),
     birthDate: data.birthday ?? storedStudent.birthDate,
-    guardianName: data.guardianName ?? storedStudent.guardianName,
+    guardianName: toNameCapitalization(
+      data.guardianName ?? storedStudent.guardianName,
+    ),
     guardianContact: data.guardianContact ?? storedStudent.guardianContact,
     gender: data.gender ?? storedStudent.gender,
-    civilStatus: data.civilStatus ?? storedStudent.civilStatus,
-    section: data.section ?? storedStudent.section,
+    civilStatus: toDisplayCapitalization(
+      data.civilStatus ?? storedStudent.civilStatus,
+    ),
+    section: toDisplayCapitalization(data.section ?? storedStudent.section),
   };
 
   const updatedStudents = readStoredStudents().map((student) =>
@@ -564,9 +500,9 @@ export const studentApi = {
 
     const sessionUser = getCurrentStudentSessionUser();
     if (sessionUser) {
-      return { ...buildSessionBackedPortalStudent(sessionUser), ...data };
+      throw new Error("Student record could not be loaded. Please log in again.");
     }
 
-    return { ...mockStudent, ...data };
+    throw new Error("Student session is missing. Please log in again.");
   },
 };

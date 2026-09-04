@@ -367,7 +367,20 @@ begin
   end if;
 
   if v_existing_student_id is null then
-    v_result_student_number := public.generate_student_number(v_branch_id);
+    if v_requested_student_number is null then
+      v_result_student_number := public.generate_student_number(v_branch_id);
+    else
+      if exists (
+        select 1
+        from public.student_profiles student
+        where student.branch_id = v_branch_id
+          and upper(student.student_number) = upper(v_requested_student_number)
+      ) then
+        raise exception 'Student number "%" is already assigned in this branch.', v_requested_student_number;
+      end if;
+
+      v_result_student_number := v_requested_student_number;
+    end if;
 
     insert into public.student_profiles (
       admission_application_id,

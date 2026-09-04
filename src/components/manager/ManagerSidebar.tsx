@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import axios from "axios";
 import {
   MdBadge,
-  MdCameraAlt,
   MdClose,
   MdDashboard,
   MdEmail,
@@ -14,6 +12,13 @@ import { FiLogOut } from "react-icons/fi";
 import AccountSettingsModal, {
   type AccountSettingsDraft,
 } from "../common/AccountSettingsModal";
+import { useAuth } from "../../hooks/useAuth";
+import {
+  clearManagerAuthentication,
+  getStoredManagerAccount,
+  updateStoredManagerAccount,
+} from "../../services/mockStaffAuth";
+import aicsLogo from "../../assets/images/AICS_Logo.png";
 
 interface AreaManagerSidebarProps {
   isOpen: boolean;
@@ -24,28 +29,9 @@ interface AreaManagerSidebarProps {
 }
 
 interface UserAccount {
-  id: number | null;
   firstName: string;
   lastName: string;
-  username: string;
   role: string;
-  profilePic: string;
-  newPassword: string;
-  confirmPassword: string;
-}
-
-interface UserProfileResponse {
-  id: number | null;
-  first_name: string;
-  last_name: string;
-  username: string;
-  role?: string;
-  profile_pic?: string | null;
-  new_username?: string;
-}
-
-interface ApiErrorResponse {
-  error?: string;
 }
 
 interface SidebarMenuItem {
@@ -53,9 +39,6 @@ interface SidebarMenuItem {
   label: string;
   path: string;
 }
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 const getFallbackNameParts = (displayName: string) => {
   const nameParts = displayName.trim().split(/\s+/).filter(Boolean);
@@ -78,22 +61,11 @@ const createFallbackUserAccount = (displayName: string): UserAccount => {
   const { firstName, lastName } = getFallbackNameParts(displayName);
 
   return {
-    id: null,
     firstName,
     lastName,
-    username: displayName,
     role: "Area Manager",
-    profilePic: "",
-    newPassword: "",
-    confirmPassword: "",
   };
 };
-
-const buildUserProfileUrl = (username: string) =>
-  `${API_BASE_URL}/api/user/${encodeURIComponent(username)}/`;
-
-const buildProfileImageUrl = (profilePic: string) =>
-  profilePic.startsWith("http") ? profilePic : `${API_BASE_URL}${profilePic}`;
 
 export default function AreaManagerSidebar({
   isOpen,
@@ -102,45 +74,25 @@ export default function AreaManagerSidebar({
   loggedInUsername,
   isMobile = false,
 }: AreaManagerSidebarProps) {
+  const { currentUser, updateCurrentUser } = useAuth();
   const [showEditModal, setShowEditModal] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [userAccount, setUserAccount] = useState<UserAccount>(() =>
-    createFallbackUserAccount(loggedInUsername),
+    createFallbackUserAccount(getStoredManagerAccount().fullName || loggedInUsername),
   );
   const [accountError, setAccountError] = useState("");
   const [isSavingAccount, setIsSavingAccount] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const oldUsernameRef = useRef(loggedInUsername);
-
-  const fetchProfile = async (targetUsername = oldUsernameRef.current) => {
-    try {
-      const response = await axios.get<UserProfileResponse>(
-        buildUserProfileUrl(targetUsername),
-      );
-
-      oldUsernameRef.current = response.data.username;
-      setUserAccount((currentAccount) => ({
-        ...currentAccount,
-        id: response.data.id,
-        firstName: response.data.first_name,
-        lastName: response.data.last_name,
-        username: response.data.username,
-        role: response.data.role || "Area Manager",
-        profilePic: response.data.profile_pic
-          ? buildProfileImageUrl(response.data.profile_pic)
-          : "",
-      }));
-    } catch (error) {
-      console.error("Error loading profile:", error);
-    }
-  };
 
   useEffect(() => {
-    oldUsernameRef.current = loggedInUsername;
-    setUserAccount(createFallbackUserAccount(loggedInUsername));
-    void fetchProfile(loggedInUsername);
+    setUserAccount(
+      createFallbackUserAccount(
+        currentUser?.displayName ||
+          getStoredManagerAccount().fullName ||
+          loggedInUsername,
+      ),
+    );
 
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -150,87 +102,52 @@ export default function AreaManagerSidebar({
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [loggedInUsername]);
-
-  const handleFileChange = async (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    if (!event.target.files?.[0]) {
-      return;
-    }
-
-    const file = event.target.files[0];
-    const formData = new FormData();
-    formData.append("profile_pic", file);
-
-    if (userAccount.id) {
-      formData.append("id", userAccount.id.toString());
-    }
-
-    try {
-      await axios.post(buildUserProfileUrl(oldUsernameRef.current), formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      await fetchProfile();
-      setShowProfileMenu(false);
-      setAccountError("");
-    } catch {
-      alert("Failed to update profile picture.");
-    }
-  };
+  }, [currentUser?.displayName, loggedInUsername]);
 
   const handleUpdateAccount = async ({
     firstName,
     lastName,
+    currentPassword,
     newPassword,
   }: AccountSettingsDraft) => {
     setIsSavingAccount(true);
     setAccountError("");
     try {
-      const formData = new FormData();
-
-      if (userAccount.id) {
-        formData.append("id", userAccount.id.toString());
+      if (newPassword && newPassword.length < 8) {
+        setAccountError("Password must be at least 8 characters long.");
+        return;
       }
 
-      formData.append("first_name", firstName);
-      formData.append("last_name", lastName);
-      formData.append("username", userAccount.username);
+      const nextDisplayName = `${firstName} ${lastName}`.trim();
+      await updateStoredManagerAccount({
+        fullName: nextDisplayName,
+        currentPassword,
+        ...(newPassword ? { password: newPassword } : {}),
+      });
 
-      if (newPassword) {
-        formData.append("password", newPassword);
-      }
-
-      const response = await axios.post<UserProfileResponse>(
-        buildUserProfileUrl(oldUsernameRef.current),
-        formData,
-      );
-      const updatedUsername =
-        response.data.new_username || userAccount.username;
-
-      oldUsernameRef.current = updatedUsername;
       setUserAccount((currentAccount) => ({
         ...currentAccount,
         firstName,
         lastName,
-        username: updatedUsername,
-        newPassword: "",
-        confirmPassword: "",
       }));
+      updateCurrentUser({
+        displayName: nextDisplayName,
+        firstName,
+        lastName,
+      });
 
       setShowEditModal(false);
-      await fetchProfile(updatedUsername);
     } catch (error) {
-      const errorMessage = axios.isAxiosError(error)
-        ? (error.response?.data as ApiErrorResponse | undefined)?.error
-        : null;
-      setAccountError(errorMessage || "Update failed. Please try again.");
+      setAccountError(
+        error instanceof Error ? error.message : "Update failed. Please try again.",
+      );
     } finally {
       setIsSavingAccount(false);
     }
   };
 
   const handleLogout = () => {
+    clearManagerAuthentication();
     onLogout();
     onClose();
   };
@@ -239,13 +156,6 @@ export default function AreaManagerSidebar({
     `${userAccount.firstName} ${userAccount.lastName}`.trim() ||
     loggedInUsername ||
     "Area Manager";
-  const userInitials =
-    displayName
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((namePart) => namePart[0]?.toUpperCase() || "")
-      .join("") || "AM";
   const menuItems: SidebarMenuItem[] = [
     {
       icon: <MdDashboard />,
@@ -292,28 +202,15 @@ export default function AreaManagerSidebar({
                 }
                 type="button"
               >
-                {userAccount.profilePic ? (
-                  <img
-                    src={userAccount.profilePic}
-                    alt="Profile"
-                    className="area-manager-avatar-image"
-                  />
-                ) : (
-                  <span className="area-manager-user-avatar">
-                    {userInitials}
-                  </span>
-                )}
+                <img
+                  src={aicsLogo}
+                  alt="AICS logo"
+                  className="area-manager-avatar-image"
+                />
               </button>
 
               {showProfileMenu && (
                 <div className="area-manager-profile-menu">
-                  <button
-                    className="area-manager-profile-action"
-                    onClick={() => fileInputRef.current?.click()}
-                    type="button"
-                  >
-                    <MdCameraAlt size={18} /> Change Picture
-                  </button>
                   <button
                     className="area-manager-profile-action"
                     onClick={() => {
@@ -327,14 +224,6 @@ export default function AreaManagerSidebar({
                   </button>
                 </div>
               )}
-
-              <input
-                type="file"
-                ref={fileInputRef}
-                hidden
-                accept="image/*"
-                onChange={handleFileChange}
-              />
             </div>
 
             <div className="area-manager-user-info">
@@ -384,6 +273,7 @@ export default function AreaManagerSidebar({
         }}
         errorMessage={accountError}
         isSaving={isSavingAccount}
+        requireCurrentPasswordForPasswordChange
         onClose={() => {
           setAccountError("");
           setShowEditModal(false);

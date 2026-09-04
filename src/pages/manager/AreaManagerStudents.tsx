@@ -7,6 +7,13 @@ import {
   STORED_STUDENTS_UPDATED_EVENT,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
+import { hasLatestApprovedIrregularEnrollmentRequestForStudent } from "../../services/enrollmentRequests";
+import { fetchManagedBranches } from "../../services/staffApi";
+import {
+  getStudentAcademicStanding,
+  type StudentAcademicStandingLabel,
+} from "../../services/studentGrades";
+import SkeletonPage from "../../components/common/SkeletonPage";
 import "../../styles/manager/area-manageStudents.css";
 
 interface Student {
@@ -16,7 +23,7 @@ interface Student {
   student_id: string;
   status: string;
   credential_status: string;
-  admission_status?: string;
+  academic_standing: StudentAcademicStandingLabel;
   course: string;
   year_level: string;
   branch: string;
@@ -59,9 +66,6 @@ const splitStoredStudentName = (fullName: string) => {
   };
 };
 
-const getAdmissionTypeLabel = (studentStatus?: string) =>
-  studentStatus?.trim() || "Not recorded";
-
 const getNormalizedStudentRecordStatus = (status?: string | null) =>
   (status || "").trim().toLowerCase();
 
@@ -72,7 +76,6 @@ const isVisibleManagerStudentRecord = (
 
   return ![
     "archived",
-    "graduated",
     "deleted",
     "inactive",
     "removed",
@@ -112,6 +115,31 @@ const getCredentialStatusLabel = (student: StudentStorageRecord) => {
   return "Pending";
 };
 
+const getAcademicStandingLabel = (
+  student: StudentStorageRecord,
+): StudentAcademicStandingLabel => {
+  const hasIrregularSchedule =
+    student.requestedOwnSchedule === true ||
+    student.ownScheduleRequestStatus === "Approved";
+  const hasApprovedIrregularRequest =
+    hasLatestApprovedIrregularEnrollmentRequestForStudent({
+      branch: student.branch,
+      studentNumber: student.id,
+      trackingNumber: student.trackingNumber,
+    });
+  const gradeStanding = getStudentAcademicStanding({
+    branch: student.branch,
+    program: student.program,
+    studentId: student.id,
+  }).label;
+
+  return hasIrregularSchedule ||
+    hasApprovedIrregularRequest ||
+    gradeStanding === "Irregular"
+    ? "Irregular"
+    : "Regular";
+};
+
 const mapStoredStudentToDirectoryRow = (
   student: StudentStorageRecord,
 ): Student => {
@@ -126,7 +154,7 @@ const mapStoredStudentToDirectoryRow = (
     student_id: student.id,
     status: isVisibleManagerStudentRecord(student) ? "active" : "inactive",
     credential_status: getCredentialStatusLabel(student),
-    admission_status: student.studentStatus,
+    academic_standing: getAcademicStandingLabel(student),
     course: isShsStudent
       ? "SHS"
       : student.strandOrCourse || "College",
@@ -140,14 +168,22 @@ const mapStoredStudentToDirectoryRow = (
   };
 };
 
+const getManagerBranchLabel = (branch: string) =>
+  `${normalizeBranchName(branch)} Branch`;
+
 const AreaManagerStudents: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
+  const [managedBranches, setManagedBranches] = useState<string[]>([
+    "Bacoor",
+    "Taytay",
+    "GMA",
+  ]);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
   const [filterCourse, setFilterCourse] = useState("");
-  const [filterSection, setFilterSection] = useState("");
+  const [filterAcademicStanding, setFilterAcademicStanding] = useState("");
   const [filterBranch, setFilterBranch] = useState("");
   const [filterYear, setFilterYear] = useState("");
   const [filterStrand, setFilterStrand] = useState("");
@@ -191,14 +227,30 @@ const AreaManagerStudents: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const loadManagedBranches = async () => {
+      try {
+        const branches = await fetchManagedBranches();
+        const branchNames = branches.map((branch) => branch.name).filter(Boolean);
+        if (branchNames.length > 0) {
+          setManagedBranches(branchNames.sort());
+        }
+      } catch (error) {
+        console.error("Error loading managed branches:", error);
+      }
+    };
+
+    void loadManagedBranches();
+  }, []);
+
   const uniqueCourses = Array.from(
     new Set(students.map((s) => s.course)),
   ).sort();
-  const uniqueSections = Array.from(
-    new Set(students.map((s) => s.section).filter(Boolean)),
-  ).sort();
   const uniqueBranches = Array.from(
-    new Set(students.map((s) => s.branch)),
+    new Set([
+      ...managedBranches.map(getManagerBranchLabel),
+      ...students.map((s) => s.branch),
+    ]),
   ).sort();
   const uniqueYears = Array.from(
     new Set(students.map((s) => s.year_level)),
@@ -209,9 +261,6 @@ const AreaManagerStudents: React.FC = () => {
 
   const totalStudents = students.length;
   const activeStudents = students.filter((s) => s.status === "active").length;
-  const completedCredentials = students.filter(
-    (s) => s.credential_status === "Completed",
-  ).length;
 
   const processedStudents = useMemo(() => {
     const filtered = students.filter((student) => {
@@ -221,12 +270,12 @@ const AreaManagerStudents: React.FC = () => {
       const matchesSearch =
         fullName.includes(normalizedSearchTerm) ||
         student.student_id.toLowerCase().includes(normalizedSearchTerm) ||
-        getAdmissionTypeLabel(student.admission_status)
+        student.academic_standing
           .toLowerCase()
           .includes(normalizedSearchTerm);
       const matchesCourse = filterCourse ? student.course === filterCourse : true;
-      const matchesSection = filterSection
-        ? student.section === filterSection
+      const matchesAcademicStanding = filterAcademicStanding
+        ? student.academic_standing === filterAcademicStanding
         : true;
       const matchesBranch = filterBranch ? student.branch === filterBranch : true;
       const matchesYear = filterYear ? student.year_level === filterYear : true;
@@ -235,7 +284,7 @@ const AreaManagerStudents: React.FC = () => {
       return (
         matchesSearch &&
         matchesCourse &&
-        matchesSection &&
+        matchesAcademicStanding &&
         matchesBranch &&
         matchesYear &&
         matchesStrand
@@ -286,7 +335,7 @@ const AreaManagerStudents: React.FC = () => {
     students,
     searchTerm,
     filterCourse,
-    filterSection,
+    filterAcademicStanding,
     filterBranch,
     filterYear,
     filterStrand,
@@ -345,7 +394,14 @@ const AreaManagerStudents: React.FC = () => {
   };
 
   if (loading) {
-    return <div className="am-students-loading">Loading Students...</div>;
+    return (
+      <SkeletonPage
+        className="am-students-root"
+        eyebrow="Records"
+        title="Student Management"
+        variant="table"
+      />
+    );
   }
 
   return (
@@ -354,8 +410,8 @@ const AreaManagerStudents: React.FC = () => {
         <div className="am-students-header-title-group">
           <h1 className="am-students-page-title">Student Management</h1>
           <p className="am-students-page-description">
-            Review the actual enrolled student records, track credential status,
-            and monitor academic progress across all branches.
+            Review the actual enrolled student records and monitor academic
+            progress across all branches.
           </p>
         </div>
       </div>
@@ -368,10 +424,6 @@ const AreaManagerStudents: React.FC = () => {
         <div className="am-students-stat-badge">
           <span className="am-students-stat-label">Active</span>
           <span className="am-students-stat-value">{activeStudents}</span>
-        </div>
-        <div className="am-students-stat-badge">
-          <span className="am-students-stat-label">Completed Credentials</span>
-          <span className="am-students-stat-value">{completedCredentials}</span>
         </div>
       </div>
 
@@ -419,18 +471,15 @@ const AreaManagerStudents: React.FC = () => {
               ))}
             </select>
             <select
-              value={filterSection}
+              value={filterAcademicStanding}
               onChange={(event) => {
-                setFilterSection(event.target.value);
+                setFilterAcademicStanding(event.target.value);
                 setCurrentPage(1);
               }}
             >
-              <option value="">All Sections</option>
-              {uniqueSections.map((section) => (
-                <option key={section} value={section}>
-                  {section}
-                </option>
-              ))}
+              <option value="">All Academic Standing</option>
+              <option value="Regular">Regular</option>
+              <option value="Irregular">Irregular</option>
             </select>
             <select
               value={filterBranch}
@@ -508,8 +557,7 @@ const AreaManagerStudents: React.FC = () => {
                 >
                   Year {getSortIcon("year_level")}
                 </th>
-                <th>Admission Type</th>
-                <th>Credential Status</th>
+                <th>Academic Standing</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -530,15 +578,10 @@ const AreaManagerStudents: React.FC = () => {
                   <td className="am-students-branch-col">{student.branch}</td>
                   <td className="am-students-year-col">{student.year_level}</td>
                   <td>
-                    <span className="am-students-admission-badge">
-                      {getAdmissionTypeLabel(student.admission_status)}
-                    </span>
-                  </td>
-                  <td>
                     <span
-                      className={`am-students-credential-badge ${getCredentialStatusClass(student.credential_status)}`}
+                      className={`am-students-standing-badge am-students-standing-${student.academic_standing.toLowerCase()}`}
                     >
-                      {student.credential_status || "Pending"}
+                      {student.academic_standing}
                     </span>
                   </td>
                   <td>
@@ -546,14 +589,14 @@ const AreaManagerStudents: React.FC = () => {
                       className="am-students-view-btn"
                       onClick={() => setSelectedStudent(student)}
                     >
-                      View
+                      View Details
                     </button>
                   </td>
                 </tr>
               ))}
               {currentStudents.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="am-students-empty-state">
+                  <td colSpan={8} className="am-students-empty-state">
                     No enrolled students found.
                   </td>
                 </tr>
@@ -591,19 +634,16 @@ const AreaManagerStudents: React.FC = () => {
                 <span className="am-students-card-badge">
                   {student.year_level}
                 </span>
-                <span className="am-students-card-badge am-students-card-admission">
-                  {getAdmissionTypeLabel(student.admission_status)}
+                <span
+                  className={`am-students-card-badge am-students-standing-${student.academic_standing.toLowerCase()}`}
+                >
+                  {student.academic_standing}
                 </span>
                 {student.section && (
                   <span className="am-students-card-badge">
                     Sec {student.section}
                   </span>
                 )}
-              </div>
-              <div
-                className={`am-students-card-credential ${getCredentialStatusClass(student.credential_status)}`}
-              >
-                {student.credential_status || "Pending"}
               </div>
             </div>
           ))}
@@ -671,17 +711,11 @@ const AreaManagerStudents: React.FC = () => {
                   </div>
                 </div>
                 <div className="am-students-field">
-                  <label>Status</label>
+                  <label>Academic Standing</label>
                   <div
-                    className={`am-students-value-box am-students-value-box-highlight am-students-status-${selectedStudent.status?.toLowerCase()}`}
+                    className={`am-students-value-box am-students-value-box-highlight am-students-standing-${selectedStudent.academic_standing.toLowerCase()}`}
                   >
-                    {selectedStudent.status}
-                  </div>
-                </div>
-                <div className="am-students-field">
-                  <label>Admission Type</label>
-                  <div className="am-students-value-box am-students-admission-value">
-                    {getAdmissionTypeLabel(selectedStudent.admission_status)}
+                    {selectedStudent.academic_standing}
                   </div>
                 </div>
                 <div className="am-students-field">

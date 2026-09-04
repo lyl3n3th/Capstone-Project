@@ -1,6 +1,7 @@
 import { supabase } from "../lib/supabase";
 import {
   normalizeBranchName,
+  normalizeStudentNumberInput,
   readBranchScopedData,
   readStoredStudents,
   writeBranchScopedData,
@@ -174,6 +175,130 @@ const syncPlanningStateIntoLocalStudents = (
   writeStoredStudents(nextStudents);
 };
 
+const writeStudentScheduleRequestToLocalCache = (
+  branch: string | null | undefined,
+  request: StudentScheduleSelectionRequestRecord,
+) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const normalizedRequestStudentNumber = normalizeStudentNumberInput(
+    request.studentNumber,
+    resolvedBranch,
+  );
+  const existingRequests =
+    readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
+      STUDENT_SCHEDULE_REQUEST_SCOPE,
+      resolvedBranch,
+    ) ?? [];
+  const existingIndex = existingRequests.findIndex(
+    (candidate) =>
+      candidate.id === request.id ||
+      (normalizeStudentNumberInput(candidate.studentNumber, resolvedBranch) ===
+        normalizedRequestStudentNumber &&
+        candidate.academicYear === request.academicYear &&
+        candidate.semester === request.semester),
+  );
+  const nextRequests =
+    existingIndex >= 0
+      ? existingRequests.map((candidate, index) =>
+          index === existingIndex ? request : candidate,
+        )
+      : [request, ...existingRequests];
+
+  writeBranchScopedData(
+    STUDENT_SCHEDULE_REQUEST_SCOPE,
+    resolvedBranch,
+    nextRequests,
+  );
+  return request;
+};
+
+const mergeStudentScheduleRequests = (
+  remoteRequests: StudentScheduleSelectionRequestRecord[],
+  localRequests: StudentScheduleSelectionRequestRecord[],
+) => {
+  const mergedRequests = [...remoteRequests];
+
+  localRequests.forEach((localRequest) => {
+    const existingIndex = mergedRequests.findIndex(
+      (remoteRequest) =>
+        remoteRequest.id === localRequest.id ||
+        (normalizeStudentNumberInput(remoteRequest.studentNumber, remoteRequest.branch) ===
+          normalizeStudentNumberInput(localRequest.studentNumber, localRequest.branch) &&
+          remoteRequest.academicYear === localRequest.academicYear &&
+          remoteRequest.semester === localRequest.semester),
+    );
+
+    if (existingIndex < 0) {
+      mergedRequests.push(localRequest);
+      return;
+    }
+
+    const remoteRequest = mergedRequests[existingIndex];
+    const localUpdatedAt = Date.parse(localRequest.updatedAt);
+    const remoteUpdatedAt = Date.parse(remoteRequest.updatedAt);
+
+    if (
+      Number.isFinite(localUpdatedAt) &&
+      (!Number.isFinite(remoteUpdatedAt) || localUpdatedAt > remoteUpdatedAt)
+    ) {
+      mergedRequests[existingIndex] = localRequest;
+    }
+  });
+
+  return mergedRequests.sort(
+    (left, right) =>
+      Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
+      right.id.localeCompare(left.id),
+  );
+};
+
+const writeStudentSubjectPlanToLocalCache = (
+  branch: string | null | undefined,
+  plan: StudentSubjectPlanRecord,
+) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const existingPlans =
+    readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
+      STUDENT_SUBJECT_PLAN_SCOPE,
+      resolvedBranch,
+    ) ?? {};
+  const nextPlans = {
+    ...existingPlans,
+    [plan.id]: plan,
+  };
+
+  writeBranchScopedData(STUDENT_SUBJECT_PLAN_SCOPE, resolvedBranch, nextPlans);
+  return plan;
+};
+
+const mergeStudentSubjectPlans = (
+  remotePlans: Record<string, StudentSubjectPlanRecord>,
+  localPlans: Record<string, StudentSubjectPlanRecord>,
+) => {
+  const mergedPlans = { ...remotePlans };
+
+  Object.entries(localPlans).forEach(([planId, localPlan]) => {
+    const remotePlan = mergedPlans[planId];
+
+    if (!remotePlan) {
+      mergedPlans[planId] = localPlan;
+      return;
+    }
+
+    const localUpdatedAt = Date.parse(localPlan.updatedAt);
+    const remoteUpdatedAt = Date.parse(remotePlan.updatedAt);
+
+    if (
+      Number.isFinite(localUpdatedAt) &&
+      (!Number.isFinite(remoteUpdatedAt) || localUpdatedAt > remoteUpdatedAt)
+    ) {
+      mergedPlans[planId] = localPlan;
+    }
+  });
+
+  return mergedPlans;
+};
+
 export const mergeStudentPlanningStateIntoStudent = <
   T extends Pick<
     StudentStorageRecord,
@@ -275,6 +400,18 @@ export const saveStudentPlanningState = async ({
   ownScheduleSelectionStatus?: StudentPlanningSelectionStatus;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
+  const optimisticPlanningState: StudentPlanningStateRecord = {
+    studentNumber,
+    trackingNumber: trackingNumber || undefined,
+    requestedOwnSchedule,
+    ownScheduleRequestStatus,
+    ownScheduleAcademicYear: ownScheduleAcademicYear || undefined,
+    ownScheduleSemester: ownScheduleSemester || undefined,
+    ownScheduleSelectionStatus,
+  };
+
+  syncPlanningStateIntoLocalStudents(resolvedBranch, optimisticPlanningState);
+
   const { data, error } = await supabase
     .rpc("upsert_student_planning_state", {
       p_payload: {
@@ -291,12 +428,19 @@ export const saveStudentPlanningState = async ({
     .returns<StudentPlanningStateRow[]>();
 
   if (error) {
-    throw new Error(getErrorMessage(error));
+    console.warn(
+      "Unable to sync student planning state to Supabase; using local cache.",
+      error,
+    );
+    return optimisticPlanningState;
   }
 
   const row = getSingleRow<StudentPlanningStateRow>(data);
   if (!row) {
-    throw new Error("Supabase did not return the saved student planning state.");
+    console.warn(
+      "Supabase did not return the saved student planning state; using local cache.",
+    );
+    return optimisticPlanningState;
   }
 
   const nextPlanningState = mapStudentPlanningState(row);
@@ -308,6 +452,11 @@ export const fetchStudentSubjectPlans = async (
   branch?: string | null,
 ): Promise<Record<string, StudentSubjectPlanRecord>> => {
   const resolvedBranch = normalizeBranchName(branch);
+  const localPlans =
+    readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
+      STUDENT_SUBJECT_PLAN_SCOPE,
+      resolvedBranch,
+    ) ?? {};
   const { data, error } = await supabase
     .rpc("list_student_subject_plans", {
       p_branch: resolvedBranch,
@@ -323,8 +472,9 @@ export const fetchStudentSubjectPlans = async (
       .map(mapStudentSubjectPlan)
       .map((plan) => [plan.id, plan]),
   );
-  writeBranchScopedData(STUDENT_SUBJECT_PLAN_SCOPE, resolvedBranch, nextPlans);
-  return nextPlans;
+  const mergedPlans = mergeStudentSubjectPlans(nextPlans, localPlans);
+  writeBranchScopedData(STUDENT_SUBJECT_PLAN_SCOPE, resolvedBranch, mergedPlans);
+  return mergedPlans;
 };
 
 export const saveStudentSubjectPlan = async (
@@ -332,6 +482,10 @@ export const saveStudentSubjectPlan = async (
   plan: StudentSubjectPlanRecord,
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
+  const optimisticPlan = writeStudentSubjectPlanToLocalCache(
+    resolvedBranch,
+    plan,
+  );
   const { data, error } = await supabase
     .rpc("upsert_student_subject_plan", {
       p_payload: {
@@ -342,26 +496,23 @@ export const saveStudentSubjectPlan = async (
     .returns<StudentSubjectPlanRow[]>();
 
   if (error) {
-    throw new Error(getErrorMessage(error));
+    console.warn(
+      "Unable to sync student subject plan to Supabase; using local cache.",
+      error,
+    );
+    return optimisticPlan;
   }
 
   const row = getSingleRow<StudentSubjectPlanRow>(data);
   if (!row) {
-    throw new Error("Supabase did not return the saved student subject plan.");
+    console.warn(
+      "Supabase did not return the saved student subject plan; using local cache.",
+    );
+    return optimisticPlan;
   }
 
   const nextPlan = mapStudentSubjectPlan(row);
-  const existingPlans =
-    readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
-      STUDENT_SUBJECT_PLAN_SCOPE,
-      resolvedBranch,
-    ) ?? {};
-
-  writeBranchScopedData(STUDENT_SUBJECT_PLAN_SCOPE, resolvedBranch, {
-    ...existingPlans,
-    [nextPlan.id]: nextPlan,
-  });
-
+  writeStudentSubjectPlanToLocalCache(resolvedBranch, nextPlan);
   return nextPlan;
 };
 
@@ -393,6 +544,11 @@ export const fetchStudentScheduleRequests = async (
   branch?: string | null,
 ): Promise<StudentScheduleSelectionRequestRecord[]> => {
   const resolvedBranch = normalizeBranchName(branch);
+  const localRequests =
+    readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
+      STUDENT_SCHEDULE_REQUEST_SCOPE,
+      resolvedBranch,
+    ) ?? [];
   const { data, error } = await supabase
     .rpc("list_student_schedule_requests", {
       p_branch: resolvedBranch,
@@ -403,8 +559,9 @@ export const fetchStudentScheduleRequests = async (
     throw new Error(getErrorMessage(error));
   }
 
-  const requests = (Array.isArray(data) ? data : []).map(
-    mapStudentScheduleRequest,
+  const requests = mergeStudentScheduleRequests(
+    (Array.isArray(data) ? data : []).map(mapStudentScheduleRequest),
+    localRequests,
   );
   writeBranchScopedData(STUDENT_SCHEDULE_REQUEST_SCOPE, resolvedBranch, requests);
   return requests;
@@ -414,6 +571,10 @@ export const saveStudentScheduleRequest = async (
   request: StudentScheduleSelectionRequestRecord,
 ) => {
   const resolvedBranch = normalizeBranchName(request.branch);
+  const optimisticRequest = writeStudentScheduleRequestToLocalCache(
+    resolvedBranch,
+    request,
+  );
   const { data, error } = await supabase
     .rpc("upsert_student_schedule_request", {
       p_payload: {
@@ -424,35 +585,22 @@ export const saveStudentScheduleRequest = async (
     .returns<StudentScheduleRequestRow[]>();
 
   if (error) {
-    throw new Error(getErrorMessage(error));
+    console.warn(
+      "Unable to sync student schedule request to Supabase; using local cache.",
+      error,
+    );
+    return optimisticRequest;
   }
 
   const row = getSingleRow<StudentScheduleRequestRow>(data);
   if (!row) {
-    throw new Error("Supabase did not return the saved schedule request.");
+    console.warn(
+      "Supabase did not return the saved schedule request; using local cache.",
+    );
+    return optimisticRequest;
   }
 
   const nextRequest = mapStudentScheduleRequest(row);
-  const existingRequests =
-    readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
-      STUDENT_SCHEDULE_REQUEST_SCOPE,
-      resolvedBranch,
-    ) ?? [];
-  const existingIndex = existingRequests.findIndex(
-    (candidate) =>
-      candidate.id === nextRequest.id ||
-      (candidate.studentNumber === nextRequest.studentNumber &&
-        candidate.academicYear === nextRequest.academicYear &&
-        candidate.semester === nextRequest.semester),
-  );
-
-  const nextRequests =
-    existingIndex >= 0
-      ? existingRequests.map((candidate, index) =>
-          index === existingIndex ? nextRequest : candidate,
-        )
-      : [nextRequest, ...existingRequests];
-
-  writeBranchScopedData(STUDENT_SCHEDULE_REQUEST_SCOPE, resolvedBranch, nextRequests);
+  writeStudentScheduleRequestToLocalCache(resolvedBranch, nextRequest);
   return nextRequest;
 };

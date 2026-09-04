@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import ManagerSidebar from "./ManagerSidebar";
-import { MdMenu } from "react-icons/md";
+import { MdClose, MdMenu } from "react-icons/md";
 import "../../styles/manager/area-manager.css";
 
 interface ManagerLayoutProps {
@@ -45,15 +45,13 @@ const ManagerLayout: React.FC<ManagerLayoutProps> = (props) => {
     <div className="area-manager-container">
       {/* Mobile Topbar */}
       {isMobile && (
-        <div className="mobile-topbar">
-          <button
-            className="hamburger-btn"
-            onClick={() => setIsSidebarOpen(true)}
-          >
-            <MdMenu size={24} />
-          </button>
-          <span className="mobile-topbar-title">Area Manager Panel</span>
-        </div>
+        <button
+          className="hamburger-btn"
+          onClick={() => setIsSidebarOpen((current) => !current)}
+          aria-label={isSidebarOpen ? "Close area manager menu" : "Open area manager menu"}
+        >
+          {isSidebarOpen ? <MdClose size={24} /> : <MdMenu size={24} />}
+        </button>
       )}
 
       {/* Mobile Overlay */}

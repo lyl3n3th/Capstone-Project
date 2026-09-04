@@ -3,9 +3,10 @@ import { FaCircleExclamation, FaLocationDot } from "react-icons/fa6";
 import Progress from "../../components/Progress";
 import { useEffect, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
+import SkeletonPage from "../../components/common/SkeletonPage";
 import {
+  clearAdmissionDraft,
   getAdmissionDraft,
-  getHonorDiscountPercentage,
   getAdmissionProgress,
 } from "../../services/admission";
 import type { AdmissionApplicationSummary } from "../../types/application";
@@ -32,11 +33,6 @@ function AdmissionStep5() {
   });
   const [pageError, setPageError] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
-
-  const addToast = (message: string, type: Toast["type"]) => {
-    const id = Date.now().toString();
-    setToasts((prev) => [...prev, { id, message, type }]);
-  };
 
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
@@ -96,66 +92,17 @@ function AdmissionStep5() {
     void loadApplication();
   }, [trackingNumberFromUrl]);
 
-  const handleDownloadPermit = () => {
-    if (!application) {
-      return;
-    }
-
-    const applicantName =
-      `${application.firstName} ${application.lastName}`.trim() || "Applicant";
-    const generatedOn = new Date().toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
-
-    const permitText = `
-ASIAN INSTITUTE OF COMPUTER STUDIES
-SCHOLARSHIP EXAMINATION PERMIT
-
-${"=".repeat(52)}
-
-Applicant Name : ${applicantName}
-Tracking Number: ${application.trackingNumber}
-Program        : ${application.programName}
-Branch         : ${application.branchName}
-Exam Location  : ${examLocation.location} - ${examLocation.room}
-Schedule       : Walk-in basis. Coordinate directly with the selected branch.
-
-${"=".repeat(52)}
-
-IMPORTANT REMINDERS
-
-1. Bring this permit during your branch visit.
-2. Bring your school ID and tracking number.
-3. Bring a black pen for the scholarship examination.
-4. Coordinate with your branch first because there is no fixed exam schedule.
-
-Applicant Signature      : ______________________________
-Branch / Proctor Signature: _____________________________
-
-Generated on: ${generatedOn}
-`.trim();
-
-    const blob = new Blob([permitText], { type: "text/plain" });
-    const downloadUrl = URL.createObjectURL(blob);
-    const downloadLink = document.createElement("a");
-    downloadLink.href = downloadUrl;
-    downloadLink.download = `scholarship_exam_permit_${application.trackingNumber}.txt`;
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-    document.body.removeChild(downloadLink);
-    URL.revokeObjectURL(downloadUrl);
-
-    addToast("Scholarship exam permit downloaded.", "success");
-  };
-
   const handleBackToHome = () => {
+    clearAdmissionDraft();
     window.location.href = "/";
   };
 
   if (isLoading) {
-    return <div className="entrance-exam-page">Loading scholarship exam...</div>;
+    return (
+      <div className="entrance-exam-page">
+        <SkeletonPage eyebrow="Admission" title="Scholarship Exam" variant="form" />
+      </div>
+    );
   }
 
   if (pageError || !application) {
@@ -173,8 +120,6 @@ Generated on: ${generatedOn}
       </div>
     );
   }
-
-  const honorDiscount = getHonorDiscountPercentage(application.honorLabel);
 
   return (
     <div className="entrance-exam-page">
@@ -238,12 +183,6 @@ Generated on: ${generatedOn}
               </div>
             </div>
 
-            <div className="entrance-exam-actions">
-              <button className="entrance-exam-btn" onClick={handleDownloadPermit}>
-                Download Permit
-              </button>
-            </div>
-
             <div className="entrance-exam-notes">
               <div className="entrance-exam-notes-header">
                 <FaCircleExclamation className="entrance-exam-notes-icon" />
@@ -251,19 +190,17 @@ Generated on: ${generatedOn}
               </div>
               <p className="entrance-exam-notes-text">
                 Please coordinate with your selected branch before visiting for
-                the scholarship exam. Bring a school ID, exam permit, black
-                pen, and your tracking number.
+                the scholarship exam. Bring a school ID, black pen, and your
+                tracking number.
               </p>
               <p className="entrance-exam-notes-text">
                 There is no fixed exam schedule. The branch will assist you
                 with the available on-site exam process.
               </p>
-              {application.appliedForScholarship && honorDiscount > 0 && (
+              {application.appliedForScholarship && (
                 <p className="entrance-exam-notes-text">
-                  If you applied for scholarship and have an academic honor,
-                  the higher percentage between your scholarship exam score and
-                  honor discount will be used. If the exam score is lower, your
-                  honor discount will stay active.
+                  The scholarship exam has 60 items. The highest discount from
+                  the exam is 50%.
                 </p>
               )}
             </div>

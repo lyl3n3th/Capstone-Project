@@ -8,17 +8,25 @@ import {
   BsPersonPlusFill,
   BsSearch,
 } from "react-icons/bs";
-import { MdBlock } from "react-icons/md";
+import { MdBlock, MdDelete } from "react-icons/md";
 import {
+  addManagedBranch,
   buildEmployeeIdPreview,
   createStaffMember,
+  fetchManagedBranches,
   fetchStaffMembers,
+  moveStaffMemberToTrash,
+  removeManagedBranch,
   updateStaffMember,
   type StaffMember,
 } from "../../services/staffApi";
+import SkeletonPage from "../../components/common/SkeletonPage";
 import "../../styles/manager/area-managerStaff.css";
 
 type SortKeys = "staff_id" | "full_name" | "role" | "branch" | "email";
+
+const getStaffStatusLabel = (status?: StaffMember["status"]) =>
+  status === "inactive" ? "Disabled" : "Active";
 
 const AreaManagerStaffAccounts: React.FC = () => {
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -26,12 +34,23 @@ const AreaManagerStaffAccounts: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [showDisabledModal, setShowDisabledModal] = useState(false);
+  const [showBranchesModal, setShowBranchesModal] = useState(false);
+  const [branchPendingRemoval, setBranchPendingRemoval] = useState<string | null>(
+    null,
+  );
   const [isEditing, setIsEditing] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [branchError, setBranchError] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null);
   const [editMode, setEditMode] = useState(false);
+  const [managedBranches, setManagedBranches] = useState<string[]>([
+    "Bacoor",
+    "Taytay",
+    "GMA",
+  ]);
+  const [newBranchName, setNewBranchName] = useState("");
 
   const [filterRole, setFilterRole] = useState("");
   const [filterBranch, setFilterBranch] = useState("");
@@ -69,7 +88,26 @@ const AreaManagerStaffAccounts: React.FC = () => {
 
   useEffect(() => {
     void loadStaffDirectory();
+    void loadManagedBranches();
   }, []);
+
+  const loadManagedBranches = async () => {
+    try {
+      const branches = await fetchManagedBranches();
+      const branchNames = branches.map((branch) => branch.name).filter(Boolean);
+      if (branchNames.length > 0) {
+        setManagedBranches(branchNames.sort());
+      }
+      setBranchError("");
+    } catch (err) {
+      console.error("Error fetching branches:", err);
+      setBranchError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load managed branches right now.",
+      );
+    }
+  };
 
   const loadStaffDirectory = async () => {
     setLoading(true);
@@ -91,7 +129,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
     new Set(staff.map((member) => member.role).filter(Boolean)),
   ).sort();
   const uniqueBranches = Array.from(
-    new Set(staff.map((member) => member.branch)),
+    new Set([...managedBranches, ...staff.map((member) => member.branch)]),
   ).sort();
   const uniqueStatuses = ["active", "inactive"];
 
@@ -117,6 +155,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
       !first_name ||
       !last_name ||
       !role ||
+      !formData.branch ||
       !address ||
       !email ||
       !contact_number ||
@@ -262,6 +301,96 @@ const AreaManagerStaffAccounts: React.FC = () => {
     }
   };
 
+  const handleDeleteDisabledAccount = async (member: StaffMember) => {
+    if (
+      !window.confirm(
+        `Delete ${member.first_name} ${member.last_name}'s disabled account?`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await moveStaffMemberToTrash(member.staff_id);
+      await loadStaffDirectory();
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to delete this disabled staff account.",
+      );
+    }
+  };
+
+  const handleAddBranch = async () => {
+    const normalizedBranch = newBranchName.trim();
+
+    if (!normalizedBranch) {
+      setBranchError("Enter a branch name.");
+      return;
+    }
+
+    const branchExists = managedBranches.some(
+      (branch) => branch.toLowerCase() === normalizedBranch.toLowerCase(),
+    );
+
+    if (branchExists) {
+      setBranchError(`${normalizedBranch} is already in your branch list.`);
+      return;
+    }
+
+    try {
+      const savedBranch = await addManagedBranch(normalizedBranch);
+      await loadManagedBranches();
+      setFormData((current) => ({
+        ...current,
+        branch: current.branch || savedBranch.name,
+      }));
+      setNewBranchName("");
+      setBranchError("");
+    } catch (err) {
+      setBranchError(
+        err instanceof Error ? err.message : "Failed to add this branch.",
+      );
+    }
+  };
+
+  const handleRemoveBranch = async (branchName: string) => {
+    setBranchPendingRemoval(branchName);
+    setBranchError("");
+  };
+
+  const handleConfirmRemoveBranch = async () => {
+    if (!branchPendingRemoval) {
+      return;
+    }
+
+    const branchName = branchPendingRemoval;
+    try {
+      await removeManagedBranch(branchName);
+      const remainingBranches = managedBranches.filter(
+        (branch) => branch !== branchName,
+      );
+      setManagedBranches(remainingBranches);
+      setFilterBranch((current) => (current === branchName ? "" : current));
+      setFormData((current) => ({
+        ...current,
+        branch:
+          current.branch === branchName
+            ? remainingBranches[0] || ""
+            : current.branch,
+      }));
+      setBranchPendingRemoval(null);
+      setBranchError("");
+    } catch (err) {
+      setBranchError(
+        err instanceof Error ? err.message : "Failed to remove this branch.",
+      );
+      setBranchPendingRemoval(null);
+    }
+  };
+
   const getInputClass = (fieldName: keyof StaffMember) => {
     const value = formData[fieldName]?.toString() || "";
 
@@ -361,6 +490,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
   };
 
   const handleAddNewStaff = () => {
+    const defaultBranch = managedBranches[0] || "";
     setIsEditing(false);
     setEditMode(false);
     setSelectedStaff(null);
@@ -371,7 +501,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
       first_name: "",
       last_name: "",
       role: "Registrar",
-      branch: "Bacoor",
+      branch: defaultBranch,
       email: "",
       contact_number: "",
       address: "",
@@ -396,7 +526,14 @@ const AreaManagerStaffAccounts: React.FC = () => {
   };
 
   if (loading) {
-    return <div className="stf-loading">Loading Staff Directory...</div>;
+    return (
+      <SkeletonPage
+        className="stf-root"
+        eyebrow="Directory"
+        title="Staff Management"
+        variant="table"
+      />
+    );
   }
 
   return (
@@ -406,7 +543,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
           <h1 className="stf-page-title">Staff Management</h1>
           <p className="stf-page-description">
             Manage registrar and branch administrator accounts for each branch,
-            control active and inactive access, and keep staff logins in sync
+            control active and disabled access, and keep staff logins in sync
             with Supabase.
           </p>
         </div>
@@ -480,7 +617,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
               <option value="">All Status</option>
               {uniqueStatuses.map((status) => (
                 <option key={status} value={status}>
-                  {status.charAt(0).toUpperCase() + status.slice(1)}
+                  {getStaffStatusLabel(status as StaffMember["status"])}
                 </option>
               ))}
             </select>
@@ -492,6 +629,15 @@ const AreaManagerStaffAccounts: React.FC = () => {
             </button>
             <button className="stf-add-btn" onClick={handleAddNewStaff}>
               <BsPersonPlusFill /> Add Staff
+            </button>
+            <button
+              className="stf-branches-btn"
+              onClick={() => {
+                setShowBranchesModal(true);
+                setBranchError("");
+              }}
+            >
+              Manage Branches
             </button>
           </div>
         </div>
@@ -541,14 +687,12 @@ const AreaManagerStaffAccounts: React.FC = () => {
                     {member.first_name} {member.last_name}
                   </td>
                   <td className="stf-role-col">{member.role}</td>
-                  <td className="stf-branch-col">
-                    <span className="stf-branch-badge">{member.branch}</span>
-                  </td>
+                  <td className="stf-branch-col">{member.branch}</td>
                   <td>
                     <span
                       className={`stf-status-badge stf-status-${member.status?.toLowerCase() || "active"}`}
                     >
-                      {member.status || "active"}
+                      {getStaffStatusLabel(member.status)}
                     </span>
                   </td>
                   <td>
@@ -652,7 +796,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   <div
                     className={`stf-value-box stf-status-${selectedStaff.status?.toLowerCase() || "active"}`}
                   >
-                    {selectedStaff.status || "active"}
+                    {getStaffStatusLabel(selectedStaff.status)}
                   </div>
                 </div>
                 <div className="stf-field full">
@@ -754,14 +898,19 @@ const AreaManagerStaffAccounts: React.FC = () => {
                     onChange={(event) =>
                       setFormData({
                         ...formData,
-                        branch: event.target.value as "GMA" | "Bacoor" | "Taytay",
+                        branch: event.target.value,
                       })
                     }
                     className={getInputClass("branch")}
                   >
-                    <option value="Bacoor">Bacoor</option>
-                    <option value="GMA">GMA</option>
-                    <option value="Taytay">Taytay</option>
+                    {uniqueBranches.length === 0 ? (
+                      <option value="">Add a branch first</option>
+                    ) : null}
+                    {uniqueBranches.map((branch) => (
+                      <option key={branch} value={branch}>
+                        {branch}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="stf-field">
@@ -934,6 +1083,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
               </button>
             </div>
             <div className="stf-modal-body">
+              {error ? <div className="stf-error-msg">{error}</div> : null}
               <div className="stf-trash-top-row">
                 <p className="stf-trash-count">
                   {disabledAccounts.length} disabled account(s)
@@ -965,11 +1115,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
                             <small>{member.staff_id}</small>
                           </td>
                           <td>{member.role}</td>
-                          <td>
-                            <span className="stf-branch-badge">
-                              {member.branch}
-                            </span>
-                          </td>
+                          <td>{member.branch}</td>
                           <td style={{ textAlign: "right" }}>
                             <div className="stf-trash-btns-wrapper">
                               <button
@@ -977,6 +1123,12 @@ const AreaManagerStaffAccounts: React.FC = () => {
                                 onClick={() => handleEnableAccount(member)}
                               >
                                 <BsArrowCounterclockwise /> Enable
+                              </button>
+                              <button
+                                className="stf-btn-delete-perm"
+                                onClick={() => handleDeleteDisabledAccount(member)}
+                              >
+                                <MdDelete size={14} /> Delete
                               </button>
                             </div>
                           </td>
@@ -986,6 +1138,116 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   </table>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showBranchesModal ? (
+        <div
+          className="stf-modal-overlay"
+          onClick={() => setShowBranchesModal(false)}
+        >
+          <div className="stf-branches-card" onClick={(event) => event.stopPropagation()}>
+            <div className="stf-modal-header">
+              <h3 className="stf-modal-title">Manage Branches</h3>
+              <button
+                className="stf-modal-close"
+                onClick={() => setShowBranchesModal(false)}
+              >
+                &times;
+              </button>
+            </div>
+            <div className="stf-modal-body">
+              {branchError ? (
+                <div className="stf-error-msg">{branchError}</div>
+              ) : null}
+              <div className="stf-branch-add-row">
+                <input
+                  type="text"
+                  value={newBranchName}
+                  onChange={(event) => setNewBranchName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleAddBranch();
+                    }
+                  }}
+                  placeholder="Branch name"
+                  className="stf-input"
+                />
+                <button className="stf-action-btn stf-save-btn" onClick={handleAddBranch}>
+                  Add Branch
+                </button>
+              </div>
+              <div className="stf-branch-list">
+                {managedBranches.length === 0 ? (
+                  <div className="stf-empty-state">No managed branches yet.</div>
+                ) : (
+                  managedBranches.map((branch) => {
+                    const assignedStaffCount = staff.filter(
+                      (member) => member.branch === branch,
+                    ).length;
+
+                    return (
+                      <div className="stf-branch-item" key={branch}>
+                        <div>
+                          <strong>{branch}</strong>
+                          <span>{assignedStaffCount} staff account(s)</span>
+                        </div>
+                        <button
+                          className="stf-btn-delete-perm"
+                          onClick={() => handleRemoveBranch(branch)}
+                          title={`Remove ${branch}`}
+                        >
+                          <MdDelete size={14} /> Delete
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {branchPendingRemoval ? (
+        <div
+          className="stf-modal-overlay"
+          onClick={() => setBranchPendingRemoval(null)}
+        >
+          <div className="stf-confirm-card" onClick={(event) => event.stopPropagation()}>
+            <div className="stf-modal-header">
+              <h3 className="stf-modal-title">Remove Branch?</h3>
+              <button
+                className="stf-modal-close"
+                onClick={() => setBranchPendingRemoval(null)}
+              >
+                &times;
+              </button>
+            </div>
+            <div className="stf-modal-body">
+              <p className="stf-confirm-copy">
+                Are you sure you want to remove <strong>{branchPendingRemoval}</strong> from the branches handled by the area manager?
+              </p>
+              <p className="stf-confirm-note">
+                Staff accounts assigned to this branch will no longer be able to use this branch while signing in until the branch is added again.
+              </p>
+            </div>
+            <div className="stf-modal-footer">
+              <button
+                className="stf-action-btn stf-cancel-btn"
+                onClick={() => setBranchPendingRemoval(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="stf-action-btn stf-remove-btn"
+                onClick={handleConfirmRemoveBranch}
+              >
+                Remove Branch
+              </button>
             </div>
           </div>
         </div>

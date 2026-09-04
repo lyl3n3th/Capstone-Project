@@ -1,5 +1,10 @@
 import { supabase } from "../lib/supabase";
 import type { AuthUser } from "../types/user";
+import { isCachedAlumniStudent } from "./backupApi";
+import {
+  toDisplayCapitalization,
+  toNameCapitalization,
+} from "../utils/textFormatting";
 
 type SupabaseErrorLike = {
   code?: string;
@@ -117,21 +122,21 @@ const mapStudentPortalSnapshot = (
   studentId: row.student_id,
   studentNumber: row.student_number,
   trackingNumber: row.tracking_number,
-  branch: row.branch,
-  fullName: row.full_name,
-  firstName: row.first_name,
-  lastName: row.last_name,
-  middleName: row.middle_name || undefined,
-  programName: row.program_name,
-  trackName: row.track_name,
-  yearLevel: row.year_level,
-  section: row.section || undefined,
+  branch: toDisplayCapitalization(row.branch),
+  fullName: toNameCapitalization(row.full_name),
+  firstName: toNameCapitalization(row.first_name),
+  lastName: toNameCapitalization(row.last_name),
+  middleName: toNameCapitalization(row.middle_name) || undefined,
+  programName: toDisplayCapitalization(row.program_name),
+  trackName: toDisplayCapitalization(row.track_name),
+  yearLevel: toDisplayCapitalization(row.year_level),
+  section: toDisplayCapitalization(row.section) || undefined,
   email: row.email,
   phoneNumber: formatContactNumber(row.phone_number),
-  address: row.address,
+  address: toDisplayCapitalization(row.address),
   birthDate: row.birth_date || undefined,
   sex: row.sex,
-  civilStatus: row.civil_status,
+  civilStatus: toDisplayCapitalization(row.civil_status),
   portalAccountRegistered: row.portal_account_registered,
 });
 
@@ -232,6 +237,12 @@ export const loginStudentPortal = async ({
   studentNumber: string;
   password: string;
 }) => {
+  if (isCachedAlumniStudent({ studentNumber })) {
+    throw new Error(
+      "This student has already been transferred to Alumni and can no longer access the student portal.",
+    );
+  }
+
   const { data, error } = await supabase
     .rpc("student_portal_login", {
       p_student_number: studentNumber.trim().toUpperCase(),
@@ -239,7 +250,70 @@ export const loginStudentPortal = async ({
     })
     .returns<StudentPortalSnapshotRow[]>();
 
-  return ensureStudentSnapshot(data, error);
+  const identity = ensureStudentSnapshot(data, error);
+
+  if (
+    isCachedAlumniStudent({
+      studentNumber: identity.studentNumber,
+      trackingNumber: identity.trackingNumber,
+      branch: identity.branch,
+    })
+  ) {
+    throw new Error(
+      "This student has already been transferred to Alumni and can no longer access the student portal.",
+    );
+  }
+
+  return identity;
+};
+
+export const loginStudentPortalWithEmail = async ({
+  email,
+}: {
+  email: string;
+}) => {
+  const { data, error } = await supabase
+    .rpc("student_portal_email_login", {
+      p_email: email.trim().toLowerCase(),
+    })
+    .returns<StudentPortalSnapshotRow[]>();
+
+  const identity = ensureStudentSnapshot(data, error);
+
+  if (
+    isCachedAlumniStudent({
+      studentNumber: identity.studentNumber,
+      trackingNumber: identity.trackingNumber,
+      branch: identity.branch,
+    })
+  ) {
+    throw new Error(
+      "This student has already been transferred to Alumni and can no longer access the student portal.",
+    );
+  }
+
+  return identity;
+};
+
+export const startStudentGoogleLogin = async () => {
+  const redirectTo =
+    typeof window === "undefined"
+      ? undefined
+      : `${window.location.origin}/student/login`;
+
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo,
+      queryParams: {
+        prompt: "select_account",
+      },
+    },
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
 };
 
 export const resetStudentPortalPassword = async (

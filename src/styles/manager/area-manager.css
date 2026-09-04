@@ -3,7 +3,7 @@
   min-height: 100vh;
   background: #f1f5f9;
   overflow: hidden;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
 }
 
 .area-manager-sidebar {
@@ -88,6 +88,9 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  background: #ffffff;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 .area-manager-user-info {
@@ -251,54 +254,39 @@
 
 .area-manager-content.content-mobile {
   height: 100vh;
-  padding-top: 68px;
+  padding-top: 70px;
 }
 
 .mobile-topbar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 60px;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
   display: none;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
-  z-index: 130;
 }
 
 .mobile-topbar-title {
-  color: #1a3d5c;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  display: none;
 }
 
 .hamburger-btn {
-  width: 42px;
-  height: 42px;
-  display: flex;
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 1100;
+  width: 46px;
+  height: 46px;
+  display: none;
   align-items: center;
   justify-content: center;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: #1A3D5C;
+  border: none;
   border-radius: 12px;
-  color: #1a3d5c;
+  color: #ffffff;
   cursor: pointer;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease,
-    background 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
 }
 
 .hamburger-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.16);
-  background: #f8fafc;
+  background: #066287;
+  transform: translateY(-2px);
 }
 
 .mobile-overlay-backdrop {
@@ -495,6 +483,10 @@
 
 @media (max-width: 1023px) {
   .mobile-topbar {
+    display: none;
+  }
+
+  .hamburger-btn {
     display: flex;
   }
 
@@ -522,7 +514,7 @@
   }
 
   .area-manager-sidebar-header {
-    padding: 24px 20px;
+    padding: 64px 20px 22px;
   }
 
   .area-manager-user-card {
@@ -557,7 +549,7 @@
 
 @media (max-width: 640px) {
   .area-manager-content.content-mobile {
-    padding-top: 60px;
+    padding-top: 70px;
   }
 
   .area-manager-form-grid {

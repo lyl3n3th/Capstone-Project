@@ -2,8 +2,10 @@ import {
   normalizeBranchName,
   normalizeStudentNumberInput,
   readBranchScopedData,
+  type StudentPortalSubject,
   writeBranchScopedData,
 } from "./adminStorage";
+import { supabase } from "../lib/supabase";
 
 export type StudentGradeProgramType = "SHS" | "College";
 export type StudentGradeEvaluation = "Passed" | "Failed" | "Incomplete";
@@ -72,8 +74,12 @@ export interface StudentAcademicStandingSnapshot {
 }
 
 const STUDENT_GRADE_STORAGE_SCOPE = "student-grades";
+export const APPROVED_GRADE_CONFLICT_ERROR =
+  "This student already has uploaded grades approved by the registrar/admin.";
 export const STUDENT_GRADE_RECORDS_UPDATED_EVENT = "aics-student-grades-updated";
-const PASSING_GRADE = 75;
+export const SHS_PASSING_GRADE = 75;
+const SHS_MIN_GRADE = 60;
+const SHS_MAX_GRADE = 100;
 const SEMESTER_ORDER = ["1st Semester", "2nd Semester", "Summer"];
 const SHS_QUARTER_ORDER = [
   "1st Quarter",
@@ -96,7 +102,7 @@ const COLLEGE_GRADE_SCALE = [
 ];
 const COLLEGE_GRADE_SCALE_SET = new Set(COLLEGE_GRADE_SCALE);
 const COLLEGE_GRADE_ERROR_MESSAGE =
-  "College grades must use 1.00, 1.25, 1.50, 1.75, 2.00, 2.25, 2.50, 2.75, 3.00, 4.00 (INC), or 5.00 (FAILED)";
+  "College grades must use 1.00 - 5.00";
 
 const getDefaultAcademicYear = () => {
   const now = new Date();
@@ -217,6 +223,72 @@ const inferSemesterFromQuarter = (gradingPeriod?: string) => {
   }
 
   return "";
+};
+
+export const getRequiredShsQuarterLabelsForSemester = (semester: string) =>
+  semester.trim().toLowerCase().includes("2nd")
+    ? ["3rd Quarter", "4th Quarter"]
+    : ["1st Quarter", "2nd Quarter"];
+
+const normalizeGradeSubjectCode = (value?: string | null) =>
+  value?.trim().toUpperCase() || "";
+
+const normalizeGradeSubjectTitle = (value?: string | null) =>
+  value?.trim().toUpperCase().replace(/\s+/g, " ") || "";
+
+const gradeRecordMatchesSubject = (
+  record: StoredStudentGradeRecord,
+  subject: Pick<StudentPortalSubject, "code" | "title">,
+) => {
+  const recordCode = normalizeGradeSubjectCode(record.subjectCode);
+  const subjectCode = normalizeGradeSubjectCode(subject.code);
+
+  if (!recordCode || recordCode !== subjectCode) {
+    return false;
+  }
+
+  const recordTitle = normalizeGradeSubjectTitle(record.subjectTitle);
+  const subjectTitle = normalizeGradeSubjectTitle(subject.title);
+
+  return !recordTitle || !subjectTitle || recordTitle === subjectTitle;
+};
+
+export const hasCompletePassingShsSemesterGrades = ({
+  subjects,
+  gradeRecords,
+  academicYear,
+  semester,
+}: {
+  subjects: Pick<StudentPortalSubject, "code" | "title">[];
+  gradeRecords: StoredStudentGradeRecord[];
+  academicYear: string;
+  semester: string;
+}) => {
+  if (subjects.length === 0) {
+    return false;
+  }
+
+  const requiredQuarterLabels = getRequiredShsQuarterLabelsForSemester(semester);
+  const normalizedAcademicYear = academicYear.trim();
+  const normalizedSemester = normalizeSemester(semester);
+
+  if (!normalizedSemester) {
+    return false;
+  }
+
+  return subjects.every((subject) =>
+    requiredQuarterLabels.every((quarterLabel) =>
+      gradeRecords.some(
+        (record) =>
+          record.programType === "SHS" &&
+          record.academicYear.trim() === normalizedAcademicYear &&
+          normalizeSemester(record.semester) === normalizedSemester &&
+          record.gradingPeriod === quarterLabel &&
+          record.evaluation === "Passed" &&
+          gradeRecordMatchesSubject(record, subject),
+      ),
+    ),
+  );
 };
 
 const normalizeGradingPeriod = (
@@ -360,18 +432,19 @@ const evaluateGradeValue = (
   const numericGrade = Number(trimmed);
   if (
     Number.isFinite(numericGrade) &&
-    numericGrade >= 0 &&
-    numericGrade <= 100
+    numericGrade >= SHS_MIN_GRADE &&
+    numericGrade <= SHS_MAX_GRADE
   ) {
     return {
       normalizedGrade: trimmed,
       numericGrade,
-      evaluation: numericGrade >= PASSING_GRADE ? "Passed" : "Failed",
+      evaluation: numericGrade >= SHS_PASSING_GRADE ? "Passed" : "Failed",
     };
   }
 
   return {
-    errorReason: "SHS grades must be numeric values from 0-100",
+    errorReason:
+      "SHS grades must be numeric values from 60-100; 75 is the passing grade",
   };
 };
 
@@ -428,6 +501,32 @@ const buildGradeRecordLookupKey = (
     ),
     gradingPeriod: record.gradingPeriod,
   });
+
+export const findApprovedStudentGradeConflict = ({
+  branch,
+  record,
+  existingRecords,
+}: {
+  branch?: string | null;
+  record: StudentGradeRecordIdentity;
+  existingRecords?: StoredStudentGradeRecord[];
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const targetKey = buildGradeRecordLookupKey(record, resolvedBranch);
+
+  return (existingRecords ?? readStudentGradeRecordsForBranch(resolvedBranch)).find(
+    (existingRecord) =>
+      buildGradeRecordLookupKey(existingRecord, resolvedBranch) === targetKey,
+  );
+};
+
+export const getApprovedStudentGradeConflictMessage = (
+  record: Pick<
+    StudentGradeRecordIdentity,
+    "studentId" | "subjectCode" | "academicYear" | "semester" | "gradingPeriod"
+  >,
+) =>
+  `${APPROVED_GRADE_CONFLICT_ERROR} ${record.studentId} already has an approved grade for ${record.subjectCode} (${record.academicYear}, ${record.semester}, ${record.gradingPeriod}).`;
 
 const isTerminalCollegeGradeRecord = (record: StoredStudentGradeRecord) => {
   const normalizedPeriod = record.gradingPeriod.trim().toLowerCase();
@@ -509,6 +608,69 @@ const sortGrades = (grades: StoredStudentGradeRecord[]) =>
       left.gradingPeriod.localeCompare(right.gradingPeriod)
     );
   });
+
+type SupabaseErrorLike = {
+  details?: string | null;
+  hint?: string | null;
+  message: string;
+};
+
+type StudentGradeRecordRow = {
+  payload: StoredStudentGradeRecord | null;
+};
+
+const getErrorMessage = (error: SupabaseErrorLike) =>
+  error.details
+    ? `${error.message} ${error.details}`.trim()
+    : error.hint
+      ? `${error.message} ${error.hint}`.trim()
+      : error.message;
+
+const syncStudentGradeRecordToSupabase = async (
+  branch: string,
+  record: StoredStudentGradeRecord,
+) => {
+  const { error } = await supabase.rpc("upsert_student_grade_record", {
+    p_branch: branch,
+    p_payload: record,
+  });
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+const deleteStudentGradeRecordFromSupabase = async (
+  branch: string,
+  identity: StudentGradeRecordIdentity,
+) => {
+  const { error } = await supabase.rpc("delete_student_grade_record", {
+    p_branch: branch,
+    p_record_id: buildGradeRecordLookupKey(identity, branch),
+  });
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
+const syncStudentGradeOperationsToSupabase = (
+  branch: string,
+  operations: StudentGradeUploadOperation[],
+) => {
+  void Promise.all(
+    operations.map((operation) =>
+      operation.type === "upsert"
+        ? syncStudentGradeRecordToSupabase(branch, operation.record)
+        : deleteStudentGradeRecordFromSupabase(branch, operation.identity),
+    ),
+  ).catch((error) => {
+    console.warn(
+      "Unable to sync student grade records to Supabase; local cache was updated.",
+      error,
+    );
+  });
+};
 
 export const validateAndNormalizeUploadedGradeRow = (
   row: UploadedStudentGradeRow,
@@ -596,9 +758,35 @@ export const readStudentGradeRecordsForBranch = (branch?: string | null) =>
     ) ?? [],
   );
 
+export const fetchAndCacheStudentGradeRecordsForBranch = async (
+  branch?: string | null,
+) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const { data, error } = await supabase
+    .rpc("list_student_grade_records", {
+      p_branch: resolvedBranch,
+    })
+    .returns<StudentGradeRecordRow[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const records = sortGrades(
+    (Array.isArray(data) ? data : [])
+      .map((row) => row.payload)
+      .filter((record): record is StoredStudentGradeRecord => Boolean(record)),
+  );
+  writeStudentGradeRecordsForBranch(resolvedBranch, records, {
+    skipSupabaseSync: true,
+  });
+  return records;
+};
+
 export const writeStudentGradeRecordsForBranch = (
   branch: string | null | undefined,
   records: StoredStudentGradeRecord[],
+  options: { skipSupabaseSync?: boolean } = {},
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
   writeBranchScopedData(
@@ -612,6 +800,13 @@ export const writeStudentGradeRecordsForBranch = (
       new CustomEvent(STUDENT_GRADE_RECORDS_UPDATED_EVENT, {
         detail: { branch: resolvedBranch },
       }),
+    );
+  }
+
+  if (!options.skipSupabaseSync) {
+    syncStudentGradeOperationsToSupabase(
+      resolvedBranch,
+      sortGrades(records).map((record) => ({ type: "upsert", record })),
     );
   }
 };
@@ -652,7 +847,10 @@ export const applyStudentGradeUploadOperationsForBranch = (
   });
 
   const nextRecords = Array.from(recordMap.values());
-  writeStudentGradeRecordsForBranch(resolvedBranch, nextRecords);
+  writeStudentGradeRecordsForBranch(resolvedBranch, nextRecords, {
+    skipSupabaseSync: true,
+  });
+  syncStudentGradeOperationsToSupabase(resolvedBranch, operations);
   return sortGrades(nextRecords);
 };
 

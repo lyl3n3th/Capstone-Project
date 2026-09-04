@@ -36,6 +36,14 @@ export interface AdmissionDecisionNotificationResponse {
   };
 }
 
+export interface AdmissionRequirementRedoNotificationResponse {
+  message: string;
+  tracking_number: string;
+  deliveries: {
+    email: AdmissionNotificationDelivery;
+  };
+}
+
 const parseSubmissionNotificationError = async (response: Response) => {
   let message = "Unable to send the tracking number automatically right now.";
 
@@ -75,6 +83,15 @@ export interface SendAdmissionDecisionNotificationPayload {
   decisionStatus?: "accepted" | "rejected";
   decisionReason?: string;
   portalLink?: string;
+}
+
+export interface SendAdmissionRequirementRedoNotificationPayload {
+  trackingNumber: string;
+  requirementName: string;
+  email?: string;
+  mobile?: string;
+  firstName?: string;
+  lastName?: string;
 }
 
 export async function sendAdmissionSubmissionNotification(
@@ -117,4 +134,25 @@ export async function sendAdmissionDecisionNotification(
   }
 
   return (await response.json()) as AdmissionDecisionNotificationResponse;
+}
+
+export async function sendAdmissionRequirementRedoNotification(
+  payload: SendAdmissionRequirementRedoNotificationPayload,
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/admissions/requirement-redo-notification/`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    await parseSubmissionNotificationError(response);
+  }
+
+  return (await response.json()) as AdmissionRequirementRedoNotificationResponse;
 }

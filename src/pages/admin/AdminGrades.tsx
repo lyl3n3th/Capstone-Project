@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { PiMicrosoftExcelLogo } from "react-icons/pi";
 import { IoMdCheckmarkCircleOutline } from "react-icons/io";
 import {
@@ -8,6 +8,7 @@ import {
   FiCheck,
   FiDownload,
   FiMenu,
+  FiTrash2,
   FiUpload,
   FiX,
 } from "react-icons/fi";
@@ -24,6 +25,9 @@ import {
 } from "../../services/adminStorage";
 import {
   applyStudentGradeUploadOperationsForBranch,
+  fetchAndCacheStudentGradeRecordsForBranch,
+  findApprovedStudentGradeConflict,
+  getApprovedStudentGradeConflictMessage,
   readStudentGradeRecordsForBranch,
   validateAndNormalizeUploadedGradeRow,
   type StoredStudentGradeRecord,
@@ -36,6 +40,16 @@ import {
   resolveStudentPortalContext,
   type ResolvedStudentPortalContext,
 } from "../../services/studentPortalResolver";
+import {
+  getInstructorGradeSubmissions,
+  fetchAndCacheInstructorGradeSubmissions,
+  getInstructorGradeChangeRequests,
+  fetchAndCacheInstructorGradeChangeRequests,
+  writeInstructorGradeChangeRequests,
+  writeInstructorGradeSubmissions,
+  type InstructorGradeChangeRequest,
+  type InstructorGradeSubmission,
+} from "../../services/instructorPortal";
 import "../../styles/admin/admin-grades.css";
 
 interface GradesProps {
@@ -49,6 +63,7 @@ interface UploadHistoryItem {
   id?: string;
   fileName: string;
   dateUpload: string;
+  uploadedAt?: string;
   records: number;
   errors: number;
   status: "Completed" | "Pending" | "Failed" | "Error";
@@ -75,6 +90,32 @@ interface PreviewGradeRow {
   normalizedRecord?: StoredStudentGradeRecord;
   clearRecordIdentity?: StudentGradeRecordIdentity;
 }
+
+type InstructorGradeApprovalItem =
+  | {
+      kind: "upload";
+      requestType: "Grades Upload";
+      id: string;
+      fileName: string;
+      instructorName: string;
+      employeeId: string;
+      submittedAt: string;
+      status: InstructorGradeSubmission["status"];
+      rowCount: number;
+      submission: InstructorGradeSubmission;
+    }
+  | {
+      kind: "change";
+      requestType: "Grade Change";
+      id: string;
+      fileName: string;
+      instructorName: string;
+      employeeId: string;
+      submittedAt: string;
+      status: InstructorGradeChangeRequest["status"];
+      rowCount: number;
+      request: InstructorGradeChangeRequest;
+    };
 
 interface Toast {
   id: string;
@@ -110,6 +151,9 @@ interface TemplateSubjectCatalogItem {
   code: string;
   name: string;
   units?: number;
+  program?: string;
+  yearLevel?: string;
+  semester?: string;
 }
 
 interface GeneratedTemplateSheet {
@@ -137,7 +181,7 @@ interface TemplateResolvedStudentContext {
 }
 
 type WorksheetRow = Array<string | number | boolean | null | undefined>;
-type CollegeTemplateSemester = "1st Semester" | "2nd Semester" | "Summer";
+type CollegeTemplateSemester = "1st Semester" | "2nd Semester";
 type ShsTemplateQuarter =
   | "1st Quarter"
   | "2nd Quarter"
@@ -163,7 +207,7 @@ const TEMPLATE_FIRST_DATA_ROW_INDEX = 6;
 const TEMPLATE_DATA_CAPACITY = 19;
 const TEMPLATE_FILE_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const PREVIEW_PAGE_SIZE = 6;
+const PREVIEW_PAGE_SIZE = 12;
 const UPLOAD_HISTORY_PAGE_SIZE = 6;
 const XML_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const XML_REL_NS =
@@ -201,7 +245,6 @@ const ERROR_HIGHLIGHT_FILL_RGB = "FFFFF2CC";
 const COLLEGE_TEMPLATE_SEMESTERS: CollegeTemplateSemester[] = [
   "1st Semester",
   "2nd Semester",
-  "Summer",
 ];
 const COLLEGE_TEMPLATE_YEAR_LEVELS = [
   "1st Year",
@@ -257,6 +300,20 @@ const formatHistoryTimestamp = (value: Date) =>
     minute: "2-digit",
     hour12: true,
   }).format(value);
+
+const parseHistoryTimestamp = (value?: string) => {
+  const normalizedValue = value?.trim().replace(/\s+at\s+/i, " ");
+  const timestamp = Date.parse(normalizedValue ?? "");
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+};
+
+const getHistoryTimestampValue = (item: UploadHistoryItem) =>
+  parseHistoryTimestamp(item.uploadedAt) || parseHistoryTimestamp(item.dateUpload);
+
+const getHistoryTimestampIso = (item: UploadHistoryItem) => {
+  const timestamp = getHistoryTimestampValue(item);
+  return timestamp > 0 ? new Date(timestamp).toISOString() : undefined;
+};
 
 const sanitizeHistoryIdPart = (value: string) =>
   value
@@ -316,6 +373,12 @@ const buildGradeIdentityKey = (
     record.programType,
   ].join("::");
 
+const normalizeApprovalGradeValue = (value?: string | number | null) =>
+  String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
+
 const getRedoableHistoryRecordCount = (item: UploadHistoryItem) =>
   (item.fileData ?? []).filter((row) => Boolean(row.normalizedRecord)).length;
 
@@ -328,17 +391,42 @@ const getDownloadableHistoryErrorCount = (item: UploadHistoryItem) =>
 const normalizeUploadHistory = (
   history: UploadHistoryItem[],
 ): UploadHistoryItem[] =>
-  history.map((item, index) => ({
-    ...item,
-    id: buildUploadHistoryItemId(item, index),
-    redoneAt: item.redoneAt?.trim() || undefined,
-    status:
+  history.map((item, index) => {
+    const normalizedStatus: UploadHistoryItem["status"] =
       item.status === "Pending" || item.status === "Failed"
         ? item.status
         : item.errors > 0
           ? "Error"
-          : "Completed",
-  }));
+          : "Completed";
+    const normalizedItem: UploadHistoryItem = {
+      ...item,
+      dateUpload: item.dateUpload || item.uploadedAt || "",
+      uploadedAt: item.uploadedAt?.trim() || undefined,
+      redoneAt: item.redoneAt?.trim() || undefined,
+      status: normalizedStatus,
+    };
+
+    return {
+      ...normalizedItem,
+      id: buildUploadHistoryItemId(normalizedItem, index),
+      uploadedAt: getHistoryTimestampIso(normalizedItem),
+    };
+  });
+
+const sortUploadHistoryNewestFirst = (history: UploadHistoryItem[]) =>
+  history
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const timestampComparison =
+        getHistoryTimestampValue(right.item) - getHistoryTimestampValue(left.item);
+
+      if (timestampComparison !== 0) {
+        return timestampComparison;
+      }
+
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
 
 export default function AdminGrades({
   onLogout,
@@ -352,11 +440,11 @@ export default function AdminGrades({
   const [selectedFileName, setSelectedFileName] = useState("No file chosen");
   const [previewRows, setPreviewRows] = useState<PreviewGradeRow[]>([]);
   const [previewFileName, setPreviewFileName] = useState("");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [isReadyToUpload, setIsReadyToUpload] = useState(false);
   const [previewPage, setPreviewPage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
   const [collegeTemplateSemester, setCollegeTemplateSemester] =
     useState<CollegeTemplateSemester>("1st Semester");
   const [collegeTemplateYearLevel, setCollegeTemplateYearLevel] =
@@ -366,7 +454,28 @@ export default function AdminGrades({
   const [shsTemplateYearLevel, setShsTemplateYearLevel] =
     useState<(typeof SHS_TEMPLATE_YEAR_LEVELS)[number]>("Grade 11");
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [instructorSubmissionVersion, setInstructorSubmissionVersion] =
+    useState(0);
+  const [viewingInstructorGradeItem, setViewingInstructorGradeItem] =
+    useState<InstructorGradeApprovalItem | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    void Promise.all([
+      fetchAndCacheInstructorGradeSubmissions(currentBranch),
+      fetchAndCacheInstructorGradeChangeRequests(currentBranch),
+    ])
+      .then(() => {
+        setInstructorSubmissionVersion((previousValue) => previousValue + 1);
+      })
+      .catch((error) => {
+        console.warn("Unable to load instructor grade approvals from Supabase.", error);
+      });
+
+    void fetchAndCacheStudentGradeRecordsForBranch(currentBranch).catch((error) => {
+      console.warn("Unable to load student grades from Supabase.", error);
+    });
+  }, [currentBranch]);
 
   // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {
@@ -389,39 +498,81 @@ export default function AdminGrades({
         try {
           const parsed = JSON.parse(savedHistory);
           if (Array.isArray(parsed)) {
-            return normalizeUploadHistory(parsed as UploadHistoryItem[]);
+            return sortUploadHistoryNewestFirst(
+              normalizeUploadHistory(parsed as UploadHistoryItem[]),
+            );
           }
         } catch (error) {
           console.error("Failed to load upload history", error);
         }
       }
-      return normalizeUploadHistory(DEFAULT_UPLOAD_HISTORY);
+      return sortUploadHistoryNewestFirst(
+        normalizeUploadHistory(DEFAULT_UPLOAD_HISTORY),
+      );
     },
   );
 
   // Save upload history to localStorage
   const saveUploadHistory = (history: UploadHistoryItem[]) => {
-    const normalizedHistory = normalizeUploadHistory(history);
+    const normalizedHistory = sortUploadHistoryNewestFirst(
+      normalizeUploadHistory(history),
+    );
     localStorage.setItem(
       UPLOAD_HISTORY_STORAGE_KEY,
       JSON.stringify(normalizedHistory),
     );
     setUploadHistory(normalizedHistory);
+    setSelectedHistoryIds((previousIds) => {
+      const availableIds = new Set(
+        normalizedHistory.map((item) => item.id).filter(Boolean),
+      );
+      return previousIds.filter((id) => availableIds.has(id));
+    });
   };
 
-  const sortedUploadHistory = [...uploadHistory].sort((left, right) => {
-    const leftValue = left.fileName.toLowerCase();
-    const rightValue = right.fileName.toLowerCase();
-
-    if (leftValue < rightValue) return sortDirection === "asc" ? -1 : 1;
-    if (leftValue > rightValue) return sortDirection === "asc" ? 1 : -1;
-    return 0;
-  });
-
-  const toggleFileNameSort = () => {
-    setHistoryPage(1);
-    setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
-  };
+  const sortedUploadHistory = sortUploadHistoryNewestFirst(uploadHistory);
+  void instructorSubmissionVersion;
+  const instructorGradeSubmissions = getInstructorGradeSubmissions(currentBranch);
+  const instructorGradeChangeRequests =
+    getInstructorGradeChangeRequests(currentBranch);
+  const instructorGradeApprovalItems: InstructorGradeApprovalItem[] = [
+    ...instructorGradeSubmissions.map((submission) => ({
+      kind: "upload" as const,
+      requestType: "Grades Upload" as const,
+      id: submission.id,
+      fileName: submission.fileName,
+      instructorName: submission.instructorName,
+      employeeId: submission.employeeId,
+      submittedAt: submission.submittedAt,
+      status: submission.status,
+      rowCount: submission.records.length,
+      submission,
+    })),
+    ...instructorGradeChangeRequests.map((request) => ({
+      kind: "change" as const,
+      requestType: "Grade Change" as const,
+      id: request.id,
+      fileName: request.fileName,
+      instructorName: request.instructorName,
+      employeeId: request.employeeId,
+      submittedAt: request.submittedAt,
+      status: request.status,
+      rowCount: request.changes.length,
+      request,
+    })),
+  ].sort(
+    (left, right) =>
+      Date.parse(right.submittedAt) - Date.parse(left.submittedAt),
+  );
+  const pendingInstructorGradeSubmissions = instructorGradeApprovalItems.filter(
+    (item) => item.status === "Pending",
+  );
+  const approvedInstructorGradeSubmissions = instructorGradeApprovalItems.filter(
+    (item) => item.status === "Approved",
+  );
+  const rejectedInstructorGradeSubmissions = instructorGradeApprovalItems.filter(
+    (item) => item.status === "Rejected",
+  );
 
   const uploadedRecords = previewRows.filter(
     (row) => row.status === "Valid" && row.action === "Upload",
@@ -465,6 +616,17 @@ export default function AdminGrades({
     historyPageStartIndex + UPLOAD_HISTORY_PAGE_SIZE,
     sortedUploadHistory.length,
   );
+  const historyPageIds = historyPageRows
+    .map((item) => item.id)
+    .filter((id): id is string => Boolean(id));
+  const selectedHistoryIdSet = new Set(selectedHistoryIds);
+  const selectedHistoryCount = selectedHistoryIds.length;
+  const areAllHistoryPageRowsSelected =
+    historyPageIds.length > 0 &&
+    historyPageIds.every((id) => selectedHistoryIdSet.has(id));
+  const isSomeHistoryPageRowSelected =
+    historyPageIds.some((id) => selectedHistoryIdSet.has(id)) &&
+    !areAllHistoryPageRowsSelected;
 
   const normalizeHeader = (header: string) =>
     header
@@ -588,6 +750,9 @@ export default function AdminGrades({
 
   const normalizeYearLevelLabel = (value?: string) =>
     value?.trim().toLowerCase() || "";
+
+  const normalizeTemplateSectionCode = (value?: string | null) =>
+    value?.trim().toUpperCase() || "";
 
   const getSelectedTemplateChoice = (
     templateType: StudentGradeProgramType,
@@ -948,8 +1113,7 @@ export default function AdminGrades({
       readBranchScopedData<TemplateSubjectCatalogItem[]>("subjects", currentBranch) ??
       [];
     const storedStudents = getStudentsForBranch(currentBranch).filter(
-      (student) =>
-        student.status !== "Archived" && student.status !== "Graduated",
+      (student) => student.status !== "Archived",
     );
     const resolvedStudentContexts = storedStudents.map<TemplateResolvedStudentContext>(
       (student) => ({
@@ -1001,8 +1165,6 @@ export default function AdminGrades({
       )
       .sort(sortSectionsForTemplate)
       .map<GeneratedTemplateSheet | null>((section) => {
-        const normalizedSectionSemester =
-          normalizeSemesterLabel(section.semester) || targetSemester;
         const linkedEnrolleeIds = new Set(
           (section.enrolleeIds ?? [])
             .map((enrolleeId) => enrolleeId.trim())
@@ -1015,7 +1177,8 @@ export default function AdminGrades({
             studentContext.portalContext.resolvedStudentRecord.section?.trim() || "";
 
           return (
-            resolvedSectionCode === section.code ||
+            normalizeTemplateSectionCode(resolvedSectionCode) ===
+              normalizeTemplateSectionCode(section.code) ||
             linkedEnrolleeIds.has(studentContext.id.trim())
           );
         };
@@ -1060,9 +1223,10 @@ export default function AdminGrades({
               targetAcademicYear: selectedTermAcademicYear,
             }).filter(
               (assignment) =>
-                assignment.sectionCode === section.code &&
+                normalizeTemplateSectionCode(assignment.sectionCode) ===
+                  normalizeTemplateSectionCode(section.code) &&
                 normalizeSemesterLabel(assignment.semester) ===
-                  normalizedSectionSemester,
+                  targetSemester,
             );
 
             const uniqueAssignments = Array.from(
@@ -2457,6 +2621,237 @@ export default function AdminGrades({
     );
   };
 
+  const handleToggleHistorySelection = (historyId?: string) => {
+    if (!historyId) {
+      return;
+    }
+
+    setSelectedHistoryIds((previousIds) =>
+      previousIds.includes(historyId)
+        ? previousIds.filter((id) => id !== historyId)
+        : [...previousIds, historyId],
+    );
+  };
+
+  const handleToggleHistoryPageSelection = () => {
+    if (historyPageIds.length === 0) {
+      return;
+    }
+
+    setSelectedHistoryIds((previousIds) => {
+      const previousIdSet = new Set(previousIds);
+
+      if (historyPageIds.every((id) => previousIdSet.has(id))) {
+        return previousIds.filter((id) => !historyPageIds.includes(id));
+      }
+
+      historyPageIds.forEach((id) => previousIdSet.add(id));
+      return Array.from(previousIdSet);
+    });
+  };
+
+  const handleDeleteSelectedUploadHistory = () => {
+    if (selectedHistoryIds.length === 0) {
+      addToast("Select at least one upload history item to delete.", "info");
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `Delete ${selectedHistoryIds.length} selected upload histor${
+        selectedHistoryIds.length === 1 ? "y" : "ies"
+      }?\n\nThis only removes the history row. It will not delete posted grades.`,
+    );
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    const selectedIdSet = new Set(selectedHistoryIds);
+    const nextHistory = uploadHistory.filter(
+      (item) => !item.id || !selectedIdSet.has(item.id),
+    );
+
+    saveUploadHistory(nextHistory);
+    setSelectedHistoryIds([]);
+    setHistoryPage((previousPage) =>
+      Math.min(
+        previousPage,
+        Math.max(1, Math.ceil(nextHistory.length / UPLOAD_HISTORY_PAGE_SIZE)),
+      ),
+    );
+    addToast("Selected upload history deleted.", "success");
+  };
+
+  const updateInstructorSubmissionStatus = async (
+    submissionId: string,
+    status: "Approved" | "Rejected",
+  ) => {
+    const submission = instructorGradeSubmissions.find(
+      (item) => item.id === submissionId,
+    );
+
+    if (!submission) {
+      addToast("Instructor submission was not found.", "error");
+      return false;
+    }
+
+    if (status === "Approved") {
+      let currentGradeRecords = readStudentGradeRecordsForBranch(currentBranch);
+
+      try {
+        currentGradeRecords =
+          await fetchAndCacheStudentGradeRecordsForBranch(currentBranch);
+      } catch (error) {
+        console.warn("Unable to refresh student grades before approval.", error);
+      }
+
+      const approvedGradeConflict = submission.records.find((record) =>
+        findApprovedStudentGradeConflict({
+          branch: currentBranch,
+          record,
+          existingRecords: currentGradeRecords,
+        }),
+      );
+
+      if (approvedGradeConflict) {
+        addToast(
+          getApprovedStudentGradeConflictMessage(approvedGradeConflict),
+          "error",
+        );
+        return false;
+      }
+
+      applyStudentGradeUploadOperationsForBranch(
+        currentBranch,
+        submission.records.map((record) => ({
+          type: "upsert" as const,
+          record,
+        })),
+      );
+    }
+
+    writeInstructorGradeSubmissions(
+      currentBranch,
+      instructorGradeSubmissions.map((item) =>
+        item.id === submissionId
+          ? {
+              ...item,
+              status,
+              reviewedAt: new Date().toISOString(),
+              reviewedBy: loggedInUsername,
+            }
+          : item,
+      ),
+    );
+    setInstructorSubmissionVersion((previousValue) => previousValue + 1);
+    addToast(
+      status === "Approved"
+        ? "Instructor grades approved and posted."
+        : "Instructor grade submission rejected.",
+      status === "Approved" ? "success" : "info",
+    );
+    return true;
+  };
+
+  const updateInstructorGradeChangeRequestStatus = async (
+    requestId: string,
+    status: "Approved" | "Rejected",
+  ) => {
+    const request = instructorGradeChangeRequests.find(
+      (item) => item.id === requestId,
+    );
+
+    if (!request) {
+      addToast("Instructor grade change request was not found.", "error");
+      return false;
+    }
+
+    if (status === "Approved") {
+      let currentGradeRecords = readStudentGradeRecordsForBranch(currentBranch);
+
+      try {
+        currentGradeRecords =
+          await fetchAndCacheStudentGradeRecordsForBranch(currentBranch);
+      } catch (error) {
+        console.warn(
+          "Unable to refresh student grades before approving change request.",
+          error,
+        );
+      }
+
+      const staleChange = request.changes.find((change) => {
+        const currentRecord = findApprovedStudentGradeConflict({
+          branch: currentBranch,
+          record: change.requestedRecord,
+          existingRecords: currentGradeRecords,
+        });
+
+        return (
+          !currentRecord ||
+          normalizeApprovalGradeValue(currentRecord.normalizedGrade) !==
+            normalizeApprovalGradeValue(change.currentGrade)
+        );
+      });
+
+      if (staleChange) {
+        addToast(
+          `Cannot approve yet. ${staleChange.fullName}'s current ${staleChange.subjectCode} grade no longer matches this request.`,
+          "error",
+        );
+        return false;
+      }
+
+      const reviewedAt = new Date().toISOString();
+
+      applyStudentGradeUploadOperationsForBranch(
+        currentBranch,
+        request.changes.map((change) => ({
+          type: "upsert" as const,
+          record: {
+            ...change.requestedRecord,
+            updatedAt: reviewedAt,
+          },
+        })),
+      );
+    }
+
+    writeInstructorGradeChangeRequests(
+      currentBranch,
+      instructorGradeChangeRequests.map((item) =>
+        item.id === requestId
+          ? {
+              ...item,
+              status,
+              reviewedAt: new Date().toISOString(),
+              reviewedBy: loggedInUsername,
+            }
+          : item,
+      ),
+    );
+    setInstructorSubmissionVersion((previousValue) => previousValue + 1);
+    addToast(
+      status === "Approved"
+        ? "Instructor grade change request approved and posted."
+        : "Instructor grade change request rejected.",
+      status === "Approved" ? "success" : "info",
+    );
+    return true;
+  };
+
+  const updateInstructorGradeApprovalStatus = async (
+    item: InstructorGradeApprovalItem,
+    status: "Approved" | "Rejected",
+  ) => {
+    const wasUpdated =
+      item.kind === "upload"
+        ? await updateInstructorSubmissionStatus(item.id, status)
+        : await updateInstructorGradeChangeRequestStatus(item.id, status);
+
+    if (wasUpdated) {
+      setViewingInstructorGradeItem(null);
+    }
+  };
+
   const handleUploadGrades = () => {
     if (!selectedFile) {
       addToast("Please choose a grade file first.", "warning");
@@ -2468,7 +2863,8 @@ export default function AdminGrades({
       return;
     }
 
-    const uploadedAt = formatHistoryTimestamp(new Date());
+    const uploadDate = new Date();
+    const uploadedAt = formatHistoryTimestamp(uploadDate);
 
     const normalizedName = selectedFile.name.replace(/\.[^/.]+$/, "");
     const uploadOperations = previewRows.flatMap<StudentGradeUploadOperation>(
@@ -2494,6 +2890,7 @@ export default function AdminGrades({
     const newHistoryItem: UploadHistoryItem = {
       fileName: normalizedName,
       dateUpload: uploadedAt,
+      uploadedAt: uploadDate.toISOString(),
       records: processedRecords,
       errors: errorRecords,
       status: errorRecords > 0 ? "Error" : "Completed",
@@ -2584,18 +2981,32 @@ export default function AdminGrades({
         <span className="menu-toggle-icon" aria-hidden="true">
           {isSidebarOpen ? <FiX /> : <FiMenu />}
         </span>
-        {isSidebarOpen ? "✕" : "☰"}
       </button>
 
       {/* Main content */}
       <main className="grades-content">
         <header className="page-header">
-          <h1>Grades Management</h1>
+          <h1>Instructor Grade Approvals</h1>
           <p>
-            Upload Excel files with student grades to update student records and
-            grade history
+            Review instructor-uploaded grades and approve them before they
+            become official in student accounts.
           </p>
         </header>
+
+        <div className="grade-approval-summary-grid">
+          <div className="grade-approval-summary-card pending">
+            <span>Pending</span>
+            <strong>{pendingInstructorGradeSubmissions.length}</strong>
+          </div>
+          <div className="grade-approval-summary-card approved">
+            <span>Approved</span>
+            <strong>{approvedInstructorGradeSubmissions.length}</strong>
+          </div>
+          <div className="grade-approval-summary-card rejected">
+            <span>Rejected</span>
+            <strong>{rejectedInstructorGradeSubmissions.length}</strong>
+          </div>
+        </div>
 
         <div className="grades-top-grid">
           {/* Upload card */}
@@ -2694,7 +3105,12 @@ export default function AdminGrades({
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
-                SHS uses quarterly grading (1st-4th Quarter)
+                SHS uses quarterly grading: 1st and 2nd Quarter for 1st
+                Semester, then 3rd and 4th Quarter for 2nd Semester
+              </li>
+              <li>
+                <IoMdCheckmarkCircleOutline className="list-icon success" />
+                SHS grades must be 60 to 100, with 75 as the passing grade
               </li>
               <li>
                 <IoMdCheckmarkCircleOutline className="list-icon success" />
@@ -2817,6 +3233,378 @@ export default function AdminGrades({
             </div>
           </div>
         </div>
+
+        <div className="history-card instructor-submissions-card">
+          <div className="history-header">
+            <div>
+              <h3>Instructor Grade Requests</h3>
+              <p>
+                {pendingInstructorGradeSubmissions.length} pending request
+                {pendingInstructorGradeSubmissions.length === 1 ? "" : "s"} for
+                approval. Approved uploads and change requests are posted to
+                student accounts.
+              </p>
+            </div>
+          </div>
+
+          <div className="table-container history-table-container">
+            <table className="history-table">
+              <thead>
+                <tr>
+                  <th>Instructor</th>
+                  <th>Type</th>
+                  <th>File</th>
+                  <th>Date Submitted</th>
+                  <th>No. of Students</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {instructorGradeApprovalItems.length > 0 ? (
+                  instructorGradeApprovalItems.map((item) => (
+                    <tr key={`${item.kind}-${item.id}`}>
+                      <td>
+                        <strong>{item.instructorName}</strong>
+                        <br />
+                        <span>{item.employeeId}</span>
+                      </td>
+                      <td>
+                        <span
+                          className={`grade-request-type-badge ${item.kind}`}
+                        >
+                          {item.requestType}
+                        </span>
+                      </td>
+                      <td
+                        className="instructor-submission-file-cell"
+                        title={item.fileName}
+                      >
+                        {item.fileName}
+                      </td>
+                      <td>{new Date(item.submittedAt).toLocaleString()}</td>
+                      <td>
+                        <strong className="uploaded-grade-count">
+                          {item.rowCount}
+                        </strong>
+                        <div className="uploaded-grade-list">
+                          {(item.kind === "upload"
+                            ? item.submission.records
+                            : item.request.changes
+                          ).slice(0, 8).map((record) => (
+                            <div className="uploaded-grade-row" key={record.id}>
+                              <strong>{record.fullName}</strong>
+                              <span>
+                                {record.subjectCode} · {record.gradingPeriod} ·{" "}
+                                {"normalizedGrade" in record
+                                  ? record.normalizedGrade
+                                  : `${record.currentGrade} to ${record.requestedGrade}`}
+                              </span>
+                            </div>
+                          ))}
+                          {item.rowCount > 8 && (
+                            <span className="uploaded-grade-more">
+                              +{item.rowCount - 8} more grade rows
+                            </span>
+                          )}
+                          {item.rowCount === 0 && (
+                            <span className="uploaded-grade-more">
+                              No valid grade rows
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <span
+                          className={`upload-status-badge ${item.status.toLowerCase()}`}
+                        >
+                          {item.status}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="history-actions">
+                          <button
+                            type="button"
+                            className="view-history-btn instructor-approval-action-btn view"
+                            onClick={() => setViewingInstructorGradeItem(item)}
+                          >
+                            Review
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={7} className="no-results">
+                      No instructor grade requests yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {viewingInstructorGradeItem?.kind === "upload" && (
+          <div className="preview-modal-overlay">
+            <div className="preview-modal">
+              <div className="preview-modal-header">
+                <div>
+                  <h2>{viewingInstructorGradeItem.fileName}</h2>
+                  <span className="grade-request-type-badge upload">
+                    {viewingInstructorGradeItem.requestType}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="preview-modal-close"
+                  onClick={() => setViewingInstructorGradeItem(null)}
+                  aria-label="Close uploaded file view"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="preview-modal-body">
+                <div className="preview-card">
+                  <div className="preview-header">
+                    <div>
+                      <h3>{viewingInstructorGradeItem.instructorName}</h3>
+                      <p>
+                        {viewingInstructorGradeItem.submission.records.length} uploaded
+                        grade row
+                        {viewingInstructorGradeItem.submission.records.length === 1
+                          ? ""
+                          : "s"}{" "}
+                        awaiting review or already processed.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="table-container preview-table-container">
+                    <table className="grades-table">
+                      <thead>
+                        <tr>
+                          <th>Student ID</th>
+                          <th>Full Name</th>
+                          <th>Subject</th>
+                          <th>Grade</th>
+                          <th>Units</th>
+                          <th>Term</th>
+                          <th>Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {viewingInstructorGradeItem.submission.records.length > 0 ? (
+                          viewingInstructorGradeItem.submission.records.map((record) => (
+                            <tr key={record.id}>
+                              <td>{record.studentId}</td>
+                              <td>{record.fullName}</td>
+                              <td>
+                                <strong>{record.subjectCode}</strong>
+                                <br />
+                                <span>{record.subjectTitle}</span>
+                              </td>
+                              <td>{record.normalizedGrade}</td>
+                              <td>{record.units ?? "-"}</td>
+                              <td>
+                                {record.academicYear}
+                                <br />
+                                {record.semester} / {record.gradingPeriod}
+                              </td>
+                              <td>{record.evaluation}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={7} className="no-results">
+                              No valid grade rows were uploaded in this file.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {viewingInstructorGradeItem.submission.errors.length > 0 && (
+                    <div className="upload-note warning">
+                      <FiAlertCircle className="note-icon warning" />
+                      <span>
+                        {viewingInstructorGradeItem.submission.errors.length} warning
+                        {viewingInstructorGradeItem.submission.errors.length === 1
+                          ? ""
+                          : "s"}{" "}
+                        were detected during upload.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {viewingInstructorGradeItem.status === "Pending" && (
+                <div className="preview-modal-actions grade-approval-modal-actions">
+                  <button
+                    type="button"
+                    className="instructor-approval-action-btn reject"
+                    onClick={() =>
+                      void updateInstructorGradeApprovalStatus(
+                        viewingInstructorGradeItem,
+                        "Rejected",
+                      )
+                    }
+                  >
+                    Reject
+                  </button>
+                  <button
+                    type="button"
+                    className="instructor-approval-action-btn approve"
+                    onClick={() =>
+                      void updateInstructorGradeApprovalStatus(
+                        viewingInstructorGradeItem,
+                        "Approved",
+                      )
+                    }
+                  >
+                    Approve
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {viewingInstructorGradeItem?.kind === "change" && (
+          <div className="preview-modal-overlay">
+            <div className="preview-modal">
+              <div className="preview-modal-header">
+                <div>
+                  <h2>{viewingInstructorGradeItem.fileName}</h2>
+                  <span className="grade-request-type-badge change">
+                    {viewingInstructorGradeItem.requestType}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="preview-modal-close"
+                  onClick={() => setViewingInstructorGradeItem(null)}
+                  aria-label="Close grade change request view"
+                >
+                  Ã—
+                </button>
+              </div>
+
+              <div className="preview-modal-body">
+                <div className="preview-card">
+                  <div className="preview-header">
+                    <div>
+                      <h3>{viewingInstructorGradeItem.instructorName}</h3>
+                      <p>
+                        {viewingInstructorGradeItem.request.changes.length} requested
+                        grade change row
+                        {viewingInstructorGradeItem.request.changes.length === 1
+                          ? ""
+                          : "s"}{" "}
+                        awaiting review or already processed.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="table-container preview-table-container">
+                    <table className="grades-table">
+                      <thead>
+                        <tr>
+                          <th>Student ID</th>
+                          <th>Full Name</th>
+                          <th>Subject</th>
+                          <th>Current Grade</th>
+                          <th>Requested Grade</th>
+                          <th>Units / Period</th>
+                          <th>Term</th>
+                          <th>Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {viewingInstructorGradeItem.request.changes.length > 0 ? (
+                          viewingInstructorGradeItem.request.changes.map((change) => (
+                            <tr key={change.id}>
+                              <td>{change.studentId}</td>
+                              <td>{change.fullName}</td>
+                              <td>
+                                <strong>{change.subjectCode}</strong>
+                                <br />
+                                <span>{change.subjectTitle}</span>
+                              </td>
+                              <td>{change.currentGrade}</td>
+                              <td>{change.requestedGrade}</td>
+                              <td>
+                                {change.programType === "SHS"
+                                  ? change.gradingPeriod || "-"
+                                  : change.units ?? "-"}
+                              </td>
+                              <td>
+                                {change.academicYear}
+                                <br />
+                                {change.semester} / {change.gradingPeriod}
+                              </td>
+                              <td>{change.requestedRecord.evaluation}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={8} className="no-results">
+                              No valid grade changes were uploaded in this file.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {viewingInstructorGradeItem.request.errors.length > 0 && (
+                    <div className="upload-note warning">
+                      <FiAlertCircle className="note-icon warning" />
+                      <span>
+                        {viewingInstructorGradeItem.request.errors.length} warning
+                        {viewingInstructorGradeItem.request.errors.length === 1
+                          ? ""
+                          : "s"}{" "}
+                        were detected during upload.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {viewingInstructorGradeItem.status === "Pending" && (
+                <div className="preview-modal-actions grade-approval-modal-actions">
+                  <button
+                    type="button"
+                    className="instructor-approval-action-btn reject"
+                    onClick={() =>
+                      void updateInstructorGradeApprovalStatus(
+                        viewingInstructorGradeItem,
+                        "Rejected",
+                      )
+                    }
+                  >
+                    Reject
+                  </button>
+                  <button
+                    type="button"
+                    className="instructor-approval-action-btn approve"
+                    onClick={() =>
+                      void updateInstructorGradeApprovalStatus(
+                        viewingInstructorGradeItem,
+                        "Approved",
+                      )
+                    }
+                  >
+                    Approve
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Preview Modal */}
         {isPreviewModalOpen && selectedFile && (
@@ -3017,23 +3805,44 @@ export default function AdminGrades({
         {/* Upload history */}
         <div className="history-card">
           <div className="history-header">
-            <h3>Upload History</h3>
+            <div>
+              <h3>Upload History</h3>
+              <p>
+                {selectedHistoryCount > 0
+                  ? `${selectedHistoryCount} selected`
+                  : "Select history rows to remove them from this list."}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="delete-history-selected-btn"
+              onClick={handleDeleteSelectedUploadHistory}
+              disabled={selectedHistoryCount === 0}
+            >
+              <FiTrash2 />
+              Delete Selected
+            </button>
           </div>
 
           <div className="table-container history-table-container">
             <table className="history-table">
               <thead>
                 <tr>
-                  <th>
-                    <button
-                      type="button"
-                      className="history-table-sort-btn"
-                      onClick={toggleFileNameSort}
-                      data-sort-direction={sortDirection}
-                    >
-                      File Name {sortDirection === "asc" ? "↑" : "↓"}
-                    </button>
+                  <th className="history-select-column">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all upload history on this page"
+                      checked={areAllHistoryPageRowsSelected}
+                      ref={(inputElement) => {
+                        if (inputElement) {
+                          inputElement.indeterminate =
+                            isSomeHistoryPageRowSelected;
+                        }
+                      }}
+                      onChange={handleToggleHistoryPageSelection}
+                    />
                   </th>
+                  <th>File Name</th>
                   <th>Date Upload</th>
                   <th>Records</th>
                   <th>Errors</th>
@@ -3042,7 +3851,8 @@ export default function AdminGrades({
                 </tr>
               </thead>
               <tbody>
-                {historyPageRows.map((item) => {
+                {historyPageRows.length > 0 ? (
+                  historyPageRows.map((item) => {
                   const redoableRecordCount = getRedoableHistoryRecordCount(item);
                   const downloadableErrorCount =
                     getDownloadableHistoryErrorCount(item);
@@ -3052,6 +3862,16 @@ export default function AdminGrades({
 
                   return (
                     <tr key={item.id}>
+                      <td className="history-select-column">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${item.fileName} upload history`}
+                          checked={Boolean(
+                            item.id && selectedHistoryIdSet.has(item.id),
+                          )}
+                          onChange={() => handleToggleHistorySelection(item.id)}
+                        />
+                      </td>
                       <td>{item.fileName}</td>
                       <td>{item.dateUpload}</td>
                       <td>{item.records}</td>
@@ -3111,7 +3931,14 @@ export default function AdminGrades({
                       </td>
                     </tr>
                   );
-                })}
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={7} className="no-results">
+                      No upload history found.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

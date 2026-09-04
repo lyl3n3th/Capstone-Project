@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   BrowserRouter,
@@ -22,7 +23,6 @@ import StudentSubjects from "./pages/student/StudentSubjects.tsx";
 import StudentEnrollment from "./pages/student/StudentEnrollment.tsx";
 import StudentEvaluation from "./pages/student/StudentEvaluation.tsx";
 import StudentLogin from "./pages/student/StudentLogin.tsx";
-import StudentRegistration from "./pages/student/StudentRegistration.tsx";
 
 import AdminDashboard from "./pages/admin/AdminDashboard.tsx";
 import AdminStudents from "./pages/admin/AdminStudents.tsx";
@@ -40,9 +40,13 @@ import AreaManagerStudents from "./pages/manager/AreaManagerStudents.tsx";
 import AreaManagerStaffAccounts from "./pages/manager/AreaManagerStaffAccounts.tsx";
 import AreaManagerReports from "./pages/manager/AreaManagerReports.tsx";
 import BackupScheduler from "./components/admin/BackupScheduler";
+import InstructorLayout from "./components/instructor/InstructorLayout";
+import InstructorHome from "./pages/instructor/InstructorHome";
+import InstructorStudents from "./pages/instructor/InstructorStudents";
+import InstructorGrades from "./pages/instructor/InstructorGrades";
+import InstructorGradeChanges from "./pages/instructor/InstructorGradeChanges";
 
 import StaffLogin from "./pages/staff/StaffLogin.tsx";
-import TestSupabase from "./components/TestSupabase";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import PublicOnlyRoute from "./components/auth/PublicOnlyRoute";
 import {
@@ -67,6 +71,39 @@ function StudentPortalRoute({ children }: { children: ReactNode }) {
   );
 }
 
+function StaffConnectionGuard({ children }: { children: ReactNode }) {
+  const { logout } = useAuth();
+  const [shouldReturnToLogin, setShouldReturnToLogin] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const returnToStaffLogin = () => {
+      logout();
+      setShouldReturnToLogin(true);
+    };
+
+    if (!window.navigator.onLine) {
+      returnToStaffLogin();
+      return;
+    }
+
+    window.addEventListener("offline", returnToStaffLogin);
+
+    return () => {
+      window.removeEventListener("offline", returnToStaffLogin);
+    };
+  }, [logout]);
+
+  if (shouldReturnToLogin) {
+    return <Navigate to="/staff/login" replace />;
+  }
+
+  return <>{children}</>;
+}
+
 function StaffPortalRoute({
   children,
   allowedRoles = STAFF_PORTAL_ROLES,
@@ -76,7 +113,7 @@ function StaffPortalRoute({
 }) {
   return (
     <ProtectedRoute allowedRoles={allowedRoles} loginPath="/staff/login">
-      {children}
+      <StaffConnectionGuard>{children}</StaffConnectionGuard>
     </ProtectedRoute>
   );
 }
@@ -87,7 +124,7 @@ function AdminPortalRoute({ children }: { children: ReactNode }) {
       allowedRoles={["admin", "registrar"]}
       loginPath="/staff/login"
     >
-      {children}
+      <StaffConnectionGuard>{children}</StaffConnectionGuard>
     </ProtectedRoute>
   );
 }
@@ -182,11 +219,7 @@ function AppRoutes() {
       />
       <Route
         path="/student/registration"
-        element={
-          <PublicOnlyRoute>
-            <StudentRegistration />
-          </PublicOnlyRoute>
-        }
+        element={<Navigate to="/student/login" replace />}
       />
       <Route
         path="/student/home"
@@ -268,6 +301,21 @@ function AppRoutes() {
         />
       </Route>
 
+      <Route
+        path="/instructor"
+        element={
+          <StaffPortalRoute allowedRoles={["instructor"]}>
+            <InstructorLayout />
+          </StaffPortalRoute>
+        }
+      >
+        <Route index element={<Navigate to="/instructor/home" replace />} />
+        <Route path="home" element={<InstructorHome />} />
+        <Route path="students" element={<InstructorStudents />} />
+        <Route path="grades" element={<InstructorGrades />} />
+        <Route path="grade-changes" element={<InstructorGradeChanges />} />
+      </Route>
+
       {/* Registrar Routes with Layout */}
       <Route
         path="/registrar"
@@ -316,9 +364,6 @@ function AppRoutes() {
           </PublicOnlyRoute>
         }
       />
-
-      {/* Test Routes */}
-      <Route path="/test-supabase" element={<TestSupabase />} />
 
       {/* Redirects */}
       <Route

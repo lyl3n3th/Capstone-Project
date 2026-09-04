@@ -1,11 +1,14 @@
 import React, { useEffect, useState, useRef } from "react";
 import Progress from "../../components/Progress";
 import { ToastContainer } from "../../components/common/Toast";
+import SkeletonPage from "../../components/common/SkeletonPage";
 import "../../styles/main.css";
 import {
   civilStatusOptions,
   getAdmissionBranchName,
+  getAdmissionYearLevelOptions,
   getAvailablePrograms,
+  normalizeAdmissionYearLevel,
   getTrackOptions,
   honorOptions,
   saveAdmissionApplication,
@@ -16,12 +19,32 @@ const EDUCATIONAL_LEVEL_PLACEHOLDER = "Educational Level";
 const TRACK_SELECTION_PLACEHOLDER = "Strand / Program";
 const LEGACY_LEVEL_PLACEHOLDER = "Program";
 const LEGACY_TRACK_PLACEHOLDER = "Strand/Course";
+const YEAR_LEVEL_PLACEHOLDER = "Select year level";
 
 const isEducationalLevelPlaceholder = (value: string) =>
   value === EDUCATIONAL_LEVEL_PLACEHOLDER || value === LEGACY_LEVEL_PLACEHOLDER;
 
 const isTrackSelectionPlaceholder = (value: string) =>
   value === TRACK_SELECTION_PLACEHOLDER || value === LEGACY_TRACK_PLACEHOLDER;
+
+const REQUIRED_FIELD_IDS = [
+  "fname",
+  "lname",
+  "address",
+  "email",
+  "contact",
+  "lastSchool",
+] as const;
+
+type RequiredFieldId = (typeof REQUIRED_FIELD_IDS)[number];
+type PersonalInfoFieldId = RequiredFieldId | "yearCompletion";
+type FormFieldId =
+  | PersonalInfoFieldId
+  | "program"
+  | "program1"
+  | "sex"
+  | "civilStatus"
+  | "requestedYearLevel";
 
 // get query
 function getQueryParam(name: string): string | null {
@@ -41,6 +64,9 @@ function AdmissionStep2() {
   // Program dropdown menu
   const [menuOpen, setIsMenuOpen] = useState(false);
   const [program, setProgram] = useState(EDUCATIONAL_LEVEL_PLACEHOLDER);
+  const [requestedYearLevel, setRequestedYearLevel] = useState(
+    YEAR_LEVEL_PLACEHOLDER,
+  );
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Strand/Course second dropdown menu
@@ -69,6 +95,10 @@ function AdmissionStep2() {
   // submit handle
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [showValidationErrors, setShowValidationErrors] = useState(false);
+  const [touchedFields, setTouchedFields] = useState<
+    Partial<Record<FormFieldId, boolean>>
+  >({});
 
   // info states (KEPT)
   const [fname, setFname] = useState("");
@@ -101,12 +131,109 @@ function AdmissionStep2() {
 
   const availablePrograms = getAvailablePrograms(selectedBranch, studentStatus);
   const trackOptions = getTrackOptions(program);
+  const isTransferee = studentStatus === "Transferee";
+  const yearLevelOptions = getAdmissionYearLevelOptions(program);
+  const needsRequestedYearLevel = isTransferee && yearLevelOptions.length > 0;
   const trackSelectionLabel =
     program === "College"
       ? "Program selection"
       : program === "Senior High School"
         ? "Strand selection"
         : "Strand / Program selection";
+
+  const getFieldValue = (fieldId: PersonalInfoFieldId) => {
+    switch (fieldId) {
+      case "fname":
+        return fname;
+      case "lname":
+        return lname;
+      case "address":
+        return address;
+      case "email":
+        return email;
+      case "contact":
+        return contact;
+      case "lastSchool":
+        return lastSchool;
+      case "yearCompletion":
+        return yearCompletion;
+    }
+  };
+
+  const getFieldError = (fieldId: FormFieldId): string => {
+    if (fieldId === "program") {
+      return isEducationalLevelPlaceholder(program)
+        ? "Educational level is required."
+        : "";
+    }
+
+    if (fieldId === "program1") {
+      return isTrackSelectionPlaceholder(program1)
+        ? `${trackSelectionLabel} is required.`
+        : "";
+    }
+
+    if (fieldId === "sex") {
+      return sex === "Sex" ? "Sex is required." : "";
+    }
+
+    if (fieldId === "civilStatus") {
+      return civilStatus === "Civil Status" ? "Civil status is required." : "";
+    }
+
+    if (fieldId === "requestedYearLevel") {
+      return needsRequestedYearLevel &&
+        !normalizeAdmissionYearLevel(program, requestedYearLevel)
+        ? "Current year level is required."
+        : "";
+    }
+
+    if (fieldId === "yearCompletion" && isTransferee) {
+      return "";
+    }
+
+    const value = getFieldValue(fieldId).trim();
+
+    if (!value) {
+      return "This field is required.";
+    }
+
+    if (fieldId === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      return "Enter a valid email address.";
+    }
+
+    if (fieldId === "contact" && value.replace(/\D/g, "").length !== 11) {
+      return "Enter an 11-digit contact number.";
+    }
+
+    if (
+      fieldId === "yearCompletion" &&
+      (!/^\d{4}$/.test(value) ||
+        Number(value) < 1900 ||
+        Number(value) > new Date().getFullYear())
+    ) {
+      return "Enter a valid 4-digit year.";
+    }
+
+    return "";
+  };
+
+  const shouldShowFieldError = (fieldId: FormFieldId) =>
+    Boolean(
+      getFieldError(fieldId) && (showValidationErrors || touchedFields[fieldId]),
+    );
+
+  const getInputClassName = (
+    fieldId: FormFieldId,
+    baseClassName = "",
+  ) =>
+    [baseClassName, shouldShowFieldError(fieldId) ? "input-error" : ""]
+      .filter(Boolean)
+      .join(" ");
+
+  const markFieldTouched = (fieldId: FormFieldId) => {
+    setTouchedFields((prev) => ({ ...prev, [fieldId]: true }));
+  };
 
   // Format contact number (adds space after 4th and 7th digits)
   const formatContactNumber = (value: string) => {
@@ -145,31 +272,31 @@ function AdmissionStep2() {
     }
   };
 
-  // Form validation
-  const isFormValid = (): boolean => {
-    if (
-      isEducationalLevelPlaceholder(program) ||
-      isTrackSelectionPlaceholder(program1)
-    ) {
-      return false;
-    }
-    if (sex === "Sex") return false;
-    if (civilStatus === "Civil Status") return false;
-
-    const requiredFields = [
-      "fname",
-      "lname",
-      "address",
-      "email",
-      "contact",
-      "lastSchool",
-      "yearCompletion",
+  const getFieldsToValidate = (): FormFieldId[] => {
+    const fieldsToValidate: FormFieldId[] = [
+      ...REQUIRED_FIELD_IDS,
+      "program",
+      "program1",
+      "sex",
+      "civilStatus",
     ];
 
-    return requiredFields.every((id) => {
-      const el = document.getElementById(id) as HTMLInputElement | null;
-      return el && el.value.trim() !== "";
-    });
+    if (!isTransferee) {
+      fieldsToValidate.push("yearCompletion");
+    }
+
+    if (needsRequestedYearLevel) {
+      fieldsToValidate.push("requestedYearLevel");
+    }
+
+    return fieldsToValidate;
+  };
+
+  // Form validation
+  const isFormValid = (): boolean => {
+    const fieldsToValidate = getFieldsToValidate();
+
+    return fieldsToValidate.every((fieldId) => !getFieldError(fieldId));
   };
 
   // Save draft to sessionStorage
@@ -188,6 +315,8 @@ function AdmissionStep2() {
       contact,
       last_school_attended: lastSchool,
       year_completion: yearCompletion,
+      requested_year_level:
+        normalizeAdmissionYearLevel(program, requestedYearLevel) || undefined,
       program,
       strand_or_course: program1,
       sex,
@@ -222,6 +351,11 @@ function AdmissionStep2() {
       if (draft.contact) setContact(draft.contact);
       if (draft.last_school_attended) setLastSchool(draft.last_school_attended);
       if (draft.year_completion) setYearCompletion(draft.year_completion);
+      if (draft.requested_year_level || draft.requestedYearLevel) {
+        setRequestedYearLevel(
+          draft.requested_year_level || draft.requestedYearLevel,
+        );
+      }
       if (draft.sex) setSex(draft.sex);
       if (draft.civil_status) setCivilStatus(draft.civil_status);
       if (draft.trackingNumber) setTrackingNumber(draft.trackingNumber);
@@ -269,6 +403,7 @@ function AdmissionStep2() {
     contact,
     lastSchool,
     yearCompletion,
+    requestedYearLevel,
     program,
     program1,
     sex,
@@ -315,7 +450,15 @@ function AdmissionStep2() {
 
   const handleContinue = async () => {
     if (!isFormValid()) {
-      addToast("Please complete all required fields.", "error");
+      const invalidFields = getFieldsToValidate().filter((fieldId) =>
+        getFieldError(fieldId),
+      );
+      setShowValidationErrors(true);
+      setTouchedFields((prev) => ({
+        ...prev,
+        ...Object.fromEntries(invalidFields.map((fieldId) => [fieldId, true])),
+      }));
+      addToast("Please correct the highlighted fields.", "error");
       return;
     }
 
@@ -338,7 +481,9 @@ function AdmissionStep2() {
         email,
         phoneNumber: contact,
         lastSchoolAttended: lastSchool,
-        yearCompletion,
+        yearCompletion: isTransferee ? "" : yearCompletion,
+        requestedYearLevel:
+          normalizeAdmissionYearLevel(program, requestedYearLevel) || undefined,
         honorLabel: honor === "Select Honor" ? "No Honor" : honor,
         applyScholarship,
         currentStep: 2,
@@ -364,7 +509,10 @@ function AdmissionStep2() {
           email,
           contact,
           last_school_attended: lastSchool,
-          year_completion: yearCompletion,
+          year_completion: isTransferee ? "" : yearCompletion,
+          requested_year_level:
+            normalizeAdmissionYearLevel(program, requestedYearLevel) ||
+            undefined,
           program,
           strand_or_course: program1,
           sex,
@@ -412,6 +560,11 @@ function AdmissionStep2() {
 
   useEffect(() => {
     setProgram1(TRACK_SELECTION_PLACEHOLDER);
+    setRequestedYearLevel(
+      (currentYearLevel) =>
+        normalizeAdmissionYearLevel(program, currentYearLevel) ||
+        YEAR_LEVEL_PLACEHOLDER,
+    );
   }, [program]);
 
   // Close dropdown menus
@@ -448,7 +601,11 @@ function AdmissionStep2() {
   }, []);
 
   if (isLoadingDraft) {
-    return <div className="container admission-step2-page">Loading saved data...</div>;
+    return (
+      <div className="container admission-step2-page">
+        <SkeletonPage eyebrow="Admission" title="Saved Data" variant="form" />
+      </div>
+    );
   }
 
   const isCollege = program === "College";
@@ -484,21 +641,11 @@ function AdmissionStep2() {
                 <input
                   type="text"
                   id="fname"
+                  className={getInputClassName("fname")}
                   required
                   value={fname}
                   onChange={handleInputChange}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="lname">
-                  Last Name <span style={{ color: "red" }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  id="lname"
-                  required
-                  value={lname}
-                  onChange={handleInputChange}
+                  onBlur={() => markFieldTouched("fname")}
                 />
               </div>
               <div className="form-group">
@@ -510,6 +657,20 @@ function AdmissionStep2() {
                   onChange={handleInputChange}
                 />
               </div>
+              <div className="form-group">
+                <label htmlFor="lname">
+                  Last Name <span style={{ color: "red" }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  id="lname"
+                  className={getInputClassName("lname")}
+                  required
+                  value={lname}
+                  onChange={handleInputChange}
+                  onBlur={() => markFieldTouched("lname")}
+                />
+              </div>
             </div>
 
             {/* Sex & Civil Status */}
@@ -519,8 +680,10 @@ function AdmissionStep2() {
                   Sex <span style={{ color: "red" }}>*</span>
                 </label>
                 <div
-                  className="select"
+                  className={getInputClassName("sex", "select")}
                   onClick={() => setIsMenuOpenSex((p) => !p)}
+                  onBlur={() => markFieldTouched("sex")}
+                  tabIndex={0}
                 >
                   <span className="selected">{sex}</span>
                   <div
@@ -533,6 +696,7 @@ function AdmissionStep2() {
                       key={opt}
                       onClick={() => {
                         setSex(opt);
+                        markFieldTouched("sex");
                         setIsMenuOpenSex(false);
                       }}
                     >
@@ -547,8 +711,10 @@ function AdmissionStep2() {
                   Civil Status <span style={{ color: "red" }}>*</span>
                 </label>
                 <div
-                  className="select"
+                  className={getInputClassName("civilStatus", "select")}
                   onClick={() => setIsMenuOpenCS((p) => !p)}
+                  onBlur={() => markFieldTouched("civilStatus")}
+                  tabIndex={0}
                 >
                   <span className="selected">{civilStatus}</span>
                   <div
@@ -561,6 +727,7 @@ function AdmissionStep2() {
                       key={opt}
                       onClick={() => {
                         setCivilStatus(opt);
+                        markFieldTouched("civilStatus");
                         setIsMenuOpenCS(false);
                       }}
                     >
@@ -578,13 +745,14 @@ function AdmissionStep2() {
                   Address <span style={{ color: "red" }}>*</span>
                 </label>
                 <input
-                  className="address-input"
+                  className={getInputClassName("address", "address-input")}
                   type="text"
                   id="address"
                   placeholder="Street Address, City, Province, ZIP Code"
                   required
                   value={address}
                   onChange={handleInputChange}
+                  onBlur={() => markFieldTouched("address")}
                 />
               </div>
             </div>
@@ -598,10 +766,12 @@ function AdmissionStep2() {
                 <input
                   type="email"
                   id="email"
+                  className={getInputClassName("email")}
                   placeholder="example@email.com"
                   required
                   value={email}
                   onChange={handleInputChange}
+                  onBlur={() => markFieldTouched("email")}
                 />
               </div>
               <div className="form-group">
@@ -611,10 +781,12 @@ function AdmissionStep2() {
                 <input
                   type="tel"
                   id="contact"
+                  className={getInputClassName("contact")}
                   placeholder="0912 345 6789"
                   required
                   value={contact}
                   onChange={handleInputChange}
+                  onBlur={() => markFieldTouched("contact")}
                   maxLength={13}
                 />
               </div>
@@ -629,25 +801,31 @@ function AdmissionStep2() {
                 <input
                   type="text"
                   id="lastSchool"
+                  className={getInputClassName("lastSchool")}
                   required
                   value={lastSchool}
                   onChange={handleInputChange}
+                  onBlur={() => markFieldTouched("lastSchool")}
                 />
               </div>
-              <div className="form-group">
-                <label htmlFor="yearCompletion">
-                  Year Completion <span style={{ color: "red" }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  id="yearCompletion"
-                  placeholder="YYYY"
-                  required
-                  value={yearCompletion}
-                  onChange={handleInputChange}
-                  maxLength={4}
-                />
-              </div>
+              {!isTransferee && (
+                <div className="form-group">
+                  <label htmlFor="yearCompletion">
+                    Year Completion <span style={{ color: "red" }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="yearCompletion"
+                    className={getInputClassName("yearCompletion")}
+                    placeholder="YYYY"
+                    required
+                    value={yearCompletion}
+                    onChange={handleInputChange}
+                    onBlur={() => markFieldTouched("yearCompletion")}
+                    maxLength={4}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Honor & Scholarship - Only shows for COLLEGE */}
@@ -722,8 +900,10 @@ function AdmissionStep2() {
                   Educational Level <span style={{ color: "red" }}>*</span>
                 </label>
                 <div
-                  className="select"
+                  className={getInputClassName("program", "select")}
                   onClick={() => setIsMenuOpen((p) => !p)}
+                  onBlur={() => markFieldTouched("program")}
+                  tabIndex={0}
                 >
                   <span className="selected">{program}</span>
                   <div
@@ -737,6 +917,7 @@ function AdmissionStep2() {
                         key={opt}
                         onClick={() => {
                           setProgram(opt);
+                          markFieldTouched("program");
                           setIsMenuOpen(false);
                         }}
                       >
@@ -757,8 +938,10 @@ function AdmissionStep2() {
                   <span style={{ color: "red" }}>*</span>
                 </label>
                 <div
-                  className="select"
+                  className={getInputClassName("program1", "select")}
                   onClick={() => setIsMenuOpen1((p) => !p)}
+                  onBlur={() => markFieldTouched("program1")}
+                  tabIndex={0}
                 >
                   <span className="selected">{program1}</span>
                   <div
@@ -771,6 +954,7 @@ function AdmissionStep2() {
                       key={opt}
                       onClick={() => {
                         setProgram1(opt);
+                        markFieldTouched("program1");
                         setIsMenuOpen1(false);
                         saveDraft();
                       }}
@@ -781,6 +965,44 @@ function AdmissionStep2() {
                 </ul>
               </div>
             </div>
+
+            {needsRequestedYearLevel && (
+              <div className="form-row">
+                <div className="form-group transferee-year-level-field">
+                  <label htmlFor="requestedYearLevel">
+                    Current Year Level <span style={{ color: "red" }}>*</span>
+                  </label>
+                  <select
+                    id="requestedYearLevel"
+                    className={getInputClassName("requestedYearLevel")}
+                    required
+                    value={
+                      normalizeAdmissionYearLevel(program, requestedYearLevel) ||
+                      ""
+                    }
+                    onChange={(event) => {
+                      setRequestedYearLevel(event.target.value);
+                      markFieldTouched("requestedYearLevel");
+                    }}
+                    onBlur={() => markFieldTouched("requestedYearLevel")}
+                  >
+                    <option value="" disabled>
+                      {YEAR_LEVEL_PLACEHOLDER}
+                    </option>
+                    {yearLevelOptions.map((yearLevel) => (
+                      <option key={yearLevel} value={yearLevel}>
+                        {yearLevel}
+                      </option>
+                    ))}
+                  </select>
+                  <small className="transferee-year-level-note">
+                    Choose the year level you already reached before
+                    transferring so the registrar can evaluate your TOR against
+                    the right curriculum.
+                  </small>
+                </div>
+              </div>
+            )}
 
             <div className="choices3">
               <button
@@ -793,9 +1015,9 @@ function AdmissionStep2() {
               </button>
               <button
                 type="button"
-                className={`btn4 ${!isFormValid() || isSubmitting ? "disabled" : ""}`}
+                className={`btn4 ${isSubmitting ? "disabled" : ""}`}
                 onClick={handleContinue}
-                disabled={!isFormValid() || isSubmitting}
+                disabled={isSubmitting}
               >
                 {isSubmitting ? "Saving..." : "Continue"}
               </button>

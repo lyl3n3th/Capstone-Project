@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BsArrowCounterclockwise,
   BsArrowLeft,
@@ -12,6 +12,7 @@ import {
 } from "react-icons/bs";
 import { MdDeleteSweep, MdOutlineMarkEmailUnread } from "react-icons/md";
 import { ToastContainer } from "../../components/common/Toast";
+import SkeletonPage from "../../components/common/SkeletonPage";
 import {
   fetchInboxReports,
   fetchTrashReports,
@@ -105,6 +106,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
   const [showTrashModal, setShowTrashModal] = useState(false);
   const [isUpdatingReviewStatus, setIsUpdatingReviewStatus] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const autoReviewingReportIds = useRef(new Set<string>());
 
   const addToast = (message: string, type: Toast["type"]) => {
     const id = Date.now().toString();
@@ -139,7 +141,7 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
       setTrash(nextTrash);
       setSelectedReport((current) => {
         if (!current) {
-          return nextReports[0] || null;
+          return null;
         }
 
         return (
@@ -201,9 +203,46 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
 
   const selectedReportIsReviewed = selectedReport?.isReviewed ?? false;
 
+  const markReportAsReviewed = async (report: Report) => {
+    if (
+      report.isReviewed ||
+      isUpdatingReviewStatus ||
+      autoReviewingReportIds.current.has(report.id)
+    ) {
+      return;
+    }
+
+    autoReviewingReportIds.current.add(report.id);
+
+    const optimisticReport: Report = {
+      ...report,
+      isReviewed: true,
+      reviewedAt: report.reviewedAt || new Date().toISOString(),
+    };
+
+    replaceReportInState(optimisticReport);
+
+    try {
+      const updated = mapApiReport(
+        await updateReportReviewStatus(report.id, true),
+      );
+      replaceReportInState(updated);
+    } catch (error) {
+      console.error("Failed to automatically mark report as reviewed", error);
+      replaceReportInState(report);
+      addToast("Failed to mark report as reviewed", "error");
+    } finally {
+      autoReviewingReportIds.current.delete(report.id);
+    }
+  };
+
   const handleSelectReport = (report: Report) => {
     setSelectedReport(report);
     setShowDetail(true);
+
+    if (!report.isReviewed) {
+      void markReportAsReviewed(report);
+    }
   };
 
   const handleToggleReviewStatus = async (report: Report) => {
@@ -329,7 +368,14 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
   };
 
   if (loading) {
-    return <div className="am-reports-loading">Loading Reports...</div>;
+    return (
+      <SkeletonPage
+        className="am-reports-wrapper"
+        eyebrow="Inbox"
+        title="Reports"
+        variant="table"
+      />
+    );
   }
 
   return (
@@ -341,64 +387,31 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
       >
         <header className="am-reports-header">
           <div className="am-reports-header-left">
-            {showDetail ? (
-              <button
-                className="am-reports-mobile-back-btn"
-                onClick={() => setShowDetail(false)}
-              >
-                <BsArrowLeft />
-              </button>
-            ) : null}
             <div className="am-reports-title-group">
               <h2>
                 <BsEnvelopePaperFill className="am-reports-title-icon" />
                 Reports
               </h2>
-              <span className="am-reports-msg-count">
-                Inbox: {inboxCount} | Pending Review: {pendingReviewCount}
-              </span>
             </div>
-          </div>
-          <div
-            className={`am-reports-header-right ${showDetail ? "hidden-on-mobile" : ""}`}
-          >
-            <button
-              className="am-reports-trash-toggle-btn"
-              onClick={() => setShowTrashModal(true)}
-            >
-              <BsTrash3 /> Trash ({trash.length})
-            </button>
           </div>
         </header>
 
         <section className="am-reports-summary-band">
-          <button
-            type="button"
-            className={`am-reports-summary-card ${statusFilter === "all" ? "is-active" : ""}`}
-            onClick={() => setStatusFilter("all")}
-          >
+          <div className="am-reports-summary-card">
             <span className="am-reports-summary-label">Inbox</span>
             <strong>{inboxCount}</strong>
             <p>All active reports waiting in the inbox.</p>
-          </button>
-          <button
-            type="button"
-            className={`am-reports-summary-card pending ${statusFilter === "pending" ? "is-active" : ""}`}
-            onClick={() => setStatusFilter("pending")}
-          >
+          </div>
+          <div className="am-reports-summary-card pending">
             <span className="am-reports-summary-label">Pending Review</span>
             <strong>{pendingReviewCount}</strong>
             <p>Focus on reports that still need your review.</p>
-          </button>
-          <button
-            type="button"
-            className={`am-reports-summary-card reviewed ${statusFilter === "reviewed" ? "is-active" : ""}`}
-            onClick={() => setStatusFilter("reviewed")}
-          >
+          </div>
+          <div className="am-reports-summary-card reviewed">
             <span className="am-reports-summary-label">Reviewed</span>
             <strong>{reviewedCount}</strong>
             <p>Reports already checked and cleared by the manager.</p>
-          </button>
+          </div>
         </section>
 
         <div className="am-reports-split-view am-reports-split-view-wide">
@@ -435,6 +448,13 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
                   onClick={() => setStatusFilter("reviewed")}
                 >
                   Reviewed ({reviewedCount})
+                </button>
+                <button
+                  type="button"
+                  className="am-reports-trash-toggle-btn"
+                  onClick={() => setShowTrashModal(true)}
+                >
+                  <BsTrash3 /> Trash ({trash.length})
                 </button>
               </div>
 
@@ -514,28 +534,37 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
             {selectedReport ? (
               <div className="am-reports-full-content">
                 <div className="am-reports-detail-header">
+                  <div className="am-reports-detail-actions">
+                    <button
+                      className="am-reports-detail-back-btn"
+                      onClick={() => setShowDetail(false)}
+                      aria-label="Back to reports"
+                    >
+                      <BsArrowLeft />
+                    </button>
+                    <div className="am-reports-detail-action-group">
+                      <button
+                        className={`am-reports-review-toggle-btn ${selectedReportIsReviewed ? "is-reviewed" : "is-pending"}`}
+                        onClick={() => handleToggleReviewStatus(selectedReport)}
+                        disabled={isUpdatingReviewStatus}
+                      >
+                        {isUpdatingReviewStatus
+                          ? "Updating..."
+                          : selectedReportIsReviewed
+                            ? "Mark as Pending"
+                            : "Mark as Reviewed"}
+                      </button>
+                      <button
+                        className="am-reports-detail-delete-btn"
+                        onClick={() => handleMoveToTrash([selectedReport.id])}
+                      >
+                        <BsTrash3 />
+                      </button>
+                    </div>
+                  </div>
                   <h1 className="am-reports-detail-title">
                     {selectedReport.title}
                   </h1>
-                  <div className="am-reports-detail-actions">
-                    <button
-                      className={`am-reports-review-toggle-btn ${selectedReportIsReviewed ? "is-reviewed" : "is-pending"}`}
-                      onClick={() => handleToggleReviewStatus(selectedReport)}
-                      disabled={isUpdatingReviewStatus}
-                    >
-                      {isUpdatingReviewStatus
-                        ? "Updating..."
-                        : selectedReportIsReviewed
-                          ? "Mark as Pending"
-                          : "Mark as Reviewed"}
-                    </button>
-                    <button
-                      className="am-reports-detail-delete-btn"
-                      onClick={() => handleMoveToTrash([selectedReport.id])}
-                    >
-                      <BsTrash3 />
-                    </button>
-                  </div>
                 </div>
                 <div className="am-reports-info-bar">
                   <div className="am-reports-info-chip">

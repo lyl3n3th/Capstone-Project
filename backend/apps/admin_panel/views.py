@@ -284,6 +284,24 @@ class BackupRestoreStartView(APIView):
             restored_from=source_history.id,
             metadata={"source_backup_id": str(source_history.id)},
         )
+
+        source_snapshot_format = str(
+            (source_history.metadata or {}).get("snapshot_format") or ""
+        ).lower()
+        if source_snapshot_format == "json":
+            try:
+                restore_history = restore_branch_backup(restore_history)
+            except Exception as exc:
+                logger.exception("JSON backup restore failed for history %s", restore_history.id)
+                restore_history = update_backup_history(
+                    restore_history.id,
+                    status=BackupHistory.STATUS_FAILED,
+                    progress=100,
+                    error_message=str(exc),
+                    restore_finished_at=timezone.now(),
+                ) or restore_history
+            return Response(BackupHistorySerializer(restore_history).data, status=status.HTTP_202_ACCEPTED)
+
         try:
             from .tasks import restore_branch_backup_task
 

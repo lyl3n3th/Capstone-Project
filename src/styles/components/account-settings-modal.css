@@ -12,15 +12,15 @@
 
 .account-settings-modal-card {
   width: 100%;
-  max-width: 480px;
-  max-height: 90vh;
+  max-width: 560px;
+  max-height: min(90vh, 720px);
   display: flex;
   flex-direction: column;
   background: #ffffff;
   border-radius: 16px;
   box-shadow: 0 24px 50px rgba(15, 23, 42, 0.24);
   overflow: hidden;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
 }
 
 .account-settings-modal-card,
@@ -74,6 +74,7 @@
 .account-settings-modal-body {
   padding: 20px;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .account-settings-form-grid {
@@ -87,6 +88,10 @@
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+}
+
+.account-settings-form-group-full {
+  grid-column: 1 / -1;
 }
 
 .account-settings-label {
@@ -107,6 +112,11 @@
   font-size: 14px;
   outline: none;
   transition: all 0.2s ease;
+}
+
+.account-settings-input::placeholder {
+  font-size: 11px;
+  text-overflow: ellipsis;
 }
 
 .account-settings-input:focus {
@@ -207,6 +217,17 @@
 }
 
 @media (max-width: 640px) {
+  .account-settings-modal-overlay {
+    align-items: flex-start;
+    padding: 12px;
+    overflow-y: auto;
+  }
+
+  .account-settings-modal-card {
+    max-height: calc(100dvh - 24px);
+    border-radius: 14px;
+  }
+
   .account-settings-form-grid {
     grid-template-columns: 1fr;
   }
@@ -216,6 +237,21 @@
   }
 
   .account-settings-modal-footer {
+    flex-wrap: wrap;
     padding: 14px 16px;
+  }
+
+  .account-settings-btn {
+    flex: 1 1 140px;
+  }
+}
+
+@media (max-width: 380px) {
+  .account-settings-modal-footer {
+    flex-direction: column-reverse;
+  }
+
+  .account-settings-btn {
+    width: 100%;
   }
 }

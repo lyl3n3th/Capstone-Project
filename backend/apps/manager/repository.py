@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from django.contrib.auth import get_user_model
@@ -5,14 +6,12 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 
-from apps.core.models import BRANCH_CHOICES
 from apps.core.supabase_rest import SupabaseRestClient, is_supabase_feature_enabled
 
 from .models import Branch, Report
 
 
 User = get_user_model()
-VALID_BRANCHES = {value for value, _label in BRANCH_CHOICES}
 
 
 @dataclass
@@ -43,6 +42,24 @@ def _normalize_datetime(value):
     if value is None or hasattr(value, "tzinfo"):
         return value
     return parse_datetime(str(value))
+
+
+def _build_branch_code(branch_name):
+    branch_code = re.sub(r"[^a-z0-9]+", "_", branch_name.strip().lower())
+    return branch_code.strip("_") or "branch"
+
+
+def _ensure_supabase_branch(client, branch_name):
+    client.insert(
+        "admission_branches",
+        {
+            "code": _build_branch_code(branch_name),
+            "name": branch_name,
+            "is_active": True,
+        },
+        upsert=True,
+        on_conflict="code",
+    )
 
 
 def _report_from_model(report):
@@ -115,11 +132,12 @@ def create_report(
     message,
     attachment_url="",
 ):
-    if branch_name not in VALID_BRANCHES:
-        raise ValueError("Unsupported branch.")
+    branch_name = branch_name.strip()
 
     if use_supabase_reports():
-        rows = _client().insert(
+        client = _client()
+        _ensure_supabase_branch(client, branch_name)
+        rows = client.insert(
             "branch_reports",
             {
                 "sender": sender_identifier,

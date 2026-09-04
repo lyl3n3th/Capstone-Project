@@ -1,7 +1,7 @@
 import { supabase } from "../lib/supabase";
 import type { StaffRole as AppStaffRole } from "../types/user";
 
-export type StaffBranch = "Bacoor" | "Taytay" | "GMA";
+export type StaffBranch = string;
 export type StaffDirectoryRole = "Registrar" | "Branch Administrator";
 export type StaffDirectoryStatus = "active" | "inactive";
 
@@ -44,6 +44,11 @@ interface StaffLoginApiResponse {
   full_name: string;
   role: "admin" | "registrar";
   password_change_required?: boolean;
+}
+
+export interface ManagedBranch {
+  code: string;
+  name: StaffBranch;
 }
 
 export interface StaffLoginResult {
@@ -121,8 +126,82 @@ const buildStaffPayload = (staff: StaffMember) => ({
   p_status: staff.status,
 });
 
+const buildBranchCode = (branchName: string) => {
+  const code = branchName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return code || branchName.trim().toLowerCase();
+};
+
 export const buildEmployeeIdPreview = (branch: StaffBranch) =>
   `AICS-${branch.toUpperCase()}-XXXXXX`;
+
+export async function fetchManagedBranches() {
+  const { data, error } = await supabase
+    .rpc("list_area_manager_branches")
+    .returns<ManagedBranch[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  return Array.isArray(data) ? data : [];
+}
+
+export async function addManagedBranch(branchName: string) {
+  const normalizedName = branchName.trim();
+
+  if (!normalizedName) {
+    throw new Error("Branch name is required.");
+  }
+
+  const { data, error } = await supabase
+    .rpc("upsert_area_manager_branch", {
+      p_code: buildBranchCode(normalizedName),
+      p_name: normalizedName,
+    })
+    .returns<ManagedBranch[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<ManagedBranch>(data);
+  if (!row) {
+    throw new Error("Supabase did not return the saved branch.");
+  }
+
+  return row;
+}
+
+export async function syncManagedBranches(branchNames: string[]) {
+  const uniqueBranchNames = Array.from(
+    new Set(
+      branchNames
+        .map((branchName) => branchName.trim())
+        .filter((branchName) => branchName.length > 0),
+    ),
+  );
+
+  const savedBranches = await Promise.all(
+    uniqueBranchNames.map((branchName) => addManagedBranch(branchName)),
+  );
+
+  return savedBranches;
+}
+
+export async function removeManagedBranch(branchName: string) {
+  const { error } = await supabase.rpc("deactivate_area_manager_branch", {
+    p_branch: branchName,
+  });
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+}
 
 export async function fetchStaffMembers(options?: { trash?: boolean }) {
   const { data, error } = await supabase

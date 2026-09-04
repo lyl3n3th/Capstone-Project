@@ -1,8 +1,5 @@
 from rest_framework import serializers
 
-from apps.core.models import BRANCH_CHOICES
-
-
 class ReportSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     sender = serializers.CharField(read_only=True, allow_null=True)
@@ -19,7 +16,7 @@ class ReportSerializer(serializers.Serializer):
 
 
 class ReportCreateSerializer(serializers.Serializer):
-    branch = serializers.ChoiceField(choices=[value for value, _label in BRANCH_CHOICES])
+    branch = serializers.CharField(max_length=100, trim_whitespace=True)
     subject = serializers.CharField(max_length=255)
     message = serializers.CharField()
     attachment = serializers.FileField(required=False, allow_null=True)

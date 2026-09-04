@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import aicslogst from "../../assets/images/aicslogst-2.png";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
+import SystemAlertModal from "../../components/common/SystemAlertModal";
 import {
   activateApprovedStudent,
   registerStudentPortalAccount,
@@ -21,6 +22,11 @@ function StudentRegistration() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [systemAlert, setSystemAlert] = useState<{
+    title: string;
+    message: string;
+    onClose?: () => void;
+  } | null>(null);
 
   const [formData, setFormData] = useState({
     studentNumber: "",
@@ -68,6 +74,20 @@ function StudentRegistration() {
     return formatted.replace(/\D/g, "");
   };
 
+  const showSystemAlert = (
+    title: string,
+    message: string,
+    onClose?: () => void,
+  ) => {
+    setSystemAlert({ title, message, onClose });
+  };
+
+  const closeSystemAlert = () => {
+    const closeAction = systemAlert?.onClose;
+    setSystemAlert(null);
+    closeAction?.();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -76,20 +96,27 @@ function StudentRegistration() {
     );
 
     if (!isValidStudentNumber(normalizedStudentNumber)) {
-      alert("Please enter a valid student number in the format BAC-261001.");
+      showSystemAlert(
+        "Check Student Number",
+        "Please enter a valid student number in the format BAC-261001.",
+      );
       return;
     }
 
     const rawPhone = getRawPhoneNumber(formData.mobile);
     if (rawPhone.length < 11) {
-      alert(
+      showSystemAlert(
+        "Check Mobile Number",
         "Invalid Mobile number. Please enter 11 digits (e.g., 09123456789)",
       );
       return;
     }
 
     if (formData.password.length < 8) {
-      alert("Password must be at least 8 characters long.");
+      showSystemAlert(
+        "Check Password",
+        "Password must be at least 8 characters long.",
+      );
       setFormData((prev) => ({
         ...prev,
         password: "",
@@ -99,7 +126,7 @@ function StudentRegistration() {
     }
 
     if (formData.password !== formData.confirmPassword) {
-      alert("Passwords do not match.");
+      showSystemAlert("Check Password", "Passwords do not match.");
       setFormData((prev) => ({
         ...prev,
         password: "",
@@ -166,14 +193,19 @@ function StudentRegistration() {
         resolvedStudentNumber !== normalizedStudentNumber
           ? `Registration successful. Your student number is ${resolvedStudentNumber}. You can now sign in to the student portal.`
           : "Registration successful. You can now sign in to the student portal.";
-      alert(successMessage);
-      navigate(
-        `/student/login?studentNumber=${encodeURIComponent(resolvedStudentNumber)}`,
-        { replace: true },
+      showSystemAlert(
+        "Registration Successful",
+        successMessage,
+        () =>
+          navigate(
+            `/student/login?studentNumber=${encodeURIComponent(resolvedStudentNumber)}`,
+            { replace: true },
+          ),
       );
     } catch (error) {
       console.error("Student registration failed", error);
-      alert(
+      showSystemAlert(
+        "Unable to Register",
         error instanceof Error
           ? error.message
           : "Unable to register right now. Please try again.",
@@ -339,6 +371,12 @@ function StudentRegistration() {
           </div>
         </div>
       </div>
+      <SystemAlertModal
+        isOpen={Boolean(systemAlert)}
+        title={systemAlert?.title || ""}
+        message={systemAlert?.message || ""}
+        onClose={closeSystemAlert}
+      />
     </div>
   );
 }

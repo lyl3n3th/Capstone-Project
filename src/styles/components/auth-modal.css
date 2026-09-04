@@ -11,6 +11,10 @@
   z-index: 1200;
 }
 
+.auth-modal-overlay.system-alert-modal-overlay {
+  z-index: 3000;
+}
+
 .auth-modal-card {
   width: min(100%, 480px);
   max-height: min(720px, calc(100vh - 32px));
@@ -99,6 +103,36 @@
   padding: 16px 22px 22px;
   border-top: 1px solid #e2e8f0;
   flex-shrink: 0;
+}
+
+.system-alert-modal-message {
+  margin: 0;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.system-alert-modal-btn {
+  min-width: 96px;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #1A3D5C 0%, #066287 100%);
+  color: #ffffff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease;
+}
+
+.system-alert-modal-btn:hover {
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #20639e 0%, #0a7ab3 100%);
 }
 
 @media (max-width: 540px) {

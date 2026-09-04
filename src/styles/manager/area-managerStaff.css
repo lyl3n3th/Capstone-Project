@@ -144,7 +144,7 @@
 /* Filters Row */
 .stf-filters-row {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 12px;
 }
 
@@ -198,6 +198,21 @@
   transform: translateY(-1px);
 }
 
+.stf-branches-btn {
+  background: #f8fafc;
+  color: #1A3D5C;
+  border-color: #bfdbfe !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.stf-branches-btn:hover {
+  background: #e0f2fe;
+  transform: translateY(-1px);
+}
+
 /* Table */
 .stf-table-wrapper {
   width: 100%;
@@ -214,7 +229,7 @@
 }
 
 .stf-table th {
-  text-align: left;
+  text-align: center;
   padding: 14px 12px;
   color: #6b7280;
   font-size: 11px;
@@ -248,11 +263,12 @@
   font-size: 13px;
   color: #334155;
   background: white;
+  text-align: center;
 }
 
 /* Column Classes */
 .stf-id-col {
-  font-family: 'Courier New', monospace;
+  font-family: "Open Sans", Arial, sans-serif;
   font-weight: 700;
   color: #64748b;
 }
@@ -268,17 +284,6 @@
 
 .stf-branch-col {
   color: #334155;
-}
-
-/* Branch Badge */
-.stf-branch-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 11px;
-  font-weight: 600;
-  background: #e3f2fd;
-  color: #066287;
 }
 
 /* Status Badge */
@@ -380,7 +385,9 @@
 }
 
 .stf-modal-card,
-.stf-trash-card {
+.stf-trash-card,
+.stf-branches-card,
+.stf-confirm-card {
   background: white;
   width: 100%;
   border-radius: 16px;
@@ -397,6 +404,14 @@
 
 .stf-trash-card {
   max-width: 820px;
+}
+
+.stf-branches-card {
+  max-width: 560px;
+}
+
+.stf-confirm-card {
+  max-width: 460px;
 }
 
 /* Modal Header */
@@ -727,6 +742,69 @@
   transform: translateY(-1px);
 }
 
+.stf-btn-delete-perm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.stf-btn-delete-perm:disabled:hover {
+  background: white;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.stf-branch-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.stf-branch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stf-branch-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.stf-branch-item strong {
+  display: block;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.stf-branch-item span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.stf-confirm-copy {
+  margin: 0;
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.stf-confirm-note {
+  margin: 12px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .stf-empty-state {
   text-align: center;
   padding: 48px;
@@ -873,6 +951,21 @@
   .stf-filters-row button {
     font-size: 12px;
     padding: 8px 12px;
+  }
+
+  .stf-branch-add-row,
+  .stf-branch-item {
+    grid-template-columns: 1fr;
+  }
+
+  .stf-branch-add-row {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .stf-branch-item {
+    align-items: stretch;
+    flex-direction: column;
   }
   
   .stf-table {

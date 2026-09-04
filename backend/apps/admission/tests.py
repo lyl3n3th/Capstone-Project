@@ -10,6 +10,7 @@ from apps.admission.tracking_recovery import (
     AdmissionTrackingNotificationTarget,
     TrackingRecoveryMatch,
     build_decision_notification_email_message,
+    build_requirement_redo_email_message,
 )
 
 
@@ -275,6 +276,116 @@ class AdmissionSubmissionNotificationApiTests(TestCase):
         self.assertIn("detail", response.json())
 
 
+class AdmissionRequirementRedoNotificationApiTests(TestCase):
+    def test_requirement_redo_notification_requires_requirement_name(self):
+        response = self.client.post(
+            "/api/admissions/requirement-redo-notification/",
+            data=json.dumps({"trackingNumber": "AICS-20260425-REDO1"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("errors", response.json())
+
+    @patch("apps.admission.views.deliver_requirement_redo_notification")
+    @patch("apps.admission.views.find_tracking_notification_target")
+    def test_requirement_redo_notification_sends_specific_credential(
+        self,
+        mock_find_tracking_notification_target,
+        mock_deliver_requirement_redo_notification,
+    ):
+        mock_find_tracking_notification_target.return_value = (
+            AdmissionTrackingNotificationTarget(
+                tracking_number="AICS-20260425-REDO1",
+                email="jane@example.com",
+                phone_number="09123456789",
+                first_name="Jane",
+                last_name="Doe",
+                application_status="submitted",
+                submitted_at="2026-04-25T08:00:00+00:00",
+                created_at="2026-04-25T07:00:00+00:00",
+            )
+        )
+        mock_deliver_requirement_redo_notification.return_value = {
+            "email": {
+                "status": "sent",
+                "destination": "ja***@example.com",
+            }
+        }
+
+        response = self.client.post(
+            "/api/admissions/requirement-redo-notification/",
+            data=json.dumps(
+                {
+                    "trackingNumber": "AICS-20260425-REDO1",
+                    "requirementName": "Form 137",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        delivered_target = mock_deliver_requirement_redo_notification.call_args.args[0]
+        delivered_kwargs = mock_deliver_requirement_redo_notification.call_args.kwargs
+        self.assertEqual(delivered_target.tracking_number, "AICS-20260425-REDO1")
+        self.assertEqual(delivered_kwargs["requirement_name"], "Form 137")
+
+    @patch("apps.admission.views.find_tracking_notification_target")
+    @patch("apps.admission.views.deliver_requirement_redo_notification")
+    def test_requirement_redo_notification_can_use_request_contact_details(
+        self,
+        mock_deliver_requirement_redo_notification,
+        mock_find_tracking_notification_target,
+    ):
+        mock_deliver_requirement_redo_notification.return_value = {
+            "email": {
+                "status": "sent",
+                "destination": "ja***@example.com",
+            }
+        }
+
+        response = self.client.post(
+            "/api/admissions/requirement-redo-notification/",
+            data=json.dumps(
+                {
+                    "trackingNumber": "AICS-20260425-REDO2",
+                    "requirementName": "Birth Certificate/PSA",
+                    "email": "jane@example.com",
+                    "mobile": "0912 345 6789",
+                    "firstName": "Jane",
+                    "lastName": "Doe",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_find_tracking_notification_target.assert_not_called()
+        delivered_target = mock_deliver_requirement_redo_notification.call_args.args[0]
+        self.assertEqual(delivered_target.tracking_number, "AICS-20260425-REDO2")
+        self.assertEqual(delivered_target.email, "jane@example.com")
+        self.assertEqual(delivered_target.phone_number, "09123456789")
+
+    def test_requirement_redo_email_includes_tracking_number_and_credential(self):
+        message = build_requirement_redo_email_message(
+            AdmissionTrackingNotificationTarget(
+                tracking_number="AICS-20260425-REDO1",
+                email="jane@example.com",
+                phone_number="09123456789",
+                first_name="Jane",
+                last_name="Doe",
+                application_status="submitted",
+                submitted_at="2026-04-25T08:00:00+00:00",
+                created_at="2026-04-25T07:00:00+00:00",
+            ),
+            requirement_name="Form 137",
+        )
+
+        self.assertIn("Form 137", message)
+        self.assertIn("AICS-20260425-REDO1", message)
+        self.assertIn("Upload Requirements page", message)
+
+
 class AdmissionDecisionNotificationApiTests(TestCase):
     def test_decision_notification_requires_reason(self):
         response = self.client.post(
@@ -418,7 +529,7 @@ class AdmissionDecisionNotificationApiTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertIn("detail", response.json())
 
-    def test_accepted_decision_email_includes_registration_note_before_sign_in(self):
+    def test_accepted_decision_email_includes_login_note_with_admission_email(self):
         message = build_decision_notification_email_message(
             AdmissionDecisionNotificationTarget(
                 email="jane@example.com",
@@ -433,10 +544,10 @@ class AdmissionDecisionNotificationApiTests(TestCase):
         )
 
         self.assertIn(
-            "You must register your student portal account first before signing in or accessing the student portal.",
+            "You may now log in to the student portal using the email address you used in your admission application.",
             message,
         )
         self.assertIn(
-            "Use the assigned student number above, together with your approved email address and mobile number, during portal registration.",
+            "Your assigned student number is included above for your school records.",
             message,
         )

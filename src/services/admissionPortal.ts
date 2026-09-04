@@ -1,8 +1,15 @@
 import type { AdmissionBranchCode } from "../types/application";
-import { admissionBranches } from "./admission";
+import {
+  admissionBranches,
+  fetchAdmissionBranches,
+  normalizeBranchCode,
+  type AdmissionBranchOption,
+} from "./admission";
+import { supabase } from "../lib/supabase";
 
 export const ADMISSION_PORTAL_STATUS_STORAGE_KEY =
   "aics-admission-portal-status";
+const ADMISSION_PORTAL_BRANCHES_STORAGE_KEY = "aics-admission-portal-branches";
 export const ADMISSION_PORTAL_STATUS_UPDATED_EVENT =
   "aics-admission-portal-status-updated";
 export const ADMISSION_PORTAL_OPEN_DESCRIPTION =
@@ -37,17 +44,29 @@ type AdmissionPortalStatusStore = Partial<
   Record<AdmissionBranchCode, Partial<AdmissionPortalStatusRecord>>
 >;
 
+type SupabaseErrorLike = {
+  details?: string | null;
+  hint?: string | null;
+  message: string;
+};
+
+type AdmissionPortalStatusRow = {
+  branch: string;
+  is_open: boolean;
+  close_on_date: string | null;
+  updated_at: string;
+};
+
 const ADMISSION_CLOSE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export const DEFAULT_ADMISSION_BRANCH_CODE: AdmissionBranchCode =
   admissionBranches[0].code;
 
-const ADMISSION_BRANCH_CODES = admissionBranches.map(
-  (branch) => branch.code,
-) as AdmissionBranchCode[];
-
-const ADMISSION_BRANCH_NAME_BY_CODE = Object.fromEntries(
-  admissionBranches.map((branch) => [branch.code, branch.name]),
-) as Record<AdmissionBranchCode, string>;
+const getErrorMessage = (error: SupabaseErrorLike) =>
+  error.details
+    ? `${error.message} ${error.details}`.trim()
+    : error.hint
+      ? `${error.message} ${error.hint}`.trim()
+      : error.message;
 
 const getDefaultAdmissionPortalStatus = (): AdmissionPortalStatusRecord => ({
   isOpen: true,
@@ -55,11 +74,78 @@ const getDefaultAdmissionPortalStatus = (): AdmissionPortalStatusRecord => ({
   updatedAt: "",
 });
 
+const normalizeAdmissionPortalBranchOptions = (
+  branches: AdmissionBranchOption[],
+) =>
+  branches
+    .map((branch) => ({
+      code: normalizeBranchCode(branch.code),
+      name: branch.name.trim(),
+    }))
+    .filter((branch) => branch.code && branch.name);
+
+const readCachedAdmissionPortalBranches = () => {
+  if (typeof window === "undefined") {
+    return [...admissionBranches];
+  }
+
+  const rawValue = window.localStorage.getItem(
+    ADMISSION_PORTAL_BRANCHES_STORAGE_KEY,
+  );
+  if (!rawValue) {
+    return [...admissionBranches];
+  }
+
+  try {
+    const parsedValue = JSON.parse(rawValue) as AdmissionBranchOption[];
+    const branches = Array.isArray(parsedValue)
+      ? normalizeAdmissionPortalBranchOptions(parsedValue)
+      : [];
+
+    return branches.length > 0 ? branches : [...admissionBranches];
+  } catch (error) {
+    console.warn("Failed to parse admission portal branches", error);
+    return [...admissionBranches];
+  }
+};
+
+const writeCachedAdmissionPortalBranches = (
+  branches: AdmissionBranchOption[],
+) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const normalizedBranches = normalizeAdmissionPortalBranchOptions(branches);
+  window.localStorage.setItem(
+    ADMISSION_PORTAL_BRANCHES_STORAGE_KEY,
+    JSON.stringify(
+      normalizedBranches.length > 0 ? normalizedBranches : admissionBranches,
+    ),
+  );
+};
+
+const getAdmissionPortalBranches = () => readCachedAdmissionPortalBranches();
+
+const formatFallbackBranchName = (branchCode: AdmissionBranchCode) =>
+  branchCode
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase()) || branchCode;
+
+const getAdmissionPortalBranchName = (branchCode: AdmissionBranchCode) =>
+  getAdmissionPortalBranches().find((branch) => branch.code === branchCode)
+    ?.name ?? formatFallbackBranchName(branchCode);
+
 const createAdmissionPortalStatusStore = (
   record: AdmissionPortalStatusRecord = getDefaultAdmissionPortalStatus(),
 ) =>
   Object.fromEntries(
-    ADMISSION_BRANCH_CODES.map((branchCode) => [branchCode, { ...record }]),
+    getAdmissionPortalBranches().map((branch) => [
+      branch.code,
+      { ...record },
+    ]),
   ) as Record<AdmissionBranchCode, AdmissionPortalStatusRecord>;
 
 export const resolveAdmissionPortalBranchCode = (
@@ -71,13 +157,13 @@ export const resolveAdmissionPortalBranchCode = (
     return null;
   }
 
-  const matchedBranch = admissionBranches.find(
+  const matchedBranch = getAdmissionPortalBranches().find(
     (candidate) =>
       candidate.code === normalizedBranch ||
       candidate.name.trim().toLowerCase() === normalizedBranch,
   );
 
-  return matchedBranch?.code ?? null;
+  return matchedBranch?.code ?? normalizeBranchCode(normalizedBranch);
 };
 
 const normalizeAdmissionCloseOnDate = (value: string | null | undefined) => {
@@ -179,9 +265,9 @@ const readStoredAdmissionPortalStore = () => {
       const parsedStore = parsedValue as AdmissionPortalStatusStore;
 
       return Object.fromEntries(
-        ADMISSION_BRANCH_CODES.map((branchCode) => [
-          branchCode,
-          normalizeStoredAdmissionPortalStatus(parsedStore[branchCode]),
+        getAdmissionPortalBranches().map((branch) => [
+          branch.code,
+          normalizeStoredAdmissionPortalStatus(parsedStore[branch.code]),
         ]),
       ) as Record<AdmissionBranchCode, AdmissionPortalStatusRecord>;
     }
@@ -205,12 +291,51 @@ const writeStoredAdmissionPortalStore = (
   );
 };
 
+export const fetchAndCacheAdmissionPortalStatuses = async () => {
+  const admissionBranchOptions = await fetchAdmissionBranches();
+  writeCachedAdmissionPortalBranches(admissionBranchOptions);
+  const branches = getAdmissionPortalBranches();
+  const { data, error } = await supabase
+    .rpc("list_admission_portal_statuses")
+    .returns<AdmissionPortalStatusRow[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const store = readStoredAdmissionPortalStore();
+  (Array.isArray(data) ? data : []).forEach((row) => {
+    const branchCode =
+      branches.find(
+        (branch) =>
+          branch.code === normalizeBranchCode(row.branch) ||
+          branch.name.trim().toLowerCase() === row.branch.trim().toLowerCase(),
+      )?.code ?? resolveAdmissionPortalBranchCode(row.branch);
+
+    if (!branchCode) {
+      return;
+    }
+
+    store[branchCode] = normalizeStoredAdmissionPortalStatus({
+      isOpen: row.is_open,
+      closeOnDate: row.close_on_date || "",
+      updatedAt: row.updated_at,
+    });
+  });
+
+  writeStoredAdmissionPortalStore(store);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(ADMISSION_PORTAL_STATUS_UPDATED_EVENT));
+  }
+  return getAdmissionPortalOverview();
+};
+
 const getBranchStatusSnapshot = (
   branchCode: AdmissionBranchCode,
   status: AdmissionPortalStatusRecord,
 ): AdmissionPortalBranchStatus => ({
   branchCode,
-  branchName: ADMISSION_BRANCH_NAME_BY_CODE[branchCode],
+  branchName: getAdmissionPortalBranchName(branchCode),
   ...resolveAdmissionPortalStatus(status),
 });
 
@@ -222,13 +347,19 @@ export const getAdmissionPortalStatus = (branch: string | null | undefined) => {
   }
 
   const store = readStoredAdmissionPortalStore();
-  return getBranchStatusSnapshot(branchCode, store[branchCode]);
+  return getBranchStatusSnapshot(
+    branchCode,
+    normalizeStoredAdmissionPortalStatus(store[branchCode]),
+  );
 };
 
 export const getAdmissionPortalOverview = (): AdmissionPortalOverview => {
   const store = readStoredAdmissionPortalStore();
-  const branches = ADMISSION_BRANCH_CODES.map((branchCode) =>
-    getBranchStatusSnapshot(branchCode, store[branchCode]),
+  const branches = getAdmissionPortalBranches().map((branch) =>
+    getBranchStatusSnapshot(
+      branch.code,
+      normalizeStoredAdmissionPortalStatus(store[branch.code]),
+    ),
   );
   const openBranches = branches.filter((branch) => branch.isOpen);
   const closedBranches = branches.filter((branch) => !branch.isOpen);
@@ -286,6 +417,20 @@ export const setAdmissionPortalStatus = ({
   };
 
   writeStoredAdmissionPortalStore(nextStore);
+  void supabase
+    .rpc("upsert_admission_portal_status", {
+      p_branch: getAdmissionPortalBranchName(branchCode),
+      p_is_open: nextStatus.isOpen,
+      p_close_on_date: nextStatus.closeOnDate,
+    })
+    .then(({ error }) => {
+      if (error) {
+        console.warn(
+          "Unable to sync admission portal status to Supabase; local status was updated.",
+          error,
+        );
+      }
+    });
   window.dispatchEvent(
     new CustomEvent(ADMISSION_PORTAL_STATUS_UPDATED_EVENT, {
       detail: {

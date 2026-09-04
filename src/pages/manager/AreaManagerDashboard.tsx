@@ -18,15 +18,23 @@ import {
 } from "react-icons/md";
 import {
   getDefaultBranchEnrollees,
+  getKnownAdminBranches,
   getStudentsForBranch,
   normalizeBranchName,
+  readStoredStudents,
   readBranchScopedData,
   type AdminBranchName,
   type AdminEnrolleeRecord,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
 import { fetchInboxReports, type ReportRecord } from "../../services/reportApi";
+import {
+  fetchManagedBranches,
+  fetchStaffMembers,
+  syncManagedBranches,
+} from "../../services/staffApi";
 import ChartNote from "../../components/common/ChartNote";
+import SkeletonPage from "../../components/common/SkeletonPage";
 import "../../styles/manager/area-managerDashboard.css";
 import "../../styles/manager/area-manager.css";
 
@@ -76,7 +84,7 @@ type PopulationRecord = {
   academicLevel: "SHS" | "College" | "Other";
 };
 
-const MANAGER_BRANCHES: AdminBranchName[] = ["Bacoor", "Taytay", "GMA"];
+const DEFAULT_MANAGER_BRANCHES: AdminBranchName[] = ["Bacoor", "Taytay", "GMA"];
 const chartColors = ["#0052cc", "#4c8bf5", "#97bcff", "#c2d6ff", "#e2e8f0"];
 
 const getAcademicLevel = (program?: string) => {
@@ -166,9 +174,35 @@ const getBranchEnrollees = (branch: AdminBranchName) =>
   readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", branch) ??
   getDefaultBranchEnrollees(branch);
 
-const buildPendingReportCounts = (reports: ReportRecord[]) => {
+const getUniqueSortedBranches = (branches: string[]) =>
+  Array.from(
+    new Set(
+      branches
+        .map((branch) => normalizeBranchName(branch))
+        .filter((branch) => branch.trim().length > 0),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+
+const buildDashboardBranches = (
+  reports: ReportRecord[],
+  managedBranches: string[] = [],
+  staffBranches: string[] = [],
+) =>
+  getUniqueSortedBranches([
+    ...DEFAULT_MANAGER_BRANCHES,
+    ...getKnownAdminBranches(),
+    ...managedBranches,
+    ...staffBranches,
+    ...reports.map((report) => report.branch_name),
+    ...readStoredStudents().map((student) => student.branch),
+  ]);
+
+const buildPendingReportCounts = (
+  reports: ReportRecord[],
+  branches: AdminBranchName[],
+) => {
   const countsByBranch = new Map<AdminBranchName, number>(
-    MANAGER_BRANCHES.map((branch) => [branch, 0] as const),
+    branches.map((branch) => [branch, 0] as const),
   );
 
   reports.forEach((report) => {
@@ -196,9 +230,21 @@ const buildPendingReportCounts = (reports: ReportRecord[]) => {
   };
 };
 
-const buildLocalDashboardState = (reports: ReportRecord[] = []): DashboardState => {
-  const pendingReportCounts = buildPendingReportCounts(reports);
-  const branches = MANAGER_BRANCHES.map((branch) => {
+const buildLocalDashboardState = (
+  reports: ReportRecord[] = [],
+  managedBranches: string[] = [],
+  staffBranches: string[] = [],
+): DashboardState => {
+  const dashboardBranches = buildDashboardBranches(
+    reports,
+    managedBranches,
+    staffBranches,
+  );
+  const pendingReportCounts = buildPendingReportCounts(
+    reports,
+    dashboardBranches,
+  );
+  const branches = dashboardBranches.map((branch) => {
     const students = getStudentsForBranch(branch);
     const enrollees = getBranchEnrollees(branch);
     const studentPopulation = buildPopulationRecordsFromStudents(students);
@@ -263,8 +309,36 @@ const AreaManagerDashboard = ({
 
   const fetchAllData = async () => {
     try {
-      const inboxReports = await fetchInboxReports();
-      applyDashboardState(buildLocalDashboardState(inboxReports));
+      const [inboxReports, managedBranches, staffMembers] = await Promise.all([
+        fetchInboxReports(),
+        fetchManagedBranches().catch((error) => {
+          console.error("Failed to load managed branches:", error);
+          return [];
+        }),
+        fetchStaffMembers().catch((error) => {
+          console.error("Failed to load staff branches:", error);
+          return [];
+        }),
+      ]);
+      const managedBranchNames = managedBranches.map((branch) => branch.name);
+      const staffBranchNames = staffMembers.map((staffMember) => staffMember.branch);
+      const dashboardBranches = buildDashboardBranches(
+        inboxReports,
+        managedBranchNames,
+        staffBranchNames,
+      );
+
+      void syncManagedBranches(dashboardBranches).catch((error) => {
+        console.error("Failed to sync dashboard branches to Supabase:", error);
+      });
+
+      applyDashboardState(
+        buildLocalDashboardState(
+          inboxReports,
+          dashboardBranches,
+          staffBranchNames,
+        ),
+      );
     } catch (error) {
       console.error("Failed to load manager dashboard reports:", error);
       applyDashboardState(buildLocalDashboardState());
@@ -287,12 +361,17 @@ const AreaManagerDashboard = ({
       accumulator + (currentBranch.total_students || 0),
     0,
   );
-  const branchesWithPopulation = dashboardData.filter(
-    (branch) => branch.total_students > 0,
-  );
+  const barChartMinWidth = Math.max(900, dashboardData.length * 240);
 
   if (loading) {
-    return <div className="loading-screen">Loading Dashboard...</div>;
+    return (
+      <SkeletonPage
+        className="manager-dashboard-container"
+        eyebrow="Area Manager"
+        title="Dashboard"
+        variant="dashboard"
+      />
+    );
   }
 
   return (
@@ -301,8 +380,8 @@ const AreaManagerDashboard = ({
         <div className="welcome-header">
           <h1>Dashboard</h1>
           <p>
-            Asian Institute of Computer Studies (Bacoor, Taytay, GMA) | Signed
-            in as {loggedInUsername}
+            Asian Institute of Computer Studies | Signed in as{" "}
+            {loggedInUsername}
           </p>
         </div>
 
@@ -363,29 +442,42 @@ const AreaManagerDashboard = ({
           </ChartNote>
           <div className="chart-wrapper-mobile">
             {barData && (
-              <Bar
-                data={barData}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: {
-                      display: true,
-                      position: "top",
-                      labels: { boxWidth: 12, font: { size: 10 } },
+              <div
+                className="bar-chart-scroll-inner"
+                style={{ minWidth: `${barChartMinWidth}px` }}
+              >
+                <Bar
+                  data={barData}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                      legend: {
+                        display: true,
+                        position: "top",
+                        labels: { boxWidth: 12, font: { size: 10 } },
+                      },
+                      tooltip: { mode: "index", intersect: false },
                     },
-                    tooltip: { mode: "index", intersect: false },
-                  },
-                  scales: {
-                    y: {
-                      stacked: true,
-                      beginAtZero: true,
-                      grid: { color: "#f1f5f9" },
+                    scales: {
+                      y: {
+                        stacked: true,
+                        beginAtZero: true,
+                        grid: { color: "#f1f5f9" },
+                      },
+                      x: {
+                        stacked: true,
+                        grid: { display: false },
+                        ticks: {
+                          maxRotation: 0,
+                          minRotation: 0,
+                          autoSkip: false,
+                        },
+                      },
                     },
-                    x: { stacked: true, grid: { display: false } },
-                  },
-                }}
-              />
+                  }}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -395,11 +487,12 @@ const AreaManagerDashboard = ({
         </div>
 
         <div className="pie-charts-row">
-          {branchesWithPopulation.length > 0 ? (
-            branchesWithPopulation.map((branch, index) => {
+          {dashboardData.length > 0 ? (
+            dashboardData.map((branch, index) => {
               const labels = branch.course_counts.labels || [];
               const counts = branch.course_counts.counts || [];
               const percentages = branch.course_counts.percentages || {};
+              const hasPopulationData = branch.total_students > 0;
 
               return (
                 <div className="dashboard-card pie-item" key={index}>
@@ -414,7 +507,8 @@ const AreaManagerDashboard = ({
                     {branch.branch_name}. The percentages beside the chart are
                     based on this branch total only.
                   </ChartNote>
-                  <div className="chart-content-row-mobile">
+                  {hasPopulationData ? (
+                    <div className="chart-content-row-mobile">
                     <div className="pie-container-mobile">
                       <Pie
                         data={{
@@ -464,7 +558,12 @@ const AreaManagerDashboard = ({
                         );
                       })}
                     </div>
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="branch-population-empty">
+                      No student population data yet.
+                    </div>
+                  )}
                 </div>
               );
             })

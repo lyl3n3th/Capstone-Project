@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     AdmissionDecisionNotificationView,
+    AdmissionRequirementRedoNotificationView,
     AdmissionStep2View,
     AdmissionSubmissionNotificationView,
     AdmissionTrackingRecoveryView,
@@ -24,6 +25,11 @@ urlpatterns = [
         "decision-notification/",
         AdmissionDecisionNotificationView.as_view(),
         name="admission-decision-notification",
+    ),
+    path(
+        "requirement-redo-notification/",
+        AdmissionRequirementRedoNotificationView.as_view(),
+        name="admission-requirement-redo-notification",
     ),
     path(
         "requirements/",

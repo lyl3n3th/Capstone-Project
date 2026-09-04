@@ -7,14 +7,7 @@
   margin-right: calc(50% - 50vw);
   background: #ffffff;
   overflow: hidden;
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    "Helvetica Neue",
-    sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
 }
 
 .admission-home,
@@ -360,15 +353,21 @@
 
 @media (max-width: 480px) {
   .admission-home__visual {
-    min-height: 28rem;
+    min-height: 22rem;
+    padding: 1rem;
+  }
+
+  .admission-home__visual-copy {
+    padding: 1.1rem;
+    border-radius: 18px;
   }
 
   .admission-home__visual-copy h1 {
-    font-size: clamp(2rem, 11vw, 2.75rem);
+    font-size: clamp(1.85rem, 10vw, 2.45rem);
   }
 
   .content h2 {
-    font-size: clamp(1.9rem, 10vw, 2.4rem);
+    font-size: clamp(1.65rem, 9vw, 2.2rem);
   }
 
   #p2 {
@@ -380,5 +379,44 @@
   .input-field,
   .track-cont {
     border-radius: 16px;
+  }
+}
+
+@media (max-width: 360px) {
+  .admission-home__visual {
+    min-height: 18rem;
+    padding: 0.75rem;
+  }
+
+  .admission-home__visual-copy {
+    padding: 0.9rem;
+  }
+
+  .admission-home__visual-kicker,
+  .content-kicker {
+    letter-spacing: 0.12em;
+  }
+
+  .admission-home__visual-copy > p:last-child,
+  #p2,
+  .admission-portal-note {
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+
+  .admission-home__panel {
+    padding: 1rem;
+  }
+
+  .logo {
+    width: 76px;
+  }
+
+  .admission-primary-action,
+  .input-field,
+  .track-cont {
+    min-height: 3.1rem;
+    padding: 0.75rem 0.85rem;
+    font-size: 0.9rem;
   }
 }

@@ -11,12 +11,6 @@
   border-radius: 12px;
   padding: 20px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  transition: transform 0.3s, box-shadow 0.3s;
-}
-
-.s-subject-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(0,0,0,0.1);
 }
 
 .s-subject-header {
@@ -190,12 +184,6 @@
   flex-direction: column;
   gap: 14px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  transition: transform 0.3s, box-shadow 0.3s, border-color 0.3s;
-}
-
-.s-own-schedule-subject-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 5px 15px rgba(0,0,0,0.1);
 }
 
 .s-own-schedule-subject-card.flagged {

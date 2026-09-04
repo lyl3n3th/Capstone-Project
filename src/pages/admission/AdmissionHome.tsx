@@ -3,6 +3,7 @@ import { FaRegPaperPlane } from "react-icons/fa6";
 import logow from "../../assets/images/logow.png";
 import { useAdmissionPortalOverview } from "../../hooks/useAdmissionPortalStatus";
 import {
+  clearAdmissionDraft,
   getAdmissionDraft,
   getAdmissionProgress,
 } from "../../services/admission";
@@ -52,6 +53,20 @@ function AdmissionHome() {
     try {
       const application = await getAdmissionProgress(trackingNumber);
       if (application) {
+        if (
+          application.currentStep <= 3 &&
+          application.applicationStatus === "draft"
+        ) {
+          const params = new URLSearchParams({
+            branch: application.branchCode,
+            status: application.studentStatus,
+            trackingNumber: application.trackingNumber,
+            program: application.programName,
+          });
+          window.location.href = `/requirements?${params.toString()}`;
+          return;
+        }
+
         window.location.href = `/confirmation?trackingNumber=${encodeURIComponent(application.trackingNumber)}`;
         return;
       }
@@ -120,6 +135,10 @@ function AdmissionHome() {
             type="button"
             className="admission-primary-action"
             onClick={() => {
+              const draft = getAdmissionDraft();
+              if (draft?.submitted) {
+                clearAdmissionDraft();
+              }
               window.location.href = "/enroll";
             }}
             disabled={!isAnyOpen}

@@ -11,7 +11,12 @@ export interface StudentLoginPayload {
   password: string;
 }
 
+export interface StudentEmailLoginPayload {
+  email: string;
+}
+
 export interface StaffLoginPayload {
+  id?: string;
   branch: string;
   fullName: string;
   employeeId: string;
@@ -24,6 +29,8 @@ export interface AuthContextType {
   isAuthenticated: boolean;
   isReady: boolean;
   loginStudent: (payload: StudentLoginPayload) => Promise<AuthUser>;
+  loginStudentWithEmail: (payload: StudentEmailLoginPayload) => Promise<AuthUser>;
+  loginStudentWithGoogle: () => Promise<void>;
   loginStaff: (payload: StaffLoginPayload) => Promise<AuthUser>;
   updateCurrentUser: (updates: Partial<AuthUser>) => void;
   logout: () => void;

@@ -2,7 +2,7 @@
 .s-portal {
   display: flex;
   min-height: 100vh;
-  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
 }
 
 .s-main {
@@ -67,12 +67,6 @@
   padding: 20px;
   min-width: 0;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  transition: transform 0.3s, box-shadow 0.3s;
-}
-
-.s-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 5px 20px rgba(0,0,0,0.1);
 }
 
 .s-card-header {
@@ -134,6 +128,9 @@
   font-weight: 600;
   color: #1A3D5C;
   margin-bottom: 4px;
+  padding-right: 76px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .s-card-value1 {
@@ -245,12 +242,7 @@
   align-items: center;
   padding: 16px 24px;
   border-bottom: 1px solid #e0e0e0;
-  transition: background 0.3s;
   gap: 16px;
-}
-
-.s-activity-item:hover {
-  background: rgba(6, 98, 135, 0.05);
 }
 
 .s-activity-item:last-child {
@@ -267,14 +259,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.s-activity-icon:hover {
-  border-color: #066287;
-  background: #f0f5ff;
-  transform: scale(1.05);
 }
 
 .s-upload-spinner {

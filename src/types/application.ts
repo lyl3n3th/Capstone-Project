@@ -1,11 +1,9 @@
-export type AdmissionBranchCode = "bacoor" | "taytay" | "gma";
+export type AdmissionBranchCode = string;
 
 export type AdmissionStudentStatus =
   | "Junior High Completer"
   | "Senior High Graduate"
-  | "Transferee"
-  | "Foreign Student"
-  | "Cross-Registrant";
+  | "Transferee";
 
 export type AdmissionProgramName = "College" | "Senior High School";
 
@@ -53,6 +51,8 @@ export interface AdmissionDraft {
   lastSchool?: string;
   year_completion?: string;
   yearCompletion?: string;
+  requested_year_level?: string;
+  requestedYearLevel?: string;
   program?: string;
   strand_or_course?: string;
   sex?: string;
@@ -83,7 +83,8 @@ export interface SaveAdmissionApplicationInput {
   email: string;
   phoneNumber: string;
   lastSchoolAttended: string;
-  yearCompletion: string;
+  yearCompletion?: string;
+  requestedYearLevel?: string;
   honorLabel?: string;
   applyScholarship: boolean;
   currentStep?: number;
@@ -99,6 +100,7 @@ export interface AdmissionApplicationSummary {
   programName: string;
   programLevel: AdmissionProgramLevel;
   trackName: string;
+  requestedYearLevel?: string;
   honorLabel: string | null;
   honorDiscountPercentage: number;
   appliedForScholarship: boolean;

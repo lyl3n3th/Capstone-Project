@@ -1,5 +1,6 @@
 import {
   normalizeBranchName,
+  normalizeStudentNumberInput,
   readBranchScopedData,
   writeBranchScopedData,
   type AdminAttachment,
@@ -33,6 +34,8 @@ export interface EnrollmentRequestRecord {
   requestDate: string;
   enrollmentDate?: string;
   updatedAt?: string;
+  archivedAt?: string;
+  archivedByRole?: "Admin" | "Registrar";
   notes?: string;
   rejectionReason?: string;
   attachments?: AdminAttachment[];
@@ -64,6 +67,9 @@ const REGULAR_ENROLLMENT_REQUIREMENTS: EnrollmentRequirementItem[] = [
     required: true,
   },
 ];
+
+const normalizeEnrollmentProgram = (program?: string | null) =>
+  (program || "").trim().toLowerCase();
 
 type SupabaseErrorLike = {
   code?: string;
@@ -241,11 +247,35 @@ const matchesStudentRequest = (
     return true;
   }
 
-  return Boolean(studentNumber) && request.studentNumber === studentNumber;
+  if (!studentNumber || !request.studentNumber) {
+    return false;
+  }
+
+  const requestStudentNumber =
+    normalizeStudentNumberInput(request.studentNumber, request.branch) ||
+    normalizeStudentNumberInput(request.studentNumber);
+  const candidateStudentNumber =
+    normalizeStudentNumberInput(studentNumber, request.branch) ||
+    normalizeStudentNumberInput(studentNumber);
+
+  return (
+    requestStudentNumber.toUpperCase() === candidateStudentNumber.toUpperCase()
+  );
 };
 
-export const getRegularEnrollmentRequirementItems = () =>
-  REGULAR_ENROLLMENT_REQUIREMENTS.map((item) => ({ ...item }));
+export const getRegularEnrollmentRequirementItems = (
+  program?: string | null,
+) => {
+  const normalizedProgram = normalizeEnrollmentProgram(program);
+  const isCollegeProgram =
+    normalizedProgram === "college" ||
+    normalizedProgram.includes("college") ||
+    normalizedProgram.includes("bachelor");
+
+  return REGULAR_ENROLLMENT_REQUIREMENTS.filter(
+    (item) => !isCollegeProgram || item.key !== "clearance",
+  ).map((item) => ({ ...item }));
+};
 
 const mapEnrollmentRequestRow = (
   row: EnrollmentRequestRow,
@@ -326,6 +356,19 @@ const findEnrollmentRequestIndex = (
   request: EnrollmentRequestRecord,
 ) => requests.findIndex((candidate) => isSameEnrollmentRequestRecord(candidate, request));
 
+const upsertEnrollmentRequestIntoList = (
+  requests: EnrollmentRequestRecord[],
+  request: EnrollmentRequestRecord,
+) => {
+  const existingIndex = findEnrollmentRequestIndex(requests, request);
+
+  return existingIndex >= 0
+    ? requests.map((record, index) =>
+        index === existingIndex ? request : record,
+      )
+    : [request, ...requests];
+};
+
 const shouldSyncLocalEnrollmentRequest = (
   localRequest: EnrollmentRequestRecord,
   remoteRequest?: EnrollmentRequestRecord | null,
@@ -388,6 +431,40 @@ const upsertEnrollmentRequestToSupabase = async (
   return mapEnrollmentRequestRow(row, resolvedBranch);
 };
 
+export const deleteEnrollmentRequest = async (
+  request: EnrollmentRequestRecord,
+) => {
+  const resolvedBranch = normalizeBranchName(request.branch);
+  const { data, error } = await supabase
+    .rpc("delete_enrollment_request", {
+      p_payload: {
+        branch: resolvedBranch,
+        id: request.id,
+        student_number: request.studentNumber,
+        tracking_number: request.trackingNumber || null,
+        academic_year: request.academicYear,
+        semester: request.semester,
+      },
+    })
+    .returns<Array<{ id: string }>>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<{ id: string }>(data);
+  if (!row) {
+    throw new Error("Supabase did not confirm the deleted enrollment request.");
+  }
+
+  const nextRequests = readEnrollmentRequestsForBranch(resolvedBranch).filter(
+    (existingRequest) => existingRequest.id !== request.id,
+  );
+  writeEnrollmentRequestsForBranch(resolvedBranch, nextRequests);
+
+  return row;
+};
+
 export const readEnrollmentRequestsForBranch = (branch?: string | null) =>
   sortEnrollmentRequests(
     stripLegacyMockEnrollmentRequestRecords(
@@ -401,7 +478,16 @@ export const readEnrollmentRequestsForBranch = (branch?: string | null) =>
 export const fetchEnrollmentRequests = async (branch?: string | null) => {
   const resolvedBranch = normalizeBranchName(branch);
   const localRequests = readEnrollmentRequestsForBranch(resolvedBranch);
-  const remoteRequests = await listEnrollmentRequestsFromSupabase(resolvedBranch);
+  let remoteRequests: EnrollmentRequestRecord[] = [];
+
+  try {
+    remoteRequests = await listEnrollmentRequestsFromSupabase(resolvedBranch);
+  } catch (error) {
+    console.warn("Unable to fetch enrollment requests from Supabase.", error);
+    writeEnrollmentRequestsForBranch(resolvedBranch, localRequests);
+    return localRequests;
+  }
+
   const requestsToSync = localRequests.filter((localRequest) => {
     const matchingRemoteRequest =
       remoteRequests.find((remoteRequest) =>
@@ -411,16 +497,41 @@ export const fetchEnrollmentRequests = async (branch?: string | null) => {
     return shouldSyncLocalEnrollmentRequest(localRequest, matchingRemoteRequest);
   });
 
+  let nextRequests = remoteRequests;
+
   if (requestsToSync.length > 0) {
-    await Promise.all(
+    const syncResults = await Promise.allSettled(
       requestsToSync.map((request) => upsertEnrollmentRequestToSupabase(request)),
     );
-  }
+    const failedRequests = requestsToSync.filter(
+      (_request, index) => syncResults[index].status === "rejected",
+    );
+    const syncedAnyRequest = syncResults.some(
+      (result) => result.status === "fulfilled",
+    );
 
-  const nextRequests =
-    requestsToSync.length > 0
-      ? await listEnrollmentRequestsFromSupabase(resolvedBranch)
-      : remoteRequests;
+    if (syncedAnyRequest) {
+      try {
+        nextRequests = await listEnrollmentRequestsFromSupabase(resolvedBranch);
+      } catch (error) {
+        console.warn("Unable to refresh synced enrollment requests.", error);
+      }
+    }
+
+    if (failedRequests.length > 0) {
+      console.warn(
+        "Some enrollment requests could not be synced to Supabase and will remain local.",
+        syncResults
+          .filter((result) => result.status === "rejected")
+          .map((result) => result.reason),
+      );
+
+      nextRequests = failedRequests.reduce(
+        (requests, request) => upsertEnrollmentRequestIntoList(requests, request),
+        nextRequests,
+      );
+    }
+  }
 
   writeEnrollmentRequestsForBranch(resolvedBranch, nextRequests);
   return nextRequests;
@@ -469,6 +580,10 @@ export const getEnrollmentRequestForStudent = ({
 
   return (
     requests.find((request) => {
+      if (request.archivedAt) {
+        return false;
+      }
+
       if (!matchesStudentRequest(request, studentNumber, trackingNumber)) {
         return false;
       }
@@ -498,6 +613,10 @@ export const getLatestEnrollmentRequestForStudent = ({
   status?: EnrollmentRequestStatus | null;
 }) =>
   readEnrollmentRequestsForBranch(branch).find((request) => {
+    if (request.archivedAt) {
+      return false;
+    }
+
     if (!matchesStudentRequest(request, studentNumber, trackingNumber)) {
       return false;
     }
@@ -561,7 +680,35 @@ export const hasLatestApprovedIrregularEnrollmentRequestForStudent = ({
   );
 
 export const saveEnrollmentRequest = async (request: EnrollmentRequestRecord) => {
-  const savedRequest = await upsertEnrollmentRequestToSupabase(request);
+  const saveLocalEnrollmentRequest = (localRequest: EnrollmentRequestRecord) => {
+    const resolvedBranch = normalizeBranchName(localRequest.branch);
+    const existingRequests = readEnrollmentRequestsForBranch(resolvedBranch);
+    const nextRequests = upsertEnrollmentRequestIntoList(
+      existingRequests,
+      {
+        ...localRequest,
+        branch: resolvedBranch,
+      },
+    );
+
+    writeEnrollmentRequestsForBranch(resolvedBranch, nextRequests);
+    return nextRequests.find((record) =>
+      isSameEnrollmentRequestRecord(record, localRequest),
+    ) ?? localRequest;
+  };
+
+  let savedRequest: EnrollmentRequestRecord;
+
+  try {
+    savedRequest = await upsertEnrollmentRequestToSupabase(request);
+  } catch (error) {
+    console.warn(
+      "Unable to sync enrollment request to Supabase; saving locally instead.",
+      error,
+    );
+    return saveLocalEnrollmentRequest(request);
+  }
+
   const nextRequest: EnrollmentRequestRecord = {
     ...savedRequest,
     attachments: mergeEnrollmentRequestAttachmentUrls(
@@ -571,13 +718,10 @@ export const saveEnrollmentRequest = async (request: EnrollmentRequestRecord) =>
   };
   const resolvedBranch = normalizeBranchName(nextRequest.branch);
   const existingRequests = readEnrollmentRequestsForBranch(resolvedBranch);
-  const existingIndex = findEnrollmentRequestIndex(existingRequests, nextRequest);
-  const nextRequests =
-    existingIndex >= 0
-      ? existingRequests.map((record, index) =>
-          index === existingIndex ? nextRequest : record,
-        )
-      : [nextRequest, ...existingRequests];
+  const nextRequests = upsertEnrollmentRequestIntoList(
+    existingRequests,
+    nextRequest,
+  );
 
   writeEnrollmentRequestsForBranch(resolvedBranch, nextRequests);
   return nextRequest;

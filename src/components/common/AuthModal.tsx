@@ -10,6 +10,7 @@ interface AuthModalProps {
   onClose: () => void;
   children: ReactNode;
   footer: ReactNode;
+  overlayClassName?: string;
 }
 
 function AuthModal({
@@ -19,6 +20,7 @@ function AuthModal({
   onClose,
   children,
   footer,
+  overlayClassName,
 }: AuthModalProps) {
   useEffect(() => {
     if (!isOpen) {
@@ -47,7 +49,10 @@ function AuthModal({
   }
 
   return (
-    <div className="auth-modal-overlay" onClick={onClose}>
+    <div
+      className={`auth-modal-overlay ${overlayClassName || ""}`.trim()}
+      onClick={onClose}
+    >
       <div
         className="auth-modal-card"
         role="dialog"

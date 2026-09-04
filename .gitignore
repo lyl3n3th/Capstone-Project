@@ -28,4 +28,14 @@ dist-ssr
 .env.*
 !.env.example
 
+# Python virtual environments and bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Django runtime data
+backend/db.sqlite3
+backend/media/
+backend/staticfiles/
 

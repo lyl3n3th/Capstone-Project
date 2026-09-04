@@ -7,7 +7,7 @@
   display: flex;
   min-height: 100vh;
   background: #f3f4f6;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
   color: #111827;
   position: relative;
   width: 100%;
@@ -100,16 +100,16 @@
    ========================================================================== */
 .archive-controls {
   display: flex;
-  gap: 16px;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+  flex-wrap: nowrap;
   align-items: center;
 }
 
 .search-wrapper {
   position: relative;
-  flex: 1;
-  min-width: 280px;
+  flex: 1 1 240px;
+  min-width: 0;
 }
 
 .search-icon {
@@ -122,24 +122,27 @@
 }
 
 .archive-search {
+  box-sizing: border-box;
   width: 100%;
-  height: 46px;
+  height: 38px;
   border: 1px solid #d1d5db;
-  border-radius: 12px;
-  padding: 0 16px 0 40px;
-  font-size: 14px;
+  border-radius: 8px;
+  padding: 0 12px 0 36px;
+  font-size: 12px;
   color: #111827;
   background: #ffffff;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .archive-filter {
-  flex: 0 0 220px;
-  height: 46px;
+  box-sizing: border-box;
+  flex: 0 1 150px;
+  min-width: 0;
+  height: 38px;
   border: 1px solid #d1d5db;
-  border-radius: 12px;
-  padding: 0 14px;
-  font-size: 14px;
+  border-radius: 8px;
+  padding: 0 9px;
+  font-size: 12px;
   color: #111827;
   background: #ffffff;
   cursor: pointer;
@@ -155,16 +158,18 @@
 
 .archive-search::placeholder {
   color: #9ca3af;
+  font-size: 11px;
+  text-overflow: ellipsis;
 }
 
 .clear-trash-btn {
-  height: 46px;
+  height: 38px;
   border: 1px solid #fdba74;
-  border-radius: 12px;
-  padding: 0 18px;
+  border-radius: 8px;
+  padding: 0 12px;
   background: #ffffff;
   color: #c2410c;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
   display: inline-flex;
   align-items: center;
@@ -206,19 +211,20 @@
 
 .archive-table {
   width: 100%;
-  min-width: 800px;
+  min-width: 0;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .archive-table th {
   background: #f9fafb;
-  padding: 16px;
-  text-align: left;
-  font-size: 12px;
+  padding: 8px 6px;
+  text-align: center;
+  font-size: 10px;
   font-weight: 700;
   color: #6b7280;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   border-bottom: 1px solid #e5e7eb;
 }
 
@@ -232,6 +238,8 @@
   text-transform: inherit;
   letter-spacing: inherit;
   cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
   transition: color 0.2s ease;
 }
 
@@ -240,10 +248,13 @@
 }
 
 .archive-table td {
-  padding: 16px;
-  font-size: 14px;
+  padding: 7px 6px;
+  font-size: 11px;
   color: #374151;
   border-bottom: 1px solid #f3f4f6;
+  text-align: center;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .archive-table tbody tr:hover td {
@@ -264,10 +275,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 76px;
-  padding: 6px 10px;
+  min-width: 58px;
+  padding: 4px 7px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -281,21 +292,27 @@
   color: #c2410c;
 }
 
+.archive-type-badge.enrollment {
+  background: #dcfce7;
+  color: #15803d;
+}
+
 /* ==========================================================================
    ACTION BUTTONS
    ========================================================================== */
 .archive-actions {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  justify-content: center;
 }
 
 .unarchive-btn,
 .delete-btn {
   border: none;
   border-radius: 8px;
-  padding: 8px 16px;
-  font-size: 12px;
+  padding: 5px 8px;
+  font-size: 10px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -321,8 +338,8 @@
 }
 
 .delete-btn.icon-only {
-  width: 40px;
-  height: 40px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   justify-content: center;
   border-radius: 10px;
@@ -349,6 +366,32 @@
   font-size: 14px;
 }
 
+.archive-table th:nth-child(7),
+.archive-table td:nth-child(7) {
+  width: 112px;
+}
+
+.archive-table .unarchive-btn {
+  width: 72px;
+  min-width: 72px;
+  min-height: 28px;
+  padding: 5px 6px;
+  font-size: 0;
+  gap: 4px;
+  justify-content: center;
+}
+
+.archive-table .unarchive-btn svg {
+  font-size: 11px;
+}
+
+.archive-table .unarchive-btn::after {
+  content: "Restore";
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 /* ==========================================================================
    PAGINATION
    ========================================================================== */
@@ -357,8 +400,8 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-top: 24px;
-  padding: 16px;
+  margin-top: 16px;
+  padding: 10px;
   background: transparent;
   border-radius: 16px;
   flex-wrap: wrap;
@@ -477,17 +520,60 @@
   }
 
   .archive-actions {
-    flex-direction: column;
+    gap: 4px;
   }
 
   .unarchive-btn,
   .delete-btn {
-    width: 100%;
+    padding: 5px 7px;
+    font-size: 10px;
     justify-content: center;
   }
 
   .delete-btn.icon-only {
-    width: 40px;
+    width: 28px;
+    height: 28px;
+  }
+
+  .archive-table th,
+  .archive-table td {
+    padding: 6px 4px;
+    font-size: 10px;
+  }
+
+  .archive-table th:nth-child(1),
+  .archive-table td:nth-child(1) {
+    width: 20%;
+  }
+
+  .archive-table th:nth-child(2),
+  .archive-table td:nth-child(2),
+  .archive-table th:nth-child(5),
+  .archive-table td:nth-child(5) {
+    width: 12%;
+  }
+
+  .archive-table th:nth-child(3),
+  .archive-table td:nth-child(3) {
+    width: 20%;
+  }
+
+  .archive-table th:nth-child(4),
+  .archive-table td:nth-child(4),
+  .archive-table th:nth-child(6),
+  .archive-table td:nth-child(6) {
+    width: 14%;
+  }
+
+  .archive-table th:nth-child(7),
+  .archive-table td:nth-child(7) {
+    width: 96px;
+  }
+
+  .archive-type-badge {
+    min-width: 0;
+    padding: 3px 5px;
+    font-size: 9px;
   }
 }
 
@@ -496,8 +582,74 @@
     font-size: 28px;
   }
 
+  .archive-table th:nth-child(4),
+  .archive-table td:nth-child(4),
+  .archive-table th:nth-child(6),
+  .archive-table td:nth-child(6) {
+    display: none;
+  }
+
   .archive-table th,
   .archive-table td {
-    padding: 12px 10px;
+    padding: 5px 3px;
+    font-size: 9px;
   }
+
+  .archive-table th:nth-child(7),
+  .archive-table td:nth-child(7) {
+    width: 88px;
+  }
+
+  .unarchive-btn {
+    font-size: 0;
+    padding: 5px 6px;
+  }
+
+  .unarchive-btn::after {
+    content: "Restore";
+    font-size: 9px;
+  }
+}
+
+/* Archive tables scroll horizontally instead of crushing columns on slim screens. */
+.archive-content .archive-table-wrap {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.archive-content .archive-table {
+  width: 100%;
+  min-width: 780px !important;
+  table-layout: auto !important;
+}
+
+.archive-content .archive-table th,
+.archive-content .archive-table td {
+  display: table-cell !important;
+  width: auto !important;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.archive-content .archive-table td:nth-child(3),
+.archive-content .archive-table td:nth-child(4) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.archive-content .archive-table th:nth-child(7),
+.archive-content .archive-table td:nth-child(7) {
+  width: 124px !important;
+  min-width: 124px;
+}
+
+.archive-content .archive-actions {
+  flex-wrap: nowrap;
+}
+
+.archive-content .archive-table .unarchive-btn {
+  width: 76px;
+  min-width: 76px;
+  white-space: nowrap;
 }

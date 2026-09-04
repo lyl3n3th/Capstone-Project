@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ADMISSION_PORTAL_STATUS_UPDATED_EVENT,
   DEFAULT_ADMISSION_BRANCH_CODE,
+  fetchAndCacheAdmissionPortalStatuses,
   getAdmissionPortalOverview,
   getAdmissionPortalStatus,
   setAdmissionPortalOpen as persistAdmissionPortalOpen,
@@ -22,6 +23,14 @@ export function useAdmissionPortalStatus(branch: string) {
 
   useEffect(() => {
     setPortalStatus(getAdmissionPortalStatus(resolvedBranch)!);
+  }, [resolvedBranch]);
+
+  useEffect(() => {
+    void fetchAndCacheAdmissionPortalStatuses()
+      .then(() => setPortalStatus(getAdmissionPortalStatus(resolvedBranch)!))
+      .catch((error) => {
+        console.warn("Unable to load admission portal status from Supabase.", error);
+      });
   }, [resolvedBranch]);
 
   useEffect(() => {
@@ -98,6 +107,12 @@ export function useAdmissionPortalOverview() {
     if (typeof window === "undefined") {
       return undefined;
     }
+
+    void fetchAndCacheAdmissionPortalStatuses()
+      .then(setPortalOverview)
+      .catch((error) => {
+        console.warn("Unable to load admission portal overview from Supabase.", error);
+      });
 
     const syncPortalOverview = () => {
       setPortalOverview(getAdmissionPortalOverview());

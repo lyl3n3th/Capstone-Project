@@ -9,6 +9,7 @@ import {
 import { IoPersonSharp } from "react-icons/io5";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
+import StudentLoadingShell from "../../components/common/StudentLoadingShell";
 import { useAuth } from "../../hooks/useAuth";
 import { useStoredProfileImage } from "../../hooks/useStoredProfileImage";
 import { useStudent } from "../../hooks/useStudent";
@@ -51,8 +52,7 @@ const useToast = () => {
 function StudentProfile() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { currentUser } = useAuth();
-  const { student, credentialSummary, isLoading, error, updateStudent } =
-    useStudent();
+  const { student, isLoading, error, updateStudent } = useStudent();
   const { profileImage } = useStoredProfileImage(currentUser);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Student>>({});
@@ -154,9 +154,19 @@ function StudentProfile() {
   // Show nothing while loading the first time
   if (isLoading && !student) {
     return (
-      <div className="s-portal s-profile">
-        <div style={{ minHeight: "100vh" }}></div>
-      </div>
+      <StudentLoadingShell
+        activePage="profile"
+        currentDate={currentDate}
+        headerTitle="My Profile"
+        onLogout={handleLogout}
+        onMenuClick={handleMenuClick}
+        onSidebarClose={handleSidebarClose}
+        portalClassName="s-profile"
+        skeletonTitle="Profile"
+        studentData={studentData}
+        variant="form"
+        sidebarOpen={sidebarOpen}
+      />
     );
   }
 
@@ -422,6 +432,34 @@ function StudentProfile() {
                   <span>{student.contactNumber}</span>
                 )}
               </div>
+              <div className="s-profile-field">
+                <label>Guardian Name:</label>
+                {editing ? (
+                  <input
+                    type="text"
+                    value={editForm.guardianName || ""}
+                    onChange={(e) =>
+                      handleInputChange("guardianName", e.target.value)
+                    }
+                  />
+                ) : (
+                  <span>{student.guardianName || "-"}</span>
+                )}
+              </div>
+              <div className="s-profile-field">
+                <label>Guardian Contact:</label>
+                {editing ? (
+                  <input
+                    type="tel"
+                    value={editForm.guardianContact || ""}
+                    onChange={(e) =>
+                      handleInputChange("guardianContact", e.target.value)
+                    }
+                  />
+                ) : (
+                  <span>{student.guardianContact || "-"}</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -435,20 +473,8 @@ function StudentProfile() {
                 <span>{student.studentNumber}</span>
               </div>
               <div className="s-profile-field">
-                <label>Branch:</label>
-                <span>{student.branch}</span>
-              </div>
-              <div className="s-profile-field">
                 <label>Section:</label>
                 <span>{student.section || "TBA"}</span>
-              </div>
-              <div className="s-profile-field">
-                <label>Credential Status:</label>
-                <span>
-                  {credentialSummary
-                    ? `${credentialSummary.overallStatus} (${credentialSummary.submitted}/${credentialSummary.total})`
-                    : "No linked admission record"}
-                </span>
               </div>
             </div>
           </div>

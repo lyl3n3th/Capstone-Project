@@ -1,6 +1,6 @@
 export const AUTH_STORAGE_KEY = "aics-auth-session";
 
-export type AppRole = "student" | "admin" | "registrar" | "manager";
+export type AppRole = "student" | "admin" | "registrar" | "manager" | "instructor";
 export type StaffRole = Exclude<AppRole, "student">;
 
 export interface AuthUser {
@@ -37,18 +37,21 @@ export const DEFAULT_ROUTE_BY_ROLE: Record<AppRole, string> = {
   admin: "/admin/dashboard",
   registrar: "/registrar/dashboard",
   manager: "/manager/dashboard",
+  instructor: "/instructor/home",
 };
 
 export const STAFF_PORTAL_ROLES: StaffRole[] = [
   "admin",
   "registrar",
   "manager",
+  "instructor",
 ];
 
 export const STAFF_ROLE_LABELS: Record<StaffRole, string> = {
   admin: "Administrator",
   registrar: "Registrar",
   manager: "Area Manager",
+  instructor: "Instructor",
 };
 
 export const getLoginRouteForRoles = (roles: AppRole[]) => {

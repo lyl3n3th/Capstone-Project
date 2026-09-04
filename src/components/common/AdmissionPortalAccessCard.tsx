@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useAdmissionPortalStatus } from "../../hooks/useAdmissionPortalStatus";
 import {
@@ -7,6 +7,12 @@ import {
   formatAdmissionCloseDate,
 } from "../../services/admissionPortal";
 import { getAdmissionBranchName } from "../../services/admission";
+import {
+  fetchBranchStudentNumberSetting,
+  normalizeStudentNumberStartDigits,
+  saveBranchStudentNumberSetting,
+  type BranchStudentNumberSetting,
+} from "../../services/studentNumberSettings";
 
 const getTodayDateInputValue = () => {
   const currentDate = new Date();
@@ -56,6 +62,14 @@ export default function AdmissionPortalAccessCard() {
     sourceKey: scheduleSourceKey,
     message: "",
   }));
+  const [studentNumberSetting, setStudentNumberSetting] =
+    useState<BranchStudentNumberSetting | null>(null);
+  const [studentNumberDraft, setStudentNumberDraft] = useState("");
+  const [studentNumberMessage, setStudentNumberMessage] = useState("");
+  const [isStudentNumberSettingLoading, setIsStudentNumberSettingLoading] =
+    useState(false);
+  const [isSavingStudentNumberSetting, setIsSavingStudentNumberSetting] =
+    useState(false);
   const scheduledCloseDate =
     scheduleDraft.sourceKey === scheduleSourceKey
       ? scheduleDraft.value
@@ -65,6 +79,46 @@ export default function AdmissionPortalAccessCard() {
       ? validationState.message
       : "";
   const formattedCloseDate = formatAdmissionCloseDate(closeOnDate);
+
+  useEffect(() => {
+    if (!canManageAdmission) {
+      return undefined;
+    }
+
+    let isMounted = true;
+    setIsStudentNumberSettingLoading(true);
+
+    fetchBranchStudentNumberSetting(managedBranch)
+      .then((setting) => {
+        if (!isMounted) {
+          return;
+        }
+
+        setStudentNumberSetting(setting);
+        setStudentNumberDraft(setting.nextDigits);
+        setStudentNumberMessage("");
+      })
+      .catch((error) => {
+        if (!isMounted) {
+          return;
+        }
+
+        setStudentNumberMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to load the student number setting from Supabase.",
+        );
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsStudentNumberSettingLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [canManageAdmission, managedBranch]);
 
   const updatedAtLabel = (() => {
     if (!updatedAt) {
@@ -158,6 +212,38 @@ export default function AdmissionPortalAccessCard() {
     });
   };
 
+  const handleSaveStudentNumberSetting = async () => {
+    const normalizedDigits = normalizeStudentNumberStartDigits(studentNumberDraft);
+
+    if (!/^\d{6}$/.test(normalizedDigits)) {
+      setStudentNumberMessage("Enter exactly 6 digits for the next student number.");
+      return;
+    }
+
+    setIsSavingStudentNumberSetting(true);
+    setStudentNumberMessage("");
+
+    try {
+      const savedSetting = await saveBranchStudentNumberSetting({
+        branch: managedBranch,
+        nextDigits: normalizedDigits,
+      });
+      setStudentNumberSetting(savedSetting);
+      setStudentNumberDraft(savedSetting.nextDigits);
+      setStudentNumberMessage(
+        `Saved. The next approved student will start at ${savedSetting.nextStudentNumber || savedSetting.nextDigits}.`,
+      );
+    } catch (error) {
+      setStudentNumberMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the student number setting to Supabase.",
+      );
+    } finally {
+      setIsSavingStudentNumberSetting(false);
+    }
+  };
+
   return (
     <section
       className={`admission-portal-card${canManageAdmission ? " is-manageable" : " is-readonly"}`}
@@ -181,50 +267,107 @@ export default function AdmissionPortalAccessCard() {
 
       {canManageAdmission ? (
         <div className="admission-portal-actions">
-          <label className="admission-portal-date-field">
-            <span>Admission closes on</span>
-            <input
-              type="date"
-              className="admission-portal-date-input"
-              value={scheduledCloseDate}
-              min={minimumScheduledCloseDate}
-              onChange={(event) => {
-                setScheduleDraft({
-                  sourceKey: scheduleSourceKey,
-                  value: event.target.value,
-                });
-                setValidationState({
-                  sourceKey: scheduleSourceKey,
-                  message: "",
-                });
-              }}
-            />
-          </label>
-          {validationMessage ? (
-            <p className="admission-portal-helper is-error">
-              {validationMessage}
+          <div className="admission-portal-control-group">
+            <label className="admission-portal-date-field">
+              <span>Admission closes on</span>
+              <input
+                type="date"
+                className="admission-portal-date-input"
+                value={scheduledCloseDate}
+                min={minimumScheduledCloseDate}
+                onChange={(event) => {
+                  setScheduleDraft({
+                    sourceKey: scheduleSourceKey,
+                    value: event.target.value,
+                  });
+                  setValidationState({
+                    sourceKey: scheduleSourceKey,
+                    message: "",
+                  });
+                }}
+              />
+            </label>
+            {validationMessage ? (
+              <p className="admission-portal-helper is-error">
+                {validationMessage}
+              </p>
+            ) : (
+              <p className="admission-portal-helper">
+                The selected date is the first day admissions are closed.
+              </p>
+            )}
+            <button
+              type="button"
+              className="admission-portal-toggle is-open"
+              onClick={handleSaveAdmissionSchedule}
+            >
+              {isAdmissionOpen ? "Update Closing Date" : "Open Admission"}
+            </button>
+            {isAdmissionOpen ? (
+              <button
+                type="button"
+                className="admission-portal-secondary"
+                onClick={handleCloseAdmission}
+              >
+                Close Admission Now
+              </button>
+            ) : null}
+          </div>
+          <div className="admission-portal-control-group admission-student-number-settings">
+            <label className="admission-portal-date-field">
+              <span>Next student number starts at</span>
+              <div className="admission-student-number-input-row">
+                {studentNumberSetting?.prefix ? (
+                  <span className="admission-student-number-prefix">
+                    {studentNumberSetting.prefix}-
+                  </span>
+                ) : null}
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  className="admission-portal-date-input admission-student-number-input"
+                  value={studentNumberDraft}
+                  placeholder="261001"
+                  disabled={
+                    isStudentNumberSettingLoading || isSavingStudentNumberSetting
+                  }
+                  onChange={(event) => {
+                    setStudentNumberDraft(
+                      normalizeStudentNumberStartDigits(event.target.value),
+                    );
+                    setStudentNumberMessage("");
+                  }}
+                />
+              </div>
+            </label>
+            <p
+              className={`admission-portal-helper ${
+                studentNumberMessage &&
+                !studentNumberMessage.toLowerCase().startsWith("saved")
+                  ? "is-error"
+                  : ""
+              }`}
+            >
+              {studentNumberMessage ||
+                (studentNumberSetting?.nextStudentNumber
+                  ? `Current next number: ${studentNumberSetting.nextStudentNumber}. Existing numbers are skipped automatically.`
+                  : "Set the 6 digits used after the branch prefix. Existing numbers are skipped automatically.")}
             </p>
-          ) : (
-            <p className="admission-portal-helper">
-              The selected date is the first day admissions are closed.
-            </p>
-          )}
-          <button
-            type="button"
-            className="admission-portal-toggle is-open"
-            onClick={handleSaveAdmissionSchedule}
-          >
-            {isAdmissionOpen ? "Update Closing Date" : "Open Admission"}
-          </button>
-          {isAdmissionOpen ? (
             <button
               type="button"
               className="admission-portal-secondary"
-              onClick={handleCloseAdmission}
+              onClick={() => void handleSaveStudentNumberSetting()}
+              disabled={
+                isStudentNumberSettingLoading || isSavingStudentNumberSetting
+              }
             >
-              Close Admission Now
+              {isSavingStudentNumberSetting
+                ? "Saving..."
+                : "Save Student Number Start"}
             </button>
-          ) : null}
+          </div>
         </div>
       ) : null}
     </section>

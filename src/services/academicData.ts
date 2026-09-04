@@ -1,5 +1,9 @@
 import { supabase } from "../lib/supabase";
-import { normalizeBranchName, writeBranchScopedData } from "./adminStorage";
+import {
+  normalizeBranchName,
+  readBranchScopedData,
+  writeBranchScopedData,
+} from "./adminStorage";
 
 type SupabaseErrorLike = {
   code?: string;
@@ -246,6 +250,50 @@ const cacheAcademicSnapshot = (
     snapshot.assignmentRooms,
   );
 };
+
+const resolveSnapshotScopeForCache = <T,>(
+  branch: string | null | undefined,
+  scope: (typeof storageScopes)[keyof typeof storageScopes],
+  remoteRecords: T[],
+) => {
+  if (remoteRecords.length > 0) {
+    return remoteRecords;
+  }
+
+  const cachedRecords = readBranchScopedData<T[]>(scope, branch) ?? [];
+  return cachedRecords.length > 0 ? cachedRecords : remoteRecords;
+};
+
+const mergeAcademicSnapshotWithLocalCache = (
+  branch: string | null | undefined,
+  snapshot: AcademicSnapshot,
+): AcademicSnapshot => ({
+  subjects: resolveSnapshotScopeForCache(
+    branch,
+    storageScopes.subjects,
+    snapshot.subjects,
+  ),
+  instructors: resolveSnapshotScopeForCache(
+    branch,
+    storageScopes.instructors,
+    snapshot.instructors,
+  ),
+  classSections: resolveSnapshotScopeForCache(
+    branch,
+    storageScopes.classSections,
+    snapshot.classSections,
+  ),
+  subjectAssignments: resolveSnapshotScopeForCache(
+    branch,
+    storageScopes.subjectAssignments,
+    snapshot.subjectAssignments,
+  ),
+  assignmentRooms: resolveSnapshotScopeForCache(
+    branch,
+    storageScopes.assignmentRooms,
+    snapshot.assignmentRooms,
+  ),
+});
 
 export const fetchAcademicSubjects = async (branch?: string | null) => {
   const resolvedBranch = normalizeBranchName(branch);
@@ -575,8 +623,12 @@ export const fetchAndCacheAcademicSnapshot = async (
 ): Promise<AcademicSnapshot> => {
   const resolvedBranch = normalizeBranchName(branch);
   const snapshot = await fetchAcademicSnapshot(resolvedBranch);
-  cacheAcademicSnapshot(resolvedBranch, snapshot);
-  return snapshot;
+  const snapshotWithLocalFallback = mergeAcademicSnapshotWithLocalCache(
+    resolvedBranch,
+    snapshot,
+  );
+  cacheAcademicSnapshot(resolvedBranch, snapshotWithLocalFallback);
+  return snapshotWithLocalFallback;
 };
 
 export const seedAcademicSnapshot = async (

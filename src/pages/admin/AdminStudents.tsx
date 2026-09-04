@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { MdArchive } from "react-icons/md";
 import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import SystemAlertModal from "../../components/common/SystemAlertModal";
 import { useAuth } from "../../hooks/useAuth";
 import {
   BACKUP_RESTORE_APPLIED_EVENT,
+  clearBackupRestoreMarker,
   persistAlumniBackupCache,
+  readBackupRestoreMarker,
   readCachedAlumni,
   rememberAlumniStudentStatus,
   type AlumniBackupRecord,
@@ -16,10 +19,15 @@ import {
   getStudentRequirementSnapshot,
   updateStoredStudentOwnScheduleState,
   getStudentsForBranch,
+  dedupeStoredStudents,
+  forgetDeletedStoredStudent,
   normalizeBranchName,
+  normalizeStudentNumberInput,
   promoteApplicantToStoredStudent,
   readBranchScopedData,
   readStoredStudents,
+  removeStudentCredentialUpload,
+  syncStudentCredentialUpload,
   writeBranchScopedData,
   updateStudentRequirementReviewStatus,
   writeStoredStudents,
@@ -34,6 +42,7 @@ import {
   fetchAdminStudents,
   getNextAdminStudentNumber,
   saveAdminStudent,
+  updateAdminStudentEmail,
   updateAdminStudentStatus,
 } from "../../services/adminStudentsApi";
 import {
@@ -44,11 +53,15 @@ import {
   saveStudentSubjectPlan,
 } from "../../services/studentPlanningApi";
 import {
+  getAdmissionRequirements,
   getEstimatedCollegeTuition,
+  SCHOLARSHIP_EXAM_MAX_SCORE,
+  uploadAdmissionRequirementFile,
   updateAdmissionProgress,
 } from "../../services/admission";
 import {
   applyStudentGradeUploadOperationsForBranch,
+  getRequiredShsQuarterLabelsForSemester,
   getStudentAcademicStanding,
   getStudentGradeRecords,
   STUDENT_GRADE_RECORDS_UPDATED_EVENT,
@@ -62,6 +75,17 @@ import {
   getLatestApprovedEnrollmentRequestForStudent,
   getLatestApprovedIrregularEnrollmentRequestForStudent,
 } from "../../services/enrollmentRequests";
+import { resolveStudentPortalContext } from "../../services/studentPortalResolver";
+import {
+  buildNextReceiptNumber,
+  buildStudentBalanceSummary,
+  createStudentPayment,
+  fetchAndCacheStudentPaymentsForBranch,
+  fetchNextStudentPaymentReceiptNumber,
+  getStudentPayments,
+  removeStudentPayment,
+  STUDENT_PAYMENTS_UPDATED_EVENT,
+} from "../../services/studentPayments";
 import { stripLegacyMockAdmissionRecords } from "../../services/legacyMockData";
 import "../../styles/admin/admin-students.css";
 
@@ -89,6 +113,8 @@ interface Student {
   branch: string;
   trackingNumber?: string;
   studentStatus?: string;
+  guardianName?: string;
+  guardianContact?: string;
   requestedOwnSchedule?: boolean;
   ownScheduleRequestStatus?: "Pending" | "Approved" | "Rejected";
   ownScheduleAcademicYear?: string;
@@ -105,7 +131,16 @@ interface InlineFeedback {
   message: string;
 }
 
-type StudentLifecycleStatus = "Undergraduate" | "Graduated" | "Dropped";
+type StudentLifecycleStatus = "Undergraduate" | "Dropped";
+
+const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
+
+const getStudentCourseDisplay = (
+  student: Pick<Student, "program" | "strandOrCourse">,
+) =>
+  student.program === "College"
+    ? DEFAULT_COLLEGE_COURSE
+    : student.strandOrCourse || student.program;
 
 interface ApiAlumniRecord {
   id?: number;
@@ -142,6 +177,17 @@ const ENROLLEE_STORAGE_SCOPE = "enrollees";
 const RECOVERABLE_BRANCHES = ["Bacoor", "Taytay", "GMA"] as const;
 const STUDENT_EXPORT_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const COLLEGE_TUITION_PER_UNIT = 600;
+
+const pesoFormatter = new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  maximumFractionDigits: 0,
+});
+
+const formatPeso = (value: number) => pesoFormatter.format(value);
+
+const getTodayInputDate = () => new Date().toISOString().slice(0, 10);
 
 const sanitizeStudentExportSegment = (value: string) =>
   value
@@ -215,22 +261,37 @@ const hasSubmittedAttachmentNamed = (
     ),
   );
 
+const hasApprovedAttachmentNamed = (
+  attachments: Pick<AdminAttachment, "name" | "reviewStatus">[] | undefined,
+  attachmentName: string,
+) =>
+  Boolean(
+    attachments?.some(
+      (attachment) =>
+        attachment.name.trim().toLowerCase() ===
+          attachmentName.trim().toLowerCase() &&
+        attachment.reviewStatus === "Approved",
+    ),
+  );
+
 const getAdmissionTypeLabel = (studentStatus?: string) =>
   studentStatus?.trim() || "Not recorded";
 
 const getStudentLifecycleStatus = (
   student: Pick<Student, "status">,
 ): StudentLifecycleStatus => {
-  if (student.status === "Graduated") {
-    return "Graduated";
+  if (student.status === "Archived") {
+    return "Dropped";
   }
 
-  if (student.status === "Archived") {
+  if (student.status === "Graduated") {
     return "Dropped";
   }
 
   return "Undergraduate";
 };
+
+const getCurrentGraduationYear = () => String(new Date().getFullYear());
 
 const buildAlumniBackupRecord = (
   student: Student,
@@ -240,16 +301,18 @@ const buildAlumniBackupRecord = (
   id: apiAlumni?.student_id || student.id,
   fullName: apiAlumni?.full_name || student.name,
   program: apiAlumni?.program || student.strandOrCourse || student.program,
-  yearGraduated: apiAlumni?.year_graduated || "",
+  yearGraduated: apiAlumni?.year_graduated || getCurrentGraduationYear(),
   contact: apiAlumni?.contact || student.contact || "",
+  email: student.email || undefined,
   becameAlumniOn: apiAlumni?.became_alumni_on || "",
+  studentSnapshot: { ...student },
 });
 
 const buildLocalAlumniRecord = (student: Student): ApiAlumniRecord => ({
   student_id: student.id,
   full_name: student.name,
   program: student.strandOrCourse || student.program,
-  year_graduated: "",
+  year_graduated: getCurrentGraduationYear(),
   contact: student.contact || "",
   became_alumni_on: new Date().toISOString(),
 });
@@ -610,12 +673,26 @@ const sortCollegeGradeRecords = (records: StoredStudentGradeRecord[]) =>
 const buildShsGradeSummaryKey = (subjectCode: string, subjectTitle: string) =>
   `${subjectCode}::${subjectTitle}`;
 
-const buildShsGradeSummaryRows = (records: StoredStudentGradeRecord[]) => {
+const getShsQuarterLabelsForSemester = (semester: string): ShsQuarterLabel[] =>
+  getRequiredShsQuarterLabelsForSemester(semester).filter(
+    (label): label is ShsQuarterLabel =>
+      SHS_QUARTER_DISPLAY_ORDER.includes(label as ShsQuarterLabel),
+  );
+
+const buildShsGradeSummaryRows = (
+  records: StoredStudentGradeRecord[],
+  semester: string,
+) => {
   const rows = new Map<string, ShsGradeSummaryRow>();
+  const activeQuarterLabels = getShsQuarterLabelsForSemester(semester);
 
   records.forEach((record) => {
     const quarterLabel = record.gradingPeriod as ShsQuarterLabel;
     if (!SHS_QUARTER_DISPLAY_ORDER.includes(quarterLabel)) {
+      return;
+    }
+
+    if (!activeQuarterLabels.includes(quarterLabel)) {
       return;
     }
 
@@ -644,17 +721,8 @@ const buildShsGradeSummaryRows = (records: StoredStudentGradeRecord[]) => {
 };
 
 const getEditableShsQuarterLabels = (semester: string): ShsQuarterLabel[] => {
-  const normalizedSemester = semester.trim().toLowerCase();
-
-  if (normalizedSemester === "1st semester") {
-    return ["1st Quarter", "2nd Quarter"];
-  }
-
-  if (normalizedSemester === "2nd semester") {
-    return ["3rd Quarter", "4th Quarter"];
-  }
-
-  return [...SHS_QUARTER_DISPLAY_ORDER];
+  const quarterLabels = getShsQuarterLabelsForSemester(semester);
+  return quarterLabels.length > 0 ? quarterLabels : [...SHS_QUARTER_DISPLAY_ORDER];
 };
 
 const buildGradeClearIdentityFromRecord = (record: StoredStudentGradeRecord) => ({
@@ -740,19 +808,124 @@ const recoverApprovedStudentsForBranch = async (
   return recoverableEnrollees.length;
 };
 
-const studentsMatch = (
-  left: Pick<Student, "id" | "trackingNumber">,
-  right: Pick<Student, "id" | "trackingNumber">,
-) =>
-  left.id === right.id ||
-  Boolean(
+type StudentIdentityInput = Pick<
+  Student,
+  "id" | "trackingNumber" | "email" | "name"
+> & {
+  birthDate?: string;
+};
+
+const studentsMatch = (left: StudentIdentityInput, right: StudentIdentityInput) => {
+  if (left.id === right.id) {
+    return true;
+  }
+
+  if (
     left.trackingNumber &&
-      right.trackingNumber &&
-      left.trackingNumber === right.trackingNumber,
+    right.trackingNumber &&
+    left.trackingNumber === right.trackingNumber
+  ) {
+    return true;
+  }
+
+  const leftEmail = left.email?.trim().toLowerCase();
+  const rightEmail = right.email?.trim().toLowerCase();
+  const leftName = left.name?.trim().toLowerCase().replace(/\s+/g, " ");
+  const rightName = right.name?.trim().toLowerCase().replace(/\s+/g, " ");
+
+  if (leftEmail && rightEmail && leftName && rightName) {
+    return leftEmail === rightEmail && leftName === rightName;
+  }
+
+  const leftBirthDate = left.birthDate?.trim();
+  const rightBirthDate = right.birthDate?.trim();
+
+  return Boolean(
+    leftName &&
+      rightName &&
+      leftBirthDate &&
+      rightBirthDate &&
+      leftName === rightName &&
+      leftBirthDate === rightBirthDate,
   );
+};
 
 const getStudentSyncKey = (student: Pick<Student, "id" | "trackingNumber">) =>
   student.trackingNumber || student.id;
+
+const isActiveStudentListRecord = (student: Pick<Student, "status">) =>
+  getStudentLifecycleStatus(student) === "Undergraduate";
+
+const getActiveStudentsForAdminList = (branch: string) =>
+  (getStudentsForBranch(branch) as Student[]).filter(isActiveStudentListRecord);
+
+const removeHiddenStudentsFromAdminList = (students: Student[]) =>
+  students.filter(isActiveStudentListRecord);
+
+const RESTORE_SNAPSHOT_GUARD_MS = 5 * 60 * 1000;
+
+const hasFreshRestoreSnapshotForBranch = (branch: string) => {
+  const restoreMarker = readBackupRestoreMarker();
+
+  if (!restoreMarker) {
+    return false;
+  }
+
+  const restoredAt = Date.parse(restoreMarker.appliedAt);
+  const isExpired =
+    !Number.isFinite(restoredAt) ||
+    Date.now() - restoredAt > RESTORE_SNAPSHOT_GUARD_MS;
+
+  if (isExpired) {
+    clearBackupRestoreMarker();
+    return false;
+  }
+
+  return normalizeBranchName(restoreMarker.branch) === normalizeBranchName(branch);
+};
+
+const persistArchivedStudentsLocally = (
+  branch: string,
+  studentsToArchive: Student[],
+) => {
+  if (studentsToArchive.length === 0) {
+    return;
+  }
+
+  const archivedByKey = new Map(
+    studentsToArchive.map((student) => [
+      getStudentSyncKey(student),
+      { ...student, branch: student.branch || branch, status: "Archived" as const },
+    ]),
+  );
+  const seenArchivedKeys = new Set<string>();
+  const nextStoredStudents = readStoredStudents().map((student) => {
+    if (normalizeBranchName(student.branch) !== normalizeBranchName(branch)) {
+      return student;
+    }
+
+    const archivedStudent = archivedByKey.get(getStudentSyncKey(student));
+
+    if (!archivedStudent) {
+      return student;
+    }
+
+    seenArchivedKeys.add(getStudentSyncKey(student));
+    return {
+      ...student,
+      ...archivedStudent,
+      status: "Archived" as const,
+    };
+  });
+
+  archivedByKey.forEach((student, key) => {
+    if (!seenArchivedKeys.has(key)) {
+      nextStoredStudents.push(student);
+    }
+  });
+
+  writeStoredStudents(nextStoredStudents);
+};
 
 const normalizeComparableText = (value?: string | null) =>
   (value || "").trim().toLowerCase();
@@ -864,13 +1037,15 @@ const resolveStudentWithApprovedEnrollment = (student: Student): Student => {
 };
 
 const needsStudentRecordSync = (
-  localStudent: Pick<Student, "yearLevel" | "section">,
-  fetchedStudent: Pick<Student, "yearLevel" | "section">,
+  localStudent: Pick<Student, "yearLevel" | "section" | "status">,
+  fetchedStudent: Pick<Student, "yearLevel" | "section" | "status">,
 ) =>
   normalizeComparableText(localStudent.yearLevel) !==
     normalizeComparableText(fetchedStudent.yearLevel) ||
   normalizeComparableText(localStudent.section) !==
-    normalizeComparableText(fetchedStudent.section);
+    normalizeComparableText(fetchedStudent.section) ||
+  normalizeComparableText(localStudent.status) !==
+    normalizeComparableText(fetchedStudent.status);
 
 type StoredSectionAssignmentRecord = {
   enrolleeId: string;
@@ -938,8 +1113,15 @@ const mergeFetchedStudentsWithLocalState = (
       getStudentSyncKey(resolvedLocalStudent),
     );
 
-    return {
+    const mergedStudent = {
       ...resolvedFetchedStudent,
+      id:
+        resolvedFetchedStudent.id === resolvedLocalStudent.id
+          ? resolvedFetchedStudent.id
+          : resolvedLocalStudent.id || resolvedFetchedStudent.id,
+      trackingNumber:
+        resolvedFetchedStudent.trackingNumber ||
+        resolvedLocalStudent.trackingNumber,
       yearLevel: shouldPreferLocalStudentState
         ? resolvedLocalStudent.yearLevel || resolvedFetchedStudent.yearLevel
         : resolvedFetchedStudent.yearLevel,
@@ -951,11 +1133,16 @@ const mergeFetchedStudentsWithLocalState = (
           : resolvedFetchedStudent.section ||
             resolvedLocalStudent.section ||
             getRecoveredStudentSection(resolvedLocalStudent),
+      status: shouldPreferLocalStudentState
+        ? resolvedLocalStudent.status
+        : resolvedFetchedStudent.status,
       ...mergeStudentOwnScheduleState(
         resolvedFetchedStudent,
         resolvedLocalStudent,
       ),
     };
+
+    return mergedStudent;
   });
 
   const localOnlyStudents = localStudents.filter(
@@ -963,13 +1150,13 @@ const mergeFetchedStudentsWithLocalState = (
       !fetchedStudents.some((candidate) => studentsMatch(candidate, student)),
   );
 
-  return [
+  return dedupeStoredStudents([
     ...mergedFetchedStudents,
     ...localOnlyStudents.map((student) => ({
       ...student,
       section: student.section || getRecoveredStudentSection(student),
     })),
-  ];
+  ]) as Student[];
 };
 
 const buildStudentSyncMessage = (
@@ -993,9 +1180,9 @@ const syncLocalStudentsToSupabase = async (
   localStudents: Student[],
   fetchedStudents: Student[],
 ) => {
-  const branchStudents = localStudents.filter(
+  const branchStudents = dedupeStoredStudents(localStudents).filter(
     (student) => normalizeBranchName(student.branch) === normalizeBranchName(branch),
-  );
+  ) as Student[];
   const studentsToSync = branchStudents.filter(
     (student) => {
       const resolvedLocalStudent = resolveStudentWithApprovedEnrollment(student);
@@ -1049,8 +1236,8 @@ export default function AdminStudents({
   const [filterProgram, setFilterProgram] = useState("All Programs");
   const [filterYearLevel, setFilterYearLevel] = useState("");
   const [filterSection, setFilterSection] = useState("");
-  const [filterStudentLifecycleStatus, setFilterStudentLifecycleStatus] =
-    useState<"All" | StudentLifecycleStatus>("Undergraduate");
+  const filterStudentLifecycleStatus: "All" | StudentLifecycleStatus =
+    "Undergraduate";
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterAcademicStanding, setFilterAcademicStanding] = useState("All");
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
@@ -1065,6 +1252,10 @@ export default function AdminStudents({
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [isScheduleNotificationModalOpen, setIsScheduleNotificationModalOpen] =
     useState(false);
+  const [systemAlert, setSystemAlert] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
   const [studentRecoveryMessage, setStudentRecoveryMessage] = useState<
     string | null
   >(null);
@@ -1078,13 +1269,20 @@ export default function AdminStudents({
     useState(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [isBulkMovingToAlumni, setIsBulkMovingToAlumni] = useState(false);
+  const [isBulkArchiving, setIsBulkArchiving] = useState(false);
   const [pendingScholarshipScore, setPendingScholarshipScore] = useState("");
   const [isSavingScholarshipScore, setIsSavingScholarshipScore] =
     useState(false);
   const [scholarshipScoreFeedback, setScholarshipScoreFeedback] =
     useState<InlineFeedback | null>(null);
+  const [credentialActionFeedback, setCredentialActionFeedback] =
+    useState<InlineFeedback | null>(null);
+  const [credentialActionKey, setCredentialActionKey] = useState<string | null>(
+    null,
+  );
   const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
-  const [gradeTermFilter, setGradeTermFilter] = useState("all");
+  const [gradeSchoolYearFilter, setGradeSchoolYearFilter] = useState("all");
+  const [gradeSemesterFilter, setGradeSemesterFilter] = useState("all");
   const [gradeSearchTerm, setGradeSearchTerm] = useState("");
   const [gradeEditState, setGradeEditState] =
     useState<StudentGradeEditState | null>(null);
@@ -1093,6 +1291,19 @@ export default function AdminStudents({
   const [gradeManagementFeedback, setGradeManagementFeedback] =
     useState<InlineFeedback | null>(null);
   const [isSavingGradeEdit, setIsSavingGradeEdit] = useState(false);
+  const [paymentRecordsVersion, setPaymentRecordsVersion] = useState(0);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentReceiptNumber, setPaymentReceiptNumber] = useState("");
+  const [paymentDate, setPaymentDate] = useState(getTodayInputDate);
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [paymentFeedback, setPaymentFeedback] = useState<InlineFeedback | null>(
+    null,
+  );
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
+
+  const showSystemAlert = (title: string, message: string) => {
+    setSystemAlert({ title, message });
+  };
 
   // Form state for add/edit
   const [formData, setFormData] = useState<Student>({
@@ -1109,6 +1320,8 @@ export default function AdminStudents({
     status: "Incomplete",
     branch: currentBranch,
     studentStatus: "",
+    guardianName: "",
+    guardianContact: "",
   });
 
   // Errors for add/edit
@@ -1118,7 +1331,7 @@ export default function AdminStudents({
 
   // Students data
   const [students, setStudents] = useState<Student[]>(() =>
-    getStudentsForBranch(currentBranch) as Student[],
+    getActiveStudentsForAdminList(currentBranch),
   );
 
   useEffect(() => {
@@ -1130,6 +1343,15 @@ export default function AdminStudents({
 
       try {
         const localBranchStudents = getStudentsForBranch(currentBranch) as Student[];
+
+        if (hasFreshRestoreSnapshotForBranch(currentBranch)) {
+          if (!isCancelled) {
+            setStudents(getActiveStudentsForAdminList(currentBranch));
+            setStudentRecoveryMessage(null);
+          }
+          return;
+        }
+
         try {
           await fetchEnrollmentRequests(currentBranch);
         } catch (error) {
@@ -1157,7 +1379,13 @@ export default function AdminStudents({
         );
 
         if (!isCancelled) {
-          setStudents(branchStudents);
+          if (hasFreshRestoreSnapshotForBranch(currentBranch)) {
+            setStudents(getActiveStudentsForAdminList(currentBranch));
+            setStudentRecoveryMessage(null);
+            return;
+          }
+
+          setStudents(removeHiddenStudentsFromAdminList(branchStudents));
 
           const syncMessage = buildStudentSyncMessage(
             syncSummary.syncedCount,
@@ -1170,7 +1398,7 @@ export default function AdminStudents({
         }
       } catch (error) {
         console.error("Failed to load branch students", error);
-        let branchStudents = getStudentsForBranch(currentBranch) as Student[];
+        let branchStudents = getActiveStudentsForAdminList(currentBranch);
         let recoveryMessage: string | null = null;
 
         try {
@@ -1199,7 +1427,7 @@ export default function AdminStudents({
               }
             }
 
-            branchStudents = getStudentsForBranch(currentBranch) as Student[];
+            branchStudents = getActiveStudentsForAdminList(currentBranch);
 
             if (branchStudents.length > 0) {
               recoveryMessage =
@@ -1284,7 +1512,7 @@ export default function AdminStudents({
 
   useEffect(() => {
     const handleBackupRestoreApplied = () => {
-      setStudents(getStudentsForBranch(currentBranch) as Student[]);
+      setStudents(getActiveStudentsForAdminList(currentBranch));
       setGradeRecordsVersion((previousValue) => previousValue + 1);
       setStudentSubjectPlans(
         readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
@@ -1295,8 +1523,8 @@ export default function AdminStudents({
       setStudentScheduleRequests(
         readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
           STUDENT_SCHEDULE_REQUEST_SCOPE,
-          currentBranch,
-        ) ?? [],
+        currentBranch,
+      ) ?? [],
       );
     };
 
@@ -1339,6 +1567,31 @@ export default function AdminStudents({
   }, [currentBranch]);
 
   useEffect(() => {
+    const handleStudentPaymentsUpdated = (event: Event) => {
+      const customEvent = event as CustomEvent<{ branch?: string }>;
+      const updatedBranch = normalizeBranchName(customEvent.detail?.branch);
+
+      if (updatedBranch && updatedBranch !== currentBranch) {
+        return;
+      }
+
+      setPaymentRecordsVersion((previousValue) => previousValue + 1);
+    };
+
+    window.addEventListener(
+      STUDENT_PAYMENTS_UPDATED_EVENT,
+      handleStudentPaymentsUpdated as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener(
+        STUDENT_PAYMENTS_UPDATED_EVENT,
+        handleStudentPaymentsUpdated as EventListener,
+      );
+    };
+  }, [currentBranch]);
+
+  useEffect(() => {
     if (window.innerWidth < 1024 && isSidebarOpen) {
       document.body.style.overflow = "hidden";
       return () => {
@@ -1353,11 +1606,37 @@ export default function AdminStudents({
   }, [isSidebarOpen]);
 
   useEffect(() => {
-    const studentsFromOtherBranches = readStoredStudents().filter(
-      (student) => normalizeBranchName(student.branch) !== currentBranch,
+    const storedStudents = readStoredStudents();
+    const visibleStudents = removeHiddenStudentsFromAdminList(students);
+    const hiddenStudentsFromState = students.filter(
+      (student) => !isActiveStudentListRecord(student),
     );
+    const hiddenStateKeys = new Set(
+      hiddenStudentsFromState.map(getStudentSyncKey),
+    );
+    const studentsToPreserve = storedStudents.filter((student) => {
+      const isCurrentBranch = normalizeBranchName(student.branch) === currentBranch;
 
-    writeStoredStudents([...studentsFromOtherBranches, ...students]);
+      if (!isCurrentBranch) {
+        return true;
+      }
+
+      if (isActiveStudentListRecord(student)) {
+        return false;
+      }
+
+      return !hiddenStateKeys.has(getStudentSyncKey(student));
+    });
+
+    writeStoredStudents([
+      ...studentsToPreserve,
+      ...hiddenStudentsFromState,
+      ...visibleStudents,
+    ]);
+
+    if (hiddenStudentsFromState.length > 0) {
+      setStudents(visibleStudents);
+    }
   }, [students, currentBranch]);
 
   useEffect(() => {
@@ -1366,8 +1645,7 @@ export default function AdminStudents({
         students.some(
           (student) =>
             student.id === studentId &&
-            student.status !== "Archived" &&
-            student.status !== "Graduated",
+            student.status !== "Archived",
         ),
       ),
     );
@@ -1416,7 +1694,6 @@ export default function AdminStudents({
       student.email.toLowerCase().includes(search) ||
       student.contact.toLowerCase().includes(search) ||
       (student.section || "").toLowerCase().includes(search) ||
-      lifecycleStatus.toLowerCase().includes(search) ||
       getAdmissionTypeLabel(student.studentStatus).toLowerCase().includes(search) ||
       academicStanding.toLowerCase().includes(search);
 
@@ -1427,7 +1704,6 @@ export default function AdminStudents({
     const matchesSection =
       filterSection === "" || (student.section || "") === filterSection;
     const matchesStudentLifecycleStatus =
-      filterStudentLifecycleStatus === "All" ||
       lifecycleStatus === filterStudentLifecycleStatus;
     const matchesStatus =
       (filterStatus === "All" || student.status === filterStatus);
@@ -1497,11 +1773,32 @@ export default function AdminStudents({
   ).sort();
   const isStudentSelectableForBulkActions = (student: Student) =>
     getStudentLifecycleStatus(student) === "Undergraduate";
+  const isStudentEligibleForAlumniTransfer = (student: Student) => {
+    const normalizedProgram = student.program.trim().toLowerCase();
+    const normalizedYearLevel = student.yearLevel.trim().toLowerCase();
+
+    if (normalizedProgram !== "shs") {
+      return normalizedYearLevel === "4th year";
+    }
+
+    if (normalizedProgram === "shs") {
+      return (
+        normalizedYearLevel === "grade 12" ||
+        normalizedYearLevel === "g12" ||
+        normalizedYearLevel === "12"
+      );
+    }
+
+    return false;
+  };
   const selectedStudents = students.filter((student) =>
     selectedStudentIds.includes(student.id) &&
     isStudentSelectableForBulkActions(student),
   );
-  const isAnyAlumniMovePending = isBulkMovingToAlumni;
+  const alumniEligibleSelectedStudents = selectedStudents.filter(
+    isStudentEligibleForAlumniTransfer,
+  );
+  const isAnyBulkActionPending = isBulkMovingToAlumni || isBulkArchiving;
   const visibleStudentIds = sortedStudents
     .filter(isStudentSelectableForBulkActions)
     .map((student) => student.id);
@@ -1650,6 +1947,8 @@ export default function AdminStudents({
         status: "Incomplete",
         branch: currentBranch,
         studentStatus: "",
+        guardianName: "",
+        guardianContact: "",
       });
       setShsTrackType("");
       setProgramSpecialization("");
@@ -1748,6 +2047,9 @@ export default function AdminStudents({
       ...formData,
       branch: formData.branch || editingStudent?.branch || currentBranch,
     };
+    const didChangeLoginEmail =
+      normalizeComparableText(normalizedStudent.email) !==
+      normalizeComparableText(editingStudent?.email);
 
     try {
       let savedStudent = normalizedStudent;
@@ -1760,7 +2062,27 @@ export default function AdminStudents({
           "Falling back to local student storage for save because Supabase sync failed.",
           syncError,
         );
-        syncFailed = true;
+        if (didChangeLoginEmail) {
+          try {
+            savedStudent = (await updateAdminStudentEmail({
+              branch: normalizedStudent.branch,
+              studentNumber: normalizedStudent.id,
+              trackingNumber: normalizedStudent.trackingNumber,
+              email: normalizedStudent.email,
+            })) as Student;
+            syncFailed = false;
+          } catch (emailSyncError) {
+            throw new Error(
+              emailSyncError instanceof Error
+                ? emailSyncError.message
+                : syncError instanceof Error
+                  ? syncError.message
+                  : "Email changes must be saved to Supabase before the student can use that email to log in.",
+            );
+          }
+        } else {
+          syncFailed = true;
+        }
       }
 
       const mergedSavedStudent = {
@@ -1791,7 +2113,7 @@ export default function AdminStudents({
       console.error("Failed to save student", error);
       const message =
         error instanceof Error ? error.message : "Unable to save student.";
-      alert(message);
+      showSystemAlert("Unable to Save Student", message);
     }
   };
 
@@ -1809,12 +2131,18 @@ export default function AdminStudents({
 
     const student = students.find((record) => record.id === studentToArchive);
     const archiveStudentLocally = () => {
+      if (student) {
+        forgetDeletedStoredStudent({
+          branch: student.branch || currentBranch,
+          id: student.id,
+          trackingNumber: student.trackingNumber,
+          name: student.name,
+        });
+        persistArchivedStudentsLocally(currentBranch, [student]);
+      }
+
       setStudents((prev) =>
-        prev.map((record) =>
-          record.id === studentToArchive
-            ? { ...record, status: "Archived" }
-            : record,
-        ),
+        prev.filter((record) => record.id !== studentToArchive),
       );
       setIsArchiveModalOpen(false);
       setStudentToArchive(null);
@@ -1847,24 +2175,116 @@ export default function AdminStudents({
     setStudentToArchive(null);
   };
 
+  const archiveSelectedStudents = async (studentsToArchive: Student[]) => {
+    const archivedStudentIds: string[] = [];
+    const failedStudents: string[] = [];
+
+    for (const student of studentsToArchive) {
+      try {
+        forgetDeletedStoredStudent({
+          branch: student.branch || currentBranch,
+          id: student.id,
+          trackingNumber: student.trackingNumber,
+          name: student.name,
+        });
+
+        try {
+          await updateAdminStudentStatus({
+            branch: student.branch || currentBranch,
+            studentNumber: student.id,
+            status: "Archived",
+          });
+        } catch (error) {
+          console.warn(
+            "Unable to sync archived student to Supabase. Keeping the archived state on this device only.",
+            error,
+          );
+        }
+
+        archivedStudentIds.push(student.id);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unable to move to archive.";
+        failedStudents.push(`${student.name}: ${message}`);
+      }
+    }
+
+    if (archivedStudentIds.length > 0) {
+      persistArchivedStudentsLocally(
+        currentBranch,
+        studentsToArchive.filter((student) =>
+          archivedStudentIds.includes(student.id),
+        ),
+      );
+      setStudents((prev) =>
+        prev.filter((student) => !archivedStudentIds.includes(student.id)),
+      );
+      setSelectedStudentIds((prev) =>
+        prev.filter((studentId) => !archivedStudentIds.includes(studentId)),
+      );
+      setStudentRecoveryMessage(
+        `Moved ${archivedStudentIds.length} student${archivedStudentIds.length === 1 ? "" : "s"} to archive.`,
+      );
+    }
+
+    if (failedStudents.length > 0) {
+      showSystemAlert(
+        "Some Students Were Not Archived",
+        failedStudents.join("\n"),
+      );
+    }
+  };
+
   const openViewModal = (student: Student) => {
-    setGradeTermFilter("all");
+    setGradeSchoolYearFilter("all");
+    setGradeSemesterFilter("all");
     setGradeSearchTerm("");
     setGradeEditState(null);
     setGradeEditFeedback(null);
     setGradeManagementFeedback(null);
+    setPaymentAmount("");
+    setPaymentReceiptNumber(
+      buildNextReceiptNumber(student.branch || currentBranch),
+    );
+    setPaymentDate(getTodayInputDate());
+    setPaymentNotes("");
+    setPaymentFeedback(null);
     setViewingStudent(student);
+    const branch = student.branch || currentBranch;
+    void fetchAndCacheStudentPaymentsForBranch(branch)
+      .then(() => fetchNextStudentPaymentReceiptNumber(branch))
+      .then(setPaymentReceiptNumber)
+      .then(() =>
+        setPaymentRecordsVersion((previousValue) => previousValue + 1),
+      )
+      .catch((error) => {
+        setPaymentFeedback({
+          type: "warning",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Unable to load the payment ledger from Supabase.",
+        });
+      });
   };
 
   const closeViewModal = () => {
     setViewingStudent(null);
     setPendingScholarshipScore("");
     setScholarshipScoreFeedback(null);
-    setGradeTermFilter("all");
+    setCredentialActionFeedback(null);
+    setCredentialActionKey(null);
+    setGradeSchoolYearFilter("all");
+    setGradeSemesterFilter("all");
     setGradeSearchTerm("");
     setGradeEditState(null);
     setGradeEditFeedback(null);
     setGradeManagementFeedback(null);
+    setPaymentAmount("");
+    setPaymentReceiptNumber("");
+    setPaymentDate(getTodayInputDate());
+    setPaymentNotes("");
+    setPaymentFeedback(null);
   };
 
   const toggleStudentSelection = (studentId: string) => {
@@ -1900,11 +2320,11 @@ export default function AdminStudents({
       trimmedScore === "" ||
       !Number.isFinite(parsedScore) ||
       parsedScore < 0 ||
-      parsedScore > 100
+      parsedScore > SCHOLARSHIP_EXAM_MAX_SCORE
     ) {
       setScholarshipScoreFeedback({
         type: "warning",
-        message: "Enter a scholarship exam score from 0 to 100.",
+        message: `Enter a scholarship exam score from 0 to ${SCHOLARSHIP_EXAM_MAX_SCORE}.`,
       });
       return;
     }
@@ -1935,6 +2355,8 @@ export default function AdminStudents({
           resolvedBranch,
         ) ?? [];
       let didUpdateLinkedRecord = false;
+      let appliedExamDiscountPercentage = 0;
+      let appliedDiscountPercentage = 0;
 
       const nextEnrollees = storedEnrollees.map((record) => {
         const matchesRecord =
@@ -1948,12 +2370,20 @@ export default function AdminStudents({
         didUpdateLinkedRecord = true;
         const tuitionEstimate = getEstimatedCollegeTuition({
           honorLabel: record.honorLabel,
-          appliedForScholarship: record.appliedForScholarship,
+          honorCertificateApproved: hasApprovedAttachmentNamed(
+            record.attachments,
+            "Honor Certificate",
+          ),
+          appliedForScholarship: true,
           scholarshipExamScore: parsedScore,
         });
+        appliedExamDiscountPercentage =
+          tuitionEstimate.scholarshipExamDiscountPercentage;
+        appliedDiscountPercentage = tuitionEstimate.effectiveDiscountPercentage;
 
         return {
           ...record,
+          appliedForScholarship: true,
           scholarshipExamScore: parsedScore,
           honorDiscountPercentage: tuitionEstimate.honorDiscountPercentage,
           effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
@@ -1976,7 +2406,7 @@ export default function AdminStudents({
             }
           : {
               type: "success",
-              message: "Scholarship exam score updated successfully.",
+              message: `Scholarship exam score updated. Exam discount: ${appliedExamDiscountPercentage}%. Applied discount: ${appliedDiscountPercentage}%.`,
             },
       );
     } catch (error) {
@@ -1991,6 +2421,115 @@ export default function AdminStudents({
     } finally {
       setIsSavingScholarshipScore(false);
     }
+  };
+
+  const handleAdminCredentialUpload = (requirement: {
+    code: string;
+    name: string;
+  }) => {
+    if (!viewingStudent || !viewingStudentApplicantRecord?.trackingNumber) {
+      setCredentialActionFeedback({
+        type: "error",
+        message: "No linked admission record was found for this student.",
+      });
+      return;
+    }
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
+
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) {
+        return;
+      }
+
+      const actionKey = `upload:${requirement.code}`;
+      setCredentialActionKey(actionKey);
+      setCredentialActionFeedback(null);
+
+      try {
+        const uploadResult = await uploadAdmissionRequirementFile({
+          trackingNumber: viewingStudentApplicantRecord.trackingNumber,
+          requirementCode: requirement.code,
+          requirementName: requirement.name,
+          file,
+        });
+
+        await syncStudentCredentialUpload({
+          branch: viewingStudent.branch || currentBranch,
+          trackingNumber: viewingStudentApplicantRecord.trackingNumber,
+          studentNumber: viewingStudent.id,
+          requirementName: requirement.name,
+          mimeType: file.type,
+          storagePath: uploadResult.storagePath,
+          reviewStatus: "Approved",
+        });
+
+        setStudents((prev) => [...prev]);
+        setCredentialActionFeedback({
+          type: "success",
+          message: `${requirement.name} uploaded successfully.`,
+        });
+      } catch (error) {
+        console.error("Failed to upload student credential", error);
+        setCredentialActionFeedback({
+          type: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Unable to upload the credential right now.",
+        });
+      } finally {
+        setCredentialActionKey(null);
+      }
+    };
+
+    input.click();
+  };
+
+  const handleAdminCredentialRemove = (requirementName: string) => {
+    if (!viewingStudent || !viewingStudentApplicantRecord?.trackingNumber) {
+      setCredentialActionFeedback({
+        type: "error",
+        message: "No linked admission record was found for this student.",
+      });
+      return;
+    }
+
+    const shouldRemove = window.confirm(
+      `Remove ${requirementName} from this student's credentials?`,
+    );
+    if (!shouldRemove) {
+      return;
+    }
+
+    const actionKey = `remove:${requirementName}`;
+    setCredentialActionKey(actionKey);
+    setCredentialActionFeedback(null);
+
+    const updatedRecord = removeStudentCredentialUpload({
+      branch: viewingStudent.branch || currentBranch,
+      trackingNumber: viewingStudentApplicantRecord.trackingNumber,
+      studentNumber: viewingStudent.id,
+      requirementName,
+    });
+
+    if (!updatedRecord) {
+      setCredentialActionFeedback({
+        type: "error",
+        message: "Unable to remove the credential from this student.",
+      });
+    } else {
+      setStudents((prev) => [...prev]);
+      setCredentialActionFeedback({
+        type: "success",
+        message: `${requirementName} removed successfully.`,
+      });
+    }
+
+    setCredentialActionKey(null);
   };
 
   const handleCloseGradeEditor = () => {
@@ -2269,6 +2808,7 @@ export default function AdminStudents({
     const failedStudents: string[] = [];
     const createdAlumniRecords: AlumniBackupRecord[] = [];
     const locallyCachedStudents: string[] = [];
+    const graduationYear = getCurrentGraduationYear();
 
     for (const student of studentsToMove) {
       try {
@@ -2284,7 +2824,7 @@ export default function AdminStudents({
               student_id: student.id,
               full_name: student.name,
               program: student.strandOrCourse || student.program,
-              year_graduated: "",
+              year_graduated: graduationYear,
               contact: student.contact || "",
             }),
           });
@@ -2313,22 +2853,22 @@ export default function AdminStudents({
           locallyCachedStudents.push(student.name);
         }
 
+        rememberAlumniStudentStatus(student.id, student.status);
+        movedStudentIds.push(student.id);
+        createdAlumniRecords.push(buildAlumniBackupRecord(student, createdAlumni));
+
         try {
           await updateAdminStudentStatus({
             branch: student.branch || currentBranch,
             studentNumber: student.id,
             status: "Graduated",
           });
-        } catch (error) {
+        } catch (statusError) {
           console.warn(
-            "Unable to sync graduated status to Supabase.",
-            error,
+            "Unable to mark alumni student as graduated in Supabase. The local alumni record will still block student portal access on this device.",
+            statusError,
           );
         }
-
-        rememberAlumniStudentStatus(student.id, student.status);
-        movedStudentIds.push(student.id);
-        createdAlumniRecords.push(buildAlumniBackupRecord(student, createdAlumni));
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unable to move to alumni.";
@@ -2338,10 +2878,11 @@ export default function AdminStudents({
 
     if (movedStudentIds.length > 0) {
       setStudents((prev) =>
-        prev.map((student) =>
-          movedStudentIds.includes(student.id)
-            ? { ...student, status: "Graduated" }
-            : student,
+        prev.filter((student) => !movedStudentIds.includes(student.id)),
+      );
+      writeStoredStudents(
+        readStoredStudents().filter(
+          (student) => !movedStudentIds.includes(student.id),
         ),
       );
       setSelectedStudentIds((prev) =>
@@ -2367,19 +2908,29 @@ export default function AdminStudents({
     }
 
     if (failedStudents.length > 0) {
-      alert(failedStudents.join("\n"));
+      showSystemAlert("Some Students Were Not Moved", failedStudents.join("\n"));
     }
 
     return movedStudentIds.length;
   };
 
   const handleMoveSelectedStudentsToAlumni = async () => {
-    if (selectedStudents.length === 0) {
+    if (alumniEligibleSelectedStudents.length === 0) {
+      showSystemAlert(
+        "Cannot Move to Alumni",
+        "Only Grade 12 SHS and 4th Year College students can be moved to alumni.",
+      );
       return;
     }
 
+    const ineligibleCount =
+      selectedStudents.length - alumniEligibleSelectedStudents.length;
+    const ineligibleNote =
+      ineligibleCount > 0
+        ? `\n\n${ineligibleCount} selected student${ineligibleCount === 1 ? "" : "s"} will be skipped because only Grade 12 SHS and 4th Year College students can be moved to alumni.`
+        : "";
     const shouldContinue = window.confirm(
-      `Move ${selectedStudents.length} selected student${selectedStudents.length === 1 ? "" : "s"} to alumni?`,
+      `Move ${alumniEligibleSelectedStudents.length} selected student${alumniEligibleSelectedStudents.length === 1 ? "" : "s"} to alumni?${ineligibleNote}`,
     );
     if (!shouldContinue) {
       return;
@@ -2388,23 +2939,40 @@ export default function AdminStudents({
     setIsBulkMovingToAlumni(true);
 
     try {
-      await moveStudentsToAlumni(selectedStudents);
+      await moveStudentsToAlumni(alumniEligibleSelectedStudents);
     } finally {
       setIsBulkMovingToAlumni(false);
     }
   };
 
+  const handleMoveSelectedStudentsToArchive = async () => {
+    if (selectedStudents.length === 0) {
+      return;
+    }
+
+    const shouldContinue = window.confirm(
+      `Move ${selectedStudents.length} selected student${selectedStudents.length === 1 ? "" : "s"} to archive?`,
+    );
+    if (!shouldContinue) {
+      return;
+    }
+
+    setIsBulkArchiving(true);
+
+    try {
+      await archiveSelectedStudents(selectedStudents);
+    } finally {
+      setIsBulkArchiving(false);
+    }
+  };
+
   const getStudentStatusClassName = (status: Student["status"]) => {
     if (status === "Complete") return "students-status-complete";
-    if (status === "Archived") return "students-status-archived";
+    if (status === "Archived" || status === "Graduated") return "students-status-archived";
     return "students-status-incomplete";
   };
 
   const getStudentLifecycleStatusClassName = (status: StudentLifecycleStatus) => {
-    if (status === "Graduated") {
-      return "students-lifecycle-status-graduated";
-    }
-
     if (status === "Dropped") {
       return "students-lifecycle-status-dropped";
     }
@@ -2424,30 +2992,6 @@ export default function AdminStudents({
         trackingNumber: viewingStudent.trackingNumber,
       })
     : null;
-  const viewingStudentCredentialStatus = viewingStudentRequirements
-    ? viewingStudentRequirements.summary.rejected > 0
-      ? {
-          label: "Needs Reupload",
-          className: "students-credential-status-alert",
-        }
-      : viewingStudentRequirements.summary.pending === 0
-        ? {
-            label: "Completed",
-            className: "students-credential-status-complete",
-          }
-        : viewingStudentRequirements.summary.submitted === 0
-          ? {
-              label: "Pending",
-              className: "students-credential-status-pending",
-            }
-          : {
-              label: "Partially Submitted",
-              className: "students-credential-status-partial",
-            }
-    : {
-        label: "No linked admission record",
-        className: "students-credential-status-empty",
-      };
   const viewingStudentProgram = viewingStudent?.program || "";
   const isViewingCollegeStudent = viewingStudentProgram === "College";
   const viewingStudentAcademicStanding = viewingStudent
@@ -2495,23 +3039,6 @@ export default function AdminStudents({
         : [],
     [currentBranch, gradeRecordsVersion, viewingStudent],
   );
-  const viewingStudentGradeTerms = sortAcademicTerms(
-    Array.from(
-      new Map(
-        viewingStudentGradeRecords
-          .filter(
-            (record) => Boolean(record.academicYear) && Boolean(record.semester),
-          )
-          .map((record) => [
-            buildGradeTermKey(record.academicYear, record.semester),
-            {
-              academicYear: record.academicYear,
-              semester: record.semester,
-            },
-          ]),
-      ).values(),
-    ),
-  );
   const viewingStudentGradeTriggerIds = useMemo(
     () =>
       new Set(
@@ -2520,27 +3047,45 @@ export default function AdminStudents({
       ),
     [viewingStudentAcademicStanding],
   );
-  const viewingStudentGradeTermOptions = viewingStudentGradeTerms.map(
-    ({ academicYear, semester }) => ({
-      key: buildGradeTermKey(academicYear, semester),
-      label: `${semester} • ${academicYear}`,
-    }),
+  const viewingStudentGradeSchoolYearOptions = Array.from(
+    new Set(
+      viewingStudentGradeRecords
+        .map((record) => record.academicYear)
+        .filter(Boolean),
+    ),
+  ).sort();
+  const viewingStudentGradeSemesterOptions = Array.from(
+    new Set(
+      viewingStudentGradeRecords
+        .map((record) => record.semester)
+        .filter(Boolean),
+    ),
+  ).sort(
+    (left, right) =>
+      getSemesterOrderIndex(left) - getSemesterOrderIndex(right) ||
+      left.localeCompare(right),
   );
   const normalizedGradeSearchTerm = gradeSearchTerm.trim().toLowerCase();
   const filteredViewingStudentGradeRecords = useMemo(
     () =>
       viewingStudentGradeRecords.filter((record) => {
-        const matchesTerm =
-          gradeTermFilter === "all" ||
-          gradeTermFilter ===
-            buildGradeTermKey(record.academicYear, record.semester);
+        const matchesSchoolYear =
+          gradeSchoolYearFilter === "all" ||
+          record.academicYear === gradeSchoolYearFilter;
+        const matchesSemester =
+          gradeSemesterFilter === "all" || record.semester === gradeSemesterFilter;
         const matchesSearch =
           !normalizedGradeSearchTerm ||
           getGradeSearchHaystack(record).includes(normalizedGradeSearchTerm);
 
-        return matchesTerm && matchesSearch;
+        return matchesSchoolYear && matchesSemester && matchesSearch;
       }),
-    [gradeTermFilter, normalizedGradeSearchTerm, viewingStudentGradeRecords],
+    [
+      gradeSchoolYearFilter,
+      gradeSemesterFilter,
+      normalizedGradeSearchTerm,
+      viewingStudentGradeRecords,
+    ],
   );
   const filteredViewingStudentGradeTerms = sortAcademicTerms(
     Array.from(
@@ -2561,6 +3106,36 @@ export default function AdminStudents({
   );
   const viewingStudentApplicantRecord =
     viewingStudentRequirements?.applicantRecord ?? null;
+  const viewingStudentCredentialRows = viewingStudentApplicantRecord
+    ? getAdmissionRequirements(
+        viewingStudentApplicantRecord.studentStatus,
+        viewingStudentApplicantRecord.program === "SHS"
+          ? "Senior High School"
+          : "College",
+        viewingStudentApplicantRecord.honorLabel || "No Honor",
+      ).map((requirement) => {
+        const attachment = viewingStudentApplicantRecord.attachments?.find(
+          (item) =>
+            item.name.trim().toLowerCase() ===
+            requirement.name.trim().toLowerCase(),
+        );
+        const hasFile = Boolean(
+          attachment?.reviewStatus !== "Rejected" &&
+            attachment?.url &&
+            attachment.url !== "#" &&
+            attachment.url !== "",
+        );
+
+        return {
+          ...requirement,
+          attachment,
+          hasFile,
+          reviewStatus: hasFile
+            ? attachment?.reviewStatus || "Pending"
+            : "Pending",
+        };
+      })
+    : [];
   const viewingStudentHonorLabel =
     !viewingStudentRequirements
       ? "No linked admission record"
@@ -2578,7 +3153,12 @@ export default function AdminStudents({
               viewingStudentRequirements.submittedAttachments,
               "Honor Certificate",
             )
-            ? "Submitted"
+            ? hasApprovedAttachmentNamed(
+                viewingStudentRequirements.submittedAttachments,
+                "Honor Certificate",
+              )
+              ? "Approved"
+              : "Pending approval"
             : "Pending"
           : "Not required";
   const viewingStudentScholarshipStatus =
@@ -2586,7 +3166,8 @@ export default function AdminStudents({
       ? "No linked admission record"
       : !isViewingCollegeStudent
         ? "Not applicable"
-        : viewingStudentApplicantRecord?.appliedForScholarship
+        : viewingStudentApplicantRecord?.appliedForScholarship ||
+            typeof viewingStudentApplicantRecord?.scholarshipExamScore === "number"
           ? "Applied"
           : "Not applied";
   const viewingStudentScholarshipScore =
@@ -2599,9 +3180,86 @@ export default function AdminStudents({
           : viewingStudentApplicantRecord?.appliedForScholarship
             ? "Awaiting result"
             : "Not applicable";
+  const viewingStudentTuitionEstimate =
+    isViewingCollegeStudent && viewingStudentApplicantRecord
+      ? getEstimatedCollegeTuition({
+          honorLabel: viewingStudentApplicantRecord.honorLabel,
+          honorCertificateApproved: hasApprovedAttachmentNamed(
+            viewingStudentApplicantRecord.attachments,
+            "Honor Certificate",
+          ),
+          appliedForScholarship: Boolean(
+            viewingStudentApplicantRecord.appliedForScholarship ||
+              typeof viewingStudentApplicantRecord.scholarshipExamScore === "number",
+          ),
+          scholarshipExamScore: viewingStudentApplicantRecord.scholarshipExamScore,
+        })
+      : null;
+  const viewingStudentScholarshipDiscount =
+    viewingStudentTuitionEstimate?.scholarshipExamDiscountPercentage ?? 0;
+  const viewingStudentPortalContext = useMemo(
+    () => (viewingStudent ? resolveStudentPortalContext(viewingStudent) : null),
+    [viewingStudent],
+  );
+  const viewingStudentCurrentTermSubjects = useMemo(() => {
+    if (!viewingStudentPortalContext) {
+      return [];
+    }
+
+    const { currentTerm, subjects: portalSubjects } = viewingStudentPortalContext;
+
+    return portalSubjects.filter(
+      (subject) =>
+        subject.academicYear === currentTerm.academicYear &&
+        subject.semester === currentTerm.semester,
+    );
+  }, [viewingStudentPortalContext]);
+  const viewingStudentTotalUnits = viewingStudentCurrentTermSubjects.reduce(
+    (sum, subject) => sum + (subject.units || 0),
+    0,
+  );
+  const viewingStudentPayments = useMemo(
+    () =>
+      viewingStudent
+        ? getStudentPayments({
+            branch: viewingStudent.branch || currentBranch,
+            studentNumber: viewingStudent.id,
+            trackingNumber: viewingStudent.trackingNumber,
+          })
+        : [],
+    [currentBranch, paymentRecordsVersion, viewingStudent],
+  );
+  const viewingStudentTotalAssessment =
+    isViewingCollegeStudent && viewingStudentTotalUnits > 0
+      ? viewingStudentTotalUnits *
+        COLLEGE_TUITION_PER_UNIT *
+        (1 - (viewingStudentTuitionEstimate?.effectiveDiscountPercentage ?? 0) / 100)
+      : 0;
+  const viewingStudentBalanceSummary = buildStudentBalanceSummary({
+    totalAssessment: viewingStudentTotalAssessment,
+    payments: viewingStudentPayments,
+  });
+  const canRecordViewingStudentPayment =
+    Boolean(viewingStudent) && viewingStudentTotalAssessment > 0;
+  const getPaymentStatusClassName = (
+    status: typeof viewingStudentBalanceSummary.status,
+  ) => {
+    if (status === "Fully Paid") return "students-payment-status-paid";
+    if (status === "Partial") return "students-payment-status-partial";
+    return "students-payment-status-unpaid";
+  };
   const canEditViewingStudentScholarshipScore =
     isViewingCollegeStudent &&
     Boolean(viewingStudent && viewingStudentApplicantRecord?.trackingNumber);
+  const viewingStudentHasAdmissionAidDetails =
+    isViewingCollegeStudent &&
+    Boolean(viewingStudentApplicantRecord) &&
+    Boolean(
+      (viewingStudentApplicantRecord?.honorLabel &&
+        viewingStudentApplicantRecord.honorLabel !== "No Honor") ||
+        viewingStudentApplicantRecord?.appliedForScholarship ||
+        typeof viewingStudentApplicantRecord?.scholarshipExamScore === "number",
+    );
   useEffect(() => {
     if (!canEditViewingStudentScholarshipScore) {
       setPendingScholarshipScore("");
@@ -2624,7 +3282,7 @@ export default function AdminStudents({
   const requirementNotifications: StudentRequirementNotification[] = students
     .filter(
       (student) =>
-        student.status !== "Archived" && student.status !== "Graduated",
+        student.status !== "Archived",
     )
     .map((student) => {
       const requirementSnapshot = getStudentRequirementSnapshot({
@@ -2683,10 +3341,15 @@ export default function AdminStudents({
       studentScheduleRequests
         .filter((request) => request.status === "Pending")
         .map((request) => {
+          const normalizedRequestStudentNumber = normalizeStudentNumberInput(
+            request.studentNumber,
+            currentBranch,
+          );
           const student =
             students.find(
               (record) =>
-                record.id === request.studentNumber ||
+                normalizeStudentNumberInput(record.id, currentBranch) ===
+                  normalizedRequestStudentNumber ||
                 (request.trackingNumber &&
                   record.trackingNumber === request.trackingNumber),
             ) ?? null;
@@ -2716,7 +3379,7 @@ export default function AdminStudents({
         .sort((left, right) =>
           right.request.submittedAt.localeCompare(left.request.submittedAt),
         ),
-    [studentScheduleRequests, students],
+    [currentBranch, studentScheduleRequests, students],
   );
   const pendingScheduleNotificationCount = pendingScheduleNotifications.length;
 
@@ -2725,6 +3388,131 @@ export default function AdminStudents({
     const selectedStudent = viewingStudent;
     closeViewModal();
     void openAddEditModal(selectedStudent);
+  };
+
+  const handleAddStudentPayment = async () => {
+    if (!viewingStudent) {
+      return;
+    }
+
+    if (!canRecordViewingStudentPayment) {
+      setPaymentFeedback({
+        type: "warning",
+        message: "No assessment is available for this student yet.",
+      });
+      return;
+    }
+
+    const parsedAmount = Number(paymentAmount);
+
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setPaymentFeedback({
+        type: "warning",
+        message: "Enter a valid payment amount greater than zero.",
+      });
+      return;
+    }
+
+    if (parsedAmount > viewingStudentBalanceSummary.currentBalance) {
+      setPaymentFeedback({
+        type: "warning",
+        message: "Payment amount cannot exceed the current balance.",
+      });
+      return;
+    }
+
+    if (!paymentReceiptNumber.trim()) {
+      setPaymentFeedback({
+        type: "warning",
+        message: "Receipt number is required.",
+      });
+      return;
+    }
+
+    if (!paymentDate) {
+      setPaymentFeedback({
+        type: "warning",
+        message: "Payment date is required.",
+      });
+      return;
+    }
+
+    const branch = viewingStudent.branch || currentBranch;
+
+    try {
+      setIsSavingPayment(true);
+      await createStudentPayment({
+        branch,
+        studentNumber: viewingStudent.id,
+        trackingNumber: viewingStudent.trackingNumber,
+        amount: parsedAmount,
+        paidAt: new Date(`${paymentDate}T00:00:00`).toISOString(),
+        encodedBy: loggedInUsername,
+        encodedRole: loggedInRole,
+        notes: paymentNotes,
+      });
+
+      setPaymentRecordsVersion((previousValue) => previousValue + 1);
+      setPaymentAmount("");
+      setPaymentReceiptNumber(
+        await fetchNextStudentPaymentReceiptNumber(branch),
+      );
+      setPaymentDate(getTodayInputDate());
+      setPaymentNotes("");
+      setPaymentFeedback({
+        type: "success",
+        message: "Payment recorded and deducted from the student balance.",
+      });
+    } catch (error) {
+      setPaymentFeedback({
+        type: "warning",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to record the payment in Supabase.",
+      });
+    } finally {
+      setIsSavingPayment(false);
+    }
+  };
+
+  const handleRemoveStudentPayment = async (paymentId: string) => {
+    if (!viewingStudent) {
+      return;
+    }
+
+    const shouldRemove = window.confirm(
+      "Remove this payment receipt from the student ledger?",
+    );
+
+    if (!shouldRemove) {
+      return;
+    }
+
+    const branch = viewingStudent.branch || currentBranch;
+
+    try {
+      setIsSavingPayment(true);
+      await removeStudentPayment({ branch, paymentId });
+      setPaymentReceiptNumber(
+        await fetchNextStudentPaymentReceiptNumber(branch),
+      );
+      setPaymentRecordsVersion((previousValue) => previousValue + 1);
+      setPaymentFeedback({
+        type: "success",
+        message: "Payment receipt removed.",
+      });
+    } catch (error) {
+      setPaymentFeedback({
+        type: "warning",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to remove the payment receipt from Supabase.",
+      });
+    } finally {
+      setIsSavingPayment(false);
+    }
   };
 
   const handleOpenNotifications = () => {
@@ -2767,7 +3555,10 @@ export default function AdminStudents({
     });
 
     if (!updatedRecord) {
-      alert("Unable to update requirement review status.");
+      showSystemAlert(
+        "Unable to Update Requirement",
+        "Unable to update requirement review status.",
+      );
       return;
     }
 
@@ -2782,7 +3573,8 @@ export default function AdminStudents({
       status === "Approved" &&
       buildScheduledAssignmentConflicts(notification.request.selections).length > 0
     ) {
-      alert(
+      showSystemAlert(
+        "Schedule Has Conflicts",
         "This submitted schedule still has conflicts. Ask the student to resubmit before approval.",
       );
       return;
@@ -2859,11 +3651,7 @@ export default function AdminStudents({
         [planKey]: nextPlan,
       }));
 
-      try {
-        await saveStudentSubjectPlan(currentBranch, nextPlan);
-      } catch (error) {
-        console.error("Failed to save shared student subject plan", error);
-      }
+      await saveStudentSubjectPlan(currentBranch, nextPlan);
     }
 
     updateStoredStudentOwnScheduleState({
@@ -2880,24 +3668,20 @@ export default function AdminStudents({
       },
     });
 
-    try {
-      await saveStudentScheduleRequest(updatedRequest);
-      await saveStudentPlanningState({
-        branch: notification.student.branch || currentBranch,
-        studentNumber: notification.student.id,
-        trackingNumber: notification.student.trackingNumber,
-        requestedOwnSchedule: true,
-        ownScheduleRequestStatus: "Approved",
-        ownScheduleAcademicYear: notification.request.academicYear,
-        ownScheduleSemester: notification.request.semester,
-        ownScheduleSelectionStatus:
-          status === "Approved" ? "Approved" : "Rejected",
-      });
-    } catch (error) {
-      console.error("Failed to sync shared schedule review state", error);
-    }
+    await saveStudentScheduleRequest(updatedRequest);
+    await saveStudentPlanningState({
+      branch: notification.student.branch || currentBranch,
+      studentNumber: notification.student.id,
+      trackingNumber: notification.student.trackingNumber,
+      requestedOwnSchedule: true,
+      ownScheduleRequestStatus: "Approved",
+      ownScheduleAcademicYear: notification.request.academicYear,
+      ownScheduleSemester: notification.request.semester,
+      ownScheduleSelectionStatus:
+        status === "Approved" ? "Approved" : "Rejected",
+    });
 
-    const refreshedStudents = getStudentsForBranch(currentBranch) as Student[];
+    const refreshedStudents = getActiveStudentsForAdminList(currentBranch);
     setStudents(refreshedStudents);
 
     if (viewingStudent) {
@@ -2911,7 +3695,10 @@ export default function AdminStudents({
       setViewingStudent(refreshedViewingStudent);
     }
 
-    alert(
+    showSystemAlert(
+      status === "Approved"
+        ? "Schedule Approved"
+        : "Schedule Rejected",
       status === "Approved"
         ? "Student schedule approved and saved as the official load."
         : "Student schedule request rejected. The student can revise and submit again.",
@@ -2982,7 +3769,7 @@ export default function AdminStudents({
 
   const handleExportStudents = () => {
     if (sortedStudents.length === 0) {
-      alert("No students match the current filters.");
+      showSystemAlert("Nothing to Export", "No students match the current filters.");
       return;
     }
 
@@ -3007,17 +3794,16 @@ export default function AdminStudents({
           "Track / Course":
             student.program === "SHS"
               ? getShsTrackDisplay(student)
-              : student.strandOrCourse || student.program,
+              : getStudentCourseDisplay(student),
           Specialization:
             student.program === "SHS"
               ? getShsSpecializationDisplay(student)
-              : student.strandOrCourse || "N/A",
+              : getStudentCourseDisplay(student),
           "Year Level":
             student.program === "SHS"
               ? getShsYearLevelDisplay(student)
               : student.yearLevel || "N/A",
           Section: student.section || "N/A",
-          "Student Status": getStudentLifecycleStatus(student),
           "Requirement Status": student.status,
           "Academic Standing": getStudentAcademicStandingLabel(student),
           "Admission Type": getAdmissionTypeLabel(student.studentStatus),
@@ -3052,7 +3838,6 @@ export default function AdminStudents({
         ["Academic Level Filter", filterProgram],
         ["Year Level Filter", filterYearLevel || "All"],
         ["Section Filter", filterSection || "All"],
-        ["Student Status Filter", filterStudentLifecycleStatus],
         ["Requirement Status Filter", filterStatus],
         ["Academic Standing Filter", filterAcademicStanding],
         ["Sort", `${sortField} ${sortDirection}`],
@@ -3103,7 +3888,10 @@ export default function AdminStudents({
       );
     } catch (error) {
       console.error("Failed to export students", error);
-      alert("Unable to export the current student list right now.");
+      showSystemAlert(
+        "Unable to Export",
+        "Unable to export the current student list right now.",
+      );
     }
   };
 
@@ -3150,7 +3938,7 @@ export default function AdminStudents({
         <div className="students-controls">
           <input
             type="text"
-            placeholder="Search by Name, ID, Email, Status..."
+            placeholder="Search by Name, ID, Email..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="students-search-input"
@@ -3191,8 +3979,7 @@ export default function AdminStudents({
             <div className="students-bulk-copy">
               <strong>{selectedStudents.length} selected</strong>
               <span>
-                Move selected students to alumni when you are ready to continue
-                the alumni workflow.
+                Move selected students to alumni or archive in one action.
               </span>
             </div>
             <div className="students-bulk-action-buttons">
@@ -3200,15 +3987,28 @@ export default function AdminStudents({
                 type="button"
                 className="students-bulk-move-btn"
                 onClick={handleMoveSelectedStudentsToAlumni}
-                disabled={isAnyAlumniMovePending}
+                disabled={
+                  isAnyBulkActionPending ||
+                  alumniEligibleSelectedStudents.length === 0
+                }
+                title="Only Grade 12 SHS and 4th Year College students can be moved to alumni"
               >
                 {isBulkMovingToAlumni ? "Moving..." : "Move to Alumni"}
               </button>
               <button
                 type="button"
+                className="students-bulk-archive-btn"
+                onClick={handleMoveSelectedStudentsToArchive}
+                disabled={isAnyBulkActionPending}
+              >
+                <MdArchive />
+                {isBulkArchiving ? "Archiving..." : "Move to Archive"}
+              </button>
+              <button
+                type="button"
                 className="students-bulk-clear-btn"
                 onClick={() => setSelectedStudentIds([])}
-                disabled={isAnyAlumniMovePending}
+                disabled={isAnyBulkActionPending}
               >
                 Clear Selection
               </button>
@@ -3254,22 +4054,6 @@ export default function AdminStudents({
                   {sectionOption}
                 </option>
               ))}
-            </select>
-          </div>
-          <div className="students-filter-group">
-            <label>Student Status</label>
-            <select
-              value={filterStudentLifecycleStatus}
-              onChange={(e) =>
-                setFilterStudentLifecycleStatus(
-                  e.target.value as "All" | StudentLifecycleStatus,
-                )
-              }
-            >
-              <option value="All">All</option>
-              <option value="Undergraduate">Undergraduate</option>
-              <option value="Graduated">Graduated</option>
-              <option value="Dropped">Dropped</option>
             </select>
           </div>
           <div className="students-filter-group">
@@ -3321,10 +4105,8 @@ export default function AdminStudents({
                 </th>
                 <th>Name</th>
                 <th>Course/Track</th>
-                <th>Specialization</th>
                 <th>Grade Year</th>
                 <th>Section</th>
-                <th>Student Status</th>
                 <th>Requirement Status</th>
                 <th>Academic Standing</th>
                 <th>ACTION</th>
@@ -3342,7 +4124,7 @@ export default function AdminStudents({
                         : ""
                     }
                   >
-                    <td className="students-selection-column">
+                    <td className="students-selection-column" data-label="Select">
                       <input
                         type="checkbox"
                         className="students-selection-checkbox"
@@ -3352,45 +4134,23 @@ export default function AdminStudents({
                         aria-label={`Select ${student.name}`}
                       />
                     </td>
-                    <td>{student.id}</td>
-                    <td>{student.name}</td>
-                    <td>
+                    <td data-label="Student ID">{student.id}</td>
+                    <td data-label="Name">{student.name}</td>
+                    <td data-label="Course/Track">
                       {student.program === "SHS"
                         ? getShsTrackDisplay(student)
-                        : student.strandOrCourse || student.program}
+                        : getStudentCourseDisplay(student)}
                     </td>
-                    <td>
-                      {student.program === "SHS"
-                        ? getShsSpecializationDisplay(student)
-                        : "—"}
-                    </td>
-                    <td>
+                    <td data-label="Grade Year">
                       {student.program === "SHS"
                         ? getShsYearLevelDisplay(student)
                         : student.yearLevel}
                     </td>
-                    <td>
-                      <span className="students-admission-type-badge">
-                        {student.section || "N/A"}
-                      </span>
+                    <td data-label="Section">{student.section || "N/A"}</td>
+                    <td data-label="Requirement Status">
+                      {student.status}
                     </td>
-                    <td>
-                      <span
-                        className={getStudentLifecycleStatusClassName(
-                          getStudentLifecycleStatus(student),
-                        )}
-                      >
-                        {getStudentLifecycleStatus(student)}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={getStudentStatusClassName(student.status)}
-                      >
-                        {student.status}
-                      </span>
-                    </td>
-                    <td>
+                    <td data-label="Academic Standing">
                       <span
                         className={getAcademicStandingClassName(
                           getStudentAcademicStandingLabel(student),
@@ -3399,21 +4159,20 @@ export default function AdminStudents({
                         {getStudentAcademicStandingLabel(student)}
                       </span>
                     </td>
-                    <td className="students-action-cell">
+                    <td className="students-action-cell" data-label="Action">
                       <div className="students-action-group">
                         <button
                           className="students-action-btn students-view-btn"
                           onClick={() => openViewModal(student)}
-                          disabled={isAnyAlumniMovePending}
+                          disabled={isAnyBulkActionPending}
                         >
-                          View Details
+                          View details
                         </button>
-                        {student.status !== "Archived" &&
-                        student.status !== "Graduated" ? (
+                        {student.status !== "Archived" ? (
                           <button
                             className="students-action-btn students-archive-btn students-icon-only-btn"
                             onClick={() => openArchiveConfirm(student.id)}
-                            disabled={isAnyAlumniMovePending}
+                            disabled={isAnyBulkActionPending}
                             type="button"
                             aria-label={`Move ${student.name} to Archive`}
                             title={`Move ${student.name} to Archive`}
@@ -3427,10 +4186,16 @@ export default function AdminStudents({
                 ))
               ) : (
                 <tr>
-                  <td colSpan={11} className="students-no-results">
-                    {isLoading
-                      ? "Loading students..."
-                      : "No students found matching your search."}
+                  <td colSpan={9} className="students-no-results">
+                    {isLoading ? (
+                      <div className="skeleton-table-row">
+                        <span className="skeleton-line short" />
+                        <span className="skeleton-line long" />
+                        <span className="skeleton-line medium" />
+                      </div>
+                    ) : (
+                      "No students found matching your search."
+                    )}
                   </td>
                 </tr>
               )}
@@ -3698,6 +4463,40 @@ export default function AdminStudents({
                 </div>
 
                 <div className="students-form-group">
+                  <label>Guardian Name</label>
+                  <input
+                    name="guardianName"
+                    value={formData.guardianName || ""}
+                    onChange={handleChange}
+                    className={
+                      formErrors.guardianName ? "students-input-error" : ""
+                    }
+                  />
+                  {formErrors.guardianName && (
+                    <span className="students-error-text">
+                      {formErrors.guardianName}
+                    </span>
+                  )}
+                </div>
+
+                <div className="students-form-group">
+                  <label>Guardian Contact</label>
+                  <input
+                    name="guardianContact"
+                    value={formData.guardianContact || ""}
+                    onChange={handleChange}
+                    className={
+                      formErrors.guardianContact ? "students-input-error" : ""
+                    }
+                  />
+                  {formErrors.guardianContact && (
+                    <span className="students-error-text">
+                      {formErrors.guardianContact}
+                    </span>
+                  )}
+                </div>
+
+                <div className="students-form-group">
                   <label>Email</label>
                   <input
                     type="email"
@@ -3798,6 +4597,16 @@ export default function AdminStudents({
                     </div>
                   </div>
                   <div className="students-profile-field">
+                    <label>Student Status</label>
+                    <div
+                      className={`students-profile-value students-profile-value-highlight ${getStudentLifecycleStatusClassName(
+                        getStudentLifecycleStatus(viewingStudent),
+                      )}`}
+                    >
+                      {getStudentLifecycleStatus(viewingStudent)}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
                     <label>Requirement Status</label>
                     <div
                       className={`students-profile-value students-profile-value-highlight ${getStudentStatusClassName(viewingStudent.status)}`}
@@ -3815,24 +4624,7 @@ export default function AdminStudents({
                       {viewingStudentAcademicStandingLabel}
                     </div>
                   </div>
-                  <div className="students-profile-field">
-                    <label>Own Schedule Admission</label>
-                    <div className="students-profile-value">
-                      {viewingStudent.requestedOwnSchedule
-                        ? viewingStudent.ownScheduleRequestStatus || "Requested"
-                        : "Standard"}
-                    </div>
-                  </div>
-                  <div className="students-profile-field">
-                    <label>Schedule Selection</label>
-                    <div className="students-profile-value">
-                      {viewingStudent.requestedOwnSchedule
-                        ? getOwnScheduleSelectionLabel(
-                            viewingStudent.ownScheduleSelectionStatus,
-                          )
-                        : "Not applicable"}
-                    </div>
-                  </div>
+                  {viewingStudentAcademicStandingLabel === "Irregular" ? (
                   <div className="students-profile-field students-profile-field-full">
                     <label>Own Schedule Term</label>
                     <div className="students-profile-value">
@@ -3849,24 +4641,11 @@ export default function AdminStudents({
                         : "Not applicable"}
                     </div>
                   </div>
+                  ) : null}
                   <div className="students-profile-field">
                     <label>Admission Type</label>
                     <div className="students-profile-value students-profile-admission-type">
                       {getAdmissionTypeLabel(viewingStudent.studentStatus)}
-                    </div>
-                  </div>
-                  <div className="students-profile-field">
-                    <label>Credential Status</label>
-                    <div
-                      className={`students-profile-value students-profile-value-highlight ${viewingStudentCredentialStatus.className}`}
-                    >
-                      {viewingStudentCredentialStatus.label}
-                    </div>
-                  </div>
-                  <div className="students-profile-field">
-                    <label>Branch</label>
-                    <div className="students-profile-value">
-                      {viewingStudent.branch || currentBranch}
                     </div>
                   </div>
                   <div className="students-profile-field">
@@ -3878,7 +4657,9 @@ export default function AdminStudents({
                   <div className="students-profile-field">
                     <label>{viewingStudent.program === "SHS" ? "Strand" : "Course"}</label>
                     <div className="students-profile-value">
-                      {viewingStudent.strandOrCourse || "Not assigned"}
+                      {viewingStudent.program === "SHS"
+                        ? viewingStudent.strandOrCourse || "Not assigned"
+                        : getStudentCourseDisplay(viewingStudent)}
                     </div>
                   </div>
                   <div className="students-profile-field">
@@ -3899,16 +4680,28 @@ export default function AdminStudents({
                       {viewingStudent.documentSubmitted || "Not submitted"}
                     </div>
                   </div>
-                  <div className="students-profile-field students-profile-field-full">
+                  <div className="students-profile-field">
                     <label>Email Address</label>
                     <div className="students-profile-value students-profile-email">
                       {viewingStudent.email || "Not provided"}
                     </div>
                   </div>
-                  <div className="students-profile-field students-profile-field-full">
+                  <div className="students-profile-field">
                     <label>Contact Number</label>
                     <div className="students-profile-value">
                       {viewingStudent.contact || "Not provided"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Guardian Name</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.guardianName || "Not provided"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Guardian Contact</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.guardianContact || "Not provided"}
                     </div>
                   </div>
                   <div className="students-profile-field students-profile-field-full">
@@ -3917,143 +4710,389 @@ export default function AdminStudents({
                       {viewingStudent.address || "No address provided"}
                     </div>
                   </div>
-                  <div className="students-profile-field">
-                    <label>Requirements</label>
-                    <div className="students-profile-value">
-                      {viewingStudentRequirements
-                        ? `${viewingStudentRequirements.summary.submitted}/${viewingStudentRequirements.summary.total} submitted`
-                        : "No linked admission record"}
-                    </div>
-                  </div>
-                  <div className="students-profile-field">
-                    <label>Pending Requirements</label>
-                    <div className="students-profile-value">
-                      {viewingStudentRequirements
-                        ? viewingStudentRequirements.summary.pending
-                        : "N/A"}
-                    </div>
-                  </div>
-                  <div className="students-profile-field">
-                    <label>Academic Honor</label>
-                    <div className="students-profile-value">
-                      {viewingStudentHonorLabel}
-                    </div>
-                  </div>
-                  <div className="students-profile-field">
-                    <label>Honor Certificate</label>
-                    <div className="students-profile-value">
-                      {viewingStudentHonorCertificateStatus}
-                    </div>
-                  </div>
-                  <div className="students-profile-field">
-                    <label>Scholarship Application</label>
-                    <div className="students-profile-value">
-                      {viewingStudentScholarshipStatus}
-                    </div>
-                  </div>
-                  <div className="students-profile-field students-profile-field-full">
-                    <label>Scholarship Exam Score</label>
-                    <div className="students-profile-value students-profile-list-box students-scholarship-score-box">
-                      <div className="students-scholarship-score-current">
-                        {viewingStudentScholarshipScore}
+                  {viewingStudentHasAdmissionAidDetails ? (
+                    <>
+                      <div className="students-profile-field">
+                        <label>Academic Honor</label>
+                        <div className="students-profile-value">
+                          {viewingStudentHonorLabel}
+                        </div>
                       </div>
-                      {canEditViewingStudentScholarshipScore ? (
-                        <div className="students-scholarship-score-editor">
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.01"
-                            value={pendingScholarshipScore}
-                            onChange={(event) => {
-                              setPendingScholarshipScore(event.target.value);
-                              if (scholarshipScoreFeedback) {
-                                setScholarshipScoreFeedback(null);
-                              }
-                            }}
-                            placeholder="Enter 0 to 100"
-                          />
-                          <button
-                            type="button"
-                            className="students-save-btn students-inline-save-btn"
-                            onClick={handleApplyScholarshipScore}
-                            disabled={isSavingScholarshipScore}
-                          >
-                            {isSavingScholarshipScore ? "Saving..." : "Apply Score"}
-                          </button>
+                      <div className="students-profile-field">
+                        <label>Honor Certificate</label>
+                        <div className="students-profile-value">
+                          {viewingStudentHonorCertificateStatus}
                         </div>
-                      ) : null}
-                      {canEditViewingStudentScholarshipScore ? (
-                        <p className="students-scholarship-score-hint">
-                          You can still update the scholarship exam score after
-                          approval from this view.
-                        </p>
-                      ) : null}
-                      {scholarshipScoreFeedback ? (
-                        <p
-                          className={`students-inline-feedback ${scholarshipScoreFeedback.type}`}
-                        >
-                          {scholarshipScoreFeedback.message}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="students-profile-field students-profile-field-full">
-                    <label>Submitted Files</label>
-                    <div className="students-profile-value students-profile-list-box">
-                      {viewingStudentRequirements &&
-                      viewingStudentRequirements.submittedAttachments.length > 0 ? (
-                        <div className="students-profile-list">
-                          {viewingStudentRequirements.submittedAttachments.map(
-                            (attachment) => (
-                              <div
-                                key={attachment.name}
-                                className="students-profile-list-item"
+                      </div>
+                      <div className="students-profile-field">
+                        <label>Scholarship Application</label>
+                        <div className="students-profile-value">
+                          {viewingStudentScholarshipStatus}
+                        </div>
+                      </div>
+                      <div className="students-profile-field">
+                        <label>Scholarship Discount</label>
+                        <div className="students-profile-value">
+                          {viewingStudentTuitionEstimate
+                            ? `${viewingStudentScholarshipDiscount}%`
+                            : "Not applicable"}
+                        </div>
+                      </div>
+                      <div className="students-profile-field">
+                        <label>Applied Discount</label>
+                        <div className="students-profile-value">
+                          {viewingStudentTuitionEstimate
+                            ? `${viewingStudentTuitionEstimate.effectiveDiscountPercentage}% (${viewingStudentTuitionEstimate.effectiveDiscountSourceLabel})`
+                            : "Not applicable"}
+                        </div>
+                      </div>
+                      <div className="students-profile-field students-profile-field-full">
+                        <label>Scholarship Exam Score</label>
+                        <div className="students-profile-value students-profile-list-box students-scholarship-score-box">
+                          <div className="students-scholarship-score-current">
+                            {viewingStudentScholarshipScore}
+                          </div>
+                          {canEditViewingStudentScholarshipScore ? (
+                            <div className="students-scholarship-score-editor">
+                              <input
+                                type="number"
+                                min="0"
+                                max={SCHOLARSHIP_EXAM_MAX_SCORE}
+                                step="1"
+                                value={pendingScholarshipScore}
+                                onChange={(event) => {
+                                  setPendingScholarshipScore(event.target.value);
+                                  if (scholarshipScoreFeedback) {
+                                    setScholarshipScoreFeedback(null);
+                                  }
+                                }}
+                                placeholder={`Score out of ${SCHOLARSHIP_EXAM_MAX_SCORE}`}
+                              />
+                              <button
+                                type="button"
+                                className="students-save-btn students-inline-save-btn"
+                                onClick={handleApplyScholarshipScore}
+                                disabled={isSavingScholarshipScore}
                               >
-                                <span>
-                                  <strong>{attachment.name}</strong>
-                                  {" "}
-                                  ({attachment.reviewStatus || "Pending"})
-                                </span>
-                                {attachment.url && attachment.url !== "#" ? (
-                                  <a
-                                    href={attachment.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                  >
-                                    View
-                                  </a>
-                                ) : (
-                                  <span>Reference only</span>
-                                )}
-                              </div>
-                            ),
-                          )}
+                                {isSavingScholarshipScore ? "Saving..." : "Apply Score"}
+                              </button>
+                            </div>
+                          ) : null}
+                          {canEditViewingStudentScholarshipScore ? (
+                            <p className="students-scholarship-score-hint">
+                              Score is out of {SCHOLARSHIP_EXAM_MAX_SCORE} items.
+                              The exam discount is capped at 50%.
+                            </p>
+                          ) : null}
+                          {scholarshipScoreFeedback ? (
+                            <p
+                              className={`students-inline-feedback ${scholarshipScoreFeedback.type}`}
+                            >
+                              {scholarshipScoreFeedback.message}
+                            </p>
+                          ) : null}
                         </div>
+                      </div>
+                    </>
+                  ) : isViewingCollegeStudent ? (
+                    <div className="students-profile-field students-profile-field-full">
+                      <label>Scholarship and Discounts</label>
+                      <div className="students-profile-value students-profile-list-box students-profile-empty-aid">
+                        No scholarship, honor discount, or exam discount details
+                        are recorded for this student.
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="students-profile-field students-profile-field-full">
+                    <label>Financial Balance</label>
+                    <div className="students-profile-value students-profile-list-box students-payment-ledger">
+                      {canRecordViewingStudentPayment ? (
+                        <>
+                          <div className="students-payment-form">
+                            <label className="students-payment-field">
+                              <span>Amount Paid</span>
+                              <input
+                                type="number"
+                                min="1"
+                                max={viewingStudentBalanceSummary.currentBalance}
+                                step="1"
+                                value={paymentAmount}
+                                onChange={(event) => {
+                                  setPaymentAmount(event.target.value);
+                                  setPaymentFeedback(null);
+                                }}
+                                placeholder="0"
+                                disabled={
+                                  viewingStudentBalanceSummary.status ===
+                                  "Fully Paid"
+                                }
+                              />
+                            </label>
+                            <label className="students-payment-field">
+                              <span>Receipt No.</span>
+                              <input
+                                type="text"
+                                value={paymentReceiptNumber}
+                                readOnly
+                                aria-readonly="true"
+                                title="Receipt number is generated automatically"
+                              />
+                            </label>
+                            <label className="students-payment-field">
+                              <span>Date Paid</span>
+                              <input
+                                type="date"
+                                value={paymentDate}
+                                onChange={(event) => {
+                                  setPaymentDate(event.target.value);
+                                  setPaymentFeedback(null);
+                                }}
+                                disabled={
+                                  viewingStudentBalanceSummary.status ===
+                                  "Fully Paid"
+                                }
+                              />
+                            </label>
+                            <label className="students-payment-field students-payment-notes-field">
+                              <span>Notes</span>
+                              <input
+                                type="text"
+                                value={paymentNotes}
+                                onChange={(event) => {
+                                  setPaymentNotes(event.target.value);
+                                  setPaymentFeedback(null);
+                                }}
+                                placeholder="Optional"
+                                disabled={
+                                  viewingStudentBalanceSummary.status ===
+                                  "Fully Paid"
+                                }
+                              />
+                            </label>
+                            <div className="students-payment-action-field">
+                              <span aria-hidden="true">&nbsp;</span>
+                              <button
+                                type="button"
+                                className="students-save-btn students-payment-add-btn"
+                                onClick={handleAddStudentPayment}
+                                disabled={
+                                  isSavingPayment ||
+                                  viewingStudentBalanceSummary.status ===
+                                  "Fully Paid"
+                                }
+                              >
+                                {isSavingPayment ? "Saving..." : "Add Payment"}
+                              </button>
+                            </div>
+                          </div>
+
+                          {paymentFeedback ? (
+                            <p
+                              className={`students-inline-feedback ${paymentFeedback.type}`}
+                            >
+                              {paymentFeedback.message}
+                            </p>
+                          ) : null}
+
+                          <div className="students-payment-summary">
+                            <div className="students-payment-summary-card">
+                              <span>Total Assessment</span>
+                              <strong>
+                                {formatPeso(
+                                  viewingStudentBalanceSummary.totalAssessment,
+                                )}
+                              </strong>
+                            </div>
+                            <div className="students-payment-summary-card">
+                              <span>Total Paid</span>
+                              <strong>
+                                {formatPeso(viewingStudentBalanceSummary.totalPaid)}
+                              </strong>
+                            </div>
+                            <div className="students-payment-summary-card balance">
+                              <span>Current Balance</span>
+                              <strong>
+                                {formatPeso(
+                                  viewingStudentBalanceSummary.currentBalance,
+                                )}
+                              </strong>
+                            </div>
+                            <div
+                              className={`students-payment-status ${getPaymentStatusClassName(
+                                viewingStudentBalanceSummary.status,
+                              )}`}
+                            >
+                              {viewingStudentBalanceSummary.status}
+                            </div>
+                          </div>
+                          <p className="students-payment-assessment-note">
+                            {viewingStudentTotalUnits} unit(s) at{" "}
+                            {formatPeso(COLLEGE_TUITION_PER_UNIT)} per unit
+                            {viewingStudentTuitionEstimate?.effectiveDiscountPercentage
+                              ? `, less ${viewingStudentTuitionEstimate.effectiveDiscountPercentage}% ${viewingStudentTuitionEstimate.effectiveDiscountSourceLabel}`
+                              : ""}
+                          </p>
+
+                          <div className="students-payment-receipts">
+                            <div className="students-payment-receipts-header">
+                              <h4>Payment Receipts</h4>
+                              <span>{viewingStudentPayments.length} record(s)</span>
+                            </div>
+                            {viewingStudentPayments.length > 0 ? (
+                              <div className="students-payment-table-wrapper">
+                                <table className="students-payment-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Date Paid</th>
+                                      <th>Receipt No.</th>
+                                      <th>Amount</th>
+                                      <th>Encoded By</th>
+                                      <th>Notes</th>
+                                      <th>Actions</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {viewingStudentPayments.map((payment) => (
+                                      <tr key={payment.id}>
+                                        <td>
+                                          {new Date(
+                                            payment.paidAt,
+                                          ).toLocaleDateString()}
+                                        </td>
+                                        <td>{payment.receiptNumber}</td>
+                                        <td>{formatPeso(payment.amount)}</td>
+                                        <td>
+                                          {payment.encodedBy}
+                                          {payment.encodedRole
+                                            ? ` (${payment.encodedRole})`
+                                            : ""}
+                                        </td>
+                                        <td>{payment.notes || "-"}</td>
+                                        <td>
+                                          <button
+                                            type="button"
+                                            className="students-grade-action-btn danger"
+                                            onClick={() =>
+                                              handleRemoveStudentPayment(payment.id)
+                                            }
+                                            disabled={isAnyBulkActionPending}
+                                          >
+                                            Remove
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="students-grade-empty-state">
+                                No payment receipts recorded yet.
+                              </div>
+                            )}
+                          </div>
+                        </>
                       ) : (
-                        "No submitted files"
+                        <div className="students-grade-empty-state">
+                          No college tuition assessment is available for this
+                          student yet.
+                        </div>
                       )}
                     </div>
                   </div>
                   <div className="students-profile-field students-profile-field-full">
-                    <label>Pending List</label>
+                    <label>Student Credentials</label>
                     <div className="students-profile-value students-profile-list-box">
-                      {viewingStudentRequirements &&
-                      viewingStudentRequirements.pendingRequirements.length > 0 ? (
-                        <div className="students-profile-list">
-                          {viewingStudentRequirements.pendingRequirements.map(
-                            (requirement) => (
+                      {viewingStudentCredentialRows.length > 0 ? (
+                        <div className="students-profile-list students-credential-list">
+                          {viewingStudentCredentialRows.map((credential) => {
+                            const actionKeyUpload = `upload:${credential.code}`;
+                            const actionKeyRemove = `remove:${credential.name}`;
+                            return (
                               <div
-                                key={requirement.code}
-                                className="students-profile-list-item"
+                                key={credential.code}
+                                className="students-profile-list-item students-credential-list-item"
                               >
-                                <span>{requirement.name}</span>
+                                <div className="students-credential-copy">
+                                  <strong>{credential.name}</strong>
+                                  <span
+                                    className={`students-credential-review-status ${String(
+                                      credential.hasFile
+                                        ? credential.reviewStatus
+                                        : "Pending",
+                                    ).toLowerCase()}`}
+                                  >
+                                    {credential.hasFile
+                                      ? credential.reviewStatus
+                                      : "Pending Upload"}
+                                  </span>
+                                </div>
+                                <div className="students-credential-actions">
+                                  {credential.hasFile &&
+                                  credential.attachment?.url ? (
+                                    <a
+                                      href={credential.attachment.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      View
+                                    </a>
+                                  ) : null}
+                                  {credential.hasFile &&
+                                  credential.attachment?.url &&
+                                  credential.reviewStatus !== "Pending" ? (
+                                    <a
+                                      href={credential.attachment.url}
+                                      download={credential.attachment.name}
+                                      className="students-credential-action-btn students-credential-download-btn"
+                                    >
+                                      Download
+                                    </a>
+                                  ) : null}
+                                  <button
+                                    type="button"
+                                    className="students-credential-action-btn"
+                                    onClick={() =>
+                                      handleAdminCredentialUpload(credential)
+                                    }
+                                    disabled={credentialActionKey !== null}
+                                  >
+                                    {credentialActionKey === actionKeyUpload
+                                      ? "Uploading..."
+                                      : credential.hasFile
+                                        ? "Replace"
+                                        : "Upload"}
+                                  </button>
+                                  {credential.hasFile ? (
+                                    <button
+                                      type="button"
+                                      className="students-credential-action-btn danger"
+                                      onClick={() =>
+                                        handleAdminCredentialRemove(
+                                          credential.name,
+                                        )
+                                      }
+                                      disabled={credentialActionKey !== null}
+                                    >
+                                      {credentialActionKey === actionKeyRemove
+                                        ? "Removing..."
+                                        : "Remove"}
+                                    </button>
+                                  ) : null}
+                                </div>
                               </div>
-                            ),
-                          )}
+                            );
+                          })}
+                          {credentialActionFeedback ? (
+                            <p
+                              className={`students-inline-feedback ${credentialActionFeedback.type}`}
+                            >
+                              {credentialActionFeedback.message}
+                            </p>
+                          ) : null}
                         </div>
                       ) : (
-                        "No pending requirements"
+                        "No linked credential requirements"
                       )}
                     </div>
                   </div>
@@ -4157,20 +5196,39 @@ export default function AdminStudents({
                         <div className="students-grade-sections">
                           <div className="students-grade-toolbar">
                             <div className="students-grade-filter-field">
-                              <label htmlFor="students-grade-term-filter">
-                                Term
+                              <label htmlFor="students-grade-school-year-filter">
+                                School Year
                               </label>
                               <select
-                                id="students-grade-term-filter"
-                                value={gradeTermFilter}
+                                id="students-grade-school-year-filter"
+                                value={gradeSchoolYearFilter}
                                 onChange={(event) =>
-                                  setGradeTermFilter(event.target.value)
+                                  setGradeSchoolYearFilter(event.target.value)
                                 }
                               >
-                                <option value="all">All Terms</option>
-                                {viewingStudentGradeTermOptions.map((option) => (
-                                  <option key={option.key} value={option.key}>
-                                    {option.label}
+                                <option value="all">All School Years</option>
+                                {viewingStudentGradeSchoolYearOptions.map((year) => (
+                                  <option key={year} value={year}>
+                                    {year}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="students-grade-filter-field">
+                              <label htmlFor="students-grade-semester-filter">
+                                Semester
+                              </label>
+                              <select
+                                id="students-grade-semester-filter"
+                                value={gradeSemesterFilter}
+                                onChange={(event) =>
+                                  setGradeSemesterFilter(event.target.value)
+                                }
+                              >
+                                <option value="all">All Semesters</option>
+                                {viewingStudentGradeSemesterOptions.map((semester) => (
+                                  <option key={semester} value={semester}>
+                                    {semester}
                                   </option>
                                 ))}
                               </select>
@@ -4214,11 +5272,11 @@ export default function AdminStudents({
                                           event.target.value,
                                         )
                                       }
-                                      placeholder={
-                                        gradeEditState.programType === "College"
-                                          ? "1.00, 1.25, 3.00, INC, FAILED"
-                                          : "Enter a grade or leave blank"
-                                      }
+                                        placeholder={
+                                          gradeEditState.programType === "College"
+                                            ? "1.00, 1.25, 3.00, INC, FAILED"
+                                            : "60-100; 75 passing"
+                                        }
                                       disabled={isSavingGradeEdit}
                                     />
                                   </label>
@@ -4349,7 +5407,7 @@ export default function AdminStudents({
                                                         record,
                                                       )
                                                     }
-                                                    disabled={isAnyAlumniMovePending}
+                                                    disabled={isAnyBulkActionPending}
                                                   >
                                                     Edit
                                                   </button>
@@ -4365,7 +5423,7 @@ export default function AdminStudents({
                                                         summaryLabel: `${record.subjectCode} - ${record.subjectTitle} (${record.gradingPeriod})`,
                                                       })
                                                     }
-                                                    disabled={isAnyAlumniMovePending}
+                                                    disabled={isAnyBulkActionPending}
                                                   >
                                                     Remove
                                                   </button>
@@ -4386,8 +5444,10 @@ export default function AdminStudents({
                                     record.subjectCode,
                                     record.subjectTitle,
                                   ),
-                                ),
-                              );
+      ),
+    );
+                              const activeShsQuarterLabels =
+                                getShsQuarterLabelsForSemester(semester);
                               const shsRows = buildShsGradeSummaryRows(
                                 allTermGrades.filter((record) =>
                                   visibleShsRowKeys.has(
@@ -4397,6 +5457,7 @@ export default function AdminStudents({
                                     ),
                                   ),
                                 ),
+                                semester,
                               );
 
                               return (
@@ -4416,10 +5477,13 @@ export default function AdminStudents({
                                         <tr>
                                           <th>Subject Code</th>
                                           <th>Subject Title</th>
-                                          <th>1st Quarter</th>
-                                          <th>2nd Quarter</th>
-                                          <th>3rd Quarter</th>
-                                          <th>4th Quarter</th>
+                                          {activeShsQuarterLabels.map(
+                                            (quarterLabel) => (
+                                              <th key={quarterLabel}>
+                                                {quarterLabel}
+                                              </th>
+                                            ),
+                                          )}
                                           <th>Actions</th>
                                         </tr>
                                       </thead>
@@ -4430,25 +5494,23 @@ export default function AdminStudents({
                                               buildShsGradeSummaryKey(
                                                 record.subjectCode,
                                                 record.subjectTitle,
-                                              ) === row.key,
+                                              ) === row.key &&
+                                              activeShsQuarterLabels.includes(
+                                                record.gradingPeriod as ShsQuarterLabel,
+                                              ),
                                           );
 
                                           return (
                                             <tr key={row.key}>
                                               <td>{row.subjectCode}</td>
                                               <td>{row.subjectTitle}</td>
-                                              <td>
-                                                {row.quarterGrades["1st Quarter"]}
-                                              </td>
-                                              <td>
-                                                {row.quarterGrades["2nd Quarter"]}
-                                              </td>
-                                              <td>
-                                                {row.quarterGrades["3rd Quarter"]}
-                                              </td>
-                                              <td>
-                                                {row.quarterGrades["4th Quarter"]}
-                                              </td>
+                                              {activeShsQuarterLabels.map(
+                                                (quarterLabel) => (
+                                                  <td key={quarterLabel}>
+                                                    {row.quarterGrades[quarterLabel]}
+                                                  </td>
+                                                ),
+                                              )}
                                               <td>
                                                 <div className="students-grade-row-actions">
                                                   <button
@@ -4462,7 +5524,7 @@ export default function AdminStudents({
                                                         records: rowRecords,
                                                       })
                                                     }
-                                                    disabled={isAnyAlumniMovePending}
+                                                    disabled={isAnyBulkActionPending}
                                                   >
                                                     Edit
                                                   </button>
@@ -4478,7 +5540,7 @@ export default function AdminStudents({
                                                         summaryLabel: `${row.subjectCode} - ${row.subjectTitle} (${semester})`,
                                                       })
                                                     }
-                                                    disabled={isAnyAlumniMovePending}
+                                                    disabled={isAnyBulkActionPending}
                                                   >
                                                     Remove
                                                   </button>
@@ -4528,7 +5590,7 @@ export default function AdminStudents({
                   type="button"
                   className="students-save-btn"
                   onClick={handleEditFromView}
-                  disabled={isAnyAlumniMovePending}
+                  disabled={isAnyBulkActionPending}
                 >
                   Edit
                 </button>
@@ -4536,7 +5598,7 @@ export default function AdminStudents({
                   type="button"
                   className="students-cancel-btn"
                   onClick={closeViewModal}
-                  disabled={isAnyAlumniMovePending}
+                  disabled={isAnyBulkActionPending}
                 >
                   Close
                 </button>
@@ -4855,8 +5917,7 @@ export default function AdminStudents({
                               {notification.student.id} -{" "}
                               {notification.student.program === "SHS"
                                 ? getShsTrackDisplay(notification.student)
-                                : notification.student.strandOrCourse ||
-                                  notification.student.program}
+                                : getStudentCourseDisplay(notification.student)}
                             </p>
                           </div>
                           <button
@@ -5241,17 +6302,25 @@ export default function AdminStudents({
                 </button>
                 <button
                   type="button"
-                  className="students-archive-confirm-btn students-icon-only-btn"
+                  className="students-archive-confirm-btn"
                   onClick={confirmArchive}
                   aria-label="Confirm move to Archive"
                   title="Confirm move to Archive"
                 >
                   <MdArchive />
+                  Archive
                 </button>
               </div>
             </div>
           </div>
         )}
+
+        <SystemAlertModal
+          isOpen={Boolean(systemAlert)}
+          title={systemAlert?.title || ""}
+          message={systemAlert?.message || ""}
+          onClose={() => setSystemAlert(null)}
+        />
       </main>
     </div>
   );

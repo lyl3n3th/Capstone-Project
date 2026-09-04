@@ -3,14 +3,7 @@
 /* ============================================ */
 
 .admission-req-container {
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    "Helvetica Neue",
-    sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
 }
 
 .admission-step3-page {
@@ -505,5 +498,60 @@
   .admission-req-container .upload-group-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 360px) {
+  .admission-step3-page {
+    gap: 14px;
+    padding: 14px 8px 24px;
+  }
+
+  .admission-req-container .header2 {
+    padding: 16px 10px;
+    border-radius: 12px;
+  }
+
+  .admission-req-container .header2 h2 {
+    font-size: 20px;
+  }
+
+  .admission-req-container .syb {
+    margin-bottom: 16px;
+  }
+
+  .admission-req-container .syb > p,
+  .admission-req-container .honor-notice p,
+  .admission-req-container .choices-note .notice-text {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .admission-req-container .upload-form {
+    gap: 14px;
+  }
+
+  .admission-req-container .upload-grid {
+    gap: 12px;
+  }
+
+  .admission-req-container .upload-group,
+  .admission-req-container .choices-note {
+    padding: 12px;
+    border-radius: 12px;
+  }
+
+  .admission-req-container .upload-label {
+    font-size: 13px;
+  }
+
+  .admission-req-container .file-wrapper {
+    min-height: 66px;
+    padding: 10px;
+  }
+
+  .admission-req-container .file-trigger {
+    padding: 8px 10px;
+    font-size: 12px;
   }
 }

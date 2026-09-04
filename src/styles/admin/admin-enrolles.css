@@ -11,7 +11,7 @@
   position: relative;
   width: 100%;
   background: #f3f4f6;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
   color: #111827;
 }
 
@@ -196,7 +196,7 @@
    ========================================================================== */
 .stats-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 24px;
 }
@@ -214,18 +214,20 @@
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
-  padding: 9px 18px;
-  min-height: 58px;
+  padding: 8px 14px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 14px;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
-  transition: all 0.2s ease;
 }
 
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+.stat-card:hover,
+.stats-cards .stat-card:hover,
+.stats-cards.academic-stats .stat-card:hover {
+  transform: none;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
 }
 
 .stat-card.approved {
@@ -241,21 +243,63 @@
 }
 
 .stat-label {
-  font-size: 13px;
+  font-size: clamp(16px, 1.3vw, 20px);
   color: #6b7280;
   font-weight: 600;
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.25;
 }
 
 .stat-value {
-  font-size: 24px;
+  font-size: clamp(28px, 2.5vw, 40px);
   font-weight: 700;
   color: #111827;
+  flex-shrink: 0;
+  line-height: 1;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   .stats-cards,
   .stats-cards.academic-stats {
-    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .stat-card,
+  .stats-cards.academic-stats .stat-card {
+    padding: 9px 12px;
+    min-height: 58px;
+  }
+
+  .stat-label {
+    font-size: clamp(14px, 2.5vw, 17px);
+  }
+
+  .stat-value {
+    font-size: clamp(24px, 4.5vw, 32px);
+  }
+}
+
+@media (max-width: 640px) {
+  .stats-cards,
+  .stats-cards.academic-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .stat-card,
+  .stats-cards.academic-stats .stat-card {
+    min-height: 54px;
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .stat-label {
+    font-size: clamp(12px, 3.4vw, 15px);
+    line-height: 1.15;
+  }
+
+  .stat-value {
+    font-size: clamp(22px, 6.4vw, 28px);
   }
 }
 
@@ -328,13 +372,14 @@
 .enrollees-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 800px;
+  min-width: 0;
+  table-layout: fixed;
 }
 
 .enrollees-table th,
 .enrollees-table td {
   padding: 16px 12px;
-  text-align: left;
+  text-align: center;
   border-bottom: 1px solid #f3f4f6;
   vertical-align: middle;
 }
@@ -352,6 +397,8 @@
   font-size: 14px;
   color: #374151;
   background: #ffffff;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .enrollees-table tbody tr:hover td {
@@ -388,6 +435,11 @@
 .status-badge.approved {
   background: #d4edda;
   color: #28a745;
+}
+
+.status-badge.rejected {
+  background: #fee2e2;
+  color: #dc2626;
 }
 
 .enrollment-badge {
@@ -429,6 +481,11 @@
 .validation-badge.pending {
   background: #fef3c7;
   color: #92400e;
+}
+
+.validation-badge.rejected {
+  background: #fee2e2;
+  color: #dc2626;
 }
 
 .validation-badge.progress {
@@ -518,6 +575,17 @@
 
 .action-btn.reject:hover {
   background: #fecaca;
+  transform: translateY(-1px);
+}
+
+.action-btn.warning {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fed7aa;
+}
+
+.action-btn.warning:hover {
+  background: #ffedd5;
   transform: translateY(-1px);
 }
 
@@ -623,9 +691,122 @@
   font-size: 14px;
 }
 
+/* Compact 1366x768 admission/transferee table density */
+.enrollees-table {
+  min-width: 0;
+}
+
+.enrollees-table th,
+.enrollees-table td {
+  padding: 7px 8px;
+}
+
+.enrollees-table th {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.enrollees-table td {
+  font-size: 11px;
+}
+
+.status-badge,
+.enrollment-badge,
+.next-level-badge,
+.own-schedule-status-badge {
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+.action-buttons {
+  gap: 5px;
+}
+
+.action-btn {
+  padding: 5px 8px;
+  font-size: 10px;
+}
+
+.action-btn.trash-icon-btn:not(.archive),
+.action-btn.archive.trash-icon-btn,
+.mini-actions button.trash-icon-btn:not(.archive),
+.mini-actions button.archive.trash-icon-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.action-btn.trash-icon-btn svg,
+.action-btn.archive.trash-icon-btn svg,
+.mini-actions button.trash-icon-btn svg,
 .action-btn.archive.trash-icon-btn svg,
 .mini-actions button.archive.trash-icon-btn svg {
-  font-size: 16px;
+  font-size: 12px;
+}
+
+.enrollees-table th:last-child,
+.enrollees-table td:last-child {
+  width: 140px;
+}
+
+.enrollees-table .action-buttons {
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+
+.enrollees-table .action-btn {
+  padding: 4px 6px;
+  font-size: 9px;
+}
+
+.enrollees-table .action-btn.trash-icon-btn:not(.archive),
+.enrollees-table .action-btn.archive.trash-icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+@media (max-width: 1200px) {
+  .table-container,
+  .subjects-table-wrapper {
+    overflow-x: hidden;
+  }
+
+  .enrollees-table,
+  .subjects-table {
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .enrollees-table th,
+  .enrollees-table td,
+  .subjects-table th,
+  .subjects-table td {
+    padding: 6px 5px;
+    font-size: 10px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .enrollees-table th:last-child,
+  .enrollees-table td:last-child {
+    width: 116px;
+  }
+
+  .subjects-table .subject-prerequisite-cell {
+    min-width: 0;
+  }
+
+  .subject-actions-cell {
+    justify-content: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+  }
+
+  .subject-actions-cell .assignment-selection-btn.secondary {
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 9px;
+  }
 }
 
 .table-pagination {
@@ -854,7 +1035,8 @@
 }
 
 .application-review-modal {
-  max-width: 860px;
+  width: min(960px, calc(100vw - 40px));
+  max-width: 960px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -950,7 +1132,8 @@
   color: #1a3d5c;
 }
 
-.confirmation-field select {
+.confirmation-field select,
+.confirmation-field textarea {
   width: 100%;
   padding: 12px 14px;
   border: 1px solid #d1d5db;
@@ -958,9 +1141,18 @@
   font-size: 14px;
   color: #1f2937;
   background: #ffffff;
+  font: inherit;
+  box-sizing: border-box;
 }
 
-.confirmation-field select:focus {
+.confirmation-field textarea {
+  min-height: 120px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.confirmation-field select:focus,
+.confirmation-field textarea:focus {
   outline: none;
   border-color: #1a3d5c;
   box-shadow: 0 0 0 3px rgba(26, 61, 92, 0.12);
@@ -1004,8 +1196,36 @@
 
 .personal-info-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.admission-personal-info-grid {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.personal-info-item-wide {
+  grid-column: 1 / -1;
+}
+
+.personal-info-item-span-2 {
+  grid-column: span 2;
+}
+
+.personal-info-item-span-3 {
+  grid-column: span 3;
+}
+
+.personal-info-item-span-4 {
+  grid-column: span 4;
+}
+
+.personal-info-item-span-6 {
+  grid-column: span 6;
+}
+
+.personal-info-item-span-9 {
+  grid-column: span 9;
 }
 
 .personal-info-item {
@@ -1034,6 +1254,9 @@
   font-size: 14px;
   color: #334155;
   font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-height: 1.35;
 }
 
 .personal-info-item input {
@@ -1245,8 +1468,8 @@
 
 .transferee-subject-planner-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: minmax(320px, 1.05fr) minmax(320px, 1fr);
+  gap: 18px;
 }
 
 .transferee-subject-column {
@@ -1262,8 +1485,94 @@
   font-size: 13px;
 }
 
+.transferee-credit-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 10px;
+  min-height: 82px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+.transferee-credit-filters .transferee-field {
+  margin: 0;
+}
+
+.transferee-credit-search-field {
+  grid-column: 1 / -1;
+}
+
+.transferee-load-actions-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-height: 134px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+.transferee-load-search-field {
+  margin: 0;
+}
+
+.transferee-load-actions-panel .assignment-selection-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+.transferee-load-actions-panel .assignment-selection-btn {
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
+
 .transferee-subject-selector {
-  max-height: 280px;
+  max-height: 420px;
+}
+
+.transferee-load-subject-selector {
+  margin-top: 36px;
+}
+
+.transferee-credit-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transferee-credit-group + .transferee-credit-group {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.transferee-credit-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 4px 4px;
+}
+
+.transferee-credit-group-heading strong {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.transferee-credit-group-heading span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .transferee-review-note {
@@ -1297,6 +1606,16 @@
 }
 
 @media (max-width: 768px) {
+  .review-modal-overlay {
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .application-review-modal {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+  }
+
   .application-review-modal .review-modal-header {
     padding: 18px 20px;
   }
@@ -1313,8 +1632,25 @@
     grid-template-columns: 1fr;
   }
 
+  .admission-personal-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .personal-info-item-wide {
+    grid-column: auto;
+  }
+
+  .personal-info-item-span-2,
+  .personal-info-item-span-3,
+  .personal-info-item-span-4,
+  .personal-info-item-span-6,
+  .personal-info-item-span-9 {
+    grid-column: auto;
+  }
+
   .transferee-planner-header,
   .transferee-subject-planner-grid,
+  .transferee-credit-filters,
   .transferee-planner-filters {
     grid-template-columns: 1fr;
     flex-direction: column;
@@ -1660,10 +1996,15 @@
   border-color: #fecaca;
 }
 
+.section-card.locked {
+  border-color: #bfdbfe;
+}
+
 .section-card .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   margin-bottom: 12px;
 }
 
@@ -1681,6 +2022,14 @@
   font-weight: 600;
 }
 
+.section-status-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .section-status.available {
   background: #d4edda;
   color: #28a745;
@@ -1689,6 +2038,11 @@
 .section-status.full {
   background: #fee2e2;
   color: #dc2626;
+}
+
+.section-status.locked {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .section-details {
@@ -1749,6 +2103,18 @@
   justify-content: center;
 }
 
+.section-card .section-actions .action-btn.lock {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.section-card .section-actions .action-btn.unlock {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e40af;
+}
+
 /* ==========================================================================
    16. MANUAL ASSIGNMENT
    ========================================================================== */
@@ -1795,6 +2161,29 @@
   color: white;
   border: none;
   padding: 10px 20px;
+}
+
+.section-students-modal .students-table th,
+.section-students-modal .students-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.section-students-modal .students-table th:last-child,
+.section-students-modal .students-table td:last-child {
+  text-align: center;
+}
+
+.action-btn.remove-student {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  padding: 6px 10px;
+}
+
+.action-btn.remove-student:hover {
+  background: #fee2e2;
 }
 
 /* ==========================================================================
@@ -2038,7 +2427,7 @@
   font-size: 18px;
   font-weight: 700;
   color: #1A3D5C;
-  font-family: monospace;
+  font-family: "Open Sans", Arial, sans-serif;
   letter-spacing: 0.5px;
 }
 
@@ -2324,7 +2713,7 @@
 .subjects-table th,
 .subjects-table td {
   padding: 12px 16px;
-  text-align: left;
+  text-align: center;
   border-bottom: 1px solid #f1f5f9;
 }
 
@@ -2342,7 +2731,7 @@
 }
 
 .subject-code {
-  font-family: monospace;
+  font-family: "Open Sans", Arial, sans-serif;
   font-weight: 600;
   color: #066287;
 }
@@ -2356,7 +2745,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 14px;
   flex-wrap: wrap;
   white-space: nowrap;
 }
@@ -2554,8 +2943,8 @@
 }
 
 .instructor-card:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
+  box-shadow: none;
+  transform: none;
 }
 
 .instructor-avatar {
@@ -2659,6 +3048,7 @@
    ========================================================================== */
 .academic-subtabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 16px 20px 0 20px;
   background: #f9fafb;
@@ -2668,7 +3058,9 @@
 .subtab-btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  min-width: 0;
   padding: 10px 20px;
   background: transparent;
   border: none;
@@ -2678,6 +3070,12 @@
   cursor: pointer;
   transition: all 0.2s ease;
   border-radius: 8px 8px 0 0;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.subtab-btn svg {
+  flex: 0 0 auto;
 }
 
 .subtab-btn:hover {
@@ -2693,6 +3091,46 @@
 
 .management-section {
   padding: 24px;
+}
+
+@media (max-width: 700px) {
+  .academic-subtabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 12px;
+    border-bottom: 0;
+  }
+
+  .subtab-btn {
+    width: 100%;
+    min-height: 40px;
+    padding: 8px 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #ffffff;
+    font-size: 12px;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .subtab-btn.active {
+    border-bottom: 1px solid #066287;
+  }
+}
+
+@media (max-width: 420px) {
+  .academic-subtabs {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .subtab-btn {
+    justify-content: flex-start;
+    min-height: 38px;
+    padding: 8px 12px;
+    text-align: left;
+  }
 }
 
 .section-header-actions {
@@ -2750,6 +3188,13 @@
   margin: 0 0 10px;
   color: #64748b;
   font-size: 12px;
+  line-height: 1.5;
+}
+
+.modal-helper-text {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -2871,6 +3316,236 @@
   background: #e2e8f0;
 }
 
+.academic-management-panel {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0 0 22px;
+  padding: 16px;
+  border: 1px solid #dbe4ee;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(6, 98, 135, 0.08), transparent 34%),
+    linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.academic-management-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.academic-management-panel-header h4 {
+  margin: 0 0 4px;
+  color: #1A3D5C;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.academic-management-panel-header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.academic-management-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.academic-management-create-row input {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.academic-management-create-row input:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+}
+
+.academic-option-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  min-width: 0;
+}
+
+.academic-option-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.academic-option-chip button {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.academic-option-chip button:hover {
+  background: #bfdbfe;
+}
+
+.academic-option-chip svg {
+  font-size: 10px;
+}
+
+.academic-option-empty {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.academic-management-modal {
+  max-width: 620px;
+}
+
+.academic-management-modal .review-modal-header {
+  align-items: flex-start;
+}
+
+.academic-management-modal .review-modal-header h2 {
+  margin-bottom: 4px;
+}
+
+.academic-management-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.academic-management-list-toolbar span {
+  margin-right: auto;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.academic-management-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(360px, 48vh);
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.academic-management-option-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.academic-management-option-row.selected {
+  border-color: #60a5fa;
+  background: #eff6ff;
+}
+
+.academic-management-option-row input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #1d4ed8;
+}
+
+.academic-management-option-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.academic-management-option-row .trash-icon-btn {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #dc2626;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.academic-management-option-row .trash-icon-btn:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+  transform: translateY(-1px);
+}
+
+.academic-management-option-row .trash-icon-btn svg {
+  font-size: 14px;
+}
+
+.academic-delete-confirm-modal {
+  max-width: 460px;
+}
+
+.academic-delete-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.academic-delete-list span {
+  padding: 6px 10px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .assignment-subject-selector {
   display: flex;
   flex-direction: column;
@@ -2920,6 +3595,7 @@
 }
 
 .assignment-subject-details {
+  flex: 1;
   min-width: 0;
 }
 
@@ -2928,6 +3604,7 @@
   color: #0f172a;
   font-size: 13px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .assignment-subject-option span {
@@ -2993,6 +3670,29 @@
   align-items: end;
 }
 
+.assignment-schedule-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 14px;
+}
+
+.assignment-schedule-slot {
+  display: grid;
+  grid-template-columns:
+    minmax(140px, 0.95fr)
+    minmax(140px, 1fr)
+    minmax(140px, 1fr)
+    minmax(180px, 1.1fr)
+    auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid #dbe4ee;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
 .schedule-field {
   display: flex;
   flex-direction: column;
@@ -3010,6 +3710,8 @@
 
 .schedule-inputs input,
 .schedule-inputs select,
+.assignment-schedule-slot input,
+.assignment-schedule-slot select,
 .room-creator-panel input {
   width: 100%;
   min-height: 44px;
@@ -3026,6 +3728,8 @@
 
 .schedule-inputs input:focus,
 .schedule-inputs select:focus,
+.assignment-schedule-slot input:focus,
+.assignment-schedule-slot select:focus,
 .room-creator-panel input:focus {
   outline: none;
   border-color: #066287;
@@ -3038,14 +3742,51 @@
   font-variant-numeric: tabular-nums;
 }
 
+.assignment-schedule-slot input[type="time"] {
+  min-width: 0;
+  padding-right: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
 .schedule-inputs input[type="time"]::-webkit-calendar-picker-indicator {
   margin: 0;
   cursor: pointer;
 }
 
+.assignment-schedule-slot input[type="time"]::-webkit-calendar-picker-indicator {
+  margin: 0;
+  cursor: pointer;
+}
+
 .schedule-inputs input[type="time"]::-webkit-datetime-edit,
-.schedule-inputs input[type="time"]::-webkit-datetime-edit-fields-wrapper {
+.schedule-inputs input[type="time"]::-webkit-datetime-edit-fields-wrapper,
+.assignment-schedule-slot input[type="time"]::-webkit-datetime-edit,
+.assignment-schedule-slot input[type="time"]::-webkit-datetime-edit-fields-wrapper {
   padding: 0;
+}
+
+.assignment-schedule-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.assignment-schedule-remove-btn {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fff1f2;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.assignment-schedule-remove-btn:hover {
+  background: #ffe4e6;
+  transform: translateY(-1px);
 }
 
 .assignment-auto-assign-modal {
@@ -3131,10 +3872,6 @@
 
 .room-creator-panel input {
   flex: 1;
-}
-
-.assignment-schedule-note {
-  margin: 12px 0 0;
 }
 
 .assignment-delete-modal {
@@ -3467,12 +4204,56 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .assignment-schedule-slot {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .assignment-schedule-remove-btn {
+    grid-column: span 2;
+  }
+
   .schedule-field-room {
     grid-column: span 2;
   }
 }
 
 @media (max-width: 768px) {
+  .enrollees-table th,
+  .enrollees-table td {
+    padding: 6px 4px;
+    font-size: 10px;
+  }
+
+  .enrollees-table th:nth-child(1),
+  .enrollees-table td:nth-child(1),
+  .enrollees-table th:nth-child(2),
+  .enrollees-table td:nth-child(2) {
+    width: 18%;
+  }
+
+  .enrollees-table th:nth-child(3),
+  .enrollees-table td:nth-child(3),
+  .enrollees-table th:nth-child(4),
+  .enrollees-table td:nth-child(4),
+  .enrollees-table th:nth-child(5),
+  .enrollees-table td:nth-child(5) {
+    width: 13%;
+  }
+
+  .enrollees-table th:last-child,
+  .enrollees-table td:last-child {
+    width: 116px;
+  }
+
+  .enrollees-table .status-badge,
+  .enrollees-table .enrollment-badge,
+  .enrollees-table .next-level-badge,
+  .enrollees-table .own-schedule-status-badge {
+    min-width: 0;
+    padding: 3px 5px;
+    font-size: 9px;
+  }
+
   .table-pagination {
     gap: 8px;
     padding-top: 16px;
@@ -3517,14 +4298,44 @@
 
   .assignment-schedule-heading {
     flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
   }
 
   .assignment-schedule-heading span {
+    flex: none;
+    max-width: 100%;
     text-align: left;
+    margin: 0;
   }
 
   .schedule-inputs {
     grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .assignment-schedule-panel {
+    min-height: 0;
+    height: auto;
+    padding: 14px;
+  }
+
+  .assignment-schedule-slot {
+    grid-template-columns: 1fr;
+  }
+
+  .assignment-schedule-remove-btn {
+    grid-column: auto;
+  }
+
+  .assignment-schedule-actions {
+    justify-content: stretch;
+  }
+
+  .assignment-schedule-actions .assignment-selection-btn {
+    width: 100%;
+    justify-content: center;
   }
 
   .schedule-field-room {
@@ -3617,6 +4428,75 @@
   }
 }
 
+@media (max-width: 560px) {
+  .enrollees-table th:nth-child(4),
+  .enrollees-table td:nth-child(4),
+  .enrollees-table th:nth-child(5),
+  .enrollees-table td:nth-child(5) {
+    display: none;
+  }
+
+  .enrollees-table th,
+  .enrollees-table td {
+    padding: 5px 3px;
+    font-size: 9px;
+  }
+
+  .enrollees-table th:nth-child(1),
+  .enrollees-table td:nth-child(1),
+  .enrollees-table th:nth-child(2),
+  .enrollees-table td:nth-child(2) {
+    width: 24%;
+  }
+
+  .enrollees-table th:nth-child(3),
+  .enrollees-table td:nth-child(3) {
+    width: 18%;
+  }
+
+  .enrollees-table th:last-child,
+  .enrollees-table td:last-child {
+    width: 76px;
+  }
+
+  .enrollees-table .action-buttons {
+    gap: 3px;
+  }
+
+  .enrollees-table .action-btn {
+    padding: 4px 5px;
+    font-size: 0;
+  }
+
+  .enrollees-table .action-btn.review::after,
+  .enrollees-table .action-btn.view::after,
+  .enrollees-table .action-btn.approve::after,
+  .enrollees-table .action-btn.reject::after,
+  .enrollees-table .action-btn.edit::after {
+    font-size: 9px;
+  }
+
+  .enrollees-table .action-btn.review::after {
+    content: "Review";
+  }
+
+  .enrollees-table .action-btn.view::after {
+    content: "View";
+  }
+
+  .enrollees-table .action-btn.approve::after {
+    content: "OK";
+  }
+
+  .enrollees-table .action-btn.reject::after {
+    content: "No";
+  }
+
+  .enrollees-table .action-btn.edit::after {
+    content: "Edit";
+  }
+}
+
 /* ==========================================================================
    24. ANIMATIONS
    ========================================================================== */
@@ -3681,4 +4561,2206 @@
 
 .justify-between {
   justify-content: space-between;
+}
+
+/* Keep list action controls visually even across enrollee views. */
+.action-buttons .action-btn,
+.section-actions-buttons .action-btn,
+.section-card .section-actions .action-btn,
+.add-section-actions .action-btn,
+.assignment-bulk-actions .action-btn,
+.assignment-bulk-actions .assignment-selection-btn,
+.assignment-controls .action-btn,
+.pending-alert-actions .action-btn,
+.mini-actions button,
+.subject-actions-cell .assignment-selection-btn,
+.subject-actions-cell .trash-icon-btn,
+.assignment-selection-btn,
+.instructor-actions .action-btn {
+  box-sizing: border-box;
+  min-height: 30px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.enrollees-table .action-btn,
+.subjects-table .assignment-selection-btn,
+.subjects-table .trash-icon-btn,
+.mini-actions button {
+  min-height: 28px;
+}
+
+.subject-actions-cell .trash-icon-btn,
+.mini-actions button.trash-icon-btn {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+}
+
+@media (max-width: 1200px) {
+  .action-buttons .action-btn,
+  .section-actions-buttons .action-btn,
+  .section-card .section-actions .action-btn,
+  .add-section-actions .action-btn,
+  .assignment-bulk-actions .action-btn,
+  .assignment-bulk-actions .assignment-selection-btn,
+  .assignment-controls .action-btn,
+  .pending-alert-actions .action-btn,
+  .mini-actions button,
+  .subject-actions-cell .assignment-selection-btn,
+  .subject-actions-cell .trash-icon-btn,
+  .assignment-selection-btn,
+  .instructor-actions .action-btn {
+    min-height: 28px;
+  }
+}
+
+/* Dense enrollee lists should scroll instead of compressing into unreadable cells. */
+.enrollees-content .table-container,
+.enrollees-content .subjects-table-wrapper {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.enrollees-content .enrollees-table,
+.enrollees-content .subjects-table {
+  width: 100%;
+  min-width: 900px !important;
+  table-layout: auto !important;
+}
+
+.enrollees-content .subjects-table {
+  min-width: 900px !important;
+}
+
+.enrollees-content .enrollees-table th,
+.enrollees-content .enrollees-table td,
+.enrollees-content .subjects-table th,
+.enrollees-content .subjects-table td {
+  display: table-cell !important;
+  width: auto !important;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.enrollees-content .enrollees-table th,
+.enrollees-content .enrollees-table td {
+  padding: 5px 6px;
+  font-size: 10px;
+}
+
+.enrollees-content .enrollees-table th {
+  font-size: 9px;
+  letter-spacing: 0.015em;
+}
+
+.enrollees-content .enrollees-table td:nth-child(2),
+.enrollees-content .enrollees-table td:nth-child(3),
+.enrollees-content .subjects-table .subject-prerequisite-cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.enrollees-content .enrollees-table th:last-child,
+.enrollees-content .enrollees-table td:last-child {
+  width: 164px !important;
+  min-width: 164px;
+}
+
+.enrollees-content .enrollees-admission-table th:nth-child(5),
+.enrollees-content .enrollees-admission-table td:nth-child(5) {
+  width: 190px !important;
+  min-width: 190px;
+  max-width: 190px;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-height: 1.35;
+}
+
+.enrollees-content .enrollees-admission-table th:nth-child(8),
+.enrollees-content .enrollees-admission-table td:nth-child(8),
+.enrollees-content .enrollees-enrollment-table th:nth-child(9),
+.enrollees-content .enrollees-enrollment-table td:nth-child(9) {
+  width: 90px !important;
+  min-width: 90px;
+  max-width: 90px;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.enrollees-content .enrollees-admission-table th:nth-child(6),
+.enrollees-content .enrollees-admission-table td:nth-child(6),
+.enrollees-content .enrollees-admission-table th:nth-child(7),
+.enrollees-content .enrollees-admission-table td:nth-child(7) {
+  width: 92px !important;
+  min-width: 92px;
+  max-width: 92px;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.enrollees-content .enrollees-table .status-badge,
+.enrollees-content .enrollees-table .enrollment-badge {
+  min-width: 56px;
+  padding: 3px 6px;
+  font-size: 9px;
+}
+
+.enrollees-content .enrollees-table .action-buttons,
+.enrollees-content .subject-actions-cell {
+  flex-wrap: nowrap;
+  gap: 14px;
+}
+
+.enrollees-content .enrollees-table .action-btn,
+.enrollees-content .subjects-table .assignment-selection-btn {
+  min-height: 26px;
+  white-space: nowrap;
+}
+
+.enrollees-content .subject-actions-cell .assignment-selection-btn,
+.enrollees-content .subject-actions-cell .trash-icon-btn {
+  height: 32px;
+  min-height: 32px;
+}
+
+.enrollees-content .subject-actions-cell .assignment-selection-btn,
+.enrollees-content .subject-actions-cell .trash-icon-btn {
+  min-width: 74px;
+  padding: 0 12px;
+  gap: 6px;
+}
+
+.enrollees-content .subject-actions-cell .trash-icon-btn {
+  width: auto;
+}
+
+.enrollees-content .subjects-table-view .subjects-table-wrapper {
+  overflow-x: hidden !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table {
+  min-width: 0 !important;
+  table-layout: fixed !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th,
+.enrollees-content .subjects-table-view .subjects-table td {
+  padding: 9px 8px;
+  white-space: normal !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(1),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(1) {
+  width: 15% !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(2),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(2) {
+  width: 28% !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(3),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(3),
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(4),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(4) {
+  width: 12% !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(5),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(5) {
+  width: 14% !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(6),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(6) {
+  width: 21% !important;
+}
+
+.enrollees-content .subjects-table-view .subject-prerequisite-cell {
+  min-width: 0;
+}
+
+.enrollees-content .subjects-table-view .subject-actions-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.enrollees-content .subjects-table-view .subject-actions-cell .assignment-selection-btn,
+.enrollees-content .subjects-table-view .subject-actions-cell .trash-icon-btn {
+  height: 28px;
+  min-height: 28px;
+  width: 72px;
+  min-width: 72px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  gap: 4px;
+  vertical-align: middle;
+  box-shadow: none;
+}
+
+.enrollees-content .subjects-table-view .subject-actions-cell .trash-icon-btn svg {
+  font-size: 12px;
+}
+
+.enrollee-bulk-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.enrollee-selection-control,
+.enrollee-bulk-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.enrollee-selection-control {
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.enrollee-selection-control input,
+.enrollee-select-column input {
+  width: 14px;
+  height: 14px;
+  accent-color: #066287;
+  cursor: pointer;
+}
+
+.enrollee-select-column {
+  width: 50px !important;
+  min-width: 50px;
+}
+
+.enrollees-content .enrollees-table .action-buttons {
+  justify-content: center;
+  gap: 4px;
+}
+
+.enrollees-content .enrollees-table .action-btn.review,
+.enrollees-content .enrollees-table .action-btn.view,
+.enrollees-content .enrollees-table .enrollee-archive-btn {
+  width: 68px;
+  min-width: 68px;
+  min-height: 26px;
+  padding: 0 6px;
+  justify-content: center;
+  font-size: 9px;
+  gap: 3px;
+}
+
+.enrollees-content .enrollees-table .enrollee-archive-btn svg {
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .enrollee-bulk-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .enrollee-bulk-actions .action-btn {
+    flex: 1;
+  }
+}
+
+.evaluation-management-section {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.evaluation-management-subtitle {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.evaluation-admin-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.evaluation-questionnaire-btn {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+.evaluation-admin-stat,
+.evaluation-admin-card {
+  border: 1px solid #dbe5ef;
+  border-radius: 12px;
+  background: #ffffff;
+  min-width: 0;
+}
+
+.evaluation-admin-stat {
+  padding: 18px;
+}
+
+.evaluation-admin-stat span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.evaluation-admin-stat strong {
+  display: block;
+  margin-top: 8px;
+  color: #1a3d5c;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.evaluation-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.evaluation-admin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+.evaluation-admin-card.open {
+  border-color: #bfdbfe;
+}
+
+.evaluation-admin-card-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.evaluation-avatar {
+  width: 46px;
+  height: 46px;
+  min-width: 46px;
+}
+
+.evaluation-admin-title {
+  min-width: 0;
+}
+
+.evaluation-admin-title h4 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 17px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-admin-title p {
+  margin: 5px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.evaluation-status-pill.open {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.evaluation-status-pill.closed {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.evaluation-admin-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.evaluation-admin-meta span {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #eef6fb;
+  color: #1a3d5c;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+
+.evaluation-toggle-btn.open {
+  background: #066287;
+}
+
+.evaluation-toggle-btn.details {
+  background: #1a3d5c;
+}
+
+.evaluation-toggle-btn.close {
+  background: #b91c1c;
+}
+
+.evaluation-toggle-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.14);
+}
+
+.evaluation-toggle-btn:disabled {
+  background: #cbd5e1;
+  cursor: not-allowed;
+}
+
+.evaluation-empty {
+  grid-column: 1 / -1;
+}
+
+.evaluation-card-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.evaluation-details-modal {
+  max-width: 980px;
+}
+
+.evaluation-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: #f8fafc;
+}
+
+.evaluation-details-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.evaluation-details-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.evaluation-details-summary div {
+  padding: 16px;
+  border: 1px solid #dbe5ef;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.evaluation-details-summary span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.evaluation-details-summary strong {
+  display: block;
+  margin-top: 6px;
+  color: #1a3d5c;
+  font-size: 28px;
+}
+
+.evaluation-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.evaluation-results-category {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #dbe5ef;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.evaluation-results-category h3 {
+  width: fit-content;
+  margin: 0;
+  padding: 4px 7px;
+  background: #7cb3eb;
+  color: #1f2937;
+  font-size: 14px;
+}
+
+.evaluation-result-question {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.evaluation-result-question-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.evaluation-result-question-head strong {
+  color: #111827;
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.evaluation-result-question-head span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.evaluation-result-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.evaluation-result-bar-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 10px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.evaluation-result-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.evaluation-result-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #066287 0%, #22c55e 100%);
+}
+
+.questionnaire-modal {
+  max-width: 1120px;
+}
+
+.questionnaire-modal .review-modal-header {
+  align-items: flex-start;
+}
+
+.questionnaire-modal-subtitle {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.questionnaire-modal-body {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
+  gap: 20px;
+  background: #f4f7fb;
+}
+
+.questionnaire-form-card,
+.questionnaire-preview-card {
+  min-width: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+.questionnaire-form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-self: start;
+  padding: 20px;
+}
+
+.questionnaire-form-card h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 18px;
+}
+
+.questionnaire-inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.questionnaire-save-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 38px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  background: #059669;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.questionnaire-preview-card {
+  padding: 20px;
+}
+
+.questionnaire-rating-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #95b8c7;
+  color: #475569;
+}
+
+.questionnaire-rating-legend strong {
+  color: #475569;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.questionnaire-rating-legend span {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.questionnaire-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  margin-top: 22px;
+}
+
+.questionnaire-category-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.questionnaire-category-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+}
+
+.questionnaire-category-heading span {
+  display: inline-flex;
+  padding: 3px 5px;
+  background: #7cb3eb;
+  color: #1f2937;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.questionnaire-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.questionnaire-table-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(5, 64px) 68px;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  border-bottom: 1px solid #e5e7eb;
+  color: #111827;
+  font-size: 13px;
+}
+
+.questionnaire-table-row.heading {
+  min-height: 32px;
+  border-bottom-color: #111827;
+}
+
+.questionnaire-table-row > :not(:first-child) {
+  justify-self: center;
+}
+
+.questionnaire-table-row span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.questionnaire-table-row span:first-child small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.questionnaire-radio-preview {
+  width: 12px;
+  height: 12px;
+  border: 1px solid #9ca3af;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.questionnaire-table-row.essay {
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 0.45fr) auto;
+}
+
+.questionnaire-essay-preview {
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.evaluation-essay-results {
+  display: grid;
+  gap: 10px;
+}
+
+.evaluation-essay-results blockquote {
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 3px solid #066287;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.evaluation-essay-results p {
+  margin: 0 0 8px;
+  color: #1e293b;
+  line-height: 1.45;
+}
+
+.evaluation-essay-results cite {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.questionnaire-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff5f5;
+  color: #b91c1c;
+  cursor: pointer;
+}
+
+.questionnaire-empty-row,
+.questionnaire-empty-preview {
+  padding: 16px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+  .evaluation-admin-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .questionnaire-modal-body {
+    grid-template-columns: 1fr;
+  }
+
+  .evaluation-details-filters,
+  .evaluation-details-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .questionnaire-table {
+    overflow-x: auto;
+  }
+
+  .questionnaire-table-row {
+    min-width: 620px;
+  }
+
+  .evaluation-admin-card-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .evaluation-status-pill {
+    grid-column: 1 / -1;
+    justify-self: flex-start;
+  }
+}
+
+/* Match enrollee list typography to the 14px filter controls. */
+.enrollees-content .table-container {
+  overflow-x: hidden !important;
+}
+
+.enrollees-content .enrollees-table {
+  width: 100%;
+  min-width: 0 !important;
+  table-layout: fixed !important;
+}
+
+.enrollees-content .enrollees-table th,
+.enrollees-content .enrollees-table td {
+  display: table-cell !important;
+  width: auto !important;
+  min-width: 0;
+  padding: 8px 6px;
+  font-size: 14px !important;
+  line-height: 1.25;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.enrollees-content .enrollees-table th {
+  letter-spacing: 0.01em;
+}
+
+.enrollees-content .enrollees-table .status-badge,
+.enrollees-content .enrollees-table .enrollment-badge {
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 7px;
+  font-size: 14px !important;
+  line-height: 1.15;
+  white-space: normal;
+}
+
+.enrollees-content .enrollees-table .action-btn.review,
+.enrollees-content .enrollees-table .action-btn.view,
+.enrollees-content .enrollees-table .enrollee-archive-btn {
+  font-size: 14px !important;
+}
+
+@media (max-width: 900px) {
+  .enrollees-content .enrollees-table th,
+  .enrollees-content .enrollees-table td,
+  .enrollees-content .enrollees-table .status-badge,
+  .enrollees-content .enrollees-table .enrollment-badge,
+  .enrollees-content .enrollees-table .action-btn.review,
+  .enrollees-content .enrollees-table .action-btn.view,
+  .enrollees-content .enrollees-table .enrollee-archive-btn {
+    font-size: 13px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .enrollees-content .enrollees-table th,
+  .enrollees-content .enrollees-table td,
+  .enrollees-content .enrollees-table .status-badge,
+  .enrollees-content .enrollees-table .enrollment-badge,
+  .enrollees-content .enrollees-table .action-btn.review,
+  .enrollees-content .enrollees-table .action-btn.view,
+  .enrollees-content .enrollees-table .enrollee-archive-btn {
+    font-size: 12px !important;
+  }
+}
+
+/* Final enrollee page type scale and narrow-screen table cards. */
+.enrollees-content,
+.enrollees-content :where(
+  a,
+  button,
+  div,
+  input,
+  label,
+  li,
+  p,
+  select,
+  span,
+  strong,
+  td,
+  textarea,
+  th,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6
+) {
+  font-size: 12px !important;
+}
+
+.enrollees-content .page-header h1 {
+  font-size: 32px !important;
+}
+
+.enrollees-content .page-header p {
+  font-size: 15px !important;
+}
+
+.enrollees-content .enrollees-table th,
+.enrollees-content .enrollees-table td,
+.enrollees-content .enrollees-table .status-badge,
+.enrollees-content .enrollees-table .enrollment-badge,
+.enrollees-content .enrollees-table .action-btn {
+  font-size: 12px !important;
+}
+
+@media (max-width: 768px) {
+  .enrollees-content .table-container {
+    overflow-x: hidden !important;
+    border-radius: 14px;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .enrollees-content .enrollees-table,
+  .enrollees-content .enrollees-table thead,
+  .enrollees-content .enrollees-table tbody,
+  .enrollees-content .enrollees-table th,
+  .enrollees-content .enrollees-table td,
+  .enrollees-content .enrollees-table tr {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  .enrollees-content .enrollees-table thead tr {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+    width: 1px !important;
+    height: 1px;
+    overflow: hidden;
+  }
+
+  .enrollees-content .enrollees-table tbody tr {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.05);
+  }
+
+  .enrollees-content .enrollees-table tbody td {
+    position: relative;
+    display: grid !important;
+    grid-template-columns: minmax(96px, 42%) minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0 !important;
+    border-bottom: 1px solid #eef2f7;
+    text-align: right;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .enrollees-content .enrollees-table tbody td:last-child {
+    border-bottom: 0;
+  }
+
+  .enrollees-content .enrollees-table tbody td::before {
+    content: attr(data-label);
+    color: #475569;
+    font-weight: 700;
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.01em;
+  }
+
+  .enrollees-content .enrollees-table .enrollee-select-column {
+    justify-items: end;
+  }
+
+  .enrollees-content .enrollees-table .action-buttons {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .enrollees-content .enrollees-table .status-badge,
+  .enrollees-content .enrollees-table .enrollment-badge {
+    justify-self: end;
+  }
+
+  .enrollees-content .enrollees-table .no-results {
+    display: block !important;
+    text-align: center;
+  }
+
+  .enrollees-content .enrollees-table .no-results::before {
+    content: none;
+  }
+}
+
+/* Mobile/minimized enrollee lists stay as tables and scroll sideways. */
+@media (max-width: 768px) {
+  .enrollees-content .table-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+  }
+
+  .enrollees-content .enrollees-table {
+    display: table !important;
+    width: 100%;
+    min-width: 900px !important;
+    table-layout: auto !important;
+    border-collapse: collapse;
+  }
+
+  .enrollees-content .enrollees-table thead {
+    display: table-header-group !important;
+  }
+
+  .enrollees-content .enrollees-table tbody {
+    display: table-row-group !important;
+  }
+
+  .enrollees-content .enrollees-table tr {
+    display: table-row !important;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .enrollees-content .enrollees-table thead tr {
+    position: static;
+    width: auto !important;
+    height: auto;
+    overflow: visible;
+  }
+
+  .enrollees-content .enrollees-table th,
+  .enrollees-content .enrollees-table td {
+    display: table-cell !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 8px 10px !important;
+    border-bottom: 1px solid #f3f4f6;
+    text-align: center;
+    vertical-align: middle;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  .enrollees-content .enrollees-table td::before {
+    content: none !important;
+  }
+
+  .enrollees-content .enrollees-table .enrollee-select-column {
+    width: 50px !important;
+    min-width: 50px !important;
+  }
+
+  .enrollees-content .enrollees-admission-table th:nth-child(5),
+  .enrollees-content .enrollees-admission-table td:nth-child(5) {
+    min-width: 180px !important;
+  }
+
+  .enrollees-content .enrollees-table th:last-child,
+  .enrollees-content .enrollees-table td:last-child {
+    min-width: 120px !important;
+  }
+
+  .enrollees-content .enrollees-table .action-buttons {
+    justify-content: center;
+    flex-wrap: nowrap;
+  }
+}
+
+/* Keep enrollee lists visually consistent on slim windows: table stays intact, container scrolls. */
+@media (max-width: 1200px) {
+  .enrollees-content .table-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+  }
+
+  .enrollees-content .enrollees-table {
+    display: table !important;
+    width: 100%;
+    min-width: 1020px !important;
+    table-layout: fixed !important;
+    border-collapse: collapse;
+  }
+
+  .enrollees-content .enrollees-table thead {
+    display: table-header-group !important;
+  }
+
+  .enrollees-content .enrollees-table tbody {
+    display: table-row-group !important;
+  }
+
+  .enrollees-content .enrollees-table tr {
+    display: table-row !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .enrollees-content .enrollees-table thead tr {
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .enrollees-content .enrollees-table th,
+  .enrollees-content .enrollees-table td {
+    display: table-cell !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 8px 10px !important;
+    border-bottom: 1px solid #f3f4f6;
+    text-align: center !important;
+    vertical-align: middle;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .enrollees-content .enrollees-table td::before {
+    content: none !important;
+  }
+
+  .enrollees-content .enrollees-table .enrollee-select-column,
+  .enrollees-content .enrollees-table th:nth-child(1),
+  .enrollees-content .enrollees-table td:nth-child(1) {
+    width: 52px !important;
+  }
+
+  .enrollees-content .enrollees-admission-table th:nth-child(2),
+  .enrollees-content .enrollees-admission-table td:nth-child(2),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(2),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(2) {
+    width: 110px !important;
+  }
+
+  .enrollees-content .enrollees-admission-table th:nth-child(3),
+  .enrollees-content .enrollees-admission-table td:nth-child(3),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(3),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(3) {
+    width: 130px !important;
+  }
+
+  .enrollees-content .enrollees-admission-table th:nth-child(4),
+  .enrollees-content .enrollees-admission-table td:nth-child(4),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(4),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(4) {
+    width: 90px !important;
+  }
+
+  .enrollees-content .enrollees-admission-table th:nth-child(5),
+  .enrollees-content .enrollees-admission-table td:nth-child(5) {
+    width: 220px !important;
+  }
+
+  .enrollees-content .enrollees-admission-table th:nth-child(6),
+  .enrollees-content .enrollees-admission-table td:nth-child(6),
+  .enrollees-content .enrollees-admission-table th:nth-child(7),
+  .enrollees-content .enrollees-admission-table td:nth-child(7),
+  .enrollees-content .enrollees-admission-table th:nth-child(8),
+  .enrollees-content .enrollees-admission-table td:nth-child(8) {
+    width: 105px !important;
+  }
+
+  .enrollees-content .enrollees-admission-table th:nth-child(9),
+  .enrollees-content .enrollees-admission-table td:nth-child(9),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(10),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(10) {
+    width: 140px !important;
+  }
+
+  .enrollees-content .enrollees-enrollment-table th:nth-child(5),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(5),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(6),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(6),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(9),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(9) {
+    width: 105px !important;
+  }
+
+  .enrollees-content .enrollees-enrollment-table th:nth-child(7),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(7),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(8),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(8) {
+    width: 120px !important;
+  }
+
+  .enrollees-content .enrollees-table .action-buttons {
+    justify-content: center;
+    flex-wrap: nowrap !important;
+  }
+}
+
+/* Hard reset any previous card/mobile table styling for enrollee lists. */
+@media (max-width: 1200px) {
+  .enrollees-content .table-container {
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .enrollees-content .table-container > .enrollees-table {
+    display: table !important;
+    min-width: 1020px !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
+  }
+
+  .enrollees-content .table-container > .enrollees-table > thead {
+    display: table-header-group !important;
+  }
+
+  .enrollees-content .table-container > .enrollees-table > tbody {
+    display: table-row-group !important;
+  }
+
+  .enrollees-content .table-container > .enrollees-table > thead > tr,
+  .enrollees-content .table-container > .enrollees-table > tbody > tr {
+    display: table-row !important;
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  .enrollees-content .table-container > .enrollees-table > thead > tr > th,
+  .enrollees-content .table-container > .enrollees-table > tbody > tr > td {
+    display: table-cell !important;
+    position: static !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 8px 10px !important;
+    border-bottom: 1px solid #f3f4f6 !important;
+    text-align: center !important;
+    vertical-align: middle !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: normal !important;
+  }
+
+  .enrollees-content .table-container > .enrollees-table > tbody > tr > td::before {
+    content: none !important;
+  }
+
+  .enrollees-content .table-container > .enrollees-table .action-btn::after {
+    content: none !important;
+  }
+}
+
+/* Keep enrollee search and status filter side by side on slim screens. */
+@media (max-width: 768px) {
+  .enrollees-content .controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(132px, 0.42fr);
+    align-items: stretch;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .enrollees-content .search-input,
+  .enrollees-content .status-filter {
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+    border-radius: 10px;
+    font-size: 12px !important;
+  }
+
+  .enrollees-content .search-input {
+    padding: 0 12px;
+  }
+
+  .enrollees-content .status-filter {
+    padding: 0 10px;
+  }
+}
+
+@media (max-width: 420px) {
+  .enrollees-content .controls {
+    grid-template-columns: minmax(0, 1fr) minmax(112px, 0.45fr);
+    gap: 6px;
+  }
+}
+
+/* Mobile tab layout: four equal tabs in two rows. */
+@media (max-width: 900px) {
+  .enrollees-content .enrollment-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    border-bottom: 0;
+    margin-bottom: 16px;
+  }
+
+  .enrollees-content .tab-btn {
+    width: 100%;
+    min-width: 0;
+    height: 36px;
+    padding: 0 8px;
+    justify-content: center;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #ffffff;
+    font-size: 12px !important;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+
+  .enrollees-content .tab-btn.active {
+    border-bottom: 1px solid #066287;
+  }
+
+  .enrollees-content .tab-badge {
+    flex: 0 0 auto;
+    height: 18px;
+    min-width: 18px;
+    padding: 0 6px;
+    font-size: 11px !important;
+  }
+}
+
+/* Subject management tables keep their columns intact and scroll on slim screens. */
+.enrollees-content .subjects-table-view,
+.enrollees-content .program-section,
+.enrollees-content .year-level-section,
+.enrollees-content .semesters-container,
+.enrollees-content .semester-section {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.enrollees-content .subjects-table-view .subjects-table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto !important;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.enrollees-content .subjects-table-view .subjects-table {
+  display: table !important;
+  width: 100%;
+  min-width: 760px !important;
+  table-layout: auto !important;
+  border-collapse: collapse;
+}
+
+.enrollees-content .subjects-table-view .subjects-table thead {
+  display: table-header-group !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table tbody {
+  display: table-row-group !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table tr {
+  display: table-row !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th,
+.enrollees-content .subjects-table-view .subjects-table td {
+  display: table-cell !important;
+  width: auto !important;
+  min-width: 0;
+  padding: 10px 12px;
+  vertical-align: middle;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(1),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(1) {
+  min-width: 96px;
+  width: 96px !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(2),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(2) {
+  min-width: 220px;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(3),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(3),
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(4),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(4) {
+  min-width: 82px;
+  width: 82px !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(5),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(5) {
+  min-width: 120px;
+  width: 120px !important;
+}
+
+.enrollees-content .subjects-table-view .subjects-table th:nth-child(6),
+.enrollees-content .subjects-table-view .subjects-table td:nth-child(6) {
+  min-width: 150px;
+}
+
+.enrollees-content .subjects-table-view .subject-actions-cell {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 14px;
+  white-space: nowrap !important;
+}
+
+.enrollees-content .subjects-table-view .subject-actions-cell .assignment-selection-btn,
+.enrollees-content .subjects-table-view .subject-actions-cell .trash-icon-btn {
+  width: auto;
+  min-width: 64px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.enrollees-content .subjects-table-view .subject-actions-cell .trash-icon-btn {
+  margin-left: 14px !important;
+}
+
+/* Class assignments adapt cleanly across slim windows and mobile phones. */
+.enrollees-content .assignments-filters,
+.enrollees-content .assignment-bulk-toolbar,
+.enrollees-content .assignments-list,
+.enrollees-content .section-assignment-group,
+.enrollees-content .section-assignments-content,
+.enrollees-content .assignment-card.mini {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.enrollees-content .assignments-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.enrollees-content .assignments-filters .filter-select {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  box-sizing: border-box;
+}
+
+.enrollees-content .section-group-header {
+  gap: 16px;
+}
+
+.enrollees-content .group-info,
+.enrollees-content .group-actions,
+.enrollees-content .assignment-header-main,
+.enrollees-content .assignment-details-grid p {
+  min-width: 0;
+}
+
+.enrollees-content .group-info {
+  flex: 1 1 auto;
+}
+
+.enrollees-content .group-actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.enrollees-content .assignment-card.mini .assignment-header h5,
+.enrollees-content .assignment-details-grid p {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.enrollees-content .assignment-card.mini .assignment-header {
+  align-items: flex-start;
+}
+
+.enrollees-content .mini-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px) {
+  .enrollees-content .assignments-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .enrollees-content .assignment-bulk-toolbar {
+    align-items: stretch;
+  }
+
+  .enrollees-content .assignment-bulk-summary {
+    flex: 1 1 280px;
+  }
+}
+
+@media (max-width: 700px) {
+  .enrollees-content .assignment-config-modal .review-modal-body {
+    padding: 12px;
+  }
+
+  .enrollees-content .assignment-config-form {
+    gap: 14px;
+  }
+
+  .enrollees-content .assignment-schedule-panel {
+    min-height: 0 !important;
+    height: auto !important;
+  }
+
+  .enrollees-content .assignment-schedule-panel .schedule-inputs {
+    align-content: start;
+  }
+
+  .enrollees-content .academic-management-panel {
+    padding: 14px;
+    margin-bottom: 16px;
+  }
+
+  .enrollees-content .academic-management-create-row {
+    grid-template-columns: 1fr;
+  }
+
+  .enrollees-content .academic-management-create-row .assignment-selection-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .enrollees-content .assignments-filters {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .enrollees-content .assignments-filters .filter-select {
+    height: 42px;
+  }
+
+  .enrollees-content .assignment-bulk-toolbar {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .enrollees-content .assignment-bulk-summary,
+  .enrollees-content .assignment-bulk-actions {
+    width: 100%;
+  }
+
+  .enrollees-content .assignment-bulk-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .enrollees-content .assignment-toolbar-caption {
+    grid-column: 1 / -1;
+  }
+
+  .enrollees-content .assignment-bulk-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    gap: 10px;
+  }
+
+  .enrollees-content .assignment-bulk-actions .assignment-selection-btn,
+  .enrollees-content .assignment-bulk-actions .action-btn {
+    width: 100%;
+  }
+
+  .enrollees-content .assignment-bulk-actions .trash-icon-btn {
+    width: 42px !important;
+    min-width: 42px;
+  }
+
+  .enrollees-content .section-group-header {
+    padding: 14px;
+  }
+
+  .enrollees-content .group-info {
+    width: 100%;
+    gap: 8px;
+  }
+
+  .enrollees-content .group-info h4 {
+    font-size: 16px;
+  }
+
+  .enrollees-content .count-tag {
+    padding: 4px 9px;
+    font-size: 11px !important;
+  }
+
+  .enrollees-content .group-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .enrollees-content .group-actions .assignment-selection-btn {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .enrollees-content .section-assignments-content {
+    padding: 12px;
+  }
+
+  .enrollees-content .assignment-card.mini {
+    padding: 12px;
+  }
+
+  .enrollees-content .assignment-card.mini .assignment-header {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .enrollees-content .assignment-header-main {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .enrollees-content .assignment-card-check {
+    justify-self: flex-start;
+  }
+
+  .enrollees-content .assignment-card.mini .assignment-header h5 {
+    width: 100%;
+    font-size: 14px !important;
+    line-height: 1.4;
+    text-align: left;
+  }
+
+  .enrollees-content .mini-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    align-items: stretch;
+    width: 100%;
+    gap: 12px;
+  }
+
+  .enrollees-content .mini-actions button {
+    width: 100%;
+    height: 36px;
+    min-height: 36px;
+    justify-content: center;
+    min-width: 0;
+    border: 1px solid #dbe4ee;
+    border-radius: 10px;
+    background: #ffffff;
+    font-size: 12px !important;
+    font-weight: 700;
+  }
+
+  .enrollees-content .mini-actions button:first-child {
+    color: #066287;
+    background: #eff6ff;
+    border-color: #bfdbfe;
+  }
+
+  .enrollees-content .mini-actions button.trash-icon-btn,
+  .enrollees-content .mini-actions button:last-child {
+    width: 44px !important;
+    min-width: 44px !important;
+    padding: 0 !important;
+    color: #dc2626;
+    background: #fff5f5;
+    border-color: #fecaca;
+  }
+
+  .enrollees-content .mini-actions button.trash-icon-btn svg {
+    font-size: 14px;
+  }
+
+  .enrollees-content .assignment-details-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .enrollees-content .assignment-details-grid p {
+    line-height: 1.45;
+    text-align: left;
+  }
+}
+
+@media (max-width: 380px) {
+  .enrollees-content .assignment-bulk-summary,
+  .enrollees-content .assignment-bulk-actions,
+  .enrollees-content .group-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .enrollees-content .assignment-bulk-actions .trash-icon-btn {
+    width: 100% !important;
+  }
+
+  .enrollees-content .mini-actions {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .enrollees-content .mini-actions button.trash-icon-btn,
+  .enrollees-content .mini-actions button:last-child {
+    width: 44px !important;
+  }
+
+  .enrollees-content .assignment-header-main {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* Instructor management stays within the viewport on phones and narrow windows. */
+.enrollees-content .management-section {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.enrollees-content .instructor-management-header {
+  margin-bottom: 18px;
+}
+
+.enrollees-content .instructor-management-header h3 {
+  font-size: 22px !important;
+  line-height: 1.2;
+}
+
+.enrollees-content .instructor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  margin-bottom: 24px;
+}
+
+.enrollees-content .instructor-search {
+  flex: 1;
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 0;
+}
+
+.enrollees-content .instructor-search input {
+  width: min(100%, 520px);
+  max-width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+}
+
+.enrollees-content .instructor-toolbar .action-btn.add {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+.enrollees-content .instructor-toolbar .action-btn.secondary {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 16px;
+  white-space: nowrap;
+  border: 1px solid #066287;
+  background: #e6f3f8;
+  color: #064e6b;
+  font-weight: 700;
+}
+
+.enrollees-content .instructor-toolbar .action-btn.secondary:hover {
+  background: #066287;
+  color: #ffffff;
+}
+
+.enrollees-content .section-header-button-group .action-btn.secondary {
+  border: 1px solid #066287;
+  background: #e6f3f8;
+  color: #064e6b;
+  font-weight: 700;
+}
+
+.enrollees-content .section-header-button-group .action-btn.secondary:hover {
+  background: #066287;
+  color: #ffffff;
+}
+
+.enrollees-content .section-header-button-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.enrollees-content .instructors-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  max-width: 100%;
+  min-width: 0;
+}
+
+.enrollees-content .instructor-card {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.enrollees-content .instructor-actions {
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .enrollees-content .management-section {
+    padding: 16px 12px;
+  }
+
+  .enrollees-content .instructor-management-header {
+    margin-bottom: 14px;
+  }
+
+  .enrollees-content .instructor-management-header h3 {
+    font-size: 20px !important;
+  }
+
+  .enrollees-content .instructor-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .enrollees-content .instructor-toolbar .action-btn.add {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .enrollees-content .instructor-toolbar .action-btn.secondary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .enrollees-content .section-header-button-group {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .enrollees-content .section-header-button-group .action-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .enrollees-content .section-header-button-group .action-btn.secondary {
+    border: 1px solid #066287;
+    background: #e6f3f8;
+    color: #064e6b;
+    font-weight: 700;
+  }
+
+  .enrollees-content .section-header-button-group .action-btn.secondary:hover {
+    background: #066287;
+    color: #ffffff;
+  }
+
+  .enrollees-content .academic-management-modal .review-modal-body {
+    padding: 14px;
+  }
+
+  .enrollees-content .academic-management-list-toolbar {
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .enrollees-content .academic-management-list-toolbar span {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .enrollees-content .academic-management-list-toolbar button {
+    width: auto;
+    min-height: 32px;
+    padding: 6px 12px;
+    flex: 0 0 auto;
+    justify-content: center;
+  }
+
+  .enrollees-content .academic-management-list-toolbar .action-btn.delete {
+    padding: 6px 12px;
+  }
+
+  .enrollees-content .academic-management-panel-header {
+    flex-direction: column;
+  }
+
+  .enrollees-content .instructor-search {
+    margin-bottom: 16px;
+  }
+
+  .enrollees-content .instructor-search input {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .enrollees-content .instructors-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .enrollees-content .instructor-card {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .enrollees-content .instructor-card:hover {
+    transform: none;
+    box-shadow: none;
+  }
+
+  .enrollees-content .instructor-avatar {
+    width: 48px;
+    height: 48px;
+  }
+
+  .enrollees-content .instructor-avatar svg {
+    font-size: 22px;
+  }
+
+  .enrollees-content .instructor-info h4 {
+    font-size: 14px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .enrollees-content .instructor-info p {
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .enrollees-content .instructor-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    flex: none;
+    gap: 10px;
+  }
+
+  .enrollees-content .instructor-actions .action-btn {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .enrollees-content .instructor-card {
+    grid-template-columns: 1fr;
+  }
+
+  .enrollees-content .instructor-avatar {
+    justify-self: center;
+  }
+
+  .enrollees-content .instructor-info {
+    text-align: center;
+  }
+
+  .enrollees-content .instructor-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .academic-management-modal .academic-management-list-toolbar {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    align-items: center !important;
+    gap: 10px !important;
+  }
+
+  .academic-management-modal .academic-management-list-toolbar > span {
+    grid-column: 1 / -1 !important;
+    width: auto !important;
+    margin: 0 !important;
+  }
+
+  .academic-management-modal .academic-management-list-toolbar > button {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 34px !important;
+    padding: 6px 10px !important;
+    justify-content: center !important;
+  }
+
+  .academic-management-modal .academic-management-list-toolbar > .action-btn.delete {
+    width: 100% !important;
+    padding: 6px 10px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .enrollees-content {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .enrollees-content .subjects-filter {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .enrollees-content .subjects-filter .filter-group,
+  .enrollees-content .subjects-filter .filter-select,
+  .enrollees-content .subjects-filter .filter-checkbox {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .enrollees-content .semester-header,
+  .enrollees-content .year-level-header,
+  .enrollees-content .program-section-header {
+    gap: 8px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .enrollees-content .semesters-container {
+    padding: 0 10px 12px;
+  }
+
+  .enrollees-content .subjects-table-view .subjects-table {
+    min-width: 720px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .enrollees-content {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .enrollees-content .program-section-header h3,
+  .enrollees-content .year-level-header h4,
+  .enrollees-content .semester-header h5 {
+    overflow-wrap: anywhere;
+  }
 }

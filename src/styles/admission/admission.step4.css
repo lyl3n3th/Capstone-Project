@@ -5,18 +5,45 @@
 
 .confirmation-page-wrapper {
   width: 100%;
-  min-height: 100vh;
+  min-height: 100svh;
   background: #f5f7fa;
   padding: 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.confirmation-page-wrapper,
+.confirmation-page-wrapper * {
+  box-sizing: border-box;
+}
+
+.confirmation-page-wrapper > .container1 {
+  position: static;
+  top: auto;
+  width: min(100%, 800px);
+  max-width: 800px;
+  margin: 0 auto 18px;
+  padding: 0;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.confirmation-page-wrapper .progress-component {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .confirmation-container {
   width: 100%;
   max-width: 800px; /* Increased from 600px to 700px */
   margin: 0 auto;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .confirmation-card {
@@ -26,6 +53,8 @@
   padding: 35px; /* Slightly increased padding */
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
   border: 1px solid #e0e0e0;
+  width: 100%;
+  min-width: 0;
 }
 
 /* Status Header - CENTERED */
@@ -73,6 +102,7 @@
 .conf-status-text {
   font-size: 20px;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 /* Tracking Number */
@@ -99,6 +129,8 @@
   letter-spacing: 1px;
   display: inline-block;
   border: 1px solid #e0e0e0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 /* Copy Button */
@@ -133,6 +165,7 @@
   margin-bottom: 15px;
   font-size: 13px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .conf-notice-warning {
@@ -182,6 +215,7 @@
   color: #8a5a12;
   font-size: 13px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .conf-schedule-request-btn {
@@ -216,15 +250,17 @@
   padding: 20px;
   background: rgba(15, 23, 42, 0.45);
   backdrop-filter: blur(3px);
+  overflow-y: auto;
 }
 
 .conf-modal-card {
   width: min(100%, 520px);
+  max-height: calc(100svh - 40px);
   border-radius: 16px;
   border: 1px solid #f5c26b;
   background: #ffffff;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .conf-modal-header {
@@ -384,6 +420,7 @@
   color: #333;
   text-align: right;
   max-width: 60%;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -425,6 +462,7 @@
   margin: 8px 0;
   padding-left: 28px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 /* Action Buttons */
@@ -475,23 +513,39 @@
 @media (max-width: 1440px) {
   .confirmation-card {
     padding: 25px;
-    margin-top: 95px;
+    margin-top: 20px;
   }
 }
 
 @media (max-width: 768px) {
+  .confirmation-page-wrapper {
+    padding: 16px;
+  }
+
+  .confirmation-page-wrapper > .container1 {
+    position: static;
+    top: auto;
+    width: 100%;
+    margin-bottom: 14px;
+  }
+
   .confirmation-container {
-    max-width: 95%;
+    max-width: 100%;
   }
   
   .confirmation-card {
     padding: 25px;
-    margin-top: 90px;
+    margin-top: 20px;
   }
 }
 
 @media (max-width: 600px) {
+  .confirmation-page-wrapper {
+    padding: 12px;
+  }
+
   .confirmation-card {
+    margin-top: 16px;
     padding: 20px;
   }
   
@@ -502,6 +556,13 @@
   .conf-schedule-request {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .conf-schedule-request-btn,
+  .conf-copy-btn {
+    width: 100%;
+    justify-content: center;
+    white-space: normal;
   }
   
   .conf-btn-back,
@@ -550,5 +611,60 @@
 
   .conf-modal-btn {
     width: 100%;
+  }
+}
+
+@media (max-width: 360px) {
+  .confirmation-page-wrapper {
+    padding: 8px;
+  }
+
+  .confirmation-page-wrapper > .container1 {
+    width: 100%;
+  }
+
+  .confirmation-container {
+    max-width: 100%;
+  }
+
+  .confirmation-card {
+    margin-top: 10px;
+    padding: 16px 10px;
+    border-radius: 12px;
+  }
+
+  .conf-status-header {
+    align-items: flex-start;
+  }
+
+  .conf-status-title,
+  .conf-status-text {
+    font-size: 16px;
+    line-height: 1.35;
+  }
+
+  .conf-track-number {
+    max-width: 100%;
+    padding: 10px 12px;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+  }
+
+  .conf-summary,
+  .conf-notes,
+  .conf-notice,
+  .conf-schedule-request {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .conf-notes-text {
+    padding-left: 0;
+  }
+
+  .conf-btn-back,
+  .conf-btn-continue {
+    padding: 10px 14px;
+    font-size: 13px;
   }
 }

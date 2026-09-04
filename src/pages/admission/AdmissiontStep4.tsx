@@ -4,7 +4,9 @@ import { FaCircleExclamation } from "react-icons/fa6";
 import Progress from "../../components/Progress";
 import { useEffect, useMemo, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
+import SkeletonPage from "../../components/common/SkeletonPage";
 import {
+  clearAdmissionDraft,
   getAdmissionDraft,
   getEstimatedCollegeTuition,
   getAdmissionProgress,
@@ -65,6 +67,14 @@ function AdmissionStep4() {
   };
 
   const persistOwnScheduleRequest = (nextValue: boolean) => {
+    if (nextValue && applicationData?.programLevel !== "college") {
+      setRequestOwnSchedule(false);
+      mergeAdmissionDraft({
+        requestOwnSchedule: false,
+      });
+      return;
+    }
+
     setRequestOwnSchedule(nextValue);
     mergeAdmissionDraft({
       requestOwnSchedule: nextValue,
@@ -162,6 +172,7 @@ function AdmissionStep4() {
 
     const isCollege = applicationData.programLevel === "college";
     const shouldProceedToScholarshipExam = isCollege && applyScholarship;
+    const effectiveRequestOwnSchedule = isCollege && requestOwnSchedule;
 
     try {
       const updatedApplication = await updateAdmissionProgress({
@@ -172,12 +183,17 @@ function AdmissionStep4() {
       });
 
       const draft = getAdmissionDraft();
+      const submissionDraft = draft
+        ? {
+            ...draft,
+            requestOwnSchedule: effectiveRequestOwnSchedule,
+          }
+        : draft;
       if (draft) {
         sessionStorage.setItem(
           "enrollmentDraft",
           JSON.stringify({
-            ...draft,
-            requestOwnSchedule,
+            ...submissionDraft,
             submitted: true,
             submissionDate: new Date().toISOString(),
             trackingNumber: updatedApplication.trackingNumber,
@@ -187,7 +203,7 @@ function AdmissionStep4() {
 
       upsertSubmittedApplicant({
         application: updatedApplication,
-        draft,
+        draft: submissionDraft,
       });
 
       setApplicationData(updatedApplication);
@@ -384,12 +400,20 @@ function AdmissionStep4() {
 
   const isCollege = applicationData?.programLevel === "college";
   const canEdit = applicationData?.applicationStatus === "draft";
+  const canRequestOwnSchedule = canEdit && isCollege;
+
+  useEffect(() => {
+    if (applicationData && !isCollege && requestOwnSchedule) {
+      persistOwnScheduleRequest(false);
+    }
+  }, [applicationData, isCollege, requestOwnSchedule]);
+
   const tuitionEstimate = getEstimatedCollegeTuition({
     honorLabel: applicationData?.honorLabel ?? null,
+    honorCertificateApproved: false,
     appliedForScholarship: applyScholarship,
     scholarshipExamScore: applicationData?.scholarshipExamScore ?? null,
   });
-  const honorDiscount = tuitionEstimate.honorDiscountPercentage;
   const isAccepted = applicationData?.applicationStatus === "accepted";
   const isRejected = applicationData?.applicationStatus === "rejected";
   const rejectionReason = applicationData?.rejectionReason?.trim() || "";
@@ -406,7 +430,9 @@ function AdmissionStep4() {
 
   if (isLoading) {
     return (
-      <div className="confirmation-page-wrapper">Loading application...</div>
+      <div className="confirmation-page-wrapper">
+        <SkeletonPage eyebrow="Admission" title="Confirmation" variant="form" />
+      </div>
     );
   }
 
@@ -473,7 +499,7 @@ function AdmissionStep4() {
             </div>
           )}
 
-          {canEdit && (
+          {canRequestOwnSchedule && (
             <div className="conf-schedule-request">
               <div className="conf-schedule-request-copy">
                 <strong>Request Own Schedule</strong>
@@ -581,14 +607,11 @@ function AdmissionStep4() {
                 selected college program. There is no fixed exam schedule, so
                 you will need to coordinate directly with your selected branch.
               </p>
-              {honorDiscount > 0 && (
-                <p>
-                  If you applied for scholarship and have an academic honor,
-                  the higher percentage between your scholarship exam score and
-                  honor discount will be used. If the exam score is lower, your
-                  honor discount will stay active.
-                </p>
-              )}
+              <p>
+                The scholarship exam has 60 items and can provide up to a 50%
+                tuition discount. Honor discounts only apply after an uploaded
+                Honor Certificate is approved by the administrator.
+              </p>
             </div>
           )}
 
@@ -596,6 +619,12 @@ function AdmissionStep4() {
             <p className="conf-summary-title">Application Summary</p>
 
             <div className="conf-summary-grid">
+              <div className="conf-summary-item">
+                <span className="conf-summary-label">Name:</span>
+                <span className="conf-summary-value">
+                  {applicationData.firstName} {applicationData.lastName}
+                </span>
+              </div>
               <div className="conf-summary-item">
                 <span className="conf-summary-label">Branch:</span>
                 <span className="conf-summary-value">
@@ -614,22 +643,18 @@ function AdmissionStep4() {
                   {applicationData.programName}
                 </span>
               </div>
-              <div className="conf-summary-item">
-                <span className="conf-summary-label">Own Schedule:</span>
-                <span className="conf-summary-value">
-                  {requestOwnSchedule ? "Requested" : "Standard admission flow"}
-                </span>
-              </div>
+              {isCollege ? (
+                <div className="conf-summary-item">
+                  <span className="conf-summary-label">Own Schedule:</span>
+                  <span className="conf-summary-value">
+                    {requestOwnSchedule ? "Requested" : "Standard admission flow"}
+                  </span>
+                </div>
+              ) : null}
               <div className="conf-summary-item">
                 <span className="conf-summary-label">Course/Strand:</span>
                 <span className="conf-summary-value">
                   {applicationData.trackName}
-                </span>
-              </div>
-              <div className="conf-summary-item">
-                <span className="conf-summary-label">Name:</span>
-                <span className="conf-summary-value">
-                  {applicationData.firstName} {applicationData.lastName}
                 </span>
               </div>
               <div className="conf-summary-item">
@@ -678,10 +703,10 @@ function AdmissionStep4() {
               Uploaded requirements and admission details are now submitted in
               registrar's records.
             </p>
-            {isCollege && applyScholarship && honorDiscount > 0 && (
+            {isCollege && applyScholarship && (
               <p className="conf-notes-text">
-                Final tuition discount will use the higher percentage between
-                your scholarship exam score and academic honor.
+                Honor discounts only count after the Honor Certificate upload is
+                approved. Scholarship exam discounts are capped at 50%.
               </p>
             )}
           </div>
@@ -709,6 +734,7 @@ function AdmissionStep4() {
                     return;
                   }
 
+                  clearAdmissionDraft();
                   window.location.href = "/";
                   return;
                 }
@@ -722,7 +748,7 @@ function AdmissionStep4() {
         </div>
       </div>
 
-      {isScheduleWarningModalOpen && (
+      {isScheduleWarningModalOpen && canRequestOwnSchedule && (
         <div
           className="conf-modal-overlay"
           role="dialog"

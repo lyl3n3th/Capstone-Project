@@ -5,8 +5,8 @@
 .staff-login-page {
   position: relative;
   height: 100vh;
+  height: 100dvh;
   width: 100%;
-  min-height: 600px;
   background-color: #1a2a3a;
   background-image: url("../../assets/images/bg2.png");
   background-size: cover;
@@ -18,7 +18,7 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Open Sans", Arial, sans-serif;
 }
 
 .staff-login-page input,
@@ -99,6 +99,49 @@
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+}
+
+.staff-login-page .login-card.is-instructor-login {
+  padding: 28px 30px;
+}
+
+.staff-login-page .login-card.is-instructor-login .login-content {
+  gap: 1rem;
+}
+
+.staff-login-page .login-card.is-instructor-login .login-title {
+  font-size: 30px;
+  margin-bottom: 6px;
+}
+
+.staff-login-page .login-card.is-instructor-login .header-text .pent {
+  margin: 3px 0;
+}
+
+.staff-login-page .login-card.is-instructor-login .selected-branch-display {
+  margin-top: 8px;
+}
+
+.staff-login-page .login-card.is-instructor-login .login-form {
+  gap: 0.85rem;
+}
+
+.staff-login-page .login-card.is-instructor-login .form-groups {
+  gap: 6px;
+}
+
+.staff-login-page .login-card.is-instructor-login .form-groups input,
+.staff-login-page .login-card.is-instructor-login .form-groups select {
+  padding: 11px 14px;
+}
+
+.staff-login-page .login-card.is-instructor-login .forgot-link-wrapper {
+  margin-top: 0;
+}
+
+.staff-login-page .login-card.is-instructor-login .submit-btn {
+  margin-top: 2px;
+  padding: 12px 28px;
 }
 
 /* Header Text */
@@ -482,6 +525,13 @@
   border: 1px solid #a7f3d0;
 }
 
+.staff-login-page .reset-confirmation-copy {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .staff-login-page .reset-cancel-btn,
 .staff-login-page .reset-submit-btn {
   border: none;
@@ -522,6 +572,35 @@
   transform: none;
 }
 
+.staff-login-page .staff-system-message-text {
+  margin: 0;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.staff-login-page .system-message-btn {
+  min-width: 96px;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #1A3D5C 0%, #066287 100%);
+  color: #ffffff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease;
+}
+
+.staff-login-page .system-message-btn:hover {
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #20639e 0%, #0a7ab3 100%);
+}
+
 /* Submit Button - Using the usual color (not green) */
 .staff-login-page .submit-btn {
   background: linear-gradient(135deg, #1A3D5C 0%, #066287 100%);
@@ -549,6 +628,71 @@
 @media (max-width: 1440px) {
   .staff-login-page .login-card {
     padding: 35px 30px;
+  }
+}
+
+@media (max-height: 760px) {
+  .staff-login-page .login-wrapper {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .staff-login-page .login-card {
+    border-radius: 16px;
+    padding: 24px 28px;
+  }
+
+  .staff-login-page .login-card.is-instructor-login {
+    padding: 16px 26px;
+  }
+
+  .staff-login-page .login-content {
+    gap: 0.8rem;
+  }
+
+  .staff-login-page .login-title {
+    font-size: 26px;
+    margin-bottom: 4px;
+  }
+
+  .staff-login-page .header-text .pent {
+    font-size: 14px;
+    margin: 2px 0;
+  }
+
+  .staff-login-page .selected-branch-display {
+    font-size: 13px;
+    margin-top: 5px;
+  }
+
+  .staff-login-page .login-form {
+    gap: 0.6rem;
+  }
+
+  .staff-login-page .dropdownlog .lbel,
+  .staff-login-page .form-groups label {
+    margin-bottom: 4px;
+  }
+
+  .staff-login-page .form-groups {
+    gap: 6px;
+  }
+
+  .staff-login-page .form-groups input,
+  .staff-login-page .form-groups select,
+  .staff-login-page .selectlog {
+    padding: 9px 12px;
+    font-size: 14px;
+  }
+
+  .staff-login-page .forgot-link-wrapper {
+    margin-top: 0;
+  }
+
+  .staff-login-page .submit-btn {
+    margin-top: 0;
+    padding: 10px 24px;
+    font-size: 16px;
   }
 }
 

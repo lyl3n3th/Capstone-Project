@@ -1,16 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 import { MdKeyboardArrowDown } from "react-icons/md";
 import AuthModal from "../../components/common/AuthModal";
 import { useAuth } from "../../hooks/useAuth";
-import { authenticateManager } from "../../services/mockStaffAuth";
+import {
+  authenticateManager,
+  resetStoredManagerPassword,
+  updateStoredManagerAccount,
+} from "../../services/mockStaffAuth";
 import {
   authenticateStaffLogin,
   completeStaffPasswordSetup,
+  fetchManagedBranches,
   resetStaffPassword,
   type StaffBranch,
 } from "../../services/staffApi";
+import {
+  authenticateInstructor,
+  setInstructorPassword,
+} from "../../services/instructorPortal";
 import { STAFF_ROLE_LABELS, type StaffRole } from "../../types/user";
 import "../../styles/staff/staff-login.css";
 
@@ -35,6 +44,9 @@ function StaffLogin() {
   } | null>(null);
 
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [isManagerResetModalOpen, setIsManagerResetModalOpen] = useState(false);
+  const [isManagerResetSubmitting, setIsManagerResetSubmitting] =
+    useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showResetConfirmPassword, setShowResetConfirmPassword] =
     useState(false);
@@ -43,16 +55,27 @@ function StaffLogin() {
     type: "error" | "success";
     message: string;
   } | null>(null);
+  const [systemMessage, setSystemMessage] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
+  const [managedBranches, setManagedBranches] = useState<string[]>([
+    "Bacoor",
+    "Taytay",
+    "GMA",
+  ]);
 
   const [loginData, setLoginData] = useState({
     branch: "",
+    employeeId: "",
     password: "",
     role: "admin" as StaffRole,
   });
   const [setupData, setSetupData] = useState({
+    id: "",
     employeeId: "",
     branch: "",
-    role: "admin" as StaffResetAccessRole,
+    role: "admin" as StaffLoginAccessRole,
     fullName: "",
     temporaryPassword: "",
     newPassword: "",
@@ -68,6 +91,22 @@ function StaffLogin() {
   });
 
   const isAreaManager = loginData.role === "manager";
+  useEffect(() => {
+    const loadBranches = async () => {
+      try {
+        const branches = await fetchManagedBranches();
+        const branchNames = branches.map((branch) => branch.name).filter(Boolean);
+        if (branchNames.length > 0) {
+          setManagedBranches(branchNames.sort());
+        }
+      } catch (error) {
+        console.error("Unable to load staff branches", error);
+      }
+    };
+
+    void loadBranches();
+  }, []);
+
   const resolveRedirectPath = (role: StaffRole) => {
     const redirectPath = (
       location.state as { from?: { pathname?: string } } | null
@@ -82,17 +121,37 @@ function StaffLogin() {
     event.preventDefault();
 
     if (!isAreaManager && !loginData.branch) {
-      alert("Please select a branch!");
+      setSystemMessage({
+        title: "Check Login Details",
+        message: "Please select a branch.",
+      });
       return;
     }
 
-    if (!isAreaManager && !["admin", "registrar"].includes(loginData.role)) {
-      alert("Please select a valid role.");
+    if (
+      !isAreaManager &&
+      !["admin", "registrar", "instructor"].includes(loginData.role)
+    ) {
+      setSystemMessage({
+        title: "Check Login Details",
+        message: "Please select a valid role.",
+      });
+      return;
+    }
+
+    if (loginData.role === "instructor" && !loginData.employeeId.trim()) {
+      setSystemMessage({
+        title: "Check Login Details",
+        message: "Please enter your employee ID.",
+      });
       return;
     }
 
     if (!loginData.password) {
-      alert("Please enter your password!");
+      setSystemMessage({
+        title: "Check Login Details",
+        message: "Please enter your password.",
+      });
       return;
     }
 
@@ -100,10 +159,23 @@ function StaffLogin() {
       setIsSubmitting(true);
 
       if (isAreaManager) {
-        const managerAccount = authenticateManager(loginData.password);
+        const managerAccount = await authenticateManager(loginData.password);
 
-        if (!managerAccount) {
-          alert("Invalid login credentials. Please try again.");
+        if (managerAccount.passwordChangeRequired) {
+          setSetupFeedback(null);
+          setShowSetupPassword(false);
+          setShowSetupConfirmPassword(false);
+          setSetupData({
+            id: managerAccount.id || "AICS-MANAGER-ACCESS",
+            employeeId: "AICS-MANAGER-ACCESS",
+            branch: managerAccount.branch,
+            role: "manager",
+            fullName: managerAccount.fullName,
+            temporaryPassword: loginData.password,
+            newPassword: "",
+            confirmPassword: "",
+          });
+          setIsSetupModalOpen(true);
           return;
         }
 
@@ -118,6 +190,43 @@ function StaffLogin() {
         return;
       }
 
+      if (loginData.role === "instructor") {
+        const instructorAccount = await authenticateInstructor({
+          branch: loginData.branch,
+          employeeId: loginData.employeeId,
+          password: loginData.password,
+        });
+
+        if (instructorAccount.passwordChangeRequired) {
+          setSetupFeedback(null);
+          setShowSetupPassword(false);
+          setShowSetupConfirmPassword(false);
+          setSetupData({
+            id: instructorAccount.id,
+            employeeId: instructorAccount.employeeId,
+            branch: instructorAccount.branch,
+            role: "instructor",
+            fullName: instructorAccount.name,
+            temporaryPassword: loginData.password,
+            newPassword: "",
+            confirmPassword: "",
+          });
+          setIsSetupModalOpen(true);
+          return;
+        }
+
+        await loginStaff({
+          id: instructorAccount.id,
+          branch: instructorAccount.branch,
+          fullName: instructorAccount.name,
+          employeeId: instructorAccount.employeeId,
+          role: "instructor",
+        });
+
+        navigate(resolveRedirectPath("instructor"), { replace: true });
+        return;
+      }
+
       const staffAccount = await authenticateStaffLogin(
         loginData.branch as StaffBranch,
         loginData.role as Extract<StaffRole, "admin" | "registrar">,
@@ -129,6 +238,7 @@ function StaffLogin() {
         setShowSetupPassword(false);
         setShowSetupConfirmPassword(false);
         setSetupData({
+          id: staffAccount.employeeId,
           employeeId: staffAccount.employeeId,
           branch: staffAccount.branch,
           role: staffAccount.role,
@@ -155,7 +265,10 @@ function StaffLogin() {
         error instanceof Error
           ? error.message
           : "Unable to sign in right now. Please try again.";
-      alert(message);
+      setSystemMessage({
+        title: "Unable to Sign In",
+        message,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -195,6 +308,53 @@ function StaffLogin() {
     try {
       setIsSetupSubmitting(true);
 
+      if (setupData.role === "manager") {
+        const managerAccount = await updateStoredManagerAccount({
+          fullName: setupData.fullName,
+          currentPassword: setupData.temporaryPassword,
+          password: setupData.newPassword,
+        });
+        setIsSetupModalOpen(false);
+
+        await loginStaff({
+          id: managerAccount.id,
+          branch: managerAccount.branch,
+          fullName: managerAccount.fullName,
+          employeeId: "AICS-MANAGER-ACCESS",
+          role: "manager",
+        });
+
+        navigate(resolveRedirectPath("manager"), { replace: true });
+        return;
+      }
+
+      if (setupData.role === "instructor") {
+        await setInstructorPassword({
+          branch: setupData.branch,
+          employeeId: setupData.employeeId,
+          currentPassword: setupData.temporaryPassword,
+          password: setupData.newPassword,
+        });
+        setLoginData({
+          branch: setupData.branch,
+          employeeId: setupData.employeeId,
+          password: setupData.newPassword,
+          role: "instructor",
+        });
+        setIsSetupModalOpen(false);
+
+        await loginStaff({
+          id: setupData.id,
+          branch: setupData.branch,
+          fullName: setupData.fullName,
+          employeeId: setupData.employeeId,
+          role: "instructor",
+        });
+
+        navigate(resolveRedirectPath("instructor"), { replace: true });
+        return;
+      }
+
       const result = await completeStaffPasswordSetup({
         employeeId: setupData.employeeId,
         currentPassword: setupData.temporaryPassword,
@@ -203,6 +363,7 @@ function StaffLogin() {
 
       setLoginData({
         branch: result.branch,
+        employeeId: "",
         password: setupData.newPassword,
         role: result.role,
       });
@@ -232,7 +393,7 @@ function StaffLogin() {
 
   const handleOpenResetModal = () => {
     if (isAreaManager) {
-      alert("Area Manager password reset is not available on this page yet.");
+      setIsManagerResetModalOpen(true);
       return;
     }
 
@@ -245,6 +406,37 @@ function StaffLogin() {
       role: (loginData.role || current.role) as StaffResetAccessRole,
     }));
     setIsResetModalOpen(true);
+  };
+
+  const handleCloseManagerResetModal = () => {
+    if (!isManagerResetSubmitting) {
+      setIsManagerResetModalOpen(false);
+    }
+  };
+
+  const handleConfirmManagerPasswordReset = async () => {
+    try {
+      setIsManagerResetSubmitting(true);
+      await resetStoredManagerPassword();
+      setLoginData((current) => ({ ...current, password: "" }));
+      setIsManagerResetModalOpen(false);
+      setSystemMessage({
+        title: "Password Reset",
+        message:
+          "The Area Manager password was reset successfully. It must be changed after the next login.",
+      });
+    } catch (error) {
+      setIsManagerResetModalOpen(false);
+      setSystemMessage({
+        title: "Reset Failed",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to reset the Area Manager password.",
+      });
+    } finally {
+      setIsManagerResetSubmitting(false);
+    }
   };
 
   const handleCloseResetModal = () => {
@@ -320,7 +512,10 @@ function StaffLogin() {
       }));
 
       setIsResetModalOpen(false);
-      alert("Staff password updated. You can now sign in with the new password.");
+      setSystemMessage({
+        title: "Password Updated",
+        message: "Staff password updated. You can now sign in with the new password.",
+      });
     } catch (error) {
       console.error("Staff password reset failed", error);
       setResetFeedback({
@@ -339,7 +534,11 @@ function StaffLogin() {
     <div className="staff-login-page">
       <div className="background-overlay"></div>
       <div className="login-wrapper">
-        <div className="login-card">
+        <div
+          className={`login-card${
+            loginData.role === "instructor" ? " is-instructor-login" : ""
+          }`}
+        >
           <div className="login-content">
             <div className="header-text">
               <h1 className="login-title">Login</h1>
@@ -371,12 +570,14 @@ function StaffLogin() {
                         ...current,
                         role,
                         branch: role === "manager" ? "" : current.branch,
+                        employeeId: role === "instructor" ? current.employeeId : "",
                       }));
                     }}
                   >
                     <option value="admin">Administrator</option>
                     <option value="registrar">Registrar</option>
                     <option value="manager">Area Manager</option>
+                    <option value="instructor">Instructor</option>
                   </select>
                   <span className="staff-select-arrow" aria-hidden="true">
                     <MdKeyboardArrowDown size={18} />
@@ -399,14 +600,35 @@ function StaffLogin() {
                       required
                     >
                       <option value="">Select Branch</option>
-                      <option value="Bacoor">Bacoor</option>
-                      <option value="GMA">GMA</option>
-                      <option value="Taytay">Taytay</option>
+                      {managedBranches.map((branch) => (
+                        <option key={branch} value={branch}>
+                          {branch}
+                        </option>
+                      ))}
                     </select>
                     <span className="staff-select-arrow" aria-hidden="true">
                       <MdKeyboardArrowDown size={18} />
                     </span>
                   </div>
+                </div>
+              ) : null}
+
+              {loginData.role === "instructor" ? (
+                <div className="form-groups">
+                  <label htmlFor="employeeId">Employee ID</label>
+                  <input
+                    id="employeeId"
+                    type="text"
+                    value={loginData.employeeId}
+                    onChange={(event) =>
+                      setLoginData((current) => ({
+                        ...current,
+                        employeeId: event.target.value.toUpperCase(),
+                      }))
+                    }
+                    autoComplete="username"
+                    required
+                  />
                 </div>
               ) : null}
 
@@ -444,9 +666,8 @@ function StaffLogin() {
                   type="button"
                   className="forgot-link"
                   onClick={handleOpenResetModal}
-                  disabled={isAreaManager}
                 >
-                  Forgot password?
+                  {isAreaManager ? "Reset password" : "Forgot password?"}
                 </button>
               </div>
 
@@ -463,9 +684,40 @@ function StaffLogin() {
       </div>
 
       <AuthModal
+        isOpen={isManagerResetModalOpen}
+        title="Reset Area Manager Password"
+        description=""
+        onClose={handleCloseManagerResetModal}
+        footer={
+          <>
+            <button
+              type="button"
+              className="reset-cancel-btn"
+              onClick={handleCloseManagerResetModal}
+              disabled={isManagerResetSubmitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="reset-submit-btn"
+              onClick={() => void handleConfirmManagerPasswordReset()}
+              disabled={isManagerResetSubmitting}
+            >
+              {isManagerResetSubmitting ? "Resetting..." : "Reset Password"}
+            </button>
+          </>
+        }
+      >
+        <p className="reset-confirmation-copy">
+          Existing Area Manager sessions will be signed out. The password must
+          be changed after the next login.
+        </p>
+      </AuthModal>
+
+      <AuthModal
         isOpen={isSetupModalOpen}
         title="Change Temporary Password"
-        description="This account is still using the password assigned by the Area Manager. Create your own password before continuing."
         onClose={handleCloseSetupModal}
         footer={
           <>
@@ -608,9 +860,11 @@ function StaffLogin() {
                   }
                 >
                   <option value="">Select Branch</option>
-                  <option value="Bacoor">Bacoor</option>
-                  <option value="GMA">GMA</option>
-                  <option value="Taytay">Taytay</option>
+                  {managedBranches.map((branch) => (
+                    <option key={branch} value={branch}>
+                      {branch}
+                    </option>
+                  ))}
                 </select>
                 <span className="staff-select-arrow" aria-hidden="true">
                   <MdKeyboardArrowDown size={18} />
@@ -735,6 +989,24 @@ function StaffLogin() {
             </p>
           ) : null}
         </form>
+      </AuthModal>
+
+      <AuthModal
+        isOpen={Boolean(systemMessage)}
+        title={systemMessage?.title || ""}
+        description=""
+        onClose={() => setSystemMessage(null)}
+        footer={
+          <button
+            type="button"
+            className="system-message-btn"
+            onClick={() => setSystemMessage(null)}
+          >
+            OK
+          </button>
+        }
+      >
+        <p className="staff-system-message-text">{systemMessage?.message}</p>
       </AuthModal>
     </div>
   );

@@ -374,6 +374,114 @@
   justify-content: center;
 }
 
+/* Scoped layout reset for the live admission form. */
+.admission-step2-page {
+  min-height: 100svh;
+  height: auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 24px;
+  padding: 32px 20px 48px;
+  overflow-x: hidden;
+}
+
+.admission-step2-page .container1 {
+  position: static;
+  width: min(100%, 800px);
+  max-width: 800px;
+}
+
+.admission-step2-page .mcontainer1 {
+  position: static;
+  width: min(100%, 1020px);
+  margin-top: 0;
+  padding: 0;
+}
+
+.admission-step2-page .header1 {
+  position: static;
+  bottom: auto;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1020px;
+  margin: 0;
+  padding: 30px;
+}
+
+.admission-step2-page .pinfo,
+.admission-step2-page .form-group,
+.admission-step2-page .dropdown {
+  min-width: 0;
+}
+
+.admission-step2-page .form-group input:not([type="radio"]),
+.admission-step2-page .form-group select,
+.admission-step2-page .select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+}
+
+.admission-step2-page .radio-label input[type="radio"] {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0;
+}
+
+.admission-step2-page .transferee-year-level-field select {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+.admission-step2-page .transferee-year-level-field select:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+}
+
+.admission-step2-page .form-group input.input-error:not([type="radio"]),
+.admission-step2-page .form-group select.input-error,
+.admission-step2-page .select.input-error {
+  border-color: #dc2626;
+  background: #fff5f5;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
+.admission-step2-page .form-group input.input-error:not([type="radio"]):focus,
+.admission-step2-page .form-group select.input-error:focus,
+.admission-step2-page .select.input-error:focus {
+  border-color: #b91c1c;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18);
+}
+
+.admission-step2-page .transferee-year-level-note {
+  display: block;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.admission-step2-page .selected {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.admission-step2-page .choices3 {
+  top: auto;
+  margin: 24px 0 0;
+}
+
 /* ===== RESPONSIVE ===== */
 @media (max-width: 1024px) {
   .header1 {
@@ -396,6 +504,15 @@
 }
 
 @media (max-width: 768px) {
+  .admission-step2-page {
+    gap: 20px;
+    padding: 24px 16px 40px;
+  }
+
+  .admission-step2-page .header1 {
+    padding: 24px 20px 28px;
+  }
+
   .mcontainer1 {
     margin-top: 12%;
     padding: 0 10px;
@@ -445,6 +562,19 @@
 }
 
 @media (max-width: 480px) {
+  .admission-step2-page {
+    padding: 20px 12px 32px;
+  }
+
+  .admission-step2-page .header1 {
+    padding: 20px 14px 24px;
+    border-radius: 12px;
+  }
+
+  .admission-step2-page .syb {
+    font-size: 20px;
+  }
+
   .header1 {
     font-size: 18px;
     padding: 50px;
@@ -477,5 +607,52 @@
 
   .scholarship-note {
     font-size: 12px;
+  }
+}
+
+@media (max-width: 360px) {
+  .admission-step2-page {
+    gap: 14px;
+    padding: 14px 8px 24px;
+  }
+
+  .admission-step2-page .header1 {
+    padding: 16px 10px 20px;
+  }
+
+  .admission-step2-page .syb {
+    font-size: 18px;
+  }
+
+  .admission-step2-page .syb p,
+  .admission-step2-page .header1 p {
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .admission-step2-page .form-row {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .admission-step2-page .form-group label,
+  .admission-step2-page .dropdown label {
+    margin-top: 10px;
+    margin-bottom: 6px;
+    font-size: 11px;
+  }
+
+  .admission-step2-page .form-group input:not([type="radio"]),
+  .admission-step2-page .select,
+  .admission-step2-page .btn3,
+  .admission-step2-page .btn4 {
+    min-height: 40px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .admission-step2-page .choices3 {
+    flex-direction: column;
+    gap: 10px;
   }
 }

@@ -4,17 +4,44 @@
 .entrance-exam-page {
   width: 100%;
   min-height: 100vh;
+  min-height: 100svh;
   background: #f5f7fa;
   padding: 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.entrance-exam-page,
+.entrance-exam-page * {
+  box-sizing: border-box;
+}
+
+.entrance-exam-page > .container1 {
+  position: static;
+  top: auto;
+  width: min(100%, 900px);
+  max-width: 900px;
+  margin: 0 auto 18px;
+  padding: 0;
+  min-width: 0;
+}
+
+.entrance-exam-page .progress-component {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .entrance-exam-container {
   width: 100%;
   max-width: 900px;
   margin: 0 auto;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .entrance-exam-card {
@@ -24,6 +51,8 @@
   padding: 30px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
   border: 1px solid #e0e0e0;
+  width: 100%;
+  min-width: 0;
 }
 
 /* Header Section */
@@ -48,6 +77,7 @@
   font-size: 13px;
   color: #666;
   margin: 5px 0;
+  overflow-wrap: anywhere;
 }
 
 /* Exam Details Card */
@@ -55,6 +85,7 @@
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 20px;
+  min-width: 0;
 }
 
 .entrance-exam-divider {
@@ -83,6 +114,7 @@
   display: flex;
   align-items: center;
   gap: 15px;
+  min-width: 0;
 }
 
 .entrance-exam-icon {
@@ -101,6 +133,8 @@
 .entrance-exam-text {
   font-size: 14px;
   color: #333;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .entrance-exam-text strong {
@@ -168,6 +202,7 @@
   color: #066287;
   margin: 8px 0 4px 0;
   padding-left: 28px;
+  overflow-wrap: anywhere;
 }
 
 .entrance-exam-notes-list {
@@ -210,18 +245,25 @@
 
 @media (max-width: 1440px){
   .entrance-exam-card {
-    margin-top: 90px;
+    margin-top: 20px;
   }
 }
 
 @media (max-width: 768px) {
+  .entrance-exam-page > .container1 {
+    position: static;
+    top: auto;
+    width: 100%;
+    margin-bottom: 14px;
+  }
+
   .entrance-exam-container {
-    max-width: 95%;
+    max-width: 100%;
   }
   
   .entrance-exam-card {
     padding: 20px;
-    margin-top: 90px;
+    margin-top: 20px;
   }
   
   .entrance-exam-title {
@@ -230,7 +272,16 @@
 }
 
 @media (max-width: 600px) {
+  .entrance-exam-page {
+    padding: 12px;
+  }
+
+  .entrance-exam-page > .container1 {
+    margin-bottom: 12px;
+  }
+
   .entrance-exam-card {
+    margin-top: 16px;
     padding: 18px;
   }
   
@@ -274,5 +325,51 @@
   
   .entrance-exam-back-btn {
     width: 100%;
+  }
+}
+
+@media (max-width: 360px) {
+  .entrance-exam-page {
+    padding: 8px;
+  }
+
+  .entrance-exam-container {
+    max-width: 100%;
+  }
+
+  .entrance-exam-card {
+    margin-top: 10px;
+    padding: 16px 10px;
+    border-radius: 12px;
+  }
+
+  .entrance-exam-title {
+    font-size: 16px;
+    line-height: 1.35;
+  }
+
+  .entrance-exam-applicant,
+  .entrance-exam-info,
+  .entrance-exam-text,
+  .entrance-exam-notes-text,
+  .entrance-exam-notes-list li {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .entrance-exam-details-card,
+  .entrance-exam-notes {
+    padding: 12px;
+  }
+
+  .entrance-exam-notes-text,
+  .entrance-exam-notes-list {
+    padding-left: 18px;
+  }
+
+  .entrance-exam-btn,
+  .entrance-exam-back-btn {
+    padding: 11px 14px;
+    font-size: 12px;
   }
 }

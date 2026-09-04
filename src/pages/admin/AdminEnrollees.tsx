@@ -23,29 +23,43 @@ import {
   FaChevronUp,
   FaFilter,
   FaTrash,
+  FaStar,
+  FaToggleOn,
+  FaToggleOff,
 } from "react-icons/fa";
 import { MdArchive } from "react-icons/md";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
 import { useAuth } from "../../hooks/useAuth";
 import {
+  fetchEvaluationQuestionnaire,
+  fetchInstructorEvaluationStatuses,
+  fetchInstructorEvaluationSubmissions,
   fetchSupabaseAdmissionApplicants,
   getStudentSectionChoices,
   getStudentsForBranch,
+  INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
   mergeAdminEnrolleeRecords,
   normalizeBranchName,
   promoteApplicantToStoredStudent,
-  readInstructorEvaluationStatuses,
   readBranchScopedData,
+  readEvaluationQuestionnaire,
+  readInstructorEvaluationSubmissions,
+  readInstructorEvaluationStatuses,
   readStoredStudents,
-  setInstructorEvaluationStatus as saveInstructorEvaluationStatus,
+  saveEvaluationQuestionnaireToBackend,
+  saveInstructorEvaluationStatusToBackend,
+  setInstructorEvaluationStatus,
   updateStoredStudentSection,
   updateStoredStudentOwnScheduleState,
   writeBranchScopedData,
+  writeEvaluationQuestionnaire,
   writeStoredStudents,
+  type EvaluationQuestionCategoryRecord,
+  type InstructorEvaluationSubmissionRecord,
+  type InstructorEvaluationStatusMap,
 } from "../../services/adminStorage";
 import type {
-  InstructorEvaluationStatusMap,
   StudentStorageRecord,
   StudentScheduledAssignmentItem,
   StudentSectionChoice,
@@ -67,13 +81,16 @@ import {
   seedAcademicSnapshot,
   type AcademicSnapshot,
 } from "../../services/academicData";
+import { resetInstructorTemporaryPassword } from "../../services/instructorPortal";
 import {
   getEstimatedCollegeTuition,
   getAdmissionRequirements,
+  SCHOLARSHIP_EXAM_MAX_SCORE,
   updateAdmissionProgress,
 } from "../../services/admission";
 import {
   sendAdmissionDecisionNotification,
+  sendAdmissionRequirementRedoNotification,
   type AdmissionDecisionNotificationResponse,
   type SendAdmissionDecisionNotificationPayload,
 } from "../../services/admissionSubmissionNotificationApi";
@@ -127,6 +144,13 @@ interface PersonalInformation {
   address: string;
   yearLevel: string;
   guardianContact: string;
+  middleName?: string;
+  sex?: string;
+  civilStatus?: string;
+  lastSchoolAttended?: string;
+  yearCompletion?: string;
+  requestedYearLevel?: string;
+  strandOrCourse?: string;
 }
 
 interface Enrollee {
@@ -177,6 +201,7 @@ interface ClassSection {
   currentEnrollees: number;
   maxCapacity: number;
   enrolleeIds: string[];
+  isLocked?: boolean;
 }
 
 interface SectionFormState {
@@ -220,6 +245,8 @@ interface TransfereeEvaluationRecord {
   resolvedYearLevel: string;
   plannedSemester: string;
   plannedAcademicYear: string;
+  creditYearLevelFilter: string;
+  creditSemesterFilter: string;
   creditedSubjectIds: string[];
   assignedSubjectIds: string[];
   recommendedSectionId: string;
@@ -296,6 +323,7 @@ interface AssignmentFormState {
   subjectIds: string[];
   academicYear: string;
   semester: string;
+  schedule: Schedule[];
   scheduleDay: string;
   startTime: string;
   endTime: string;
@@ -305,20 +333,15 @@ interface AssignmentFormState {
 const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
 const DEFAULT_SECTION_SEMESTER = "1st Semester";
 const ENROLLEES_PER_PAGE = 10;
-const ADMISSION_REJECTION_REASONS = [
-  "Incomplete admission requirements",
-  "Submitted documents are invalid or unreadable",
-  "Did not meet the admission screening requirements",
-  "Program slot or academic evaluation requirements were not met",
-  "Please coordinate with admissions for further review",
-] as const;
-const ENROLLMENT_REJECTION_REASONS = [
-  "Incomplete enrollment requirements",
-  "Submitted documents are invalid or unreadable",
-  "The requested load or section could not be approved",
-  "Account or academic records require follow-up",
-  "Please coordinate with the registrar for further review",
-] as const;
+
+const getCourseStrandDisplay = ({
+  program,
+  strandOrCourse,
+}: {
+  program: string;
+  strandOrCourse?: string | null;
+}) =>
+  program === "College" ? DEFAULT_COLLEGE_COURSE : strandOrCourse || program;
 
 const getDecisionNotificationFeedback = (
   notificationResult: AdmissionDecisionNotificationResponse,
@@ -367,9 +390,11 @@ const getApprovalNotificationFeedback = (
 
 const buildStudentPortalLoginLink = ({
   branch,
+  email,
   studentNumber,
 }: {
   branch: string;
+  email?: string;
   studentNumber: string;
 }) => {
   const params = new URLSearchParams({
@@ -378,6 +403,10 @@ const buildStudentPortalLoginLink = ({
 
   if (studentNumber.trim()) {
     params.set("studentNumber", studentNumber.trim());
+  }
+
+  if (email?.trim()) {
+    params.set("email", email.trim().toLowerCase());
   }
 
   const relativeLink = `/student/login?${params.toString()}`;
@@ -409,6 +438,109 @@ const getOwnScheduleRequestLabel = (
   return "Pending Review";
 };
 
+type ReviewInfoItem = {
+  label: string;
+  value?: string | number | null;
+  isWide?: boolean;
+  spanClassName?: string;
+};
+
+const getReviewInfoValue = (value?: string | number | null) => {
+  const normalizedValue =
+    typeof value === "number" ? String(value) : value?.trim() || "";
+
+  return normalizedValue || "Not provided";
+};
+
+const getAdmissionPersonalInfoItems = (
+  enrollee: Enrollee,
+): ReviewInfoItem[] => {
+  const info = enrollee.personalInfo;
+  const items: ReviewInfoItem[] = [
+    {
+      label: "Full Name",
+      value: info.fullName || enrollee.fullName,
+      spanClassName: "personal-info-item-span-4",
+    },
+    {
+      label: "Sex",
+      value: info.sex,
+      spanClassName: "personal-info-item-span-2",
+    },
+    {
+      label: "Civil Status",
+      value: info.civilStatus,
+      spanClassName: "personal-info-item-span-2",
+    },
+    {
+      label: "Email Address",
+      value: info.email,
+      spanClassName: "personal-info-item-span-4",
+    },
+    {
+      label: "Mobile Number",
+      value: info.contactNumber,
+      spanClassName: "personal-info-item-span-3",
+    },
+    {
+      label: enrollee.program === "SHS" ? "Strand" : "Course",
+      value: info.strandOrCourse || enrollee.strandOrCourse,
+      spanClassName: "personal-info-item-span-9",
+    },
+    {
+      label: "Address",
+      value: info.address,
+      isWide: true,
+    },
+    {
+      label: "Last School Attended",
+      value: info.lastSchoolAttended,
+      isWide: true,
+    },
+  ];
+
+  const optionalItems: ReviewInfoItem[] = [
+    ...(isTransfereeAdmission(enrollee)
+      ? []
+      : [
+          {
+            label: "Requested Year Level",
+            value:
+              info.requestedYearLevel || info.yearLevel || enrollee.yearLevel,
+            spanClassName: "personal-info-item-span-3",
+          },
+        ]),
+    {
+      label: "Birth Date",
+      value: info.birthDate,
+      spanClassName: "personal-info-item-span-3",
+    },
+    {
+      label: "Guardian Name",
+      value: info.guardianName,
+      spanClassName: "personal-info-item-span-3",
+    },
+    {
+      label: "Guardian Contact",
+      value: info.guardianContact,
+      spanClassName: "personal-info-item-span-3",
+    },
+  ];
+
+  return [
+    ...items,
+    ...optionalItems.filter((item) => getReviewInfoValue(item.value) !== "Not provided"),
+  ];
+};
+
+const requiresSectionAssignment = (
+  enrollee: Pick<Enrollee, "requestedOwnSchedule" | "ownScheduleRequestStatus">,
+) =>
+  !(
+    enrollee.requestedOwnSchedule &&
+    enrollee.ownScheduleRequestStatus === "Approved"
+  );
+
 const getProgramYearLevelOptions = (program: string) =>
   program === "SHS"
     ? ["Grade 11", "Grade 12"]
@@ -433,6 +565,7 @@ const createDefaultAssignmentForm = (
   subjectIds: [],
   academicYear,
   semester: normalizeSectionSemester(semester),
+  schedule: [],
   scheduleDay: "",
   startTime: "",
   endTime: "",
@@ -470,6 +603,8 @@ const createDefaultTransfereeEvaluation = (
   resolvedYearLevel: enrollee.yearLevel,
   plannedSemester: DEFAULT_SECTION_SEMESTER,
   plannedAcademicYear: academicYear,
+  creditYearLevelFilter: "All",
+  creditSemesterFilter: "All",
   creditedSubjectIds: [],
   assignedSubjectIds: [],
   recommendedSectionId: "",
@@ -567,6 +702,16 @@ const normalizeTransfereeEvaluation = (
     typeof evaluation?.plannedAcademicYear === "string"
       ? evaluation.plannedAcademicYear.trim() || academicYear
       : fallback.plannedAcademicYear;
+  const creditYearLevelFilter =
+    typeof evaluation?.creditYearLevelFilter === "string" &&
+    evaluation.creditYearLevelFilter.trim()
+      ? evaluation.creditYearLevelFilter
+      : fallback.creditYearLevelFilter;
+  const creditSemesterFilter =
+    typeof evaluation?.creditSemesterFilter === "string" &&
+    evaluation.creditSemesterFilter.trim()
+      ? evaluation.creditSemesterFilter
+      : fallback.creditSemesterFilter;
 
   return {
     enrolleeId: enrollee.id,
@@ -576,6 +721,11 @@ const normalizeTransfereeEvaluation = (
     resolvedYearLevel,
     plannedSemester: normalizeSectionSemester(evaluation?.plannedSemester),
     plannedAcademicYear,
+    creditYearLevelFilter,
+    creditSemesterFilter:
+      creditSemesterFilter === "All"
+        ? "All"
+        : normalizeSectionSemester(creditSemesterFilter),
     creditedSubjectIds,
     assignedSubjectIds,
     recommendedSectionId:
@@ -616,21 +766,6 @@ const AUTO_ASSIGN_SEMESTER_OPTIONS = [
   "Summer",
 ] as const;
 type AutoAssignSemester = (typeof AUTO_ASSIGN_SEMESTER_OPTIONS)[number];
-const SCHEDULE_DURATION_OPTIONS = [60, 120, 180] as const;
-const MORNING_START = 7 * 60;
-const MORNING_BREAK_START = 10 * 60;
-const MORNING_BREAK_END = MORNING_BREAK_START + 15;
-const AFTERNOON_BREAK_START = 16 * 60 + 15;
-const AFTERNOON_BREAK_END = AFTERNOON_BREAK_START + 15;
-const CLASS_DAY_END = 19 * 60 + 30;
-
-const formatMinutesAsClock = (totalMinutes: number) =>
-  `${Math.floor(totalMinutes / 60)
-    .toString()
-    .padStart(2, "0")}:${(totalMinutes % 60).toString().padStart(2, "0")}`;
-
-const pickRandomValue = <T,>(values: readonly T[]) =>
-  values[Math.floor(Math.random() * values.length)];
 
 const sortSemesterValues = (semesters: string[]) =>
   [...semesters].sort((left, right) => {
@@ -658,176 +793,13 @@ const sortSemesterValues = (semesters: string[]) =>
 
 const dedupeStringValues = (values: string[]) => Array.from(new Set(values));
 
-const createWindowSlots = (
-  day: string,
-  windowStart: number,
-  windowEnd: number,
-  desiredCount: number,
-) => {
-  const slots: Array<{
-    day: string;
-    startTime: string;
-    endTime: string;
-  }> = [];
-  let currentMinutes = windowStart;
-
-  for (let index = 0; index < desiredCount; index += 1) {
-    const remainingSlots = desiredCount - index;
-    const latestDuration = windowEnd - currentMinutes - (remainingSlots - 1) * 60;
-    const allowedDurations = SCHEDULE_DURATION_OPTIONS.filter(
-      (duration) =>
-        duration <= windowEnd - currentMinutes && duration <= latestDuration,
-    );
-
-    if (allowedDurations.length === 0) {
-      break;
-    }
-
-    const duration = pickRandomValue(allowedDurations);
-    slots.push({
-      day,
-      startTime: formatMinutesAsClock(currentMinutes),
-      endTime: formatMinutesAsClock(currentMinutes + duration),
-    });
-    currentMinutes += duration;
-  }
-
-  return slots;
-};
-
-const createAutoScheduleSlots = (subjectCount: number) => {
-  const slots: Array<{
-    day: string;
-    startTime: string;
-    endTime: string;
-  }> = [];
-
-  for (let dayIndex = 0; dayIndex < SCHEDULE_DAYS.length; dayIndex += 1) {
-    const day = SCHEDULE_DAYS[dayIndex];
-    if (slots.length >= subjectCount) {
-      break;
-    }
-
-    const remainingSubjects = subjectCount - slots.length;
-    const remainingDays = SCHEDULE_DAYS.length - dayIndex;
-    const minimumSlotsNeededToday = Math.max(
-      1,
-      remainingSubjects - (remainingDays - 1) * 7,
-    );
-    const morningOptions = [0, 1, 2].filter((count) => count <= remainingSubjects);
-    let morningTarget =
-      morningOptions.length > 0 ? pickRandomValue(morningOptions) : 0;
-    const afternoonSeedRemaining = remainingSubjects - morningTarget;
-    const afternoonTarget =
-      afternoonSeedRemaining >= 3
-        ? [2, 3]
-        : afternoonSeedRemaining === 2
-          ? [2]
-          : afternoonSeedRemaining === 1
-            ? [1]
-            : [0];
-    let resolvedAfternoonTarget =
-      afternoonTarget.length > 0 ? pickRandomValue(afternoonTarget) : 0;
-    let eveningTarget = 0;
-
-    while (
-      morningTarget + resolvedAfternoonTarget + eveningTarget <
-        Math.min(7, minimumSlotsNeededToday) &&
-      morningTarget + resolvedAfternoonTarget + eveningTarget < remainingSubjects
-    ) {
-      if (resolvedAfternoonTarget < 3) {
-        resolvedAfternoonTarget += 1;
-        continue;
-      }
-
-      if (morningTarget < 2) {
-        morningTarget += 1;
-        continue;
-      }
-
-      if (eveningTarget < 2) {
-        eveningTarget += 1;
-        continue;
-      }
-
-      break;
-    }
-
-    if (
-      morningTarget + resolvedAfternoonTarget + eveningTarget >
-      remainingSubjects
-    ) {
-      const overflow =
-        morningTarget + resolvedAfternoonTarget + eveningTarget - remainingSubjects;
-
-      for (let index = 0; index < overflow; index += 1) {
-        if (eveningTarget > 0) {
-          eveningTarget -= 1;
-          continue;
-        }
-
-        if (resolvedAfternoonTarget > 1) {
-          resolvedAfternoonTarget -= 1;
-          continue;
-        }
-
-        if (morningTarget > 0) {
-          morningTarget -= 1;
-        }
-      }
-    }
-
-    const daySlots = createWindowSlots(
-      day,
-      MORNING_START,
-      MORNING_BREAK_START,
-      morningTarget,
-    );
-    daySlots.push(
-      ...createWindowSlots(
-        day,
-        MORNING_BREAK_END,
-        AFTERNOON_BREAK_START,
-        resolvedAfternoonTarget,
-      ),
-    );
-
-    const eveningRemaining = subjectCount - slots.length - daySlots.length;
-    if (eveningRemaining > 0) {
-      const randomizedEveningTarget =
-        eveningTarget > 0
-          ? eveningTarget
-          : pickRandomValue(eveningRemaining >= 2 ? [0, 1, 2] : [0, 1]);
-      daySlots.push(
-        ...createWindowSlots(
-          day,
-          AFTERNOON_BREAK_END,
-          CLASS_DAY_END,
-          Math.min(randomizedEveningTarget, eveningRemaining),
-        ),
-      );
-    }
-
-    if (daySlots.length === 0) {
-      daySlots.push(
-        ...createWindowSlots(day, MORNING_BREAK_END, AFTERNOON_BREAK_START, 1),
-      );
-    }
-
-    slots.push(...daySlots.slice(0, subjectCount - slots.length));
-  }
-
-  return slots;
-};
-
 // Get requirement items for enrollment requests based on current and requested level
 const getEnrollmentRequirementItems = (
   currentYearLevel: string,
   _requestedYearLevel: string,
-  _program: string,
+  program: string,
 ) => {
   void _requestedYearLevel;
-  void _program;
 
   if (!currentYearLevel) {
     // Default requirements for new admissions
@@ -839,7 +811,7 @@ const getEnrollmentRequirementItems = (
     ];
   }
 
-  return getRegularEnrollmentRequirementItems().map((requirement) => ({
+  return getRegularEnrollmentRequirementItems(program).map((requirement) => ({
     name: requirement.name,
     required: requirement.required,
     key: requirement.key,
@@ -860,7 +832,7 @@ const normalizeAttachmentName = (value: unknown) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const hasAttachmentNamed = (
-  attachments: Pick<Attachment, "name">[] | undefined,
+  attachments: Pick<Attachment, "name" | "reviewStatus">[] | undefined,
   attachmentName: string,
 ) =>
   Boolean(
@@ -868,6 +840,19 @@ const hasAttachmentNamed = (
       (attachment) =>
         normalizeAttachmentName(attachment.name) ===
         normalizeAttachmentName(attachmentName),
+    ),
+  );
+
+const hasApprovedAttachmentNamed = (
+  attachments: Pick<Attachment, "name" | "reviewStatus">[] | undefined,
+  attachmentName: string,
+) =>
+  Boolean(
+    attachments?.some(
+      (attachment) =>
+        normalizeAttachmentName(attachment.name) ===
+          normalizeAttachmentName(attachmentName) &&
+        attachment.reviewStatus === "Approved",
     ),
   );
 
@@ -894,6 +879,26 @@ const getReviewRequirementItems = (item: EnrollmentRequest | Enrollee) => {
     required: !requirement.optional,
     key: requirement.code,
   }));
+};
+
+const hasRedoRequirement = (item: EnrollmentRequest | Enrollee) => {
+  const requirementItems = getReviewRequirementItems(item);
+  const attachmentsByName = isEnrollmentRequestRecord(item)
+    ? null
+    : new Map(
+        (item.attachments ?? []).map((attachment) => [
+          normalizeAttachmentName(attachment.name),
+          attachment,
+        ]),
+      );
+
+  return requirementItems.some((requirement, index) => {
+    const attachment = isEnrollmentRequestRecord(item)
+      ? item.attachments?.[index]
+      : attachmentsByName?.get(normalizeAttachmentName(requirement.name));
+
+    return attachment?.reviewStatus === "Rejected";
+  });
 };
 
 const normalizeAcademicDescriptor = (value?: string) => {
@@ -1097,28 +1102,6 @@ const getSubjectTypeLabel = (
   }
 };
 
-const getSubjectTypeBadgeClass = (
-  subject: Pick<
-    Subject,
-    "code" | "name" | "program" | "strand" | "isMinor" | "subjectType"
-  >,
-) => {
-  const resolvedType = getResolvedSubjectType(subject);
-
-  switch (resolvedType) {
-    case "minor":
-      return "minor-badge";
-    case "major":
-      return "major-badge";
-    case "core":
-      return "core-badge";
-    case "applied":
-      return "applied-badge";
-    default:
-      return "specialized-badge";
-  }
-};
-
 const normalizeSubjectCatalog = (catalog: Subject[]) =>
   catalog.map((subject) => {
     const resolvedType = getResolvedSubjectType(subject);
@@ -1281,15 +1264,16 @@ const createAutoSectionForEnrollee = (
 
   return {
     id: `auto_${enrollee.id}_${Date.now()}_${nextSectionLetter}`,
-    code: `${getAutoSectionPrefix(enrollee)}${getSectionYearCode(enrollee.yearLevel)}${nextSectionLetter}`,
+    code: `${getAutoSectionPrefix(enrollee)}${getSectionYearCode(enrollee.yearLevel)}-${nextSectionLetter}`,
     program: enrollee.program,
     yearLevel: enrollee.yearLevel,
     semester: normalizeSectionSemester(lastSection?.semester),
     strand: enrollee.strandOrCourse,
     section: nextSectionLetter,
-    currentEnrollees: 1,
+    currentEnrollees: 0,
     maxCapacity: 30,
-    enrolleeIds: [enrollee.id],
+    enrolleeIds: [],
+    isLocked: false,
   };
 };
 
@@ -1304,7 +1288,7 @@ const getSectionLabelFromCode = (sectionCode: string) => {
     return "";
   }
 
-  const sectionCodeMatch = normalizedSectionCode.match(/^(.*?)([1-4])([A-Z]+)$/);
+  const sectionCodeMatch = normalizedSectionCode.match(/^(.*?)([1-4])-?([A-Z]+)$/);
   if (sectionCodeMatch?.[3]) {
     return sectionCodeMatch[3];
   }
@@ -1323,6 +1307,9 @@ const sortClassSections = (sections: ClassSection[]) =>
         getSubjectSemesterRank(right.semester) ||
       left.code.localeCompare(right.code),
   );
+
+const isSectionLocked = (section?: Pick<ClassSection, "isLocked"> | null) =>
+  Boolean(section?.isLocked);
 
 const getSectionCapacityLabel = (
   section: Pick<
@@ -1377,11 +1364,17 @@ const buildSectionCode = ({
     normalizedPreviousSection &&
     existingCode.toUpperCase().endsWith(normalizedPreviousSection)
   ) {
+    const codeParts = existingCode.match(/^(.*?)([1-4])-?([A-Z]+)$/);
+
+    if (codeParts) {
+      return `${codeParts[1]}${getSectionYearCode(yearLevel)}-${normalizedSection}`;
+    }
+
     return `${existingCode.slice(0, existingCode.length - normalizedPreviousSection.length)}${normalizedSection}`;
   }
 
   const prefix = program === "SHS" ? (strand || "SHS").trim() : "BSE";
-  return `${prefix}${getSectionYearCode(yearLevel)}${normalizedSection}`;
+  return `${prefix}${getSectionYearCode(yearLevel)}-${normalizedSection}`;
 };
 
 const buildProgressedBlockSectionCode = ({
@@ -1398,14 +1391,14 @@ const buildProgressedBlockSectionCode = ({
   }
 
   const requestedYearCode = getSectionYearCode(requestedYearLevel);
-  const codeParts = normalizedCode.match(/^(.*?)([1-4])([A-Z]+)$/);
+  const codeParts = normalizedCode.match(/^(.*?)([1-4])-?([A-Z]+)$/);
 
   if (!codeParts) {
     return normalizedCode;
   }
 
   const [, prefix, , blockLabel] = codeParts;
-  return `${prefix}${requestedYearCode}${blockLabel}`;
+  return `${prefix}${requestedYearCode}-${blockLabel}`;
 };
 
 export default function AdminEnrollees({
@@ -1445,6 +1438,9 @@ export default function AdminEnrollees({
   } | null>(null);
   const [enrollees, setEnrollees] = useState<Enrollee[]>([]);
   const [currentEnrolleePage, setCurrentEnrolleePage] = useState(1);
+  const [selectedEnrolleeIds, setSelectedEnrolleeIds] = useState<string[]>([]);
+  const [selectedEnrollmentRequestIds, setSelectedEnrollmentRequestIds] =
+    useState<string[]>([]);
   const [pendingScholarshipScore, setPendingScholarshipScore] = useState("");
   const selectedAdmissionRequest =
     selectedRequest && !isEnrollmentRequestRecord(selectedRequest)
@@ -1455,11 +1451,16 @@ export default function AdminEnrollees({
   const selectedAdmissionHonorCertificateStatus = !selectedAdmissionRequest
     ? "Not available"
     : selectedAdmissionHonorLabel !== "No Honor"
-      ? hasAttachmentNamed(
+      ? hasApprovedAttachmentNamed(
           selectedAdmissionRequest.attachments,
           "Honor Certificate",
         )
-        ? "Submitted"
+        ? "Approved"
+        : hasAttachmentNamed(
+              selectedAdmissionRequest.attachments,
+              "Honor Certificate",
+            )
+          ? "Pending approval"
         : "Pending"
       : "Not required";
   const selectedAdmissionScholarshipStatus = !selectedAdmissionRequest
@@ -1481,6 +1482,10 @@ export default function AdminEnrollees({
     selectedAdmissionRequest?.program === "College"
       ? getEstimatedCollegeTuition({
           honorLabel: selectedAdmissionRequest.honorLabel,
+          honorCertificateApproved: hasApprovedAttachmentNamed(
+            selectedAdmissionRequest.attachments,
+            "Honor Certificate",
+          ),
           appliedForScholarship: selectedAdmissionRequest.appliedForScholarship,
           scholarshipExamScore: selectedAdmissionScholarshipScore,
         })
@@ -1490,8 +1495,10 @@ export default function AdminEnrollees({
     : !selectedAdmissionRequest.appliedForScholarship
       ? "Not applied"
       : typeof selectedAdmissionScholarshipScore === "number"
-        ? selectedAdmissionTuition?.effectiveDiscountSource ===
-          "scholarship_exam"
+        ? selectedAdmissionTuition?.effectiveDiscountPercentage === 0
+          ? "No discount applied"
+          : selectedAdmissionTuition?.effectiveDiscountSource ===
+              "scholarship_exam"
           ? `Scholarship exam applied (${selectedAdmissionTuition.effectiveDiscountPercentage}%)`
           : `Honor retained (${selectedAdmissionTuition?.effectiveDiscountPercentage ?? 0}%)`
         : "Awaiting exam result";
@@ -1525,14 +1532,15 @@ export default function AdminEnrollees({
   const [isSavingMoveStudent, setIsSavingMoveStudent] = useState(false);
   const [moveStudentFeedback, setMoveStudentFeedback] =
     useState<InlineFeedback | null>(null);
+  const [transfereeCreditSearchTerm, setTransfereeCreditSearchTerm] =
+    useState("");
+  const [transfereeLoadSearchTerm, setTransfereeLoadSearchTerm] = useState("");
   // Academic Management States
   const [activeManagementTab, setActiveManagementTab] = useState<
-    "subjects" | "instructors" | "assignments"
+    "subjects" | "instructors" | "assignments" | "evaluation"
   >("subjects");
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [instructors, setInstructors] = useState<Instructor[]>([]);
-  const [instructorEvaluationStatuses, setInstructorEvaluationStatuses] =
-    useState<InstructorEvaluationStatusMap>({});
   const [subjectAssignments, setSubjectAssignments] = useState<
     SubjectAssignment[]
   >([]);
@@ -1566,8 +1574,29 @@ export default function AdminEnrollees({
   const [customAssignmentRooms, setCustomAssignmentRooms] = useState<string[]>(
     [],
   );
-  const [showRoomCreator, setShowRoomCreator] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
+  const [showClassroomManagerModal, setShowClassroomManagerModal] =
+    useState(false);
+  const [selectedClassroomNames, setSelectedClassroomNames] = useState<
+    string[]
+  >([]);
+  const [instructorDepartments, setInstructorDepartments] = useState<string[]>(
+    [],
+  );
+  const [newDepartmentName, setNewDepartmentName] = useState("");
+  const [showDepartmentManagerModal, setShowDepartmentManagerModal] =
+    useState(false);
+  const [selectedDepartmentNames, setSelectedDepartmentNames] = useState<
+    string[]
+  >([]);
+  const [pendingAcademicOptionDelete, setPendingAcademicOptionDelete] =
+    useState<{
+      kind: "department" | "classroom";
+      names: string[];
+      usedNames?: string[];
+      message: string;
+    } | null>(null);
+  const [showScheduleDraftFields, setShowScheduleDraftFields] = useState(false);
   const [assignmentForm, setAssignmentForm] = useState<AssignmentFormState>(
     createDefaultAssignmentForm(),
   );
@@ -1581,9 +1610,35 @@ export default function AdminEnrollees({
   const [instructorSearch, setInstructorSearch] = useState("");
   const [assignmentFilter, setAssignmentFilter] = useState({
     program: "All",
-    section: "All",
+    strandOrCourse: "All",
     semester: "All",
   });
+  const [evaluationStatuses, setEvaluationStatuses] =
+    useState<InstructorEvaluationStatusMap>(() =>
+      readInstructorEvaluationStatuses(currentBranch),
+    );
+  const [evaluationQuestionnaire, setEvaluationQuestionnaire] = useState<
+    EvaluationQuestionCategoryRecord[]
+  >(() => readEvaluationQuestionnaire(currentBranch));
+  const [evaluationSubmissions, setEvaluationSubmissions] = useState<
+    InstructorEvaluationSubmissionRecord[]
+  >(() => readInstructorEvaluationSubmissions(currentBranch));
+  const [showQuestionnaireModal, setShowQuestionnaireModal] = useState(false);
+  const [selectedEvaluationDetailsInstructorId, setSelectedEvaluationDetailsInstructorId] =
+    useState("");
+  const [evaluationDetailsFilters, setEvaluationDetailsFilters] = useState({
+    subjectId: "",
+    yearLevel: "",
+    section: "All",
+  });
+  const [questionnaireCategoryName, setQuestionnaireCategoryName] =
+    useState("");
+  const [selectedQuestionnaireCategoryId, setSelectedQuestionnaireCategoryId] =
+    useState("");
+  const [questionnaireQuestionText, setQuestionnaireQuestionText] =
+    useState("");
+  const [questionnaireQuestionType, setQuestionnaireQuestionType] =
+    useState<"rating" | "essay">("rating");
 
   // New state for expanded sections in subjects table
   const [expandedSHSSections, setExpandedSHSSections] = useState({
@@ -1629,6 +1684,7 @@ export default function AdminEnrollees({
     sectionAssignments: "section-assignments",
     subjects: "subjects",
     instructors: "instructors",
+    instructorDepartments: "instructor-departments",
     subjectAssignments: "subject-assignments",
     assignmentRooms: "assignment-rooms",
     transfereeEvaluations: "transferee-evaluations",
@@ -1679,6 +1735,24 @@ export default function AdminEnrollees({
     });
 
     writeStoredStudents([...preservedStudents, ...students]);
+  };
+
+  const getActiveBranchStudents = () =>
+    getStudentsForBranch(currentBranch).filter(
+      (student) => student.status !== "Archived",
+    );
+
+  const getSectionStudentCount = (sectionCode?: string | null) => {
+    const normalizedSectionCode = normalizeSectionCodeValue(sectionCode);
+
+    if (!normalizedSectionCode) {
+      return 0;
+    }
+
+    return getActiveBranchStudents().filter(
+      (student) =>
+        normalizeSectionCodeValue(student.section) === normalizedSectionCode,
+    ).length;
   };
 
   const buildSectionAssignmentsFromSections = (
@@ -1754,46 +1828,7 @@ export default function AdminEnrollees({
   const loadClassSections = async (
     remoteSections?: ClassSection[] | null,
   ): Promise<ClassSection[]> => {
-    if (remoteSections && remoteSections.length > 0) {
-      const normalizedRemoteSections = sortClassSections(
-        remoteSections.map((section) => ({
-          ...section,
-          semester: normalizeSectionSemester(section.semester),
-          enrolleeIds: normalizeStringList(section.enrolleeIds),
-        })),
-      );
-      setClassSections(normalizedRemoteSections);
-      return normalizedRemoteSections;
-    }
-
-    const storedSections = readBranchScopedData<ClassSection[]>(
-      storageScopes.classSections,
-      currentBranch,
-    ) ?? [];
-    const storedAssignments =
-      readBranchScopedData<SubjectAssignment[]>(
-        storageScopes.subjectAssignments,
-        currentBranch,
-      ) ?? [];
-    const activeBranchStudents = getStudentsForBranch(currentBranch).filter(
-      (student) =>
-        student.status !== "Archived" && student.status !== "Graduated",
-    );
-
-    const findMatchingAssignment = ({
-      sectionId,
-      sectionCode,
-    }: {
-      sectionId?: string;
-      sectionCode?: string;
-    }) =>
-      storedAssignments.find(
-        (assignment) =>
-          (sectionId && assignment.sectionId === sectionId) ||
-          normalizeSectionCodeValue(assignment.sectionCode) ===
-            normalizeSectionCodeValue(sectionCode),
-      );
-
+    const activeBranchStudents = getActiveBranchStudents();
     const studentSectionSummaries = activeBranchStudents.reduce<
       Map<string, { count: number; sampleStudent: StudentStorageRecord }>
     >((summaryMap, student) => {
@@ -1811,6 +1846,63 @@ export default function AdminEnrollees({
 
       return summaryMap;
     }, new Map());
+
+    const storedSections = readBranchScopedData<ClassSection[]>(
+      storageScopes.classSections,
+      currentBranch,
+    ) ?? [];
+    const storedSectionLocks = new Map(
+      storedSections.map((section) => [
+        normalizeSectionCodeValue(section.code),
+        Boolean(section.isLocked),
+      ]),
+    );
+
+    if (remoteSections && remoteSections.length > 0) {
+      const normalizedRemoteSections = sortClassSections(
+        remoteSections.map((section) => {
+          const normalizedCode = normalizeSectionCodeValue(section.code);
+          const currentEnrolleeCount =
+            studentSectionSummaries.get(normalizedCode)?.count ?? 0;
+
+          return {
+            ...section,
+            code: normalizedCode || section.code,
+            semester: normalizeSectionSemester(section.semester),
+            currentEnrollees: currentEnrolleeCount,
+            maxCapacity: Math.max(
+              Number(section.maxCapacity ?? 0),
+              currentEnrolleeCount,
+              1,
+            ),
+            enrolleeIds: [],
+            isLocked:
+              storedSectionLocks.get(normalizedCode) ?? Boolean(section.isLocked),
+          };
+        }),
+      );
+      setClassSections(normalizedRemoteSections);
+      return normalizedRemoteSections;
+    }
+
+    const storedAssignments =
+      readBranchScopedData<SubjectAssignment[]>(
+        storageScopes.subjectAssignments,
+        currentBranch,
+      ) ?? [];
+    const findMatchingAssignment = ({
+      sectionId,
+      sectionCode,
+    }: {
+      sectionId?: string;
+      sectionCode?: string;
+    }) =>
+      storedAssignments.find(
+        (assignment) =>
+          (sectionId && assignment.sectionId === sectionId) ||
+          normalizeSectionCodeValue(assignment.sectionCode) ===
+            normalizeSectionCodeValue(sectionCode),
+      );
 
     const normalizedStoredSections = storedSections
       .map((section) => ({
@@ -1837,11 +1929,7 @@ export default function AdminEnrollees({
           section.strand ||
           matchingStudentSummary?.sampleStudent.strandOrCourse ||
           (resolvedProgram === "College" ? DEFAULT_COLLEGE_COURSE : "All");
-        const currentEnrolleeCount = Math.max(
-          0,
-          Number(section.currentEnrollees ?? 0),
-          matchingStudentSummary?.count ?? 0,
-        );
+        const currentEnrolleeCount = matchingStudentSummary?.count ?? 0;
 
         return {
           ...section,
@@ -1860,6 +1948,8 @@ export default function AdminEnrollees({
             currentEnrolleeCount,
             1,
           ),
+          enrolleeIds: [],
+          isLocked: Boolean(section.isLocked),
         };
       });
 
@@ -1890,6 +1980,7 @@ export default function AdminEnrollees({
           currentEnrollees: summary.count,
           maxCapacity: Math.max(30, summary.count),
           enrolleeIds: [],
+          isLocked: false,
         };
       });
 
@@ -2961,6 +3052,138 @@ export default function AdminEnrollees({
     return mockInstructors;
   };
 
+  const instructorDepartmentOptions = getUniqueTrimmedValues([
+    ...instructorDepartments,
+    ...instructors.map((instructor) => instructor.department),
+  ]);
+
+  const handleCreateDepartmentOption = () => {
+    const trimmedDepartmentName = newDepartmentName.trim();
+
+    if (!trimmedDepartmentName) {
+      addToast("Enter a department name first.", "warning");
+      return;
+    }
+
+    const matchingDepartment = instructorDepartmentOptions.find(
+      (department) =>
+        department.toLowerCase() === trimmedDepartmentName.toLowerCase(),
+    );
+
+    if (matchingDepartment) {
+      setInstructorForm((prev) => ({
+        ...prev,
+        department: matchingDepartment,
+      }));
+      setNewDepartmentName("");
+      addToast(`${matchingDepartment} is already in the department list.`, "info");
+      return;
+    }
+
+    setInstructorDepartments((prev) =>
+      getUniqueTrimmedValues([...prev, trimmedDepartmentName]),
+    );
+    setInstructorForm((prev) => ({
+      ...prev,
+      department: trimmedDepartmentName,
+    }));
+    setNewDepartmentName("");
+    addToast(`${trimmedDepartmentName} added to departments.`, "success");
+  };
+
+  const handleDeleteDepartmentOption = (departmentName: string) => {
+    const departmentInUse = instructors.some(
+      (instructor) =>
+        instructor.department.trim().toLowerCase() ===
+        departmentName.trim().toLowerCase(),
+    );
+
+    if (departmentInUse) {
+      addToast("This department is still used by an instructor.", "warning");
+      return;
+    }
+
+    setPendingAcademicOptionDelete({
+      kind: "department",
+      names: [departmentName],
+      message: `Delete department "${departmentName}"?`,
+    });
+  };
+
+  const deleteDepartmentOptions = (departmentNames: string[]) => {
+    setInstructorDepartments((prev) =>
+      prev.filter(
+        (department) =>
+          !departmentNames.some(
+            (departmentName) =>
+              department.trim().toLowerCase() ===
+              departmentName.trim().toLowerCase(),
+          ),
+      ),
+    );
+    if (
+      departmentNames.some(
+        (departmentName) =>
+          instructorForm.department.trim().toLowerCase() ===
+          departmentName.trim().toLowerCase(),
+      )
+    ) {
+      setInstructorForm((prev) => ({ ...prev, department: "" }));
+    }
+    setSelectedDepartmentNames((prev) =>
+      prev.filter((department) => !departmentNames.includes(department)),
+    );
+    addToast(
+      `Deleted ${departmentNames.length} department${
+        departmentNames.length === 1 ? "" : "s"
+      }.`,
+      "success",
+    );
+  };
+
+  const toggleDepartmentSelection = (departmentName: string) => {
+    setSelectedDepartmentNames((prev) =>
+      prev.includes(departmentName)
+        ? prev.filter((item) => item !== departmentName)
+        : [...prev, departmentName],
+    );
+  };
+
+  const handleDeleteSelectedDepartments = () => {
+    if (selectedDepartmentNames.length === 0) {
+      addToast("Select departments to delete first.", "warning");
+      return;
+    }
+
+    const usedDepartments = selectedDepartmentNames.filter((departmentName) =>
+      instructors.some(
+        (instructor) =>
+          instructor.department.trim().toLowerCase() ===
+          departmentName.trim().toLowerCase(),
+      ),
+    );
+    const removableDepartments = selectedDepartmentNames.filter(
+      (departmentName) => !usedDepartments.includes(departmentName),
+    );
+
+    if (removableDepartments.length === 0) {
+      addToast("Selected departments are still used by instructors.", "warning");
+      return;
+    }
+
+    setPendingAcademicOptionDelete({
+      kind: "department",
+      names: removableDepartments,
+      message: `Delete ${removableDepartments.length} selected department${
+        removableDepartments.length === 1 ? "" : "s"
+      }?`,
+    });
+
+    if (usedDepartments.length > 0) {
+      addToast("Some selected departments are still in use.", "warning");
+    }
+  };
+
   const closeInstructorModal = () => {
     setShowInstructorModal(false);
     setEditingInstructor(null);
@@ -3023,6 +3246,14 @@ export default function AdminEnrollees({
         currentBranch,
         nextInstructor,
       );
+      let temporaryPassword = "";
+
+      if (!editingInstructor) {
+        temporaryPassword = await resetInstructorTemporaryPassword({
+          branch: currentBranch,
+          employeeId: savedInstructor.employeeId,
+        });
+      }
 
       setInstructors((prev) =>
         editingInstructor
@@ -3035,7 +3266,7 @@ export default function AdminEnrollees({
       addToast(
         editingInstructor
           ? `${savedInstructor.name} updated successfully.`
-          : `${savedInstructor.name} added to instructors.`,
+          : `${savedInstructor.name} added. Temporary password: ${temporaryPassword}`,
         "success",
       );
       closeInstructorModal();
@@ -3093,10 +3324,37 @@ export default function AdminEnrollees({
     }
   };
 
-  const loadInstructorEvaluationStatuses = () => {
-    setInstructorEvaluationStatuses(
-      readInstructorEvaluationStatuses(currentBranch),
+  const handleResetInstructorPassword = async () => {
+    if (!editingInstructor) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Generate a new temporary password for ${editingInstructor.name}?\n\nThey will be asked to change it after signing in.`,
     );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const temporaryPassword = await resetInstructorTemporaryPassword({
+        branch: currentBranch,
+        employeeId: editingInstructor.employeeId,
+      });
+      addToast(
+        `${editingInstructor.name}'s new temporary password is ${temporaryPassword}.`,
+        "success",
+      );
+    } catch (error) {
+      console.error("Failed to reset instructor password", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to reset the instructor password.",
+        "error",
+      );
+    }
   };
 
   // Load subject assignments
@@ -3536,18 +3794,17 @@ export default function AdminEnrollees({
   const buildAssignmentFormFromAssignment = (
     assignment: SubjectAssignment,
   ): AssignmentFormState => {
-    const firstSchedule = assignment.schedule[0];
-
     return {
       sectionId: assignment.sectionId,
       instructorId: assignment.instructorId,
       subjectIds: [assignment.subjectId],
       academicYear: assignment.academicYear,
       semester: normalizeSectionSemester(assignment.semester),
-      scheduleDay: firstSchedule?.day || "",
-      startTime: firstSchedule?.startTime || "",
-      endTime: firstSchedule?.endTime || "",
-      room: firstSchedule?.room || "",
+      schedule: assignment.schedule,
+      scheduleDay: "",
+      startTime: "",
+      endTime: "",
+      room: "",
     };
   };
 
@@ -3557,18 +3814,31 @@ export default function AdminEnrollees({
     ...subjectAssignments.flatMap((assignment) =>
       assignment.schedule.map((slot) => slot.room),
     ),
+    ...assignmentForm.schedule.map((slot) => slot.room),
     assignmentForm.room,
   ]);
 
   const resetRoomCreator = () => {
-    setShowRoomCreator(false);
     setNewRoomName("");
+  };
+
+  const clearAssignmentScheduleDraft = () => {
+    setAssignmentForm((prev) => ({
+      ...prev,
+      scheduleDay: "",
+      startTime: "",
+      endTime: "",
+      room: "",
+    }));
+    setShowScheduleDraftFields(false);
+    resetRoomCreator();
   };
 
   const closeAssignmentModal = () => {
     setShowAssignmentModal(false);
     setEditingAssignment(null);
     resetRoomCreator();
+    setShowScheduleDraftFields(false);
     setAssignmentForm(createDefaultAssignmentForm());
   };
 
@@ -3583,6 +3853,7 @@ export default function AdminEnrollees({
         reflectedAcademicYear,
       ),
     );
+    setShowScheduleDraftFields(false);
     setShowAssignmentModal(true);
   };
 
@@ -3604,6 +3875,7 @@ export default function AdminEnrollees({
       ...nextForm,
       subjectIds: selectedSubjectId ? [selectedSubjectId] : [],
     });
+    setShowScheduleDraftFields(false);
     setShowAssignmentModal(true);
   };
 
@@ -3646,43 +3918,18 @@ export default function AdminEnrollees({
 
       return {
         ...nextForm,
-        subjectIds: filteredSubjectIds,
+        subjectIds: filteredSubjectIds.length > 0 ? [filteredSubjectIds[0]] : [],
       };
     });
   };
 
   const toggleAssignmentSubjectSelection = (subjectId: string) => {
     setAssignmentForm((prev) => {
-      if (editingAssignment) {
-        return {
-          ...prev,
-          subjectIds: prev.subjectIds[0] === subjectId ? [] : [subjectId],
-        };
-      }
-
-      return prev.subjectIds.includes(subjectId)
-        ? {
-            ...prev,
-            subjectIds: prev.subjectIds.filter((item) => item !== subjectId),
-          }
-        : {
-            ...prev,
-            subjectIds: [...prev.subjectIds, subjectId],
-          };
+      return {
+        ...prev,
+        subjectIds: prev.subjectIds[0] === subjectId ? [] : [subjectId],
+      };
     });
-  };
-
-  const selectAllAssignmentSubjects = () => {
-    const availableSubjects = getEligibleSubjectsForSection(
-      assignmentForm.sectionId,
-      assignmentForm.semester,
-      editingAssignment?.id,
-    );
-
-    setAssignmentForm((prev) => ({
-      ...prev,
-      subjectIds: availableSubjects.map((subject) => subject.id),
-    }));
   };
 
   const clearAssignmentSubjects = () => {
@@ -3690,6 +3937,92 @@ export default function AdminEnrollees({
       ...prev,
       subjectIds: [],
     }));
+  };
+
+  const updateAssignmentScheduleSlot = (
+    slotIndex: number,
+    field: keyof Schedule,
+    value: string,
+  ) => {
+    setAssignmentForm((prev) => ({
+      ...prev,
+      schedule: prev.schedule.map((slot, index) =>
+        index === slotIndex ? { ...slot, [field]: value } : slot,
+      ),
+    }));
+  };
+
+  const removeAssignmentScheduleSlot = (slotIndex: number) => {
+    setAssignmentForm((prev) => ({
+      ...prev,
+      schedule: prev.schedule.filter((_slot, index) => index !== slotIndex),
+    }));
+  };
+
+  const hasPartialScheduleSlot = (slot: Partial<Schedule>) =>
+    Boolean(slot.day || slot.startTime || slot.endTime || slot.room) &&
+    !(slot.day && slot.startTime && slot.endTime);
+
+  const addAssignmentScheduleSlot = () => {
+    if (!showScheduleDraftFields) {
+      setShowScheduleDraftFields(true);
+      return;
+    }
+
+    const draftSlot = {
+      day: assignmentForm.scheduleDay,
+      startTime: assignmentForm.startTime,
+      endTime: assignmentForm.endTime,
+      room: assignmentForm.room.trim() || "TBA",
+    };
+
+    if (hasPartialScheduleSlot(draftSlot)) {
+      addToast("Choose a day, start time, and end time before adding this schedule.", "warning");
+      return;
+    }
+
+    if (!draftSlot.day || !draftSlot.startTime || !draftSlot.endTime) {
+      addToast("Fill in the schedule fields before adding a day.", "warning");
+      return;
+    }
+
+    setAssignmentForm((prev) => ({
+      ...prev,
+      schedule: [...prev.schedule, draftSlot],
+      scheduleDay: "",
+      startTime: "",
+      endTime: "",
+      room: "",
+    }));
+    setShowScheduleDraftFields(false);
+    resetRoomCreator();
+  };
+
+  const buildAssignmentScheduleFromForm = () => {
+    const schedule = assignmentForm.schedule.map((slot) => ({
+      ...slot,
+      room: slot.room.trim() || "TBA",
+    }));
+    if (!showScheduleDraftFields) {
+      return schedule;
+    }
+
+    const draftSlot = {
+      day: assignmentForm.scheduleDay,
+      startTime: assignmentForm.startTime,
+      endTime: assignmentForm.endTime,
+      room: assignmentForm.room.trim() || "TBA",
+    };
+
+    if (schedule.some(hasPartialScheduleSlot) || hasPartialScheduleSlot(draftSlot)) {
+      return null;
+    }
+
+    if (draftSlot.day && draftSlot.startTime && draftSlot.endTime) {
+      return [...schedule, draftSlot];
+    }
+
+    return schedule;
   };
 
   const toggleAssignmentSelection = (assignmentId: string) => {
@@ -3730,6 +4063,15 @@ export default function AdminEnrollees({
     setSelectedAssignmentIds([]);
   };
 
+  const toggleVisibleAssignmentSelection = () => {
+    if (selectedAssignmentIds.length > 0) {
+      clearAssignmentSelection();
+      return;
+    }
+
+    selectVisibleAssignments();
+  };
+
   const closeAssignmentDeleteModal = () => {
     setShowAssignmentDeleteModal(false);
     setPendingAssignmentDeleteIds([]);
@@ -3762,38 +4104,48 @@ export default function AdminEnrollees({
     }
 
     if (selectedSubjects.length === 0) {
-      addToast("Select at least one subject to assign.", "warning");
+      addToast("Select one subject to assign.", "warning");
       return;
     }
 
-    if (editingAssignment && selectedSubjects.length !== 1) {
-      addToast("Editing an assignment only supports one subject.", "warning");
+    if (selectedSubjects.length !== 1) {
+      addToast("Only one subject can be assigned at a time.", "warning");
       return;
     }
 
-    const shouldIncludeSchedule =
-      assignmentForm.scheduleDay &&
-      assignmentForm.startTime &&
-      assignmentForm.endTime;
-    const schedule = shouldIncludeSchedule
-      ? [
-          {
-            day: assignmentForm.scheduleDay,
-            startTime: assignmentForm.startTime,
-            endTime: assignmentForm.endTime,
-            room: assignmentForm.room.trim() || "TBA",
-          },
-        ]
-      : [];
+    const schedule = buildAssignmentScheduleFromForm();
 
-    if (schedule.length > 0 && schedule[0].room.trim()) {
-      try {
-        await saveAcademicAssignmentRoom(currentBranch, schedule[0].room);
-        setCustomAssignmentRooms((prev) =>
-          getUniqueTrimmedValues([...prev, schedule[0].room]),
+    if (!schedule) {
+      addToast(
+        "Every schedule row needs a day, start time, and end time.",
+        "warning",
+      );
+      return;
+    }
+
+    const scheduleRooms = getUniqueTrimmedValues(
+      schedule
+        .map((slot) => slot.room)
+        .filter((room) => room.trim() && room.trim() !== "TBA"),
+    );
+
+    if (scheduleRooms.length > 0) {
+      const roomSaveResults = await Promise.allSettled(
+        scheduleRooms.map((room) => saveAcademicAssignmentRoom(currentBranch, room)),
+      );
+      const savedRooms = roomSaveResults.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
+      );
+
+      setCustomAssignmentRooms((prev) =>
+        getUniqueTrimmedValues([...prev, ...savedRooms]),
+      );
+
+      if (roomSaveResults.some((result) => result.status === "rejected")) {
+        console.warn(
+          "Some assignment rooms could not be synced to Supabase.",
+          roomSaveResults,
         );
-      } catch (error) {
-        console.warn("Unable to sync assignment room to Supabase.", error);
       }
     }
 
@@ -3839,34 +4191,29 @@ export default function AdminEnrollees({
       return;
     }
 
-    const newAssignments: SubjectAssignment[] = selectedSubjects.map(
-      (subject, index) => ({
-        id: `assignment_${Date.now()}_${subject.id}_${index}`,
-        subjectId: subject.id,
-        subjectCode: subject.code,
-        subjectName: subject.name,
-        instructorId: instructor?.id || "",
-        instructorName: instructor?.name || "To be assigned",
-        sectionId: section.id,
-        sectionCode: section.code,
-        schedule,
-        academicYear: assignmentForm.academicYear.trim() || "2026-2027",
-        semester: normalizeSectionSemester(assignmentForm.semester),
-      }),
-    );
+    const subject = selectedSubjects[0];
+    const newAssignment: SubjectAssignment = {
+      id: `assignment_${Date.now()}_${subject.id}`,
+      subjectId: subject.id,
+      subjectCode: subject.code,
+      subjectName: subject.name,
+      instructorId: instructor?.id || "",
+      instructorName: instructor?.name || "To be assigned",
+      sectionId: section.id,
+      sectionCode: section.code,
+      schedule,
+      academicYear: assignmentForm.academicYear.trim() || "2026-2027",
+      semester: normalizeSectionSemester(assignmentForm.semester),
+    };
 
     try {
-      const savedAssignments = await Promise.all(
-        newAssignments.map((assignment) =>
-          saveAcademicSubjectAssignment(currentBranch, assignment),
-        ),
+      const savedAssignment = await saveAcademicSubjectAssignment(
+        currentBranch,
+        newAssignment,
       );
 
-      setSubjectAssignments((prev) => [...prev, ...savedAssignments]);
-      addToast(
-        `${savedAssignments.length} subject${savedAssignments.length > 1 ? "s" : ""} assigned to ${section.code}.`,
-        "success",
-      );
+      setSubjectAssignments((prev) => [...prev, savedAssignment]);
+      addToast(`${savedAssignment.subjectCode} assigned to ${section.code}.`, "success");
       closeAssignmentModal();
     } catch (error) {
       console.error("Failed to create shared subject assignments", error);
@@ -3892,10 +4239,6 @@ export default function AdminEnrollees({
     );
 
     if (matchingRoom) {
-      setAssignmentForm((prev) => ({
-        ...prev,
-        room: matchingRoom,
-      }));
       resetRoomCreator();
       addToast(`${matchingRoom} is already in the room list.`, "info");
       return;
@@ -3909,10 +4252,6 @@ export default function AdminEnrollees({
       setCustomAssignmentRooms((prev) =>
         getUniqueTrimmedValues([...prev, savedRoomName]),
       );
-      setAssignmentForm((prev) => ({
-        ...prev,
-        room: savedRoomName,
-      }));
       resetRoomCreator();
       addToast(`Room ${savedRoomName} added.`, "success");
     } catch (error) {
@@ -3926,22 +4265,194 @@ export default function AdminEnrollees({
     }
   };
 
+  const clearRoomsFromAssignments = async (roomNames: string[]) => {
+    const normalizedRoomNames = roomNames.map((roomName) =>
+      roomName.trim().toLowerCase(),
+    );
+    let assignmentsToSync: SubjectAssignment[] = [];
+
+    setSubjectAssignments((prev) => {
+      const nextAssignments = prev.map((assignment) => {
+        const hasMatchingRoom = assignment.schedule.some((slot) =>
+          normalizedRoomNames.includes(slot.room.trim().toLowerCase()),
+        );
+
+        if (!hasMatchingRoom) {
+          return assignment;
+        }
+
+        const nextAssignment = {
+          ...assignment,
+          schedule: assignment.schedule.map((slot) =>
+            normalizedRoomNames.includes(slot.room.trim().toLowerCase())
+              ? { ...slot, room: "TBA" }
+              : slot,
+          ),
+        };
+
+        assignmentsToSync = [...assignmentsToSync, nextAssignment];
+        return nextAssignment;
+      });
+
+      return nextAssignments;
+    });
+
+    if (assignmentsToSync.length > 0) {
+      const syncResults = await Promise.allSettled(
+        assignmentsToSync.map((assignment) =>
+          saveAcademicSubjectAssignment(currentBranch, assignment),
+        ),
+      );
+
+      if (syncResults.some((result) => result.status === "rejected")) {
+        console.warn("Some classroom schedule updates could not be synced.", syncResults);
+        addToast("Classroom was removed locally, but some schedules did not sync.", "warning");
+      }
+    }
+  };
+
+  const handleDeleteRoomOption = async (roomName: string) => {
+    const roomInUse = subjectAssignments.some((assignment) =>
+      assignment.schedule.some(
+        (slot) =>
+          slot.room.trim().toLowerCase() === roomName.trim().toLowerCase(),
+      ),
+    );
+
+    setPendingAcademicOptionDelete({
+      kind: "classroom",
+      names: [roomName],
+      usedNames: roomInUse ? [roomName] : [],
+      message: roomInUse
+        ? `Delete classroom "${roomName}"? It is used in one or more schedules, so those schedule rooms will be set to TBA.`
+        : `Delete classroom "${roomName}"?`,
+    });
+  };
+
+  const deleteClassroomOptions = async (
+    roomNames: string[],
+    usedRoomNames: string[] = [],
+  ) => {
+    setCustomAssignmentRooms((prev) =>
+      prev.filter(
+        (room) =>
+          !roomNames.some(
+            (roomName) =>
+              room.trim().toLowerCase() === roomName.trim().toLowerCase(),
+          ),
+      ),
+    );
+    setSelectedClassroomNames((prev) =>
+      prev.filter((room) => !roomNames.includes(room)),
+    );
+    setAssignmentForm((prev) => ({
+      ...prev,
+      room: roomNames.some(
+        (roomName) => roomName.trim().toLowerCase() === prev.room.trim().toLowerCase(),
+      )
+        ? ""
+        : prev.room,
+      schedule: prev.schedule.map((slot) =>
+        roomNames.some(
+          (roomName) =>
+            slot.room.trim().toLowerCase() === roomName.trim().toLowerCase(),
+        )
+          ? { ...slot, room: "TBA" }
+          : slot,
+      ),
+    }));
+
+    if (usedRoomNames.length > 0) {
+      await clearRoomsFromAssignments(usedRoomNames);
+    }
+
+    addToast(
+      `Deleted ${roomNames.length} classroom${roomNames.length === 1 ? "" : "s"}.`,
+      "success",
+    );
+  };
+
+  const toggleClassroomSelection = (roomName: string) => {
+    setSelectedClassroomNames((prev) =>
+      prev.includes(roomName)
+        ? prev.filter((item) => item !== roomName)
+        : [...prev, roomName],
+    );
+  };
+
+  const handleDeleteSelectedClassrooms = async () => {
+    if (selectedClassroomNames.length === 0) {
+      addToast("Select classrooms to delete first.", "warning");
+      return;
+    }
+
+    const usedRooms = selectedClassroomNames.filter((roomName) =>
+      subjectAssignments.some((assignment) =>
+        assignment.schedule.some(
+          (slot) =>
+            slot.room.trim().toLowerCase() === roomName.trim().toLowerCase(),
+        ),
+      ),
+    );
+    setPendingAcademicOptionDelete({
+      kind: "classroom",
+      names: selectedClassroomNames,
+      usedNames: usedRooms,
+      message:
+        usedRooms.length > 0
+          ? `Delete ${selectedClassroomNames.length} selected classroom${
+              selectedClassroomNames.length === 1 ? "" : "s"
+            }? Rooms used in schedules will be set to TBA.`
+          : `Delete ${selectedClassroomNames.length} selected classroom${
+              selectedClassroomNames.length === 1 ? "" : "s"
+            }?`,
+    });
+  };
+
+  const handleConfirmAcademicOptionDelete = async () => {
+    if (!pendingAcademicOptionDelete) {
+      return;
+    }
+
+    const pendingDelete = pendingAcademicOptionDelete;
+    setPendingAcademicOptionDelete(null);
+
+    if (pendingDelete.kind === "department") {
+      deleteDepartmentOptions(pendingDelete.names);
+      return;
+    }
+
+    await deleteClassroomOptions(
+      pendingDelete.names,
+      pendingDelete.usedNames ?? [],
+    );
+  };
+
   const handleRemoveAssignment = (assignmentId: string) => {
     openAssignmentDeleteModal([assignmentId]);
   };
+
+  const isAssignmentNotFoundError = (error: unknown) =>
+    error instanceof Error &&
+    /Assignment\s+".*"\s+was not found for branch/i.test(error.message);
 
   const handleConfirmAssignmentDelete = async () => {
     if (pendingAssignmentDeleteIds.length === 0) {
       return;
     }
 
-    try {
-      await Promise.all(
-        pendingAssignmentDeleteIds.map((assignmentId) =>
-          deleteAcademicSubjectAssignment(currentBranch, assignmentId),
-        ),
-      );
+    const deleteResults = await Promise.allSettled(
+      pendingAssignmentDeleteIds.map((assignmentId) =>
+        deleteAcademicSubjectAssignment(currentBranch, assignmentId),
+      ),
+    );
+    const failedDelete = deleteResults.find(
+      (result) =>
+        result.status === "rejected" &&
+        !isAssignmentNotFoundError(result.reason),
+    );
 
+    if (!failedDelete) {
       setSubjectAssignments((prev) =>
         prev.filter(
           (assignment) => !pendingAssignmentDeleteIds.includes(assignment.id),
@@ -3956,55 +4467,73 @@ export default function AdminEnrollees({
         "info",
       );
       closeAssignmentDeleteModal();
-    } catch (error) {
-      console.error("Failed to delete shared subject assignments", error);
+      return;
+    }
+
+    if (failedDelete.status === "rejected") {
+      console.error("Failed to delete shared subject assignments", failedDelete.reason);
       addToast(
-        error instanceof Error
-          ? error.message
+        failedDelete.reason instanceof Error
+          ? failedDelete.reason.message
           : "Unable to delete the shared class assignments.",
         "error",
       );
     }
   };
 
-  const detachEnrolleeFromSections = (enrolleeId: string) => {
+  const detachEnrolleesFromSections = (enrolleeIds: string[]) => {
+    const enrolleeIdSet = new Set(enrolleeIds);
+
+    if (enrolleeIdSet.size === 0) {
+      return;
+    }
+
     setSectionAssignments((prev) =>
-      prev.filter((assignment) => assignment.enrolleeId !== enrolleeId),
+      prev.filter((assignment) => !enrolleeIdSet.has(assignment.enrolleeId)),
+    );
+    void loadClassSections();
+  };
+
+  const archiveEnrollees = (recordsToArchive: Enrollee[]) => {
+    if (recordsToArchive.length === 0) {
+      return;
+    }
+
+    const archivedAt = new Date().toISOString();
+    const archivedIds = new Set(recordsToArchive.map((enrollee) => enrollee.id));
+
+    detachEnrolleesFromSections([...archivedIds]);
+    setEnrollees((prev) =>
+      prev.map((record) =>
+        archivedIds.has(record.id)
+          ? {
+              ...record,
+              archivedAt,
+              archivedByRole: loggedInRole,
+            }
+          : record,
+      ),
+    );
+    setSelectedEnrolleeIds((prev) =>
+      prev.filter((enrolleeId) => !archivedIds.has(enrolleeId)),
+    );
+    setSelectedRequest((prev) =>
+      prev && !isEnrollmentRequestRecord(prev) && archivedIds.has(prev.id)
+        ? null
+        : prev,
     );
 
-    const affectedSectionIds = new Set(
-      classSections
-        .filter((section) => section.enrolleeIds.includes(enrolleeId))
-        .map((section) => section.id),
+    if (selectedAction && archivedIds.has(selectedAction.id)) {
+      setSelectedAction(null);
+      setIsConfirmModalOpen(false);
+    }
+
+    addToast(
+      recordsToArchive.length === 1
+        ? `${recordsToArchive[0].fullName} moved to Archive.`
+        : `${recordsToArchive.length} records moved to Archive.`,
+      "success",
     );
-    const nextSections = classSections.map((section) => {
-      if (!section.enrolleeIds.includes(enrolleeId)) {
-        return section;
-      }
-
-      return {
-        ...section,
-        enrolleeIds: section.enrolleeIds.filter((id) => id !== enrolleeId),
-        currentEnrollees: Math.max(0, section.currentEnrollees - 1),
-      };
-    });
-
-    setClassSections(nextSections);
-    void syncClassSectionsToSupabase(
-      nextSections.filter((section) => affectedSectionIds.has(section.id)),
-    );
-
-    setSelectedSection((prev) => {
-      if (!prev || !prev.enrolleeIds.includes(enrolleeId)) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        enrolleeIds: prev.enrolleeIds.filter((id) => id !== enrolleeId),
-        currentEnrollees: Math.max(0, prev.currentEnrollees - 1),
-      };
-    });
   };
 
   const handleArchiveEnrollee = (enrollee: Enrollee) => {
@@ -4016,92 +4545,191 @@ export default function AdminEnrollees({
       return;
     }
 
-    detachEnrolleeFromSections(enrollee.id);
-    setEnrollees((prev) =>
-      prev.map((record) =>
-        record.id === enrollee.id
-          ? {
-              ...record,
-              archivedAt: new Date().toISOString(),
-              archivedByRole: loggedInRole,
-            }
-          : record,
+    archiveEnrollees([enrollee]);
+  };
+
+  const handleArchiveSelectedEnrollees = (recordsToArchive: Enrollee[]) => {
+    if (recordsToArchive.length === 0) {
+      addToast("Select at least one record to archive.", "info");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Archive ${recordsToArchive.length} selected ${activeTab === "transferees" ? "transferee" : "admission"} record${recordsToArchive.length === 1 ? "" : "s"}? You can restore them from Archive later.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    archiveEnrollees(recordsToArchive);
+  };
+
+  const archiveEnrollmentRequests = (requestsToArchive: EnrollmentRequest[]) => {
+    if (requestsToArchive.length === 0) {
+      addToast("Select at least one enrollment request to archive.", "info");
+      return;
+    }
+
+    const archivedAt = new Date().toISOString();
+    const archivedIds = new Set(requestsToArchive.map((request) => request.id));
+    const archivedRequests = requestsToArchive.map((request) => ({
+      ...request,
+      archivedAt,
+      archivedByRole: loggedInRole,
+      updatedAt: archivedAt,
+    }));
+
+    setEnrollmentRequests((prev) =>
+      prev.map((request) =>
+        archivedIds.has(request.id)
+          ? archivedRequests.find((archived) => archived.id === request.id) ??
+            request
+          : request,
       ),
     );
+    setSelectedEnrollmentRequestIds((prev) =>
+      prev.filter((requestId) => !archivedIds.has(requestId)),
+    );
     setSelectedRequest((prev) =>
-      prev && !isEnrollmentRequestRecord(prev) && prev.id === enrollee.id
+      prev && isEnrollmentRequestRecord(prev) && archivedIds.has(prev.id)
         ? null
         : prev,
     );
 
-    if (selectedAction?.id === enrollee.id) {
-      setSelectedAction(null);
-      setIsConfirmModalOpen(false);
+    void Promise.allSettled(
+      archivedRequests.map((request) => saveEnrollmentRequest(request)),
+    ).then((results) => {
+      if (results.some((result) => result.status === "rejected")) {
+        console.warn("Some archived enrollment requests could not be synced.", results);
+      }
+    });
+
+    addToast(
+      requestsToArchive.length === 1
+        ? "Enrollment request moved to Archive."
+        : `${requestsToArchive.length} enrollment requests moved to Archive.`,
+      "success",
+    );
+  };
+
+  const handleArchiveSelectedEnrollmentRequests = (
+    requestsToArchive: EnrollmentRequest[],
+  ) => {
+    if (requestsToArchive.length === 0) {
+      addToast("Select at least one enrollment request to archive.", "info");
+      return;
     }
 
-    addToast(`${enrollee.fullName} moved to Archive.`, "success");
+    const confirmed = window.confirm(
+      `Archive ${requestsToArchive.length} selected enrollment request${requestsToArchive.length === 1 ? "" : "s"}?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    archiveEnrollmentRequests(requestsToArchive);
   };
 
   // Update pending assignments
-  const updatePendingAssignments = () => {
-    const approvedUnassigned = enrollees.filter(
-      (e) =>
-        !e.archivedAt &&
-        e.status === "Approved" &&
-        !sectionAssignments.some((a) => a.enrolleeId === e.id),
-    );
-    setPendingAssignments(approvedUnassigned);
-  };
+  const mapStoredStudentToSectionCandidate = (
+    student: StudentStorageRecord,
+  ): Enrollee => ({
+    id: student.id,
+    trackingNumber: student.trackingNumber || "",
+    studentNumber: student.id,
+    fullName: student.name,
+    program: student.program,
+    yearLevel: student.yearLevel,
+    strandOrCourse: student.strandOrCourse || "",
+    applicationDate: student.documentSubmitted || "",
+    documentsSubmitted: 0,
+    totalDocuments: 0,
+    status: "Approved",
+    branch: student.branch,
+    studentStatus: student.studentStatus || "",
+    requestedOwnSchedule: student.requestedOwnSchedule,
+    ownScheduleRequestStatus: student.ownScheduleRequestStatus,
+    ownScheduleAcademicYear: student.ownScheduleAcademicYear,
+    ownScheduleSemester: student.ownScheduleSemester,
+    personalInfo: {
+      fullName: student.name,
+      birthDate: student.birthDate || "",
+      contactNumber: student.contact || "",
+      program: student.program,
+      guardianName: student.guardianName || "",
+      email: student.email || "",
+      address: student.address || "",
+      yearLevel: student.yearLevel,
+      guardianContact: student.guardianContact || "",
+    },
+  });
 
-  const resetSectionForm = () => {
-    setEditingSection(null);
-    setNewSection(createDefaultSectionForm());
+  const updatePendingAssignments = () => {
+    const approvedUnassigned = getActiveBranchStudents()
+      .filter(
+        (student) =>
+          !normalizeSectionCodeValue(student.section) &&
+          !student.requestedOwnSchedule &&
+          student.ownScheduleRequestStatus !== "Approved",
+      )
+      .map(mapStoredStudentToSectionCandidate);
+
+    setPendingAssignments(approvedUnassigned);
   };
 
   const syncStudentSection = (enrollee: Enrollee, sectionCode: string) => {
     if (!enrollee.studentNumber) {
-      return;
+      return null;
     }
 
-    const storedStudents = readStoredStudents();
-    const nextStudents = storedStudents.map((student) =>
-      student.id === enrollee.studentNumber &&
-      normalizeBranchName(student.branch) === currentBranch
-        ? { ...student, section: sectionCode }
-        : student,
-    );
+    const sectionUpdateResult = updateStoredStudentSection({
+      branch: currentBranch,
+      studentNumber: enrollee.studentNumber,
+      trackingNumber: enrollee.trackingNumber,
+      nextSectionCode: sectionCode,
+    });
 
-    writeStoredStudents(nextStudents);
-    void syncStoredStudentsToSupabase([enrollee.studentNumber]);
+    if (sectionUpdateResult?.student) {
+      void syncStoredStudentsToSupabase([sectionUpdateResult.student.id]);
+    }
+
+    return sectionUpdateResult;
   };
 
   const syncStoredSectionCode = (
     section: ClassSection,
     nextSectionCode: string,
   ) => {
-    const studentNumbers = new Set(
-      enrollees
-        .filter(
-          (enrollee) =>
-            section.enrolleeIds.includes(enrollee.id) && enrollee.studentNumber,
-        )
-        .map((enrollee) => enrollee.studentNumber as string),
+    const normalizedSectionCode = normalizeSectionCodeValue(section.code);
+    const affectedStudents = getActiveBranchStudents().filter(
+      (student) =>
+        normalizeSectionCodeValue(student.section) === normalizedSectionCode,
     );
 
-    if (studentNumbers.size === 0) {
+    if (affectedStudents.length === 0) {
       return;
     }
 
+    const affectedStudentNumbers = new Set(
+      affectedStudents.map((student) => student.id),
+    );
     const storedStudents = readStoredStudents();
     const nextStudents = storedStudents.map((student) =>
-      studentNumbers.has(student.id) &&
+      affectedStudentNumbers.has(student.id) &&
       normalizeBranchName(student.branch) === currentBranch
         ? { ...student, section: nextSectionCode }
         : student,
     );
 
     writeStoredStudents(nextStudents);
-    void syncStoredStudentsToSupabase(Array.from(studentNumbers));
+    void syncStoredStudentsToSupabase(Array.from(affectedStudentNumbers));
+  };
+
+  const resetSectionForm = () => {
+    setEditingSection(null);
+    setNewSection(createDefaultSectionForm());
   };
 
   const getTransfereeEvaluation = (enrollee: Enrollee) =>
@@ -4158,6 +4786,18 @@ export default function AdminEnrollees({
           ),
       )
       .sort((left, right) => left.code.localeCompare(right.code));
+
+  const getTransfereeCreditSubjects = (enrollee: Enrollee) =>
+    subjects
+      .filter(
+        (subject) =>
+          subject.program === enrollee.program &&
+          matchesAcademicDescriptor(
+            resolveSubjectStrandOrCourse(subject),
+            enrollee.strandOrCourse,
+          ),
+      )
+      .sort(compareSubjectSequence);
 
   const mapSubjectsToStudentSubjectPlanItems = (
     subjectIds: string[],
@@ -4408,7 +5048,7 @@ export default function AdminEnrollees({
         section.code.trim().toUpperCase() === (student.section?.trim().toUpperCase() || ""),
     );
     const blockLabel =
-      normalizedNextSectionCode.match(/^(.*?)([1-4])([A-Z]+)$/)?.[3] ||
+      normalizedNextSectionCode.match(/^(.*?)([1-4])-?([A-Z]+)$/)?.[3] ||
       previousSection?.section ||
       normalizedNextSectionCode;
     const nextSection: ClassSection = {
@@ -4425,6 +5065,7 @@ export default function AdminEnrollees({
       currentEnrollees: 0,
       maxCapacity: Math.max(1, previousSection?.maxCapacity || 30),
       enrolleeIds: [],
+      isLocked: false,
     };
 
     writeBranchScopedData(storageScopes.classSections, resolvedBranch, [
@@ -4656,6 +5297,18 @@ export default function AdminEnrollees({
     enrollee: Enrollee,
     updates: Partial<TransfereeEvaluationRecord>,
   ) => {
+    const updateKeys = Object.keys(updates);
+    const isFilterOnlyUpdate =
+      updateKeys.length > 0 &&
+      updateKeys.every((key) =>
+        ["creditYearLevelFilter", "creditSemesterFilter"].includes(key),
+      );
+
+    if (enrollee.status === "Approved" && !isFilterOnlyUpdate) {
+      addToast("Approved transferee records are locked for editing.", "info");
+      return;
+    }
+
     const base = normalizeTransfereeEvaluation(
       enrollee,
       transfereeEvaluations[enrollee.id],
@@ -4691,10 +5344,6 @@ export default function AdminEnrollees({
       ...prev,
       [enrollee.id]: nextEvaluation,
     }));
-
-    if (enrollee.status === "Approved") {
-      syncStudentSubjectPlan(enrollee, nextEvaluation);
-    }
   };
 
   const toggleTransfereeCreditedSubject = (
@@ -4759,15 +5408,18 @@ export default function AdminEnrollees({
   const getMatchingSectionsForEnrollee = (
     enrollee: Enrollee,
     resolvedYearLevel = enrollee.yearLevel,
+    semester?: string,
   ) =>
-    classSections.filter((section) =>
-      sectionMatchesEnrollee(
-        section,
-        {
+    classSections.filter(
+      (section) =>
+        !isSectionLocked(section) &&
+        sectionMatchesEnrollee(section, {
           ...enrollee,
           yearLevel: resolvedYearLevel,
-        },
-      ),
+        }) &&
+        (!semester ||
+          normalizeSectionSemester(section.semester) ===
+            normalizeSectionSemester(semester)),
     );
   const selectedTransfereeEvaluation =
     selectedAdmissionRequest && isTransfereeAdmission(selectedAdmissionRequest)
@@ -4778,6 +5430,7 @@ export default function AdminEnrollees({
       ? getMatchingSectionsForEnrollee(
           selectedAdmissionRequest,
           selectedTransfereeEvaluation.resolvedYearLevel,
+          selectedTransfereeEvaluation.plannedSemester,
         )
       : [];
   const selectedTransfereePlanningSemesters =
@@ -4795,9 +5448,75 @@ export default function AdminEnrollees({
           selectedTransfereeEvaluation.plannedSemester,
         )
       : [];
+  const selectedTransfereeCreditSubjects =
+    selectedAdmissionRequest && selectedTransfereeEvaluation
+      ? getTransfereeCreditSubjects(selectedAdmissionRequest)
+      : [];
+  const selectedTransfereeCreditYearLevelOptions = selectedAdmissionRequest
+    ? getProgramYearLevelOptions(selectedAdmissionRequest.program)
+    : [];
+  const selectedTransfereeCreditSemesterOptions = sortSemesterValues(
+    Array.from(
+      new Set(
+        selectedTransfereeCreditSubjects
+          .filter(
+            (subject) =>
+              !selectedTransfereeEvaluation ||
+              selectedTransfereeEvaluation.creditYearLevelFilter === "All" ||
+              subject.yearLevel ===
+                selectedTransfereeEvaluation.creditYearLevelFilter,
+          )
+          .map((subject) => normalizeSectionSemester(subject.semester)),
+      ),
+    ),
+  );
+  const selectedTransfereeResolvedCreditSemesterFilter =
+    selectedTransfereeEvaluation
+      ? selectedTransfereeEvaluation.creditSemesterFilter !== "All"
+        ? selectedTransfereeEvaluation.creditSemesterFilter
+        : "All"
+      : "All";
+  const selectedTransfereeFilteredCreditSubjects =
+    selectedTransfereeEvaluation && selectedTransfereeCreditSubjects.length > 0
+      ? selectedTransfereeCreditSubjects.filter(
+          (subject) => {
+            const normalizedSearch = transfereeCreditSearchTerm
+              .trim()
+              .toLowerCase();
+            const matchesFilters =
+              (selectedTransfereeEvaluation.creditYearLevelFilter === "All" ||
+              subject.yearLevel ===
+                selectedTransfereeEvaluation.creditYearLevelFilter) &&
+              (selectedTransfereeResolvedCreditSemesterFilter === "All" ||
+              normalizeSectionSemester(subject.semester) ===
+                selectedTransfereeResolvedCreditSemesterFilter);
+            const matchesSearch =
+              normalizedSearch === "" ||
+              [
+                subject.code,
+                subject.name,
+                subject.yearLevel,
+                normalizeSectionSemester(subject.semester),
+                getSubjectTypeLabel(subject),
+                subject.units ? `${subject.units} units` : "",
+              ]
+                .join(" ")
+                .toLowerCase()
+                .includes(normalizedSearch);
+
+            return matchesFilters && matchesSearch;
+          },
+        )
+      : [];
+  const selectedTransfereeLocked =
+    Boolean(selectedAdmissionRequest) &&
+    selectedAdmissionRequest?.status === "Approved" &&
+    Boolean(
+      selectedAdmissionRequest && isTransfereeAdmission(selectedAdmissionRequest),
+    );
   const selectedTransfereeCreditedSubjects =
-    selectedTransfereeEvaluation && selectedTransfereeAvailableSubjects.length > 0
-      ? selectedTransfereeAvailableSubjects.filter((subject) =>
+    selectedTransfereeEvaluation && selectedTransfereeCreditSubjects.length > 0
+      ? selectedTransfereeCreditSubjects.filter((subject) =>
           selectedTransfereeEvaluation.creditedSubjectIds.includes(subject.id),
         )
       : [];
@@ -4805,6 +5524,60 @@ export default function AdminEnrollees({
     selectedTransfereeEvaluation && selectedTransfereeAvailableSubjects.length > 0
       ? selectedTransfereeAvailableSubjects.filter((subject) =>
           selectedTransfereeEvaluation.assignedSubjectIds.includes(subject.id),
+        )
+      : [];
+  const selectedTransfereeAssignableSubjects =
+    selectedTransfereeEvaluation && selectedTransfereeAvailableSubjects.length > 0
+      ? selectedTransfereeAvailableSubjects.filter(
+          (subject) =>
+            !selectedTransfereeEvaluation.creditedSubjectIds.includes(
+              subject.id,
+            ),
+        )
+      : [];
+  const selectedTransfereeFilteredAssignableSubjects =
+    selectedTransfereeAssignableSubjects.length > 0
+      ? selectedTransfereeAssignableSubjects.filter((subject) => {
+          const normalizedSearch = transfereeLoadSearchTerm.trim().toLowerCase();
+
+          return (
+            normalizedSearch === "" ||
+            [
+              subject.code,
+              subject.name,
+              subject.yearLevel,
+              normalizeSectionSemester(subject.semester),
+              getSubjectTypeLabel(subject),
+              subject.units ? `${subject.units} units` : "",
+            ]
+              .join(" ")
+              .toLowerCase()
+              .includes(normalizedSearch)
+          );
+        })
+      : [];
+  const selectedTransfereeCreditSubjectGroups =
+    selectedAdmissionRequest &&
+    selectedTransfereeFilteredCreditSubjects.length > 0
+      ? getProgramYearLevelOptions(selectedAdmissionRequest.program).flatMap(
+          (yearLevel) =>
+            sortSemesterValues(
+              Array.from(
+                new Set(
+                  selectedTransfereeFilteredCreditSubjects
+                    .filter((subject) => subject.yearLevel === yearLevel)
+                    .map((subject) => normalizeSectionSemester(subject.semester)),
+                ),
+              ),
+            ).map((semester) => ({
+              yearLevel,
+              semester,
+              subjects: selectedTransfereeFilteredCreditSubjects.filter(
+                (subject) =>
+                  subject.yearLevel === yearLevel &&
+                  normalizeSectionSemester(subject.semester) === semester,
+              ),
+            })),
         )
       : [];
 
@@ -4846,7 +5619,7 @@ export default function AdminEnrollees({
 
     const nextCode = buildSectionCode({
       program: editingSection?.program || newSection.program,
-      yearLevel: editingSection?.yearLevel || newSection.yearLevel,
+      yearLevel: newSection.yearLevel,
       strand: editingSection?.strand || newSection.strand,
       section: normalizedSection,
       existingCode: editingSection?.code,
@@ -4872,6 +5645,7 @@ export default function AdminEnrollees({
     if (editingSection) {
       const nextSectionDraft: ClassSection = {
         ...editingSection,
+        yearLevel: newSection.yearLevel,
         semester: normalizeSectionSemester(newSection.semester),
         section: normalizedSection,
         code: nextCode,
@@ -4879,15 +5653,25 @@ export default function AdminEnrollees({
       };
 
       try {
-        const updatedSection = await saveAcademicClassSection(
+        const savedUpdatedSection = await saveAcademicClassSection(
           currentBranch,
           nextSectionDraft,
         );
-
-        setClassSections((prev) =>
-          prev.map((section) =>
+        const updatedSection: ClassSection = {
+          ...savedUpdatedSection,
+          isLocked: Boolean(nextSectionDraft.isLocked),
+        };
+        const nextSections = sortClassSections(
+          classSections.map((section) =>
             section.id === editingSection.id ? updatedSection : section,
           ),
+        );
+
+        setClassSections(nextSections);
+        writeBranchScopedData(
+          storageScopes.classSections,
+          currentBranch,
+          nextSections,
         );
 
         if (editingSection.code !== nextCode) {
@@ -4917,12 +5701,6 @@ export default function AdminEnrollees({
             return nextState;
           });
 
-          setAssignmentFilter((prev) =>
-            prev.section === editingSection.code
-              ? { ...prev, section: nextCode }
-              : prev,
-          );
-
           syncStoredSectionCode(editingSection, nextCode);
         }
 
@@ -4932,7 +5710,7 @@ export default function AdminEnrollees({
 
         addToast(
           editingSection.code === nextCode
-            ? `Updated ${editingSection.code} capacity to ${nextCapacity}.`
+            ? `Updated ${editingSection.code}.`
             : `Renamed ${editingSection.code} to ${nextCode}.`,
           "success",
         );
@@ -4960,11 +5738,25 @@ export default function AdminEnrollees({
       currentEnrollees: 0,
       maxCapacity: nextCapacity,
       enrolleeIds: [],
+      isLocked: false,
     };
 
     try {
-      const savedSection = await saveAcademicClassSection(currentBranch, newSec);
-      setClassSections((prev) => [...prev, savedSection]);
+      const savedSectionResult = await saveAcademicClassSection(currentBranch, newSec);
+      const savedSection: ClassSection = {
+        ...savedSectionResult,
+        isLocked: false,
+      };
+      const nextSections = sortClassSections([
+        ...classSections.filter((section) => section.id !== savedSection.id),
+        savedSection,
+      ]);
+      setClassSections(nextSections);
+      writeBranchScopedData(
+        storageScopes.classSections,
+        currentBranch,
+        nextSections,
+      );
       resetSectionForm();
       addToast(`Section ${savedSection.code} added`, "success");
     } catch (error) {
@@ -4981,7 +5773,6 @@ export default function AdminEnrollees({
   const assignEnrolleeToSection = (
     enrollee: Enrollee,
     sectionId: string,
-    isManualOverride = true,
   ) => {
     const section = classSections.find((s) => s.id === sectionId);
 
@@ -4989,7 +5780,27 @@ export default function AdminEnrollees({
       return false;
     }
 
-    if (sectionAssignments.some((assignment) => assignment.enrolleeId === enrollee.id)) {
+    if (isSectionLocked(section)) {
+      addToast(`${section.code} is locked for new assignments.`, "warning");
+      return false;
+    }
+
+    if (!requiresSectionAssignment(enrollee)) {
+      addToast(
+        `${enrollee.fullName} has an approved own-schedule request and does not need a section.`,
+        "info",
+      );
+      return false;
+    }
+
+    const storedStudent = getActiveBranchStudents().find(
+      (student) =>
+        student.id === enrollee.studentNumber ||
+        (enrollee.trackingNumber &&
+          student.trackingNumber === enrollee.trackingNumber),
+    );
+
+    if (storedStudent?.section) {
       addToast(`${enrollee.fullName} is already assigned to a section.`, "info");
       return false;
     }
@@ -5002,36 +5813,37 @@ export default function AdminEnrollees({
       return false;
     }
 
-    if (section.currentEnrollees >= section.maxCapacity) {
+    const currentStudentCount = getSectionStudentCount(section.code);
+
+    if (currentStudentCount >= section.maxCapacity) {
       addToast(`${section.code} is already full!`, "error");
       return false;
     }
 
-    const nextSection: ClassSection = {
-      ...section,
-      currentEnrollees: section.currentEnrollees + 1,
-      enrolleeIds: [...section.enrolleeIds, enrollee.id],
-    };
+    try {
+      const sectionUpdateResult = syncStudentSection(enrollee, section.code);
 
-    setClassSections((prev) =>
-      prev.map((s) =>
-        s.id === sectionId
-          ? nextSection
-          : s,
-      ),
-    );
+      if (!sectionUpdateResult?.student) {
+        addToast(
+          `${enrollee.fullName} is not in the active student list yet.`,
+          "warning",
+        );
+        return false;
+      }
+    } catch (error) {
+      addToast(
+        error instanceof Error
+          ? error.message
+          : `Unable to assign ${enrollee.fullName} to ${section.code}.`,
+        "error",
+      );
+      return false;
+    }
 
-    const newAssignment: SectionAssignment = {
-      enrolleeId: enrollee.id,
-      enrolleeName: enrollee.fullName,
-      assignedSection: section.code,
-      assignedDate: new Date().toLocaleDateString(),
-      isManualOverride,
-    };
-    setSectionAssignments((prev) => [...prev, newAssignment]);
     setPendingAssignments((prev) => prev.filter((item) => item.id !== enrollee.id));
-    syncStudentSection(enrollee, section.code);
-    void syncClassSectionsToSupabase([nextSection]);
+    void loadClassSections().then((nextSections) => {
+      void syncClassSectionsToSupabase(nextSections);
+    });
 
     addToast(`${enrollee.fullName} assigned to ${section.code}`, "success");
     return true;
@@ -5039,13 +5851,13 @@ export default function AdminEnrollees({
 
   // Handle assign to section
   const handleAssignToSection = (enrolleeId: string, sectionId: string) => {
-    const enrollee = enrollees.find((e) => e.id === enrolleeId);
+    const enrollee = pendingAssignments.find((e) => e.id === enrolleeId);
 
     if (!enrollee) {
       return;
     }
 
-    assignEnrolleeToSection(enrollee, sectionId, true);
+    assignEnrolleeToSection(enrollee, sectionId);
   };
 
   const autoAssignEnrollees = (
@@ -5056,15 +5868,24 @@ export default function AdminEnrollees({
       enrollee: Enrollee;
       section: ClassSection;
     }[] = [];
-    const updatedSections = classSections.map((section) => ({
+    const updatedSections: ClassSection[] = classSections.map((section) => ({
       ...section,
-      enrolleeIds: [...section.enrolleeIds],
+      currentEnrollees: getSectionStudentCount(section.code),
+      enrolleeIds: [] as string[],
     }));
     const unassignedStudents: Enrollee[] = [];
 
     for (const enrollee of candidates) {
+      if (!enrollee.studentNumber) {
+        unassignedStudents.push(enrollee);
+        continue;
+      }
+
       const matchingSections = updatedSections
-        .filter((section) => sectionMatchesEnrollee(section, enrollee))
+        .filter(
+          (section) =>
+            !isSectionLocked(section) && sectionMatchesEnrollee(section, enrollee),
+        )
         .sort((a, b) => a.section.localeCompare(b.section));
 
       let assignedSection = matchingSections.find(
@@ -5073,21 +5894,50 @@ export default function AdminEnrollees({
 
       if (!assignedSection) {
         assignedSection = createAutoSectionForEnrollee(enrollee, matchingSections);
+        assignedSection.currentEnrollees = 0;
+        assignedSection.enrolleeIds = [];
         updatedSections.push(assignedSection);
-      } else {
-        const existingSection = assignedSection;
-        const sectionIndex = updatedSections.findIndex(
-          (s) => s.id === existingSection.id,
-        );
-        if (sectionIndex !== -1) {
-          updatedSections[sectionIndex].currentEnrollees++;
-          updatedSections[sectionIndex].enrolleeIds.push(enrollee.id);
-        }
       }
 
-      if (assignedSection) {
+      if (!assignedSection) {
+        unassignedStudents.push(enrollee);
+        continue;
+      }
+
+      try {
+        writeBranchScopedData(
+          storageScopes.classSections,
+          currentBranch,
+          updatedSections,
+        );
+        const sectionUpdateResult = updateStoredStudentSection({
+          branch: currentBranch,
+          studentNumber: enrollee.studentNumber,
+          trackingNumber: enrollee.trackingNumber,
+          nextSectionCode: assignedSection.code,
+        });
+
+        if (!sectionUpdateResult?.student) {
+          unassignedStudents.push(enrollee);
+          continue;
+        }
+
+        const sectionIndex = updatedSections.findIndex(
+          (section) => section.id === assignedSection.id,
+        );
+
+        if (sectionIndex !== -1) {
+          updatedSections[sectionIndex] = {
+            ...updatedSections[sectionIndex],
+            currentEnrollees:
+              updatedSections[sectionIndex].currentEnrollees + 1,
+            enrolleeIds: [],
+          };
+        }
+
         assignments.push({ enrollee, section: assignedSection });
-      } else {
+      } catch (error) {
+        console.warn("Unable to auto-assign student section", error);
         unassignedStudents.push(enrollee);
       }
     }
@@ -5097,21 +5947,15 @@ export default function AdminEnrollees({
       return;
     }
 
-    setClassSections(updatedSections);
-
-    const newAssignments = assignments.map((a) => ({
-      enrolleeId: a.enrollee.id,
-      enrolleeName: a.enrollee.fullName,
-      assignedSection: a.section.code,
-      assignedDate: new Date().toLocaleDateString(),
-      isManualOverride: false,
-    }));
-    setSectionAssignments((prev) => [...prev, ...newAssignments]);
     setPendingAssignments(unassignedStudents);
-    assignments.forEach(({ enrollee, section }) => {
-      syncStudentSection(enrollee, section.code);
+    assignments.forEach(({ enrollee }) => {
+      if (enrollee.studentNumber) {
+        void syncStoredStudentsToSupabase([enrollee.studentNumber]);
+      }
     });
-    void syncClassSectionsToSupabase(updatedSections);
+    void loadClassSections().then((nextSections) => {
+      void syncClassSectionsToSupabase(nextSections);
+    });
 
     addToast(
       unassignedStudents.length > 0
@@ -5124,14 +5968,20 @@ export default function AdminEnrollees({
   // Handle auto-assign all
   const handleAutoAssignAll = () => {
     autoAssignEnrollees(
-      pendingAssignments.filter((enrollee) => !isTransfereeAdmission(enrollee)),
+      pendingAssignments.filter(
+        (enrollee) =>
+          !isTransfereeAdmission(enrollee) && requiresSectionAssignment(enrollee),
+      ),
       "students",
     );
   };
 
   const handleAutoAssignTransferees = () => {
     autoAssignEnrollees(
-      pendingAssignments.filter((enrollee) => isTransfereeAdmission(enrollee)),
+      pendingAssignments.filter(
+        (enrollee) =>
+          isTransfereeAdmission(enrollee) && requiresSectionAssignment(enrollee),
+      ),
       "transferees",
     );
   };
@@ -5157,7 +6007,6 @@ export default function AdminEnrollees({
     const linkedActiveStudents = getStudentsForBranch(currentBranch).filter(
       (student) =>
         student.status !== "Archived" &&
-        student.status !== "Graduated" &&
         normalizeSectionCodeValue(student.section) === normalizedSectionCode,
     );
     const linkedSectionAssignmentCount = sectionAssignments.filter(
@@ -5171,14 +6020,6 @@ export default function AdminEnrollees({
       section.enrolleeIds.length,
     );
 
-    if (linkedStudentCount > 0) {
-      addToast(
-        `Move the students out of ${section.code} before deleting this section.`,
-        "warning",
-      );
-      return;
-    }
-
     const linkedSubjectAssignments = subjectAssignments.filter(
       (assignment) =>
         assignment.sectionId === section.id ||
@@ -5186,9 +6027,17 @@ export default function AdminEnrollees({
           normalizedSectionCode,
     );
     const shouldDelete = window.confirm(
-      linkedSubjectAssignments.length > 0
-        ? `Delete section ${section.code}? This will also remove ${linkedSubjectAssignments.length} linked subject assignment${linkedSubjectAssignments.length === 1 ? "" : "s"}.`
-        : `Delete section ${section.code}?`,
+      [
+        `Delete section ${section.code}?`,
+        linkedStudentCount > 0
+          ? `${linkedStudentCount} linked student${linkedStudentCount === 1 ? "" : "s"} will be removed from this section.`
+          : "",
+        linkedSubjectAssignments.length > 0
+          ? `${linkedSubjectAssignments.length} linked subject assignment${linkedSubjectAssignments.length === 1 ? "" : "s"} will also be removed.`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
     );
 
     if (!shouldDelete) {
@@ -5202,7 +6051,41 @@ export default function AdminEnrollees({
         linkedSubjectAssignments.map((assignment) => assignment.id),
       );
 
-      setClassSections((prev) => prev.filter((item) => item.id !== section.id));
+      const nextSections = classSections.filter((item) => item.id !== section.id);
+      setClassSections(nextSections);
+      writeBranchScopedData(
+        storageScopes.classSections,
+        currentBranch,
+        nextSections,
+      );
+      const linkedStudentNumbers = linkedActiveStudents.map((student) => student.id);
+
+      if (linkedStudentNumbers.length > 0) {
+        const linkedStudentNumberSet = new Set(linkedStudentNumbers);
+        const storedStudents = readStoredStudents();
+        const nextStudents = storedStudents.map((student) =>
+          normalizeBranchName(student.branch) === currentBranch &&
+          linkedStudentNumberSet.has(student.id) &&
+          normalizeSectionCodeValue(student.section) === normalizedSectionCode
+            ? { ...student, section: "" }
+            : student,
+        );
+
+        writeStoredStudents(nextStudents);
+        void syncStoredStudentsToSupabase(linkedStudentNumbers);
+      }
+
+      const nextSectionAssignments = sectionAssignments.filter(
+        (assignment) =>
+          normalizeSectionCodeValue(assignment.assignedSection) !==
+          normalizedSectionCode,
+      );
+      setSectionAssignments(nextSectionAssignments);
+      writeBranchScopedData(
+        storageScopes.sectionAssignments,
+        currentBranch,
+        nextSectionAssignments,
+      );
       setSubjectAssignments((prev) =>
         prev.filter((assignment) => !deletedAssignmentIds.has(assignment.id)),
       );
@@ -5221,9 +6104,6 @@ export default function AdminEnrollees({
         delete nextState[section.code];
         return nextState;
       });
-      setAssignmentFilter((prev) =>
-        prev.section === section.code ? { ...prev, section: "All" } : prev,
-      );
       setAssignmentAutoAssignSection((prev) =>
         prev?.id === section.id ? null : prev,
       );
@@ -5254,6 +6134,89 @@ export default function AdminEnrollees({
     }
   };
 
+  const handleToggleSectionLock = async (section: ClassSection) => {
+    const nextLocked = !isSectionLocked(section);
+    const nextSection = { ...section, isLocked: nextLocked };
+    const nextSections = sortClassSections(
+      classSections.map((item) =>
+        item.id === section.id ? nextSection : item,
+      ),
+    );
+
+    setClassSections(nextSections);
+    writeBranchScopedData(
+      storageScopes.classSections,
+      currentBranch,
+      nextSections,
+    );
+    setSelectedSection((prev) => (prev?.id === section.id ? nextSection : prev));
+
+    try {
+      await saveAcademicClassSection(currentBranch, nextSection);
+    } catch (error) {
+      console.warn("Unable to sync section lock state to Supabase.", error);
+    }
+
+    addToast(
+      `${section.code} ${nextLocked ? "locked" : "unlocked"} for new assignments.`,
+      "success",
+    );
+  };
+
+  const handleRemoveStudentFromSection = async ({
+    studentNumber,
+    name,
+  }: {
+    studentNumber: string;
+    name: string;
+  }) => {
+    if (!selectedSection) {
+      return;
+    }
+
+    const shouldRemove = window.confirm(
+      `Remove ${name} from ${selectedSection.code}? The student will become unassigned.`,
+    );
+
+    if (!shouldRemove) {
+      return;
+    }
+
+    const normalizedSectionCode = normalizeSectionCodeValue(selectedSection.code);
+    const storedStudents = readStoredStudents();
+    const nextStudents = storedStudents.map((student) =>
+      normalizeBranchName(student.branch) === currentBranch &&
+      student.id === studentNumber &&
+      normalizeSectionCodeValue(student.section) === normalizedSectionCode
+        ? { ...student, section: "" }
+        : student,
+    );
+
+    writeStoredStudents(nextStudents);
+    void syncStoredStudentsToSupabase([studentNumber]);
+    const nextSectionAssignments = sectionAssignments.filter(
+      (assignment) =>
+        !(
+          assignment.enrolleeId === studentNumber &&
+          normalizeSectionCodeValue(assignment.assignedSection) ===
+            normalizedSectionCode
+        ),
+    );
+    setSectionAssignments(nextSectionAssignments);
+    writeBranchScopedData(
+      storageScopes.sectionAssignments,
+      currentBranch,
+      nextSectionAssignments,
+    );
+    const nextSections = await loadClassSections();
+    void syncClassSectionsToSupabase(nextSections);
+    setSelectedSection(
+      nextSections.find((section) => section.id === selectedSection.id) ??
+        selectedSection,
+    );
+    addToast(`${name} removed from ${selectedSection.code}.`, "success");
+  };
+
   const handleApplyStudentMove = async () => {
     if (!selectedMoveStudent) {
       return;
@@ -5264,6 +6227,14 @@ export default function AdminEnrollees({
       setMoveStudentFeedback({
         type: "warning",
         message: "Choose a section before moving this student.",
+      });
+      return;
+    }
+
+    if (isSectionChoiceLocked(normalizedSectionCode)) {
+      setMoveStudentFeedback({
+        type: "warning",
+        message: `${normalizedSectionCode} is locked for new assignments.`,
       });
       return;
     }
@@ -5391,11 +6362,38 @@ export default function AdminEnrollees({
             const activatedStudent = await activateApprovedStudent(
               enrollee.trackingNumber,
             );
+            const nextStudentNumber =
+              activatedStudent.studentNumber || enrollee.studentNumber;
+
+            if (
+              enrollee.requestedOwnSchedule ||
+              enrollee.ownScheduleRequestStatus
+            ) {
+              try {
+                await saveStudentPlanningState({
+                  branch: enrollee.branch || currentBranch,
+                  studentNumber: nextStudentNumber || enrollee.trackingNumber,
+                  trackingNumber: enrollee.trackingNumber,
+                  requestedOwnSchedule: Boolean(enrollee.requestedOwnSchedule),
+                  ownScheduleRequestStatus: enrollee.ownScheduleRequestStatus,
+                  ownScheduleAcademicYear: enrollee.ownScheduleAcademicYear,
+                  ownScheduleSemester: enrollee.ownScheduleSemester,
+                  ownScheduleSelectionStatus:
+                    enrollee.ownScheduleRequestStatus === "Approved"
+                      ? "Not Submitted"
+                      : undefined,
+                });
+              } catch (planningSyncError) {
+                console.warn(
+                  "Unable to refresh the approved own-schedule admission state.",
+                  planningSyncError,
+                );
+              }
+            }
 
             return {
               ...enrollee,
-              studentNumber:
-                activatedStudent.studentNumber || enrollee.studentNumber,
+              studentNumber: nextStudentNumber,
             };
           } catch (error) {
             console.warn(
@@ -5473,6 +6471,10 @@ export default function AdminEnrollees({
         storageScopes.assignmentRooms,
         currentBranch,
       );
+      const storedInstructorDepartments = readBranchScopedData<string[]>(
+        storageScopes.instructorDepartments,
+        currentBranch,
+      );
       let remoteAcademicSnapshot: AcademicSnapshot | null = null;
       let remoteStudentSubjectPlans: Record<string, StudentSubjectPlanRecord> | null =
         null;
@@ -5516,7 +6518,12 @@ export default function AdminEnrollees({
       const loadedInstructors = await loadInstructors(
         remoteAcademicSnapshot?.instructors,
       );
-      loadInstructorEvaluationStatuses();
+      setInstructorDepartments(
+        getUniqueTrimmedValues([
+          ...(storedInstructorDepartments ?? []),
+          ...loadedInstructors.map((instructor) => instructor.department),
+        ]),
+      );
       const loadedAssignments = await loadSubjectAssignments(
         remoteAcademicSnapshot?.subjectAssignments,
       );
@@ -5621,6 +6628,23 @@ export default function AdminEnrollees({
     }
 
     writeBranchScopedData(
+      storageScopes.instructorDepartments,
+      currentBranch,
+      instructorDepartmentOptions,
+    );
+  }, [
+    currentBranch,
+    hasInitializedBranchData,
+    instructorDepartmentOptions,
+    storageScopes.instructorDepartments,
+  ]);
+
+  useEffect(() => {
+    if (!hasInitializedBranchData) {
+      return;
+    }
+
+    writeBranchScopedData(
       storageScopes.subjectAssignments,
       currentBranch,
       subjectAssignments,
@@ -5641,7 +6665,7 @@ export default function AdminEnrollees({
 
   useEffect(() => {
     updatePendingAssignments();
-  }, [enrollees, sectionAssignments]);
+  }, [currentBranch, enrollees, sectionAssignments]);
 
   const handleAttachmentStatusUpdate = async (
     requestId: string,
@@ -5658,6 +6682,27 @@ export default function AdminEnrollees({
     if (!sourceAttachments) {
       addToast("Unable to update attachment status.", "error");
       return;
+    }
+
+    const affectedAttachment = sourceAttachments[attachmentIndex];
+    const shouldRequestAdmissionRedo = !request && !!enrollee && status === "Rejected";
+
+    if (shouldRequestAdmissionRedo && affectedAttachment?.name) {
+      try {
+        await updateAdmissionProgress({
+          trackingNumber: enrollee.trackingNumber,
+          currentStep: 3,
+          applicationStatus: "draft",
+          rejectionReason: `${affectedAttachment.name} needs to be reuploaded.`,
+        });
+      } catch (error) {
+        console.error("Failed to reopen admission requirements", error);
+        addToast(
+          "Unable to reopen the applicant's requirements page right now.",
+          "error",
+        );
+        return;
+      }
     }
 
     const updatedAttachments = sourceAttachments.map((attachment, index) =>
@@ -5695,6 +6740,12 @@ export default function AdminEnrollees({
             ? {
                 ...record,
                 attachments: updatedAttachments,
+                ...(shouldRequestAdmissionRedo
+                  ? {
+                      status: "Pending" as const,
+                      rejectionReason: `${affectedAttachment?.name ?? "Credential"} needs to be reuploaded.`,
+                    }
+                  : {}),
               }
             : record,
         ),
@@ -5709,10 +6760,69 @@ export default function AdminEnrollees({
             : {
                 ...prev,
                 attachments: updatedAttachments,
+                ...(shouldRequestAdmissionRedo
+                  ? {
+                      status: "Pending" as const,
+                      rejectionReason: `${affectedAttachment?.name ?? "Credential"} needs to be reuploaded.`,
+                    }
+                  : {}),
                 ...(request ? { updatedAt } : {}),
               }
           : null,
       );
+    }
+
+    if (shouldRequestAdmissionRedo && affectedAttachment?.name) {
+      const applicantEmail = enrollee.personalInfo.email?.trim();
+      if (!applicantEmail) {
+        addToast(
+          "Requirement marked for redo, but this applicant has no email address on file.",
+          "warning",
+        );
+        return;
+      }
+
+      try {
+        const notificationResult =
+          await sendAdmissionRequirementRedoNotification({
+            trackingNumber: enrollee.trackingNumber,
+            requirementName: affectedAttachment.name,
+            email: applicantEmail,
+            mobile: enrollee.personalInfo.contactNumber,
+            firstName: enrollee.personalInfo.fullName.split(" ")[0],
+            lastName: enrollee.fullName.split(" ").slice(-1)[0],
+          });
+
+        switch (notificationResult.deliveries.email.status) {
+          case "sent":
+            addToast(
+              `Requirement marked for redo. Email sent to ${enrollee.fullName}.`,
+              "success",
+            );
+            return;
+          case "failed":
+            addToast(
+              "Requirement marked for redo, but the email could not be sent right now.",
+              "warning",
+            );
+            return;
+          default:
+            addToast(
+              "Requirement marked for redo. Email delivery is not configured yet.",
+              "warning",
+            );
+            return;
+        }
+      } catch (error) {
+        console.error("Failed to send requirement redo notification", error);
+        const notificationMessage =
+          error instanceof Error ? error.message : "Email notification failed.";
+        addToast(
+          `Requirement marked for redo, but the email notification failed: ${notificationMessage}`,
+          "warning",
+        );
+        return;
+      }
     }
 
     addToast(
@@ -5794,6 +6904,14 @@ export default function AdminEnrollees({
     let scholarshipExamScore: number | null = null;
 
     if (isEnrollmentRequest(request)) {
+      if (hasRedoRequirement(request)) {
+        addToast(
+          "The student must resend the requirement marked for redo before this enrollment request can be approved.",
+          "warning",
+        );
+        return false;
+      }
+
       const requestedScheduleConflicts = buildScheduledAssignmentConflicts(
         getEnrollmentRequestScheduledAssignments(request),
       );
@@ -5804,6 +6922,17 @@ export default function AdminEnrollees({
       ) {
         addToast(
           "The requested section is no longer available. Review the section request before approval.",
+          "warning",
+        );
+        return false;
+      }
+
+      if (
+        request.irregularRequest?.mode === "section_assignment" &&
+        isSectionLocked(getRequestedSectionForEnrollmentRequest(request))
+      ) {
+        addToast(
+          "The requested section is locked for new assignments.",
           "warning",
         );
         return false;
@@ -5851,10 +6980,10 @@ export default function AdminEnrollees({
         if (
           !Number.isFinite(parsedScore) ||
           parsedScore < 0 ||
-          parsedScore > 100
+          parsedScore > SCHOLARSHIP_EXAM_MAX_SCORE
         ) {
           addToast(
-            "Scholarship exam score must be a number from 0 to 100.",
+            `Scholarship exam score must be a number from 0 to ${SCHOLARSHIP_EXAM_MAX_SCORE}.`,
             "warning",
           );
           return false;
@@ -5893,7 +7022,7 @@ export default function AdminEnrollees({
         : "";
 
     if (selectedAction.action === "reject" && !rejectionReason) {
-      addToast("Select a rejection reason before continuing.", "warning");
+      addToast("Type a rejection reason before continuing.", "warning");
       return;
     }
 
@@ -5919,9 +7048,19 @@ export default function AdminEnrollees({
             : null;
           const resolvedYearLevel =
             transfereeEvaluation?.resolvedYearLevel || enrolleeToUpdate.yearLevel;
+          const resolvedPlacementAcademicYear =
+            transfereeEvaluation
+              ? transfereeEvaluation.plannedAcademicYear.trim() ||
+                reflectedAcademicYear
+              : enrolleeToUpdate.ownScheduleAcademicYear;
+          const resolvedPlacementSemester = transfereeEvaluation
+            ? normalizeSectionSemester(transfereeEvaluation.plannedSemester)
+            : enrolleeToUpdate.ownScheduleSemester;
           const enrolleeForApproval: Enrollee = {
             ...enrolleeToUpdate,
             yearLevel: resolvedYearLevel,
+            ownScheduleAcademicYear: resolvedPlacementAcademicYear,
+            ownScheduleSemester: resolvedPlacementSemester,
             personalInfo: {
               ...enrolleeToUpdate.personalInfo,
               yearLevel: resolvedYearLevel,
@@ -5935,6 +7074,10 @@ export default function AdminEnrollees({
             enrolleeForApproval.program === "College"
               ? getEstimatedCollegeTuition({
                   honorLabel: enrolleeForApproval.honorLabel,
+                  honorCertificateApproved: hasApprovedAttachmentNamed(
+                    enrolleeForApproval.attachments,
+                    "Honor Certificate",
+                  ),
                   appliedForScholarship: enrolleeForApproval.appliedForScholarship,
                   scholarshipExamScore: resolvedScholarshipExamScore,
                 })
@@ -5986,9 +7129,10 @@ export default function AdminEnrollees({
             }
           }
 
+          let promotedStudentRecord: StudentStorageRecord | null = null;
           const updatedEnrollee: Enrollee = isApprove
-            ? {
-                ...promoteApplicantToStoredStudent({
+            ? (() => {
+                const promotionResult = promoteApplicantToStoredStudent({
                   ...enrolleeForApproval,
                   studentNumber: syncedStudentNumber,
                   branch: currentBranch,
@@ -6002,13 +7146,55 @@ export default function AdminEnrollees({
                   effectiveDiscountSource:
                     resolvedAdmissionTuition?.effectiveDiscountSource ?? "none",
                   rejectionReason: undefined,
-                }).applicant,
-              }
+                });
+
+                promotedStudentRecord = promotionResult.student;
+                return { ...promotionResult.applicant };
+              })()
             : {
                 ...enrolleeToUpdate,
                 status: "Rejected",
                 rejectionReason,
               };
+
+          if (promotedStudentRecord) {
+            try {
+              await saveAdminStudent(promotedStudentRecord);
+            } catch (studentSyncError) {
+              console.warn(
+                "Unable to sync the approved admission student record to Supabase immediately.",
+                studentSyncError,
+              );
+            }
+
+            if (
+              promotedStudentRecord.requestedOwnSchedule ||
+              promotedStudentRecord.ownScheduleRequestStatus
+            ) {
+              try {
+                await saveStudentPlanningState({
+                  branch: promotedStudentRecord.branch,
+                  studentNumber: promotedStudentRecord.id,
+                  trackingNumber: promotedStudentRecord.trackingNumber,
+                  requestedOwnSchedule: Boolean(
+                    promotedStudentRecord.requestedOwnSchedule,
+                  ),
+                  ownScheduleRequestStatus:
+                    promotedStudentRecord.ownScheduleRequestStatus,
+                  ownScheduleAcademicYear:
+                    promotedStudentRecord.ownScheduleAcademicYear,
+                  ownScheduleSemester: promotedStudentRecord.ownScheduleSemester,
+                  ownScheduleSelectionStatus:
+                    promotedStudentRecord.ownScheduleSelectionStatus,
+                });
+              } catch (planningSyncError) {
+                console.warn(
+                  "Unable to sync the approved own-schedule admission state immediately.",
+                  planningSyncError,
+                );
+              }
+            }
+          }
 
           setEnrollees((prev) =>
             prev.map((e) => (e.id === selectedAction.id ? updatedEnrollee : e)),
@@ -6030,7 +7216,6 @@ export default function AdminEnrollees({
             assignEnrolleeToSection(
               updatedEnrollee,
               transfereeEvaluation.recommendedSectionId,
-              true,
             );
           }
 
@@ -6061,6 +7246,7 @@ export default function AdminEnrollees({
                     decisionStatus: "accepted",
                     portalLink: buildStudentPortalLoginLink({
                       branch: currentBranch,
+                      email: applicantEmail,
                       studentNumber: updatedEnrollee.studentNumber,
                     }),
                   },
@@ -6150,6 +7336,17 @@ export default function AdminEnrollees({
           ) {
             addToast(
               "The requested section is no longer available for this enrollment request.",
+              "warning",
+            );
+            return;
+          }
+
+          if (
+            requestToUpdate.irregularRequest?.mode === "section_assignment" &&
+            isSectionLocked(requestedSection)
+          ) {
+            addToast(
+              "The requested section is locked for new assignments.",
               "warning",
             );
             return;
@@ -6289,6 +7486,9 @@ export default function AdminEnrollees({
   };
 
   const activeEnrollees = enrollees.filter((enrollee) => !enrollee.archivedAt);
+  const activeEnrollmentRequests = enrollmentRequests.filter(
+    (request) => !request.archivedAt,
+  );
   const regularAdmissions = activeEnrollees.filter(
     (enrollee) => !isTransfereeAdmission(enrollee),
   );
@@ -6333,8 +7533,16 @@ export default function AdminEnrollees({
     enrolleeStartIndex,
     enrolleeEndIndex,
   );
+  const paginatedEnrolleeIds = paginatedEnrollees.map((enrollee) => enrollee.id);
+  const selectedEnrolleeIdSet = new Set(selectedEnrolleeIds);
+  const selectedFilteredEnrollees = filteredEnrollees.filter((enrollee) =>
+    selectedEnrolleeIdSet.has(enrollee.id),
+  );
+  const allPaginatedEnrolleesSelected =
+    paginatedEnrollees.length > 0 &&
+    paginatedEnrollees.every((enrollee) => selectedEnrolleeIdSet.has(enrollee.id));
 
-  const filteredRequests = enrollmentRequests.filter((request) => {
+  const filteredRequests = activeEnrollmentRequests.filter((request) => {
     const matchesSearch =
       request.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       request.studentNumber.toLowerCase().includes(searchTerm.toLowerCase());
@@ -6343,6 +7551,16 @@ export default function AdminEnrollees({
       request.enrollmentStatus === enrollmentStatusFilter;
     return matchesSearch && matchesStatus;
   });
+  const filteredRequestIds = filteredRequests.map((request) => request.id);
+  const selectedEnrollmentRequestIdSet = new Set(selectedEnrollmentRequestIds);
+  const selectedFilteredEnrollmentRequests = filteredRequests.filter((request) =>
+    selectedEnrollmentRequestIdSet.has(request.id),
+  );
+  const allFilteredEnrollmentRequestsSelected =
+    filteredRequests.length > 0 &&
+    filteredRequests.every((request) =>
+      selectedEnrollmentRequestIdSet.has(request.id),
+    );
 
   const selectedAdmissionActionRecord = selectedAction
     ? (activeEnrollees.find((enrollee) => enrollee.id === selectedAction.id) ??
@@ -6352,35 +7570,40 @@ export default function AdminEnrollees({
     ? (enrollmentRequests.find((request) => request.id === selectedAction.id) ??
       null)
     : null;
-  const isSelectedActionAdmissionRecord =
-    !!selectedAdmissionActionRecord && !selectedEnrollmentActionRecord;
+  const selectedRequestHasEnrollmentRedoRequirement =
+    selectedRequest &&
+    isEnrollmentRequest(selectedRequest) &&
+    hasRedoRequirement(selectedRequest);
   const selectedAdmissionActionEvaluation =
     selectedAdmissionActionRecord &&
     isTransfereeAdmission(selectedAdmissionActionRecord)
       ? getTransfereeEvaluation(selectedAdmissionActionRecord)
       : null;
-  const selectedRejectionReasonOptions = isSelectedActionAdmissionRecord
-    ? ADMISSION_REJECTION_REASONS
-    : ENROLLMENT_REJECTION_REASONS;
-
-  const getInstructorEvaluationOpenState = (instructorId: string) =>
-    Boolean(instructorEvaluationStatuses[instructorId]?.isOpen);
-
-  const toggleInstructorEvaluation = (instructor: Instructor) => {
-    const nextIsOpen = !getInstructorEvaluationOpenState(instructor.id);
-    const nextStatuses = saveInstructorEvaluationStatus({
-      branch: currentBranch,
-      instructorId: instructor.id,
-      isOpen: nextIsOpen,
-    });
-
-    setInstructorEvaluationStatuses(nextStatuses);
-    addToast(
-      `Instructor evaluation ${nextIsOpen ? "opened" : "closed"} for ${instructor.name}.`,
-      nextIsOpen ? "success" : "info",
-    );
-  };
-
+  const subjectYearLevelOptions =
+    subjectFilter.program === "College"
+      ? ["1st Year", "2nd Year", "3rd Year", "4th Year"]
+      : subjectFilter.program === "SHS"
+        ? ["Grade 11", "Grade 12"]
+        : [
+            "1st Year",
+            "2nd Year",
+            "3rd Year",
+            "4th Year",
+            "Grade 11",
+            "Grade 12",
+          ];
+  const subjectStrandCourseOptions = Array.from(
+    new Set(
+      subjects
+        .filter(
+          (subject) =>
+            subjectFilter.program === "All" ||
+            subject.program === subjectFilter.program,
+        )
+        .map(resolveSubjectStrandOrCourse)
+        .filter((value) => value && value !== "All"),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
   const filteredInstructors = instructors.filter(
     (instructor) =>
       instructor.name.toLowerCase().includes(instructorSearch.toLowerCase()) ||
@@ -6392,26 +7615,214 @@ export default function AdminEnrollees({
         .includes(instructorSearch.toLowerCase()),
   );
 
+  const getAssignmentSectionCourseStrand = (section: ClassSection) =>
+    section.program === "College"
+      ? DEFAULT_COLLEGE_COURSE
+      : section.strand || "All";
+  const assignmentProgramSections = classSections.filter((section) =>
+    assignmentFilter.program === "All"
+      ? true
+      : section.program === assignmentFilter.program,
+  );
+  const assignmentCourseStrandOptions = Array.from(
+    new Set(
+      assignmentProgramSections
+        .map(getAssignmentSectionCourseStrand)
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+  const assignmentCourseStrandSections = assignmentProgramSections.filter(
+    (section) =>
+      assignmentFilter.strandOrCourse === "All"
+        ? true
+        : getAssignmentSectionCourseStrand(section) ===
+          assignmentFilter.strandOrCourse,
+  );
+  const assignmentSemesterOptions = sortSemesterValues(
+    Array.from(
+      new Set(
+        assignmentCourseStrandSections.map((section) =>
+          normalizeSectionSemester(section.semester),
+        ),
+      ),
+    ),
+  );
+  const filteredAssignmentSections = assignmentCourseStrandSections.filter(
+    (section) =>
+      assignmentFilter.semester === "All"
+        ? true
+        : normalizeSectionSemester(section.semester) ===
+          normalizeSectionSemester(assignmentFilter.semester),
+  );
+  const filteredAssignmentSectionCodes = new Set(
+    filteredAssignmentSections.map((section) => section.code),
+  );
   const filteredAssignments = subjectAssignments.filter((assignment) => {
-    if (assignmentFilter.program !== "All") {
-      const section = classSections.find(
-        (s) => s.code === assignment.sectionCode,
-      );
-      if (!section || section.program !== assignmentFilter.program)
-        return false;
-    }
-    if (
-      assignmentFilter.section !== "All" &&
-      assignment.sectionCode !== assignmentFilter.section
-    )
+    if (!filteredAssignmentSectionCodes.has(assignment.sectionCode)) {
       return false;
+    }
+
     if (
       assignmentFilter.semester !== "All" &&
-      assignment.semester !== assignmentFilter.semester
-    )
+      normalizeSectionSemester(assignment.semester) !==
+        normalizeSectionSemester(assignmentFilter.semester)
+    ) {
       return false;
+    }
+
     return true;
   });
+  const instructorEvaluationSummaries = instructors
+    .map((instructor, index) => {
+      const instructorAssignments = subjectAssignments.filter(
+        (assignment) => assignment.instructorId === instructor.id,
+      );
+      const sections = Array.from(
+        new Set(instructorAssignments.map((assignment) => assignment.sectionCode)),
+      );
+      void index;
+      const submissions = evaluationSubmissions.filter(
+        (submission) => submission.instructorId === instructor.id,
+      );
+
+      return {
+        instructor,
+        assignments: instructorAssignments,
+        sections,
+        responseCount: submissions.length,
+        submissions,
+        isOpen:
+          instructorAssignments.length > 0 &&
+          Boolean(evaluationStatuses[instructor.id]?.isOpen),
+      };
+    })
+    .sort((left, right) => left.instructor.name.localeCompare(right.instructor.name));
+  const questionnaireQuestionCount = evaluationQuestionnaire.reduce(
+    (total, category) => total + category.questions.length,
+    0,
+  );
+  const selectedEvaluationSummary =
+    instructorEvaluationSummaries.find(
+      (summary) =>
+        summary.instructor.id === selectedEvaluationDetailsInstructorId,
+    ) ?? null;
+  const selectedEvaluationSubjectOptions = selectedEvaluationSummary
+    ? selectedEvaluationSummary.assignments
+        .map((assignment) => ({
+          id: assignment.subjectId,
+          assignmentId: assignment.id,
+          code: assignment.subjectCode,
+          label: `${assignment.subjectCode} - ${assignment.subjectName}`,
+          sectionCode: assignment.sectionCode,
+        }))
+        .filter(
+          (option, index, options) =>
+            options.findIndex((item) => item.id === option.id) === index,
+        )
+    : [];
+  const resolvedEvaluationSubjectId =
+    selectedEvaluationSubjectOptions.some(
+      (option) => option.id === evaluationDetailsFilters.subjectId,
+    )
+      ? evaluationDetailsFilters.subjectId
+      : selectedEvaluationSubjectOptions[0]?.id || "";
+  const selectedEvaluationSubjectOption =
+    selectedEvaluationSubjectOptions.find(
+      (option) => option.id === resolvedEvaluationSubjectId,
+    ) ?? null;
+  const subjectMatchesSelectedEvaluation = (
+    submission: InstructorEvaluationSubmissionRecord,
+  ) =>
+    !selectedEvaluationSubjectOption ||
+    submission.subjectIds.includes(selectedEvaluationSubjectOption.id) ||
+    submission.subjectIds.includes(selectedEvaluationSubjectOption.assignmentId) ||
+    submission.subjectCodes.includes(selectedEvaluationSubjectOption.code);
+  const selectedSubjectAssignments = selectedEvaluationSummary
+    ? selectedEvaluationSummary.assignments.filter(
+        (assignment) =>
+          assignment.subjectId === resolvedEvaluationSubjectId ||
+          assignment.id === selectedEvaluationSubjectOption?.assignmentId ||
+          assignment.subjectCode === selectedEvaluationSubjectOption?.code,
+      )
+    : [];
+  const selectedSubjectSubmissions = selectedEvaluationSummary
+    ? selectedEvaluationSummary.submissions.filter(subjectMatchesSelectedEvaluation)
+    : [];
+  const selectedEvaluationYearOptions = Array.from(
+    new Set(
+      [
+        ...selectedSubjectSubmissions.map((submission) => submission.yearLevel),
+        ...selectedSubjectAssignments.map((assignment) => {
+          const section = classSections.find(
+            (item) =>
+              normalizeSectionCodeValue(item.code) ===
+              normalizeSectionCodeValue(assignment.sectionCode),
+          );
+          const subject = subjects.find(
+            (item) => item.id === assignment.subjectId,
+          );
+          return section?.yearLevel || subject?.yearLevel || "";
+        }),
+      ].filter(Boolean),
+    ),
+  );
+  const resolvedEvaluationYearLevel = selectedEvaluationYearOptions.includes(
+    evaluationDetailsFilters.yearLevel,
+  )
+    ? evaluationDetailsFilters.yearLevel
+    : selectedEvaluationYearOptions[0] || "";
+  const selectedEvaluationSectionOptions = Array.from(
+    new Set(
+      [
+        ...selectedSubjectSubmissions
+          .filter(
+            (submission) =>
+              !resolvedEvaluationYearLevel ||
+              submission.yearLevel === resolvedEvaluationYearLevel,
+          )
+          .map((submission) => submission.section),
+        ...selectedSubjectAssignments
+          .filter((assignment) => {
+            if (!resolvedEvaluationYearLevel) {
+              return true;
+            }
+
+            const section = classSections.find(
+              (item) =>
+                normalizeSectionCodeValue(item.code) ===
+                normalizeSectionCodeValue(assignment.sectionCode),
+            );
+            const subject = subjects.find(
+              (item) => item.id === assignment.subjectId,
+            );
+
+            return (
+              (section?.yearLevel || subject?.yearLevel || "") ===
+              resolvedEvaluationYearLevel
+            );
+          })
+          .map((assignment) => assignment.sectionCode),
+      ].filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+  const resolvedEvaluationSection =
+    evaluationDetailsFilters.section === "All" ||
+    selectedEvaluationSectionOptions.includes(evaluationDetailsFilters.section)
+      ? evaluationDetailsFilters.section
+      : "All";
+  const selectedEvaluationFilteredSubmissions = selectedEvaluationSummary
+    ? selectedEvaluationSummary.submissions.filter((submission) => {
+        const matchesSubject = subjectMatchesSelectedEvaluation(submission);
+        const matchesYear =
+          !resolvedEvaluationYearLevel ||
+          submission.yearLevel === resolvedEvaluationYearLevel;
+        const matchesSection =
+          resolvedEvaluationSection === "All" ||
+          submission.section === resolvedEvaluationSection;
+
+        return matchesSubject && matchesYear && matchesSection;
+      })
+    : [];
   const availableAssignmentSubjects = getEligibleSubjectsForSection(
     assignmentForm.sectionId,
     assignmentForm.semester,
@@ -6429,6 +7840,489 @@ export default function AdminEnrollees({
   const pendingAssignmentDeleteTargets = subjectAssignments.filter(
     (assignment) => pendingAssignmentDeleteIds.includes(assignment.id),
   );
+
+  const toggleInstructorEvaluation = (instructorId: string, isOpen: boolean) => {
+    const hasAssignedClass = subjectAssignments.some(
+      (assignment) => assignment.instructorId === instructorId,
+    );
+    const nextIsOpen = hasAssignedClass ? isOpen : false;
+    const nextStatuses = setInstructorEvaluationStatus({
+      branch: currentBranch,
+      instructorId,
+      isOpen: nextIsOpen,
+    });
+
+    setEvaluationStatuses(nextStatuses);
+    void saveInstructorEvaluationStatusToBackend({
+      branch: currentBranch,
+      instructorId,
+      isOpen: nextIsOpen,
+    }).catch((error) => {
+      console.warn("Failed to sync instructor evaluation status.", error);
+    });
+    addToast(
+      nextIsOpen
+        ? "Instructor evaluation opened for students."
+        : hasAssignedClass
+          ? "Instructor evaluation closed for students."
+          : "Instructor must have an assigned class before opening evaluation.",
+      hasAssignedClass ? "success" : "warning",
+    );
+  };
+
+  const openEvaluationDetails = (
+    summary: (typeof instructorEvaluationSummaries)[number],
+  ) => {
+    const firstSubject = summary.assignments[0];
+    const firstYearLevel =
+      summary.submissions[0]?.yearLevel ||
+      (firstSubject
+        ? classSections.find(
+            (section) =>
+              normalizeSectionCodeValue(section.code) ===
+              normalizeSectionCodeValue(firstSubject.sectionCode),
+          )?.yearLevel ||
+          subjects.find((subject) => subject.id === firstSubject.subjectId)
+            ?.yearLevel ||
+          ""
+        : "");
+
+    setSelectedEvaluationDetailsInstructorId(summary.instructor.id);
+    setEvaluationDetailsFilters({
+      subjectId: firstSubject?.subjectId || "",
+      yearLevel: firstYearLevel,
+      section: "All",
+    });
+  };
+
+  const escapeReportHtml = (value: string | number) =>
+    String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const getEvaluationQuestionPercentages = (questionId: string) => {
+    const ratings = selectedEvaluationFilteredSubmissions
+      .map((submission) => submission.responses[questionId])
+      .filter(
+        (rating): rating is number =>
+          typeof rating === "number" &&
+          Number.isFinite(rating) && rating >= 1 && rating <= 5,
+      );
+    const answerCount = ratings.length;
+
+    return {
+      answerCount,
+      percentages: [1, 2, 3, 4, 5].map((rating) =>
+        answerCount > 0
+          ? Math.round(
+              (ratings.filter((value) => value === rating).length /
+                answerCount) *
+                100,
+            )
+          : 0,
+      ),
+    };
+  };
+
+  const anonymousEvaluationResponderLabel = "Anonymous";
+
+  const downloadEvaluationReport = () => {
+    if (!selectedEvaluationSummary) {
+      return;
+    }
+
+    const selectedSubjectLabel =
+      selectedEvaluationSubjectOptions.find(
+        (option) => option.id === resolvedEvaluationSubjectId,
+      )?.label || "No subject";
+    const classLabel = `${resolvedEvaluationYearLevel || "No year level"} - ${resolvedEvaluationSection}`;
+    const reportRows =
+      evaluationQuestionnaire.length > 0
+        ? evaluationQuestionnaire
+            .map((category) => {
+              const questionRows =
+                category.questions.length > 0
+                  ? category.questions
+                      .map((question) => {
+                        if ((question.type || "rating") === "essay") {
+                          const essayAnswers =
+                            selectedEvaluationFilteredSubmissions
+                              .map((submission) => submission.responses[question.id])
+                              .filter(
+                                (answer): answer is string =>
+                                  typeof answer === "string" &&
+                                  answer.trim().length > 0,
+                              );
+
+                          return `
+                            <tr>
+                              <td>${escapeReportHtml(question.text)}</td>
+                              <td colspan="5">${
+                                essayAnswers.length > 0
+                                  ? essayAnswers
+                                      .map(
+                                        (answer) =>
+                                          `<p class="essay-answer"><strong>${escapeReportHtml(
+                                            anonymousEvaluationResponderLabel,
+                                          )}:</strong> ${escapeReportHtml(answer)}</p>`,
+                                      )
+                                      .join("")
+                                  : "-"
+                              }</td>
+                            </tr>
+                          `;
+                        }
+
+                        const result = getEvaluationQuestionPercentages(
+                          question.id,
+                        );
+
+                        return `
+                          <tr>
+                            <td>${escapeReportHtml(question.text)}</td>
+                            ${result.percentages
+                              .map(
+                                (percentage) =>
+                                  `<td>${percentage > 0 ? `${percentage}%` : "-"}</td>`,
+                              )
+                              .join("")}
+                          </tr>
+                        `;
+                      })
+                      .join("")
+                  : `<tr><td colspan="6">No questions in this category.</td></tr>`;
+
+              return `
+                <tr class="category-row">
+                  <th>${escapeReportHtml(category.name)}</th>
+                  <th>1</th>
+                  <th>2</th>
+                  <th>3</th>
+                  <th>4</th>
+                  <th>5</th>
+                </tr>
+                ${questionRows}
+              `;
+            })
+            .join("")
+        : `<tr><td colspan="6">No questionnaire has been configured yet.</td></tr>`;
+    const fileLabel = [
+      selectedEvaluationSummary.instructor.name,
+      selectedSubjectLabel,
+      resolvedEvaluationYearLevel,
+      resolvedEvaluationSection,
+    ]
+      .join("-")
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase();
+    const reportWindow = window.open("", "_blank", "width=960,height=720");
+
+    if (!reportWindow) {
+      addToast("Allow popups to download the evaluation report.", "warning");
+      return;
+    }
+
+    reportWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>evaluation-report-${escapeReportHtml(fileLabel || "filtered")}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 28px 18px;
+              color: #111827;
+              font-family: Arial, Helvetica, sans-serif;
+              font-size: 14px;
+            }
+            h1 {
+              margin: 0 0 18px;
+              padding-bottom: 18px;
+              border-bottom: 1px solid #e5e7eb;
+              text-align: center;
+              font-size: 28px;
+              font-weight: 500;
+            }
+            .report-meta {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 4px 28px;
+              margin-bottom: 18px;
+              font-size: 15px;
+              font-weight: 700;
+            }
+            .report-meta div { min-width: 0; }
+            .legend {
+              position: relative;
+              margin: 18px 0 0;
+              padding: 28px 10px 14px;
+              border: 1px solid #67d7e6;
+              font-size: 16px;
+            }
+            .legend strong {
+              position: absolute;
+              top: -16px;
+              left: 8px;
+              padding-right: 8px;
+              background: #ffffff;
+              font-size: 24px;
+              font-weight: 400;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              table-layout: fixed;
+            }
+            th, td {
+              padding: 12px 8px;
+              border-bottom: 1px solid #e5e7eb;
+              text-align: center;
+              vertical-align: middle;
+              word-wrap: break-word;
+            }
+            th:first-child,
+            td:first-child {
+              width: 56%;
+              text-align: left;
+            }
+            .essay-answer {
+              margin: 0 0 8px;
+              text-align: left;
+              line-height: 1.45;
+            }
+            .category-row th {
+              border-bottom: none;
+              background: #727c85;
+              color: #ffffff;
+              font-size: 16px;
+              font-weight: 700;
+            }
+            @media print {
+              body { padding: 18px 14px; }
+              button { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Evaluation Report</h1>
+          <section class="report-meta">
+            <div>Academic Year: ${escapeReportHtml(reflectedAcademicYear)} ${escapeReportHtml(reflectedSemester)}</div>
+            <div>Instructor: ${escapeReportHtml(selectedEvaluationSummary.instructor.name)}</div>
+            <div>Class: ${escapeReportHtml(classLabel)}</div>
+            <div>Subject: ${escapeReportHtml(selectedSubjectLabel)}</div>
+            <div>Total Student Evaluated: ${selectedEvaluationFilteredSubmissions.length}</div>
+          </section>
+          <section class="legend">
+            <strong>Rating Legend</strong>
+            5 = Strongly Agree, 4 = Agree, 3 = Uncertain, 2 = Disagree, 1 = Strongly Disagree
+          </section>
+          <table>
+            <tbody>${reportRows}</tbody>
+          </table>
+          <script>
+            window.onload = () => {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    reportWindow.document.close();
+  };
+
+  const saveEvaluationQuestionnaire = (
+    categories: EvaluationQuestionCategoryRecord[],
+  ) => {
+    setEvaluationQuestionnaire(
+      writeEvaluationQuestionnaire(currentBranch, categories),
+    );
+    void saveEvaluationQuestionnaireToBackend(currentBranch, categories).catch(
+      (error) => {
+        console.warn("Failed to sync evaluation questionnaire.", error);
+      },
+    );
+  };
+
+  const createQuestionnaireId = (prefix: string) =>
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const handleAddQuestionnaireCategory = () => {
+    const name = questionnaireCategoryName.trim();
+
+    if (!name) {
+      addToast("Enter a category name first.", "error");
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const nextCategory: EvaluationQuestionCategoryRecord = {
+      id: createQuestionnaireId("category"),
+      name,
+      questions: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const nextQuestionnaire = [...evaluationQuestionnaire, nextCategory];
+
+    saveEvaluationQuestionnaire(nextQuestionnaire);
+    setSelectedQuestionnaireCategoryId(nextCategory.id);
+    setQuestionnaireCategoryName("");
+    addToast("Evaluation category added.", "success");
+  };
+
+  const handleAddQuestionnaireQuestion = () => {
+    const categoryId =
+      selectedQuestionnaireCategoryId || evaluationQuestionnaire[0]?.id || "";
+    const questionText = questionnaireQuestionText.trim();
+
+    if (!categoryId) {
+      addToast("Add a category before adding questions.", "error");
+      return;
+    }
+
+    if (!questionText) {
+      addToast("Enter a question first.", "error");
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const nextQuestionnaire = evaluationQuestionnaire.map((category) =>
+      category.id === categoryId
+        ? {
+            ...category,
+            updatedAt: timestamp,
+            questions: [
+              ...category.questions,
+              {
+                id: createQuestionnaireId("question"),
+                text: questionText,
+                type: questionnaireQuestionType,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              },
+            ],
+          }
+        : category,
+    );
+
+    saveEvaluationQuestionnaire(nextQuestionnaire);
+    setSelectedQuestionnaireCategoryId(categoryId);
+    setQuestionnaireQuestionText("");
+    setQuestionnaireQuestionType("rating");
+    addToast("Evaluation question added.", "success");
+  };
+
+  const handleDeleteQuestionnaireQuestion = (
+    categoryId: string,
+    questionId: string,
+  ) => {
+    const timestamp = new Date().toISOString();
+    const nextQuestionnaire = evaluationQuestionnaire.map((category) =>
+      category.id === categoryId
+        ? {
+            ...category,
+            updatedAt: timestamp,
+            questions: category.questions.filter(
+              (question) => question.id !== questionId,
+            ),
+          }
+        : category,
+    );
+
+    saveEvaluationQuestionnaire(nextQuestionnaire);
+    addToast("Evaluation question deleted.", "success");
+  };
+
+  const handleDeleteQuestionnaireCategory = (categoryId: string) => {
+    const nextQuestionnaire = evaluationQuestionnaire.filter(
+      (category) => category.id !== categoryId,
+    );
+
+    saveEvaluationQuestionnaire(nextQuestionnaire);
+
+    if (selectedQuestionnaireCategoryId === categoryId) {
+      setSelectedQuestionnaireCategoryId(nextQuestionnaire[0]?.id || "");
+    }
+
+    addToast("Evaluation category deleted.", "success");
+  };
+
+  useEffect(() => {
+    setEvaluationStatuses(readInstructorEvaluationStatuses(currentBranch));
+    const nextQuestionnaire = readEvaluationQuestionnaire(currentBranch);
+    setEvaluationQuestionnaire(nextQuestionnaire);
+    setEvaluationSubmissions(readInstructorEvaluationSubmissions(currentBranch));
+    setSelectedQuestionnaireCategoryId(nextQuestionnaire[0]?.id || "");
+    void Promise.all([
+      fetchInstructorEvaluationStatuses(currentBranch).then(setEvaluationStatuses),
+      fetchEvaluationQuestionnaire(currentBranch).then((questionnaire) => {
+        setEvaluationQuestionnaire(questionnaire);
+        setSelectedQuestionnaireCategoryId(questionnaire[0]?.id || "");
+      }),
+      fetchInstructorEvaluationSubmissions(currentBranch).then(
+        setEvaluationSubmissions,
+      ),
+    ]).catch((error) => {
+      console.warn("Failed to sync instructor evaluations from Supabase.", error);
+    });
+  }, [currentBranch]);
+
+  useEffect(() => {
+    const assignedInstructorIds = new Set(
+      subjectAssignments
+        .map((assignment) => assignment.instructorId.trim())
+        .filter(Boolean),
+    );
+    let nextStatuses = evaluationStatuses;
+    let didCloseStaleStatus = false;
+
+    Object.values(evaluationStatuses).forEach((status) => {
+      const instructorId = status.instructorId.trim();
+
+      if (status.isOpen && !assignedInstructorIds.has(instructorId)) {
+        nextStatuses = setInstructorEvaluationStatus({
+          branch: currentBranch,
+          instructorId,
+          isOpen: false,
+        });
+        didCloseStaleStatus = true;
+      }
+    });
+
+    if (didCloseStaleStatus) {
+      setEvaluationStatuses(nextStatuses);
+    }
+  }, [currentBranch, evaluationStatuses, subjectAssignments]);
+
+  useEffect(() => {
+    const syncEvaluationSubmissions = () => {
+      setEvaluationSubmissions(readInstructorEvaluationSubmissions(currentBranch));
+      void fetchInstructorEvaluationSubmissions(currentBranch)
+        .then(setEvaluationSubmissions)
+        .catch((error) => {
+          console.warn("Failed to refresh evaluation submissions.", error);
+        });
+    };
+
+    window.addEventListener("storage", syncEvaluationSubmissions);
+    window.addEventListener(
+      INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
+      syncEvaluationSubmissions as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener("storage", syncEvaluationSubmissions);
+      window.removeEventListener(
+        INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
+        syncEvaluationSubmissions as EventListener,
+      );
+    };
+  }, [currentBranch]);
 
   useEffect(() => {
     const existingAssignmentIds = new Set(
@@ -6449,6 +8343,22 @@ export default function AdminEnrollees({
   useEffect(() => {
     setCurrentEnrolleePage(1);
   }, [searchTerm, statusFilter, activeTab, currentBranch, showOwnScheduleOnly]);
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredEnrollees.map((enrollee) => enrollee.id));
+    setSelectedEnrolleeIds((prev) => {
+      const next = prev.filter((id) => visibleIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [filteredEnrollees]);
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredRequests.map((request) => request.id));
+    setSelectedEnrollmentRequestIds((prev) => {
+      const next = prev.filter((id) => visibleIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [filteredRequests]);
 
   useEffect(() => {
     if (currentEnrolleePage > totalEnrolleePages) {
@@ -6482,10 +8392,10 @@ export default function AdminEnrollees({
   const validatedTransfereeCount = transfereeAdmissions.filter((enrollee) =>
     isTransfereeEvaluationComplete(getTransfereeEvaluation(enrollee)),
   ).length;
-  const pendingRequestsCount = enrollmentRequests.filter(
+  const pendingRequestsCount = activeEnrollmentRequests.filter(
     (r) => r.enrollmentStatus === "Pending",
   ).length;
-  const approvedRequestsCount = enrollmentRequests.filter(
+  const approvedRequestsCount = activeEnrollmentRequests.filter(
     (r) => r.enrollmentStatus === "Approved",
   ).length;
   const sectionManagerPendingAssignments =
@@ -6499,8 +8409,7 @@ export default function AdminEnrollees({
       ? pendingTransfereeAssignments
       : pendingRegularAssignments;
   const activeBranchStudents = getStudentsForBranch(currentBranch).filter(
-    (student) =>
-      student.status !== "Archived" && student.status !== "Graduated",
+    (student) => student.status !== "Archived",
   );
   const activeStudentsForMove = [...activeBranchStudents]
     .sort(
@@ -6519,6 +8428,7 @@ export default function AdminEnrollees({
             name: string;
             studentNumber: string;
             program: string;
+            yearLevel: string;
           }
         >();
 
@@ -6533,25 +8443,7 @@ export default function AdminEnrollees({
               name: student.name,
               studentNumber: student.id,
               program: student.program,
-            });
-          });
-
-        enrollees
-          .filter((enrollee) => selectedSection.enrolleeIds.includes(enrollee.id))
-          .forEach((enrollee) => {
-            const rowKey = enrollee.studentNumber
-              ? `student:${enrollee.studentNumber}`
-              : `enrollee:${enrollee.id}`;
-
-            if (studentRows.has(rowKey)) {
-              return;
-            }
-
-            studentRows.set(rowKey, {
-              key: rowKey,
-              name: enrollee.fullName,
-              studentNumber: enrollee.studentNumber || "Pending",
-              program: enrollee.program,
+              yearLevel: student.yearLevel,
             });
           });
 
@@ -6598,6 +8490,12 @@ export default function AdminEnrollees({
           normalizeSectionCodeValue(selectedMoveStudent.section),
       ) ?? null
     : null;
+  const isSectionChoiceLocked = (sectionCode?: string | null) =>
+    classSections.some(
+      (section) =>
+        normalizeSectionCodeValue(section.code) ===
+          normalizeSectionCodeValue(sectionCode) && isSectionLocked(section),
+    );
   const pendingMoveSectionChoice =
     selectedMoveStudentSectionChoices.find(
       (section) =>
@@ -6607,6 +8505,7 @@ export default function AdminEnrollees({
   const canApplyStudentMove =
     Boolean(selectedMoveStudent) &&
     Boolean(normalizeSectionCodeValue(pendingMoveSectionCode)) &&
+    !isSectionChoiceLocked(pendingMoveSectionCode) &&
     normalizeSectionCodeValue(pendingMoveSectionCode) !==
       normalizeSectionCodeValue(selectedMoveStudent?.section);
 
@@ -6676,114 +8575,11 @@ export default function AdminEnrollees({
     }));
   };
 
-  // Automated Class Assignment logic
-  const handleAutoGenerateSchedule = (
-    section: ClassSection,
-    semester?: AutoAssignSemester,
-  ) => {
-    const activeSemester = normalizeSectionSemester(semester || section.semester);
-    const sectionAcademicYear =
-      subjectAssignments.find(
-        (assignment) =>
-          assignment.sectionId === section.id &&
-          normalizeSectionSemester(assignment.semester) === activeSemester,
-      )?.academicYear || reflectedAcademicYear;
-    const sectionSubjects = subjects
-      .filter(
-        (subject) =>
-          subject.yearLevel === section.yearLevel &&
-          subject.program === section.program &&
-          normalizeSectionSemester(subject.semester) === activeSemester &&
-          matchesAcademicDescriptor(
-            resolveSubjectStrandOrCourse(subject),
-            section.strand,
-          ),
-      )
-      .sort((left, right) => left.code.localeCompare(right.code));
-
-    if (sectionSubjects.length === 0) {
-      addToast(
-        `No ${activeSemester} subjects found for ${section.code}.`,
-        "warning",
-      );
-      return;
-    }
-
-    const scheduleSlots = createAutoScheduleSlots(sectionSubjects.length);
-    const newAssignments: SubjectAssignment[] = sectionSubjects.map(
-      (subject, index) => {
-        const instructor =
-          instructors.length > 0
-            ? instructors[index % instructors.length]
-            : null;
-        const slot = scheduleSlots[index];
-
-        return {
-          id: `auto_${section.id}_${activeSemester.replace(/\s+/g, "-").toLowerCase()}_${subject.id}`,
-          subjectId: subject.id,
-          subjectCode: subject.code,
-          subjectName: subject.name,
-          instructorId: instructor?.id || "",
-          instructorName: instructor?.name || "TBA",
-          sectionId: section.id,
-          sectionCode: section.code,
-          academicYear: sectionAcademicYear,
-          semester: activeSemester,
-          schedule: slot
-            ? [
-                {
-                  day: slot.day,
-                  startTime: slot.startTime,
-                  endTime: slot.endTime,
-                  room: `RM${100 + index}`,
-                },
-              ]
-            : [],
-        };
-      },
-    );
-
-    setSubjectAssignments((prev) => [
-      ...prev.filter(
-        (assignment) =>
-          !(
-            (assignment.sectionId === section.id ||
-              assignment.sectionCode === section.code) &&
-            normalizeSectionSemester(assignment.semester) === activeSemester
-          ),
-      ),
-      ...newAssignments,
-    ]);
-
-    addToast(
-      `Generated ${newAssignments.length} ${activeSemester.toLowerCase()} assignments for ${section.code}.`,
-      "success",
-    );
-  };
-
-  const openAssignmentAutoAssignModal = (section: ClassSection) => {
-    const defaultSemester =
-      assignmentFilter.semester !== "All"
-        ? assignmentFilter.semester
-        : normalizeSectionSemester(section.semester);
-
-    setAssignmentAutoAssignSection(section);
-    setAssignmentAutoAssignSemester(defaultSemester as AutoAssignSemester);
-  };
-
   const closeAssignmentAutoAssignModal = () => {
     setAssignmentAutoAssignSection(null);
   };
 
   const confirmAssignmentAutoAssign = () => {
-    if (!assignmentAutoAssignSection) {
-      return;
-    }
-
-    handleAutoGenerateSchedule(
-      assignmentAutoAssignSection,
-      assignmentAutoAssignSemester,
-    );
     closeAssignmentAutoAssignModal();
   };
 
@@ -7018,7 +8814,7 @@ export default function AdminEnrollees({
               <div className="section-info">
                 <FaUsers className="section-icon" />
                 <span>
-                  {activeAdmissionPendingAssignments.length} approved{" "}
+                  {activeAdmissionPendingAssignments.length} active{" "}
                   {activeTab === "transferees"
                     ? "transferee(s)"
                     : "student(s)"}{" "}
@@ -7108,26 +8904,57 @@ export default function AdminEnrollees({
                 <option value="Approved">Approved</option>
                 <option value="Rejected">Rejected</option>
               </select>
-              {activeTab === "admissions" && (
+            </div>
+            <div className="enrollee-bulk-toolbar">
+              <label className="enrollee-selection-control">
+                <input
+                  type="checkbox"
+                  checked={allPaginatedEnrolleesSelected}
+                  onChange={(event) => {
+                    setSelectedEnrolleeIds((prev) => {
+                      const nextIds = new Set(prev);
+
+                      if (event.target.checked) {
+                        paginatedEnrolleeIds.forEach((id) => nextIds.add(id));
+                      } else {
+                        paginatedEnrolleeIds.forEach((id) => nextIds.delete(id));
+                      }
+
+                      return [...nextIds];
+                    });
+                  }}
+                  disabled={paginatedEnrollees.length === 0}
+                />
+                <span>
+                  {selectedFilteredEnrollees.length} selected
+                </span>
+              </label>
+              <div className="enrollee-bulk-actions">
                 <button
                   type="button"
-                  className={`status-filter own-schedule-filter-btn ${
-                    showOwnScheduleOnly ? "active" : ""
-                  }`}
+                  className="action-btn archive"
                   onClick={() =>
-                    setShowOwnScheduleOnly((previousValue) => !previousValue)
+                    handleArchiveSelectedEnrollees(selectedFilteredEnrollees)
                   }
+                  disabled={selectedFilteredEnrollees.length === 0}
                 >
-                  {showOwnScheduleOnly
-                    ? "Showing Own Schedule Only"
-                    : "Filter Own Schedule"}
+                  <MdArchive /> Archive Selected
                 </button>
-              )}
+                <button
+                  type="button"
+                  className="action-btn cancel"
+                  onClick={() => setSelectedEnrolleeIds([])}
+                  disabled={selectedFilteredEnrollees.length === 0}
+                >
+                  Clear Selection
+                </button>
+              </div>
             </div>
             <div className="table-container">
-              <table className="enrollees-table">
+              <table className="enrollees-table enrollees-admission-table">
                 <thead>
                   <tr>
+                    <th className="enrollee-select-column">SELECT</th>
                     <th>TRACKING NO.</th>
                     <th>FULL NAME</th>
                     <th>PROGRAM</th>
@@ -7151,34 +8978,38 @@ export default function AdminEnrollees({
                   {filteredEnrollees.length > 0 ? (
                     paginatedEnrollees.map((enrollee) => (
                       <tr key={enrollee.id}>
-                        <td>{enrollee.trackingNumber}</td>
-                        <td>{enrollee.fullName}</td>
-                        <td>{enrollee.program}</td>
-                        <td>{enrollee.strandOrCourse || enrollee.yearLevel}</td>
+                        <td className="enrollee-select-column" data-label="Select">
+                          <input
+                            type="checkbox"
+                            checked={selectedEnrolleeIdSet.has(enrollee.id)}
+                            onChange={(event) => {
+                              setSelectedEnrolleeIds((prev) =>
+                                event.target.checked
+                                  ? [...new Set([...prev, enrollee.id])]
+                                  : prev.filter((id) => id !== enrollee.id),
+                              );
+                            }}
+                            aria-label={`Select ${enrollee.fullName}`}
+                          />
+                        </td>
+                        <td data-label="Tracking No.">{enrollee.trackingNumber}</td>
+                        <td data-label="Full Name">{enrollee.fullName}</td>
+                        <td data-label="Program">{enrollee.program}</td>
+                        <td data-label="Course/Strand">
+                          {getCourseStrandDisplay(enrollee)}
+                        </td>
                         {activeTab === "transferees" ? (
                           <>
-                            <td>
-                              <span
-                                className={`validation-badge ${
-                                  isTransfereeEvaluationComplete(
-                                    getTransfereeEvaluation(enrollee),
-                                  )
-                                    ? "ready"
-                                    : transfereeEvaluations[enrollee.id]
-                                      ? "progress"
-                                      : "pending"
-                                }`}
-                              >
-                                {isTransfereeEvaluationComplete(
-                                  getTransfereeEvaluation(enrollee),
-                                )
-                                  ? "Ready"
-                                  : transfereeEvaluations[enrollee.id]
-                                    ? "In Progress"
+                            <td data-label="Validation">
+                              {isTransfereeEvaluationComplete(
+                                getTransfereeEvaluation(enrollee),
+                              )
+                                ? "Ready"
+                                : transfereeEvaluations[enrollee.id]
+                                  ? "In Progress"
                                   : "Pending"}
-                              </span>
                             </td>
-                            <td>
+                            <td data-label="Section">
                               <div>
                                 {getAssignedSectionCode(enrollee.id) !==
                                 "Not assigned"
@@ -7189,62 +9020,31 @@ export default function AdminEnrollees({
                                         (section) =>
                                           section.id ===
                                           getTransfereeEvaluation(enrollee)
-                                            .recommendedSectionId,
+                                        .recommendedSectionId,
                                       )?.code || "Suggested"
                                     : "Pending"}
                               </div>
-                              {(getTransfereeEvaluation(enrollee).assignedSubjectIds
-                                .length > 0 ||
-                                getTransfereeEvaluation(enrollee)
-                                  .creditedSubjectIds.length > 0) && (
-                                <div className="transferee-table-meta">
-                                  {
-                                    getTransfereeEvaluation(enrollee)
-                                      .assignedSubjectIds.length
-                                  }{" "}
-                                  planned |{" "}
-                                  {
-                                    getTransfereeEvaluation(enrollee)
-                                      .creditedSubjectIds.length
-                                  }{" "}
-                                  credited
-                                </div>
-                              )}
                             </td>
                           </>
                         ) : (
                           <>
-                            <td>
+                            <td data-label="Documents">
                               {enrollee.documentsSubmitted}/
                               {enrollee.totalDocuments}
                             </td>
-                            <td>
-                              <span
-                                className={`validation-badge ${
-                                  enrollee.requestedOwnSchedule
-                                    ? enrollee.ownScheduleRequestStatus ===
-                                      "Approved"
-                                      ? "ready"
-                                      : enrollee.ownScheduleRequestStatus ===
-                                          "Rejected"
-                                        ? "pending"
-                                        : "progress"
-                                    : "pending"
-                                }`}
-                              >
-                                {getOwnScheduleRequestLabel(enrollee)}
-                              </span>
+                            <td data-label="Own Schedule">
+                              {getOwnScheduleRequestLabel(enrollee)}
                             </td>
                           </>
                         )}
-                        <td>
+                        <td data-label="Status">
                           <span
                             className={`status-badge ${enrollee.status.toLowerCase()}`}
                           >
                             {enrollee.status}
                           </span>
                         </td>
-                        <td>
+                        <td data-label="Action">
                           <div className="action-buttons">
                             <button
                               className="action-btn review"
@@ -7253,13 +9053,13 @@ export default function AdminEnrollees({
                               Review
                             </button>
                             <button
-                              className="action-btn archive trash-icon-btn"
+                              className="action-btn archive enrollee-archive-btn"
                               onClick={() => handleArchiveEnrollee(enrollee)}
                               title={`Move ${enrollee.fullName} to Archive`}
                               aria-label={`Move ${enrollee.fullName} to Archive`}
                               type="button"
                             >
-                              <MdArchive />
+                              <MdArchive /> Archive
                             </button>
                           </div>
                         </td>
@@ -7268,8 +9068,9 @@ export default function AdminEnrollees({
                   ) : (
                     <tr>
                       <td
-                        colSpan={8}
+                        colSpan={9}
                         className="no-results"
+                        data-label="Enrollees"
                       >
                         {isLoading
                           ? "Loading enrollees..."
@@ -7365,10 +9166,50 @@ export default function AdminEnrollees({
                 <option value="Rejected">Rejected</option>
               </select>
             </div>
+            <div className="enrollee-bulk-toolbar">
+              <label className="enrollee-selection-control">
+                <input
+                  type="checkbox"
+                  checked={allFilteredEnrollmentRequestsSelected}
+                  onChange={(event) => {
+                    setSelectedEnrollmentRequestIds(
+                      event.target.checked ? filteredRequestIds : [],
+                    );
+                  }}
+                  disabled={filteredRequests.length === 0}
+                />
+                <span>
+                  {selectedFilteredEnrollmentRequests.length} selected
+                </span>
+              </label>
+              <div className="enrollee-bulk-actions">
+                <button
+                  type="button"
+                  className="action-btn archive"
+                  onClick={() =>
+                    handleArchiveSelectedEnrollmentRequests(
+                      selectedFilteredEnrollmentRequests,
+                    )
+                  }
+                  disabled={selectedFilteredEnrollmentRequests.length === 0}
+                >
+                  <MdArchive /> Archive Selected
+                </button>
+                <button
+                  type="button"
+                  className="action-btn cancel"
+                  onClick={() => setSelectedEnrollmentRequestIds([])}
+                  disabled={selectedFilteredEnrollmentRequests.length === 0}
+                >
+                  Clear Selection
+                </button>
+              </div>
+            </div>
             <div className="table-container">
-              <table className="enrollees-table">
+              <table className="enrollees-table enrollees-enrollment-table">
                 <thead>
                   <tr>
+                    <th className="enrollee-select-column">SELECT</th>
                     <th>STUDENT NO.</th>
                     <th>FULL NAME</th>
                     <th>PROGRAM</th>
@@ -7384,37 +9225,62 @@ export default function AdminEnrollees({
                   {filteredRequests.length > 0 ? (
                     filteredRequests.map((request) => (
                       <tr key={request.id}>
-                        <td>{request.studentNumber}</td>
-                        <td>{request.fullName}</td>
-                        <td>{request.program}</td>
-                        <td>{request.currentYearLevel}</td>
-                        <td>
-                          <span className="next-level-badge">
-                            {request.program === "SHS" &&
-                            request.requestedYearLevel === "College"
-                              ? "1st Year College"
-                              : request.requestedYearLevel}
-                          </span>
+                        <td className="enrollee-select-column" data-label="Select">
+                          <input
+                            type="checkbox"
+                            checked={selectedEnrollmentRequestIdSet.has(
+                              request.id,
+                            )}
+                            onChange={(event) => {
+                              setSelectedEnrollmentRequestIds((prev) =>
+                                event.target.checked
+                                  ? [...new Set([...prev, request.id])]
+                                  : prev.filter((id) => id !== request.id),
+                              );
+                            }}
+                            aria-label={`Select enrollment request for ${request.fullName}`}
+                          />
                         </td>
-                        <td>
+                        <td data-label="Student No.">{request.studentNumber}</td>
+                        <td data-label="Full Name">{request.fullName}</td>
+                        <td data-label="Program">{request.program}</td>
+                        <td data-label="Current Level">{request.currentYearLevel}</td>
+                        <td data-label="Requested Level">
+                          {request.program === "SHS" &&
+                          request.requestedYearLevel === "College"
+                            ? "1st Year College"
+                            : request.requestedYearLevel}
+                        </td>
+                        <td data-label="Enrolling Term">
                           <strong>{request.semester}</strong>
                           <div>{request.academicYear}</div>
                         </td>
-                        <td>{request.requestDate}</td>
-                        <td>
+                        <td data-label="Request Date">{request.requestDate}</td>
+                        <td data-label="Status">
                           <span
                             className={`enrollment-badge ${request.enrollmentStatus.toLowerCase()}`}
                           >
                             {request.enrollmentStatus}
                           </span>
                         </td>
-                        <td>
+                        <td data-label="Action">
                           <div className="action-buttons">
                             <button
                               className="action-btn view"
                               onClick={() => handleViewRequestDetails(request)}
                             >
-                              View
+                              Review
+                            </button>
+                            <button
+                              className="action-btn archive enrollee-archive-btn"
+                              onClick={() =>
+                                handleArchiveSelectedEnrollmentRequests([request])
+                              }
+                              title={`Move ${request.fullName} enrollment request to Archive`}
+                              aria-label={`Move ${request.fullName} enrollment request to Archive`}
+                              type="button"
+                            >
+                              <MdArchive /> Archive
                             </button>
                           </div>
                         </td>
@@ -7422,7 +9288,7 @@ export default function AdminEnrollees({
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={9} className="no-results">
+                      <td colSpan={10} className="no-results" data-label="Enrollment Requests">
                         No enrollment requests found.
                       </td>
                     </tr>
@@ -7454,6 +9320,12 @@ export default function AdminEnrollees({
                 onClick={() => setActiveManagementTab("assignments")}
               >
                 <FaCalendarAlt /> Class Assignments
+              </button>
+              <button
+                className={`subtab-btn ${activeManagementTab === "evaluation" ? "active" : ""}`}
+                onClick={() => setActiveManagementTab("evaluation")}
+              >
+                <FaStar /> Evaluation
               </button>
             </div>
 
@@ -7503,12 +9375,11 @@ export default function AdminEnrollees({
                     }
                   >
                     <option value="All">All Year Levels</option>
-                    <option value="1st Year">1st Year</option>
-                    <option value="2nd Year">2nd Year</option>
-                    <option value="3rd Year">3rd Year</option>
-                    <option value="4th Year">4th Year</option>
-                    <option value="Grade 11">Grade 11</option>
-                    <option value="Grade 12">Grade 12</option>
+                    {subjectYearLevelOptions.map((yearLevel) => (
+                      <option key={yearLevel} value={yearLevel}>
+                        {yearLevel}
+                      </option>
+                    ))}
                   </select>
 
                   <select
@@ -7522,22 +9393,13 @@ export default function AdminEnrollees({
                     }
                   >
                     <option value="All">All Strands/Courses</option>
-                    {subjectFilter.program === "SHS" ? (
-                      <>
-                        <option value="All">All Strands</option>
-                        <option value="ICT">ICT</option>
-                        <option value="GAS">GAS</option>
-                        <option value="HUMSS">HUMSS</option>
-                        <option value="ABM">ABM</option>
-                        <option value="STEM">STEM</option>
-                      </>
-                    ) : subjectFilter.program === "College" ? (
-                      <option value={DEFAULT_COLLEGE_COURSE}>
-                        BS Entrepreneurship
+                    {subjectStrandCourseOptions.map((strandOrCourse) => (
+                      <option key={strandOrCourse} value={strandOrCourse}>
+                        {strandOrCourse === DEFAULT_COLLEGE_COURSE
+                          ? "BS Entrepreneurship"
+                          : strandOrCourse}
                       </option>
-                    ) : (
-                      <></>
-                    )}
+                    ))}
                   </select>
                   {subjectFilter.program !== "SHS" ? (
                     <label className="filter-checkbox">
@@ -7610,20 +9472,8 @@ export default function AdminEnrollees({
                                               {subject.code}
                                             </td>
                                             <td>{subject.name}</td>
-                                            <td>
-                                              <span className="strand-badge">
-                                                {subject.strand}
-                                              </span>
-                                            </td>
-                                            <td>
-                                              <span
-                                                className={getSubjectTypeBadgeClass(
-                                                  subject,
-                                                )}
-                                              >
-                                                {getSubjectTypeLabel(subject)}
-                                              </span>
-                                            </td>
+                                            <td>{subject.strand}</td>
+                                            <td>{getSubjectTypeLabel(subject)}</td>
                                             <td className="subject-prerequisite-cell">
                                               {getSubjectPrerequisiteSummary(subject)}
                                             </td>
@@ -7647,6 +9497,7 @@ export default function AdminEnrollees({
                                                 title={`Delete ${subject.code}`}
                                               >
                                                 <FaTrash />
+                                                Delete
                                               </button>
                                             </td>
                                           </tr>
@@ -7713,20 +9564,8 @@ export default function AdminEnrollees({
                                               {subject.code}
                                             </td>
                                             <td>{subject.name}</td>
-                                            <td>
-                                              <span className="strand-badge">
-                                                {subject.strand}
-                                              </span>
-                                            </td>
-                                            <td>
-                                              <span
-                                                className={getSubjectTypeBadgeClass(
-                                                  subject,
-                                                )}
-                                              >
-                                                {getSubjectTypeLabel(subject)}
-                                              </span>
-                                            </td>
+                                            <td>{subject.strand}</td>
+                                            <td>{getSubjectTypeLabel(subject)}</td>
                                             <td className="subject-prerequisite-cell">
                                               {getSubjectPrerequisiteSummary(subject)}
                                             </td>
@@ -7750,6 +9589,7 @@ export default function AdminEnrollees({
                                                 title={`Delete ${subject.code}`}
                                               >
                                                 <FaTrash />
+                                                Delete
                                               </button>
                                             </td>
                                           </tr>
@@ -7830,15 +9670,7 @@ export default function AdminEnrollees({
                                                 </td>
                                                 <td>{subject.name}</td>
                                                 <td>{subject.units || 3}</td>
-                                                <td>
-                                                  <span
-                                                    className={getSubjectTypeBadgeClass(
-                                                      subject,
-                                                    )}
-                                                  >
-                                                    {getSubjectTypeLabel(subject)}
-                                                  </span>
-                                              </td>
+                                                <td>{getSubjectTypeLabel(subject)}</td>
                                               <td className="subject-prerequisite-cell">
                                                 {getSubjectPrerequisiteSummary(subject)}
                                               </td>
@@ -7862,6 +9694,7 @@ export default function AdminEnrollees({
                                                   title={`Delete ${subject.code}`}
                                                 >
                                                   <FaTrash />
+                                                  Delete
                                                 </button>
                                               </td>
                                             </tr>
@@ -7892,23 +9725,32 @@ export default function AdminEnrollees({
             {/* Instructors Management */}
             {activeManagementTab === "instructors" && (
               <div className="management-section">
-                <div className="section-header-actions">
+                <div className="section-header-actions instructor-management-header">
                   <h3>Instructor Management</h3>
+                </div>
+                <div className="instructor-toolbar">
+                  <div className="instructor-search">
+                    <FaSearch className="search-icon" />
+                    <input
+                      type="text"
+                      placeholder="Search by name, ID, or department..."
+                      value={instructorSearch}
+                      onChange={(e) => setInstructorSearch(e.target.value)}
+                    />
+                  </div>
                   <button
                     className="action-btn add"
                     onClick={openCreateInstructorModal}
                   >
                     <FaPlus /> Add Instructor
                   </button>
-                </div>
-                <div className="instructor-search">
-                  <FaSearch className="search-icon" />
-                  <input
-                    type="text"
-                    placeholder="Search by name, ID, or department..."
-                    value={instructorSearch}
-                    onChange={(e) => setInstructorSearch(e.target.value)}
-                  />
+                  <button
+                    type="button"
+                    className="action-btn secondary"
+                    onClick={() => setShowDepartmentManagerModal(true)}
+                  >
+                    Manage Departments
+                  </button>
                 </div>
                 <div className="instructors-grid">
                   {filteredInstructors.map((instructor) => (
@@ -7921,37 +9763,8 @@ export default function AdminEnrollees({
                         <p>{instructor.employeeId}</p>
                         <p className="department">{instructor.department}</p>
                         <p className="contact">{instructor.email}</p>
-                        <div className="instructor-meta-row">
-                          <span
-                            className={`instructor-evaluation-badge ${
-                              getInstructorEvaluationOpenState(instructor.id)
-                                ? "open"
-                                : "closed"
-                            }`}
-                          >
-                            {getInstructorEvaluationOpenState(instructor.id)
-                              ? "Evaluation Open"
-                              : "Evaluation Closed"}
-                          </span>
-                          <span className="instructor-evaluation-note">
-                            Student portal uses this toggle to show or hide the
-                            evaluation card for this instructor.
-                          </span>
-                        </div>
                       </div>
                       <div className="instructor-actions">
-                        <button
-                          className={`action-btn ${
-                            getInstructorEvaluationOpenState(instructor.id)
-                              ? "cancel"
-                              : "approve"
-                          }`}
-                          onClick={() => toggleInstructorEvaluation(instructor)}
-                        >
-                          {getInstructorEvaluationOpenState(instructor.id)
-                            ? "Close Evaluation"
-                            : "Open Evaluation"}
-                        </button>
                         <button
                           className="action-btn edit"
                           onClick={() => openEditInstructorModal(instructor)}
@@ -7978,12 +9791,21 @@ export default function AdminEnrollees({
               <div className="management-section">
                 <div className="section-header-actions">
                   <h3>Class Schedule & Assignments</h3>
-                  <button
-                    className="action-btn add"
-                    onClick={() => openCreateAssignmentModal()}
-                  >
-                    <FaPlus /> Create Assignment
-                  </button>
+                  <div className="section-header-button-group">
+                    <button
+                      type="button"
+                      className="action-btn secondary"
+                      onClick={() => setShowClassroomManagerModal(true)}
+                    >
+                      Classroom Management
+                    </button>
+                    <button
+                      className="action-btn add"
+                      onClick={() => openCreateAssignmentModal()}
+                    >
+                      <FaPlus /> Create Assignment
+                    </button>
+                  </div>
                 </div>
                 <div className="assignments-filters">
                   <select
@@ -7993,6 +9815,8 @@ export default function AdminEnrollees({
                       setAssignmentFilter({
                         ...assignmentFilter,
                         program: e.target.value,
+                        strandOrCourse: "All",
+                        semester: "All",
                       })
                     }
                   >
@@ -8002,18 +9826,19 @@ export default function AdminEnrollees({
                   </select>
                   <select
                     className="filter-select"
-                    value={assignmentFilter.section}
+                    value={assignmentFilter.strandOrCourse}
                     onChange={(e) =>
                       setAssignmentFilter({
                         ...assignmentFilter,
-                        section: e.target.value,
+                        strandOrCourse: e.target.value,
+                        semester: "All",
                       })
                     }
                   >
-                    <option value="All">All Sections</option>
-                    {classSections.map((section) => (
-                      <option key={section.id} value={section.code}>
-                        {section.code}
+                    <option value="All">All Course/Strand</option>
+                    {assignmentCourseStrandOptions.map((strandOrCourse) => (
+                      <option key={strandOrCourse} value={strandOrCourse}>
+                        {strandOrCourse}
                       </option>
                     ))}
                   </select>
@@ -8028,8 +9853,11 @@ export default function AdminEnrollees({
                     }
                   >
                     <option value="All">All Semesters</option>
-                    <option value="1st Semester">1st Semester 2026-2027</option>
-                    <option value="2nd Semester">2nd Semester 2026-2027</option>
+                    {assignmentSemesterOptions.map((semester) => (
+                      <option key={semester} value={semester}>
+                        {semester} 2026-2027
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -8055,19 +9883,16 @@ export default function AdminEnrollees({
                   <div className="assignment-bulk-actions">
                     <button
                       type="button"
-                      className="assignment-selection-btn"
-                      onClick={selectVisibleAssignments}
-                      disabled={filteredAssignments.length === 0}
+                      className={`assignment-selection-btn ${selectedAssignments.length > 0 ? "secondary" : ""}`}
+                      onClick={toggleVisibleAssignmentSelection}
+                      disabled={
+                        filteredAssignments.length === 0 &&
+                        selectedAssignments.length === 0
+                      }
                     >
-                      Select Visible
-                    </button>
-                    <button
-                      type="button"
-                      className="assignment-selection-btn secondary"
-                      onClick={clearAssignmentSelection}
-                      disabled={selectedAssignments.length === 0}
-                    >
-                      Clear Selection
+                      {selectedAssignments.length > 0
+                        ? "Clear Selection"
+                        : "Select Visible"}
                     </button>
                     <button
                       type="button"
@@ -8089,7 +9914,7 @@ export default function AdminEnrollees({
                 </div>
 
                 <div className="assignments-list">
-                  {classSections.map((section) => {
+                  {filteredAssignmentSections.map((section) => {
                     const sectionAssignments = filteredAssignments.filter(
                       (a) => a.sectionCode === section.code,
                     );
@@ -8135,18 +9960,8 @@ export default function AdminEnrollees({
                               disabled={sectionAssignments.length === 0}
                             >
                               {allSectionAssignmentsSelected
-                                ? "Clear Section"
-                                : "Select Section"}
-                            </button>
-                            <button
-                              type="button"
-                              className="action-btn auto-assign"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openAssignmentAutoAssignModal(section);
-                              }}
-                            >
-                              <FaMagic /> Auto-Assign
+                                ? "Clear Subjects"
+                                : "Select All Subjects"}
                             </button>
                             {isExpanded ? <FaChevronUp /> : <FaChevronDown />}
                           </div>
@@ -8235,11 +10050,577 @@ export default function AdminEnrollees({
                 </div>
               </div>
             )}
+
+            {/* Evaluation */}
+            {activeManagementTab === "evaluation" && (
+              <div className="management-section evaluation-management-section">
+                <div className="section-header-actions">
+                  <div>
+                    <h3>Evaluation</h3>
+                    <p className="evaluation-management-subtitle">
+                      Open or close student evaluations and monitor teacher
+                      satisfaction ratings.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="add-btn evaluation-questionnaire-btn"
+                    onClick={() => {
+                      const selectedCategoryId =
+                        selectedQuestionnaireCategoryId ||
+                        evaluationQuestionnaire[0]?.id ||
+                        "";
+                      setSelectedQuestionnaireCategoryId(selectedCategoryId);
+                      setShowQuestionnaireModal(true);
+                    }}
+                  >
+                    <FaPlus /> Manage Questionnaire
+                  </button>
+                </div>
+
+                <div className="evaluation-admin-summary">
+                  <div className="evaluation-admin-stat">
+                    <span>Open Evaluations</span>
+                    <strong>
+                      {
+                        instructorEvaluationSummaries.filter(
+                          (summary) => summary.isOpen,
+                        ).length
+                      }
+                    </strong>
+                  </div>
+                  <div className="evaluation-admin-stat">
+                    <span>Teachers Tracked</span>
+                    <strong>{instructorEvaluationSummaries.length}</strong>
+                  </div>
+                  <div className="evaluation-admin-stat">
+                    <span>Questionnaire Items</span>
+                    <strong>{questionnaireQuestionCount}</strong>
+                  </div>
+                </div>
+
+                <div className="evaluation-admin-grid">
+                  {instructorEvaluationSummaries.length > 0 ? (
+                    instructorEvaluationSummaries.map((summary) => (
+                      <article
+                        key={summary.instructor.id}
+                        className={`evaluation-admin-card ${
+                          summary.isOpen ? "open" : "closed"
+                        }`}
+                      >
+                        <div className="evaluation-admin-card-head">
+                          <div className="instructor-avatar evaluation-avatar">
+                            <FaChalkboardTeacher />
+                          </div>
+                          <div className="evaluation-admin-title">
+                            <h4>{summary.instructor.name}</h4>
+                            <p>
+                              {summary.instructor.employeeId} •{" "}
+                              {summary.instructor.department || "Department TBA"}
+                            </p>
+                          </div>
+                          <span
+                            className={`evaluation-status-pill ${
+                              summary.isOpen ? "open" : "closed"
+                            }`}
+                          >
+                            {summary.isOpen ? "Open" : "Closed"}
+                          </span>
+                        </div>
+
+                        <div className="evaluation-admin-meta">
+                          <span>{summary.sections.length} sections</span>
+                          <span>{summary.responseCount} responses</span>
+                        </div>
+
+                        <div className="evaluation-card-actions">
+                          {loggedInRole === "Admin" && (
+                            <button
+                              type="button"
+                              className="evaluation-toggle-btn details"
+                              onClick={() => openEvaluationDetails(summary)}
+                              disabled={summary.assignments.length === 0}
+                            >
+                              <FaEye />
+                              View Details
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className={`evaluation-toggle-btn ${
+                              summary.isOpen ? "close" : "open"
+                            }`}
+                            onClick={() =>
+                              toggleInstructorEvaluation(
+                                summary.instructor.id,
+                                !summary.isOpen,
+                              )
+                            }
+                            disabled={summary.assignments.length === 0}
+                          >
+                            {summary.isOpen ? <FaToggleOn /> : <FaToggleOff />}
+                            {summary.isOpen
+                              ? "Close Evaluation"
+                              : "Open Evaluation"}
+                          </button>
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <div className="empty-assignment evaluation-empty">
+                      <p>Add instructors first to manage evaluation access.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
 
       {/* Modals remain the same as original */}
+      {loggedInRole === "Admin" && selectedEvaluationSummary && (
+        <div className="review-modal-overlay" role="dialog">
+          <div className="review-modal evaluation-details-modal">
+            <div className="review-modal-header">
+              <div>
+                <h2>{selectedEvaluationSummary.instructor.name}</h2>
+                <p className="questionnaire-modal-subtitle">
+                  Evaluation result percentages by question.
+                </p>
+              </div>
+              <button
+                className="review-modal-close"
+                onClick={() => setSelectedEvaluationDetailsInstructorId("")}
+                aria-label="Close evaluation details"
+              >
+                x
+              </button>
+            </div>
+            <div className="review-modal-body evaluation-details-body">
+              <div className="evaluation-details-filters">
+                <div className="form-group">
+                  <label>Subject</label>
+                  <select
+                    value={resolvedEvaluationSubjectId}
+                    onChange={(event) =>
+                      setEvaluationDetailsFilters((prev) => ({
+                        ...prev,
+                        subjectId: event.target.value,
+                        yearLevel: "",
+                        section: "All",
+                      }))
+                    }
+                  >
+                    {selectedEvaluationSubjectOptions.length > 0 ? (
+                      selectedEvaluationSubjectOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">No subject assigned</option>
+                    )}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Year Level</label>
+                  <select
+                    value={resolvedEvaluationYearLevel}
+                    onChange={(event) =>
+                      setEvaluationDetailsFilters((prev) => ({
+                        ...prev,
+                        yearLevel: event.target.value,
+                        section: "All",
+                      }))
+                    }
+                  >
+                    {selectedEvaluationYearOptions.length > 0 ? (
+                      selectedEvaluationYearOptions.map((yearLevel) => (
+                        <option key={yearLevel} value={yearLevel}>
+                          {yearLevel}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">No year level available</option>
+                    )}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Section</label>
+                  <select
+                    value={resolvedEvaluationSection}
+                    onChange={(event) =>
+                      setEvaluationDetailsFilters((prev) => ({
+                        ...prev,
+                        section: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="All">All Section</option>
+                    {selectedEvaluationSectionOptions.map((section) => (
+                      <option key={section} value={section}>
+                        {section}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="evaluation-details-summary">
+                <div>
+                  <span>Filtered Responses</span>
+                  <strong>{selectedEvaluationFilteredSubmissions.length}</strong>
+                </div>
+                <div>
+                  <span>Total Responses</span>
+                  <strong>{selectedEvaluationSummary.responseCount}</strong>
+                </div>
+              </div>
+
+              <div className="evaluation-results-list">
+                {evaluationQuestionnaire.length > 0 ? (
+                  evaluationQuestionnaire.map((category) => (
+                    <section
+                      key={`details-${category.id}`}
+                      className="evaluation-results-category"
+                    >
+                      <h3>{category.name}</h3>
+                      {category.questions.length > 0 ? (
+                        category.questions.map((question) => {
+                          const questionType = question.type || "rating";
+                          const ratings = selectedEvaluationFilteredSubmissions
+                            .map((submission) => submission.responses[question.id])
+                            .filter(
+                              (rating): rating is number =>
+                                typeof rating === "number" &&
+                                Number.isFinite(rating) &&
+                                rating >= 1 &&
+                                rating <= 5,
+                            );
+                          const essayAnswers = selectedEvaluationFilteredSubmissions
+                            .map((submission) => ({
+                              answer: submission.responses[question.id],
+                            }))
+                            .filter(
+                              (item): item is {
+                                answer: string;
+                              } =>
+                                typeof item.answer === "string" &&
+                                item.answer.trim().length > 0,
+                            );
+                          const answerCount =
+                            questionType === "essay"
+                              ? essayAnswers.length
+                              : ratings.length;
+
+                          return (
+                            <div
+                              key={`details-${question.id}`}
+                              className="evaluation-result-question"
+                            >
+                              <div className="evaluation-result-question-head">
+                                <strong>{question.text}</strong>
+                                <span>{answerCount} answers</span>
+                              </div>
+                              {questionType === "essay" ? (
+                                <div className="evaluation-essay-results">
+                                  {essayAnswers.length > 0 ? (
+                                    essayAnswers.map((item, index) => (
+                                      <blockquote
+                                        key={`${question.id}-${index}`}
+                                      >
+                                        <p>{item.answer}</p>
+                                        <cite>{anonymousEvaluationResponderLabel}</cite>
+                                      </blockquote>
+                                    ))
+                                  ) : (
+                                    <div className="questionnaire-empty-row">
+                                      No written answers yet.
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="evaluation-result-bars">
+                                  {[5, 4, 3, 2, 1].map((rating) => {
+                                    const ratingCount = ratings.filter(
+                                      (value) => value === rating,
+                                    ).length;
+                                    const percentage =
+                                      answerCount > 0
+                                        ? Math.round(
+                                            (ratingCount / answerCount) * 100,
+                                          )
+                                        : 0;
+
+                                    return (
+                                      <div
+                                        key={`${question.id}-${rating}`}
+                                        className="evaluation-result-bar-row"
+                                      >
+                                        <span>{rating}</span>
+                                        <div className="evaluation-result-track">
+                                          <i
+                                            style={{ width: `${percentage}%` }}
+                                          />
+                                        </div>
+                                        <strong>{percentage}%</strong>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="questionnaire-empty-row">
+                          No questions in this category.
+                        </div>
+                      )}
+                    </section>
+                  ))
+                ) : (
+                  <div className="questionnaire-empty-preview">
+                    No questionnaire has been configured yet.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="review-modal-footer">
+              <button
+                type="button"
+                className="action-btn add"
+                onClick={downloadEvaluationReport}
+              >
+                Download Evaluation Report
+              </button>
+              <button
+                type="button"
+                className="action-btn secondary"
+                onClick={() => setSelectedEvaluationDetailsInstructorId("")}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showQuestionnaireModal && (
+        <div className="review-modal-overlay" role="dialog">
+          <div className="review-modal questionnaire-modal">
+            <div className="review-modal-header">
+              <div>
+                <h2>Manage Questionnaire</h2>
+                <p className="questionnaire-modal-subtitle">
+                  Create rating categories and questions for student evaluations.
+                </p>
+              </div>
+              <button
+                className="review-modal-close"
+                onClick={() => setShowQuestionnaireModal(false)}
+                aria-label="Close questionnaire modal"
+              >
+                x
+              </button>
+            </div>
+            <div className="review-modal-body questionnaire-modal-body">
+              <div className="questionnaire-form-card">
+                <h3>Questionnaire Form</h3>
+                <div className="questionnaire-inline-form">
+                  <div className="form-group">
+                    <label>Category Name</label>
+                    <input
+                      type="text"
+                      value={questionnaireCategoryName}
+                      onChange={(event) =>
+                        setQuestionnaireCategoryName(event.target.value)
+                      }
+                      placeholder="Category 1"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="questionnaire-save-btn"
+                    onClick={handleAddQuestionnaireCategory}
+                  >
+                    <FaPlus /> Add Category
+                  </button>
+                </div>
+
+                <div className="questionnaire-inline-form">
+                  <div className="form-group">
+                    <label>Category</label>
+                    <select
+                      value={selectedQuestionnaireCategoryId}
+                      onChange={(event) =>
+                        setSelectedQuestionnaireCategoryId(event.target.value)
+                      }
+                    >
+                      {evaluationQuestionnaire.length > 0 ? (
+                        evaluationQuestionnaire.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">Add a category first</option>
+                      )}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Question Name</label>
+                    <input
+                      type="text"
+                      value={questionnaireQuestionText}
+                      onChange={(event) =>
+                        setQuestionnaireQuestionText(event.target.value)
+                      }
+                      placeholder="Question 1"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Question Type</label>
+                    <select
+                      value={questionnaireQuestionType}
+                      onChange={(event) =>
+                        setQuestionnaireQuestionType(
+                          event.target.value === "essay" ? "essay" : "rating",
+                        )
+                      }
+                    >
+                      <option value="rating">Rating</option>
+                      <option value="essay">
+                        Constructed-response question
+                      </option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    className="questionnaire-save-btn"
+                    onClick={handleAddQuestionnaireQuestion}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+
+              <div className="questionnaire-preview-card">
+                <div className="questionnaire-rating-legend">
+                  <strong>Rating Legend</strong>
+                  <span>
+                    5 = Strongly Agree, 4 = Agree, 3 = Uncertain, 2 =
+                    Disagree, 1 = Strongly Disagree
+                  </span>
+                </div>
+
+                {evaluationQuestionnaire.length > 0 ? (
+                  <div className="questionnaire-category-list">
+                    {evaluationQuestionnaire.map((category) => (
+                      <section
+                        key={category.id}
+                        className="questionnaire-category-block"
+                      >
+                        <div className="questionnaire-category-heading">
+                          <span>{category.name}</span>
+                          <button
+                            type="button"
+                            className="questionnaire-icon-btn"
+                            onClick={() =>
+                              handleDeleteQuestionnaireCategory(category.id)
+                            }
+                            aria-label={`Delete ${category.name}`}
+                            title={`Delete ${category.name}`}
+                          >
+                            <FaTrash />
+                          </button>
+                        </div>
+
+                        <div className="questionnaire-table">
+                          <div className="questionnaire-table-row heading">
+                            <strong>Questions</strong>
+                            {[5, 4, 3, 2, 1].map((rating) => (
+                              <strong key={rating}>{rating}</strong>
+                            ))}
+                            <strong>Action</strong>
+                          </div>
+
+                          {category.questions.length > 0 ? (
+                            category.questions.map((question) => (
+                              <div
+                                key={question.id}
+                                className={`questionnaire-table-row ${
+                                  (question.type || "rating") === "essay"
+                                    ? "essay"
+                                    : ""
+                                }`}
+                              >
+                                <span>
+                                  {question.text}
+                                  <small>
+                                    {(question.type || "rating") === "essay"
+                                      ? "Constructed-response question"
+                                      : "Rating"}
+                                  </small>
+                                </span>
+                                {(question.type || "rating") === "essay" ? (
+                                  <span className="questionnaire-essay-preview">
+                                    Written response
+                                  </span>
+                                ) : (
+                                  [5, 4, 3, 2, 1].map((rating) => (
+                                    <span
+                                      key={rating}
+                                      className="questionnaire-radio-preview"
+                                    />
+                                  ))
+                                )}
+                                <button
+                                  type="button"
+                                  className="questionnaire-icon-btn"
+                                  onClick={() =>
+                                    handleDeleteQuestionnaireQuestion(
+                                      category.id,
+                                      question.id,
+                                    )
+                                  }
+                                  aria-label={`Delete ${question.text}`}
+                                  title={`Delete ${question.text}`}
+                                >
+                                  <FaTrash />
+                                </button>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="questionnaire-empty-row">
+                              No questions in this category yet.
+                            </div>
+                          )}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="questionnaire-empty-preview">
+                    Add a category to start building the evaluation form.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="review-modal-footer">
+              <button
+                type="button"
+                className="action-btn secondary"
+                onClick={() => setShowQuestionnaireModal(false)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedRequest && (
         <div className="review-modal-overlay" role="dialog">
           <div className="review-modal application-review-modal">
@@ -8349,6 +10730,10 @@ export default function AdminEnrollees({
                         {isTransfereeAdmission(selectedRequest) && (
                           <>
                             <div className="personal-info-item">
+                              <span>Requested Year Level</span>
+                              <strong>{selectedRequest.yearLevel}</strong>
+                            </div>
+                            <div className="personal-info-item">
                               <span>Validation Status</span>
                               <strong>
                                 {selectedTransfereeEvaluation &&
@@ -8393,7 +10778,7 @@ export default function AdminEnrollees({
                                 <input
                                   type="number"
                                   min="0"
-                                  max="100"
+                                  max={SCHOLARSHIP_EXAM_MAX_SCORE}
                                   step="1"
                                   value={pendingScholarshipScore}
                                   onChange={(event) =>
@@ -8403,7 +10788,7 @@ export default function AdminEnrollees({
                                   }
                                   placeholder={
                                     selectedRequest.appliedForScholarship
-                                      ? "Enter exam score"
+                                      ? `Score out of ${SCHOLARSHIP_EXAM_MAX_SCORE}`
                                       : "Optional"
                                   }
                                 />
@@ -8431,6 +10816,15 @@ export default function AdminEnrollees({
                                   <strong>
                                     {
                                       selectedAdmissionTuition.honorDiscountPercentage
+                                    }
+                                    %
+                                  </strong>
+                                </div>
+                                <div className="personal-info-item">
+                                  <span>Scholarship Exam Discount</span>
+                                  <strong>
+                                    {
+                                      selectedAdmissionTuition.scholarshipExamDiscountPercentage
                                     }
                                     %
                                   </strong>
@@ -8495,6 +10889,32 @@ export default function AdminEnrollees({
                   </div>
                 </div>
               </div>
+              {!isEnrollmentRequest(selectedRequest) && (
+                <div className="personal-information-section admission-personal-information-section">
+                  <h3>Personal Information</h3>
+                  <div className="personal-information-card">
+                    <div className="personal-info-grid admission-personal-info-grid">
+                      {getAdmissionPersonalInfoItems(selectedRequest).map(
+                        (item) => (
+                          <div
+                            className={[
+                              "personal-info-item",
+                              item.isWide ? "personal-info-item-wide" : "",
+                              item.spanClassName || "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                            key={item.label}
+                          >
+                            <span>{item.label}</span>
+                            <strong>{getReviewInfoValue(item.value)}</strong>
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
               {isEnrollmentRequest(selectedRequest) &&
                 selectedRequest.requestedLoad?.mode === "retake" && (
                   <div className="requirements-section enrollment-retake-review-section">
@@ -8618,39 +11038,6 @@ export default function AdminEnrollees({
 
                       return (
                         <>
-                          <div className="transferee-review-note">
-                            {irregularRequest.mode === "own_schedule"
-                              ? "This student is asking to open the own schedule planner again for the next term. Approving the request will let the student submit a fresh schedule selection from the portal."
-                              : "This student asked to stay in a specific section for the next term. Approving the request will publish that section load as the student&apos;s official schedule when the section subjects are already available."}
-                          </div>
-                          <div className="retake-request-summary-row">
-                            <div className="requirement-stat pending">
-                              <span>Request type</span>
-                              <strong>
-                                {irregularRequest.mode === "own_schedule"
-                                  ? "Own Schedule"
-                                  : "Specific Section"}
-                              </strong>
-                            </div>
-                            <div className="requirement-stat approved">
-                              <span>
-                                {irregularRequest.mode === "own_schedule"
-                                  ? "Target term"
-                                  : "Requested section"}
-                              </span>
-                              <strong>
-                                {irregularRequest.mode === "own_schedule"
-                                  ? `${selectedRequest.semester}`
-                                  : requestedSection?.code ||
-                                    irregularRequest.requestedSectionCode ||
-                                    "Not available"}
-                              </strong>
-                            </div>
-                            <div className="requirement-stat redo">
-                              <span>Published schedules</span>
-                              <strong>{scheduledAssignments.length}</strong>
-                            </div>
-                          </div>
                           {irregularRequest.mode === "section_assignment" &&
                           !requestedSection ? (
                             <div className="retake-request-warning">
@@ -8864,12 +11251,19 @@ export default function AdminEnrollees({
                         <p className="transferee-review-title">
                           Required validation before approval
                         </p>
+                        {selectedTransfereeLocked && (
+                          <div className="transferee-review-note">
+                            This transferee has already been approved, so the
+                            validation details are locked.
+                          </div>
+                        )}
                         <label className="transferee-check">
                           <input
                             type="checkbox"
                             checked={
                               selectedTransfereeEvaluation.credentialsReviewed
                             }
+                            disabled={selectedTransfereeLocked}
                             onChange={(event) =>
                               updateTransfereeEvaluation(selectedRequest, {
                                 credentialsReviewed: event.target.checked,
@@ -8886,6 +11280,7 @@ export default function AdminEnrollees({
                             checked={
                               selectedTransfereeEvaluation.placementConfirmed
                             }
+                            disabled={selectedTransfereeLocked}
                             onChange={(event) =>
                               updateTransfereeEvaluation(selectedRequest, {
                                 placementConfirmed: event.target.checked,
@@ -8902,6 +11297,7 @@ export default function AdminEnrollees({
                             checked={
                               selectedTransfereeEvaluation.subjectLoadValidated
                             }
+                            disabled={selectedTransfereeLocked}
                             onChange={(event) =>
                               updateTransfereeEvaluation(selectedRequest, {
                                 subjectLoadValidated: event.target.checked,
@@ -8919,15 +11315,29 @@ export default function AdminEnrollees({
                           Placement and section planning
                         </p>
                         <label className="transferee-field">
-                          <span>Resolved Year Level</span>
+                          <span>Target Year Level</span>
                           <select
                             value={selectedTransfereeEvaluation.resolvedYearLevel}
+                            disabled={selectedTransfereeLocked}
                             onChange={(event) => {
                               const nextYearLevel = event.target.value;
+                              const nextPlanningSemesters =
+                                getTransfereePlanningSemesters(
+                                  selectedRequest,
+                                  nextYearLevel,
+                                );
+                              const nextSemester =
+                                (nextPlanningSemesters.includes(
+                                  selectedTransfereeEvaluation.plannedSemester,
+                                )
+                                    ? selectedTransfereeEvaluation.plannedSemester
+                                    : nextPlanningSemesters[0]) ||
+                                DEFAULT_SECTION_SEMESTER;
                               const nextMatchingSections =
                                 getMatchingSectionsForEnrollee(
                                   selectedRequest,
                                   nextYearLevel,
+                                  nextSemester,
                                 );
                               const nextRecommendedSectionId =
                                 nextMatchingSections.some(
@@ -8937,29 +11347,6 @@ export default function AdminEnrollees({
                                 )
                                   ? selectedTransfereeEvaluation.recommendedSectionId
                                   : "";
-                              const nextPlanningSemesters =
-                                getTransfereePlanningSemesters(
-                                  selectedRequest,
-                                  nextYearLevel,
-                                );
-                              const nextSectionSemester = nextRecommendedSectionId
-                                ? normalizeSectionSemester(
-                                    nextMatchingSections.find(
-                                      (section) =>
-                                        section.id === nextRecommendedSectionId,
-                                    )?.semester,
-                                  )
-                                : "";
-                              const nextSemester =
-                                (nextSectionSemester &&
-                                nextPlanningSemesters.includes(nextSectionSemester)
-                                  ? nextSectionSemester
-                                  : nextPlanningSemesters.includes(
-                                        selectedTransfereeEvaluation.plannedSemester,
-                                      )
-                                    ? selectedTransfereeEvaluation.plannedSemester
-                                    : nextPlanningSemesters[0]) ||
-                                DEFAULT_SECTION_SEMESTER;
                               const nextAvailableSubjectIds = new Set(
                                 getTransfereePlanningSubjects(
                                   selectedRequest,
@@ -8973,10 +11360,7 @@ export default function AdminEnrollees({
                                 plannedSemester: nextSemester,
                                 recommendedSectionId: nextRecommendedSectionId,
                                 creditedSubjectIds:
-                                  selectedTransfereeEvaluation.creditedSubjectIds.filter(
-                                    (subjectId) =>
-                                      nextAvailableSubjectIds.has(subjectId),
-                                  ),
+                                  selectedTransfereeEvaluation.creditedSubjectIds,
                                 assignedSubjectIds:
                                   selectedTransfereeEvaluation.assignedSubjectIds.filter(
                                     (subjectId) =>
@@ -8995,9 +11379,77 @@ export default function AdminEnrollees({
                           </select>
                         </label>
                         <label className="transferee-field">
-                          <span>Suggested Section</span>
+                          <span>Target Semester</span>
+                          <select
+                            value={selectedTransfereeEvaluation.plannedSemester}
+                            disabled={selectedTransfereeLocked}
+                            onChange={(event) => {
+                              const nextSemester = normalizeSectionSemester(
+                                event.target.value,
+                              );
+                              const nextAvailableSubjectIds = new Set(
+                                getTransfereePlanningSubjects(
+                                  selectedRequest,
+                                  selectedTransfereeEvaluation.resolvedYearLevel,
+                                  nextSemester,
+                                ).map((subject) => subject.id),
+                              );
+
+                              updateTransfereeEvaluation(selectedRequest, {
+                                plannedSemester: nextSemester,
+                                recommendedSectionId:
+                                  getMatchingSectionsForEnrollee(
+                                    selectedRequest,
+                                    selectedTransfereeEvaluation.resolvedYearLevel,
+                                    nextSemester,
+                                  ).some(
+                                    (section) =>
+                                      section.id ===
+                                      selectedTransfereeEvaluation.recommendedSectionId,
+                                  )
+                                    ? selectedTransfereeEvaluation.recommendedSectionId
+                                    : "",
+                                creditedSubjectIds:
+                                  selectedTransfereeEvaluation.creditedSubjectIds,
+                                assignedSubjectIds:
+                                  selectedTransfereeEvaluation.assignedSubjectIds.filter(
+                                    (subjectId) =>
+                                      nextAvailableSubjectIds.has(subjectId),
+                                  ),
+                              });
+                            }}
+                          >
+                            {(selectedTransfereePlanningSemesters.length > 0
+                              ? selectedTransfereePlanningSemesters
+                              : [DEFAULT_SECTION_SEMESTER]
+                            ).map((semester) => (
+                              <option key={semester} value={semester}>
+                                {semester}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="transferee-field">
+                          <span>Academic Year</span>
+                          <input
+                            type="text"
+                            value={
+                              selectedTransfereeEvaluation.plannedAcademicYear
+                            }
+                            disabled={selectedTransfereeLocked}
+                            onChange={(event) =>
+                              updateTransfereeEvaluation(selectedRequest, {
+                                plannedAcademicYear: event.target.value,
+                              })
+                            }
+                            placeholder={reflectedAcademicYear}
+                          />
+                        </label>
+                        <label className="transferee-field">
+                          <span>Available Section</span>
                           <select
                             value={selectedTransfereeEvaluation.recommendedSectionId}
+                            disabled={selectedTransfereeLocked}
                             onChange={(event) => {
                               const nextSectionId = event.target.value;
                               const nextSection = selectedTransfereeMatchingSections.find(
@@ -9018,10 +11470,7 @@ export default function AdminEnrollees({
                                 recommendedSectionId: nextSectionId,
                                 plannedSemester: nextSemester,
                                 creditedSubjectIds:
-                                  selectedTransfereeEvaluation.creditedSubjectIds.filter(
-                                    (subjectId) =>
-                                      nextAvailableSubjectIds.has(subjectId),
-                                  ),
+                                  selectedTransfereeEvaluation.creditedSubjectIds,
                                 assignedSubjectIds:
                                   selectedTransfereeEvaluation.assignedSubjectIds.filter(
                                     (subjectId) =>
@@ -9043,6 +11492,7 @@ export default function AdminEnrollees({
                           <span>Validation Notes</span>
                           <textarea
                             value={selectedTransfereeEvaluation.notes}
+                            disabled={selectedTransfereeLocked}
                             onChange={(event) =>
                               updateTransfereeEvaluation(selectedRequest, {
                                 notes: event.target.value,
@@ -9054,7 +11504,7 @@ export default function AdminEnrollees({
                         </label>
                         <div className="transferee-review-note">
                           {selectedTransfereeMatchingSections.length > 0
-                            ? "Matching sections are based on the applicant's current program and strand/course with the resolved year level above."
+                            ? "Matching sections are based on the applicant's program, strand/course, target year level, and target semester."
                             : "No matching section is available yet. You can still approve first and assign the section later from the section manager."}
                         </div>
                       </div>
@@ -9074,7 +11524,7 @@ export default function AdminEnrollees({
                             <div className="transferee-planner-stat">
                               <span>Curriculum</span>
                               <strong>
-                                {selectedTransfereeAvailableSubjects.length}
+                                {selectedTransfereeFilteredCreditSubjects.length}
                               </strong>
                             </div>
                             <div className="transferee-planner-stat">
@@ -9091,208 +11541,301 @@ export default function AdminEnrollees({
                             </div>
                           </div>
                         </div>
-                        <div className="transferee-planner-filters">
-                          <label className="transferee-field">
-                            <span>Planning Semester</span>
-                            <select
-                              value={selectedTransfereeEvaluation.plannedSemester}
-                              onChange={(event) => {
-                                const nextSemester = normalizeSectionSemester(
-                                  event.target.value,
-                                );
-                                const nextAvailableSubjectIds = new Set(
-                                  getTransfereePlanningSubjects(
-                                    selectedRequest,
-                                    selectedTransfereeEvaluation.resolvedYearLevel,
-                                    nextSemester,
-                                  ).map((subject) => subject.id),
-                                );
-
-                                updateTransfereeEvaluation(selectedRequest, {
-                                  plannedSemester: nextSemester,
-                                  creditedSubjectIds:
-                                    selectedTransfereeEvaluation.creditedSubjectIds.filter(
-                                      (subjectId) =>
-                                        nextAvailableSubjectIds.has(subjectId),
-                                    ),
-                                  assignedSubjectIds:
-                                    selectedTransfereeEvaluation.assignedSubjectIds.filter(
-                                      (subjectId) =>
-                                        nextAvailableSubjectIds.has(subjectId),
-                                    ),
-                                });
-                              }}
-                            >
-                              {(selectedTransfereePlanningSemesters.length > 0
-                                ? selectedTransfereePlanningSemesters
-                                : [DEFAULT_SECTION_SEMESTER]
-                              ).map((semester) => (
-                                <option key={semester} value={semester}>
-                                  {semester}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="transferee-field">
-                            <span>Academic Year</span>
-                            <input
-                              type="text"
-                              value={selectedTransfereeEvaluation.plannedAcademicYear}
-                              onChange={(event) =>
-                                updateTransfereeEvaluation(selectedRequest, {
-                                  plannedAcademicYear: event.target.value,
-                                })
-                              }
-                              placeholder={reflectedAcademicYear}
-                            />
-                          </label>
-                        </div>
                         <div className="assignment-subject-picker-header transferee-subject-picker-header">
                           <div>
                             <strong>
                               {selectedTransfereeEvaluation.plannedSemester} load
                             </strong>
                             <p>
-                              Subjects are filtered by the resolved year level,
-                              strand/course, and selected semester above.
+                              Filter the TOR checklist by year level and
+                              semester, then assign the load for the selected
+                              target semester.
                             </p>
                           </div>
-                          <div className="assignment-selection-actions">
-                            <button
-                              type="button"
-                              className="assignment-selection-btn"
-                              onClick={() =>
-                                applyRemainingTransfereeSubjects(
-                                  selectedRequest,
-                                  selectedTransfereeAvailableSubjects,
-                                )
-                              }
-                              disabled={
-                                selectedTransfereeAvailableSubjects.length === 0
-                              }
-                            >
-                              Assign Remaining
-                            </button>
-                            <button
-                              type="button"
-                              className="assignment-selection-btn secondary"
-                              onClick={() =>
-                                clearTransfereeSubjectPlan(selectedRequest)
-                              }
-                              disabled={
-                                selectedTransfereeEvaluation.creditedSubjectIds
-                                  .length === 0 &&
-                                selectedTransfereeEvaluation.assignedSubjectIds
-                                  .length === 0
-                              }
-                            >
-                              Clear Selections
-                            </button>
-                          </div>
                         </div>
-                        {selectedTransfereeAvailableSubjects.length > 0 ? (
+                        {selectedTransfereeCreditSubjectGroups.length > 0 ||
+                        selectedTransfereeAvailableSubjects.length > 0 ? (
                           <div className="transferee-subject-planner-grid">
                             <div className="transferee-subject-column">
                               <h4>Credited from TOR</h4>
-                              <div className="assignment-subject-selector transferee-subject-selector">
-                                {selectedTransfereeAvailableSubjects.map(
-                                  (subject) => {
-                                    const isCredited =
-                                      selectedTransfereeEvaluation.creditedSubjectIds.includes(
-                                        subject.id,
-                                      );
+                              <div className="transferee-credit-filters">
+                                <label className="transferee-field transferee-credit-search-field">
+                                  <span>Search Subjects</span>
+                                  <input
+                                    type="search"
+                                    value={transfereeCreditSearchTerm}
+                                    onChange={(event) =>
+                                      setTransfereeCreditSearchTerm(
+                                        event.target.value,
+                                      )
+                                    }
+                                    placeholder="Search code, title, type..."
+                                  />
+                                </label>
+                                <label className="transferee-field">
+                                  <span>Credit Year Level</span>
+                                  <select
+                                    value={
+                                      selectedTransfereeEvaluation.creditYearLevelFilter
+                                    }
+                                    onChange={(event) => {
+                                      const nextYearLevelFilter =
+                                        event.target.value;
+                                      const nextSemesterOptions =
+                                        sortSemesterValues(
+                                          Array.from(
+                                            new Set(
+                                              selectedTransfereeCreditSubjects
+                                                .filter(
+                                                  (subject) =>
+                                                    nextYearLevelFilter ===
+                                                      "All" ||
+                                                    subject.yearLevel ===
+                                                      nextYearLevelFilter,
+                                                )
+                                                .map((subject) =>
+                                                  normalizeSectionSemester(
+                                                    subject.semester,
+                                                  ),
+                                                ),
+                                            ),
+                                          ),
+                                        );
+                                      const currentSemesterFilter =
+                                        selectedTransfereeEvaluation.creditSemesterFilter;
+                                      const nextSemesterFilter =
+                                        currentSemesterFilter === "All" ||
+                                        nextYearLevelFilter === "All" ||
+                                        nextSemesterOptions.includes(
+                                          currentSemesterFilter,
+                                        )
+                                          ? currentSemesterFilter
+                                          : nextSemesterOptions[0] || "All";
 
-                                    return (
-                                      <label
-                                        key={`credited-${subject.id}`}
-                                        className={`assignment-subject-option ${isCredited ? "selected" : ""}`}
+                                      updateTransfereeEvaluation(selectedRequest, {
+                                        creditYearLevelFilter:
+                                          nextYearLevelFilter,
+                                        creditSemesterFilter: nextSemesterFilter,
+                                      });
+                                    }}
+                                  >
+                                    <option value="All">All Year Levels</option>
+                                    {selectedTransfereeCreditYearLevelOptions.map(
+                                      (yearLevel) => (
+                                        <option
+                                          key={yearLevel}
+                                          value={yearLevel}
+                                        >
+                                          {yearLevel}
+                                        </option>
+                                      ),
+                                    )}
+                                  </select>
+                                </label>
+                                <label className="transferee-field">
+                                  <span>Credit Semester</span>
+                                  <select
+                                    value={
+                                      selectedTransfereeResolvedCreditSemesterFilter
+                                    }
+                                    onChange={(event) =>
+                                      updateTransfereeEvaluation(
+                                        selectedRequest,
+                                        {
+                                          creditSemesterFilter:
+                                            event.target.value,
+                                        },
+                                      )
+                                    }
+                                  >
+                                    <option value="All">All Semesters</option>
+                                    {selectedTransfereeCreditSemesterOptions.map(
+                                      (semester) => (
+                                        <option key={semester} value={semester}>
+                                          {semester}
+                                        </option>
+                                      ),
+                                    )}
+                                  </select>
+                                </label>
+                              </div>
+                              <div className="assignment-subject-selector transferee-subject-selector">
+                                {selectedTransfereeCreditSubjectGroups.length >
+                                0 ? (
+                                  selectedTransfereeCreditSubjectGroups.map(
+                                    (group) => (
+                                      <div
+                                        key={`${group.yearLevel}-${group.semester}`}
+                                        className="transferee-credit-group"
                                       >
-                                        <span className="assignment-subject-control">
-                                          <input
-                                            type="checkbox"
-                                            checked={isCredited}
-                                            onChange={() =>
-                                              toggleTransfereeCreditedSubject(
-                                                selectedRequest,
-                                                subject.id,
-                                              )
-                                            }
-                                          />
-                                        </span>
-                                        <div className="assignment-subject-details">
-                                          <strong>
-                                            {subject.code} - {subject.name}
-                                          </strong>
-                                          <span>
-                                            {getSubjectTypeLabel(subject)}
-                                            {subject.units
-                                              ? ` | ${subject.units} units`
-                                              : ""}
-                                          </span>
+                                        <div className="transferee-credit-group-heading">
+                                          <strong>{group.yearLevel}</strong>
+                                          <span>{group.semester}</span>
                                         </div>
-                                      </label>
-                                    );
-                                  },
+                                        {group.subjects.map((subject) => {
+                                          const isCredited =
+                                            selectedTransfereeEvaluation.creditedSubjectIds.includes(
+                                              subject.id,
+                                            );
+
+                                          return (
+                                            <label
+                                              key={`credited-${subject.id}`}
+                                              className={`assignment-subject-option ${isCredited ? "selected" : ""}`}
+                                            >
+                                              <span className="assignment-subject-control">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={isCredited}
+                                                  disabled={selectedTransfereeLocked}
+                                                  onChange={() =>
+                                                    toggleTransfereeCreditedSubject(
+                                                      selectedRequest,
+                                                      subject.id,
+                                                    )
+                                                  }
+                                                />
+                                              </span>
+                                              <div className="assignment-subject-details">
+                                                <strong>
+                                                  {subject.code} - {subject.name}
+                                                </strong>
+                                                <span>
+                                                  {getSubjectTypeLabel(subject)}
+                                                  {subject.units
+                                                    ? ` | ${subject.units} units`
+                                                    : ""}
+                                                </span>
+                                              </div>
+                                            </label>
+                                          );
+                                        })}
+                                      </div>
+                                    ),
+                                  )
+                                ) : (
+                                  <div className="assignment-subject-empty">
+                                    No curriculum subjects match the selected
+                                    credit filters yet.
+                                  </div>
                                 )}
                               </div>
                             </div>
                             <div className="transferee-subject-column">
                               <h4>Subject load to assign</h4>
-                              <div className="assignment-subject-selector transferee-subject-selector">
-                                {selectedTransfereeAvailableSubjects.filter(
-                                  (subject) =>
-                                    !selectedTransfereeEvaluation.creditedSubjectIds.includes(
-                                      subject.id,
-                                    ),
-                                ).length > 0 ? (
-                                  selectedTransfereeAvailableSubjects
-                                    .filter(
-                                      (subject) =>
-                                        !selectedTransfereeEvaluation.creditedSubjectIds.includes(
-                                          subject.id,
-                                        ),
-                                    )
-                                    .map((subject) => {
-                                      const isAssigned =
-                                        selectedTransfereeEvaluation.assignedSubjectIds.includes(
-                                          subject.id,
-                                        );
+                              <div className="transferee-load-actions-panel">
+                                <label className="transferee-field transferee-load-search-field">
+                                  <span>Search Subjects</span>
+                                  <input
+                                    type="search"
+                                    value={transfereeLoadSearchTerm}
+                                    onChange={(event) =>
+                                      setTransfereeLoadSearchTerm(
+                                        event.target.value,
+                                      )
+                                    }
+                                    placeholder="Search code, title, type..."
+                                  />
+                                </label>
+                                <div className="assignment-selection-actions">
+                                  <button
+                                    type="button"
+                                    className="assignment-selection-btn"
+                                    onClick={() =>
+                                      applyRemainingTransfereeSubjects(
+                                        selectedRequest,
+                                        selectedTransfereeAvailableSubjects,
+                                      )
+                                    }
+                                    disabled={
+                                      selectedTransfereeLocked ||
+                                      selectedTransfereeAvailableSubjects.length ===
+                                      0
+                                    }
+                                  >
+                                    Assign Remaining
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="assignment-selection-btn secondary"
+                                    onClick={() =>
+                                      clearTransfereeSubjectPlan(selectedRequest)
+                                    }
+                                    disabled={
+                                      selectedTransfereeLocked ||
+                                      selectedTransfereeEvaluation
+                                        .creditedSubjectIds.length === 0 &&
+                                      selectedTransfereeEvaluation
+                                        .assignedSubjectIds.length === 0
+                                    }
+                                  >
+                                    Clear Selections
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="assignment-subject-selector transferee-subject-selector transferee-load-subject-selector">
+                                {selectedTransfereeFilteredAssignableSubjects.length >
+                                0 ? (
+                                  <div className="transferee-credit-group">
+                                    <div className="transferee-credit-group-heading">
+                                      <strong>
+                                        {
+                                          selectedTransfereeEvaluation.resolvedYearLevel
+                                        }
+                                      </strong>
+                                      <span>
+                                        {
+                                          selectedTransfereeEvaluation.plannedSemester
+                                        }
+                                      </span>
+                                    </div>
+                                    {selectedTransfereeFilteredAssignableSubjects.map(
+                                      (subject) => {
+                                        const isAssigned =
+                                          selectedTransfereeEvaluation.assignedSubjectIds.includes(
+                                            subject.id,
+                                          );
 
-                                      return (
-                                        <label
-                                          key={`assigned-${subject.id}`}
-                                          className={`assignment-subject-option ${isAssigned ? "selected" : ""}`}
-                                        >
-                                          <span className="assignment-subject-control">
-                                            <input
-                                              type="checkbox"
-                                              checked={isAssigned}
-                                              onChange={() =>
-                                                toggleTransfereeAssignedSubject(
-                                                  selectedRequest,
-                                                  subject.id,
-                                                )
-                                              }
-                                            />
-                                          </span>
-                                          <div className="assignment-subject-details">
-                                            <strong>
-                                              {subject.code} - {subject.name}
-                                            </strong>
-                                            <span>
-                                              {getSubjectTypeLabel(subject)}
-                                              {subject.units
-                                                ? ` | ${subject.units} units`
-                                                : ""}
+                                        return (
+                                          <label
+                                            key={`assigned-${subject.id}`}
+                                            className={`assignment-subject-option ${isAssigned ? "selected" : ""}`}
+                                          >
+                                            <span className="assignment-subject-control">
+                                              <input
+                                                type="checkbox"
+                                                checked={isAssigned}
+                                                disabled={selectedTransfereeLocked}
+                                                onChange={() =>
+                                                  toggleTransfereeAssignedSubject(
+                                                    selectedRequest,
+                                                    subject.id,
+                                                  )
+                                                }
+                                              />
                                             </span>
-                                          </div>
-                                        </label>
-                                      );
-                                    })
+                                            <div className="assignment-subject-details">
+                                              <strong>
+                                                {subject.code} - {subject.name}
+                                              </strong>
+                                              <span>
+                                                {getSubjectTypeLabel(subject)}
+                                                {subject.units
+                                                  ? ` | ${subject.units} units`
+                                                  : ""}
+                                              </span>
+                                            </div>
+                                          </label>
+                                        );
+                                      },
+                                    )}
+                                  </div>
                                 ) : (
                                   <div className="assignment-subject-empty">
-                                    All matching subjects are already credited
-                                    from the TOR for this semester.
+                                    {selectedTransfereeAssignableSubjects.length >
+                                    0
+                                      ? "No subject load matches your search."
+                                      : "All matching subjects are already credited from the TOR for this semester."}
                                   </div>
                                 )}
                               </div>
@@ -9506,6 +12049,12 @@ export default function AdminEnrollees({
                         closeReviewModal();
                       }
                     }}
+                    disabled={!!selectedRequestHasEnrollmentRedoRequirement}
+                    title={
+                      selectedRequestHasEnrollmentRedoRequirement
+                        ? "Student must resend the requirement marked for redo before approval."
+                        : undefined
+                    }
                   >
                     {isEnrollmentRequest(selectedRequest)
                       ? "Approve Request"
@@ -9579,29 +12128,21 @@ export default function AdminEnrollees({
               )}
               {selectedAction.action === "reject" && (
                 <>
-                  <p className="confirmation-note warning">
-                    The student will be notified of this decision by email.
-                  </p>
                   <div className="confirmation-field">
-                    <label htmlFor="rejection-reason-select">
+                    <label htmlFor="rejection-reason-message">
                       Rejection reason
                     </label>
-                    <select
-                      id="rejection-reason-select"
+                    <textarea
+                      id="rejection-reason-message"
                       value={selectedRejectionReason}
                       onChange={(event) =>
                         setSelectedRejectionReason(event.target.value)
                       }
-                    >
-                      <option value="">Select a reason</option>
-                      {selectedRejectionReasonOptions.map((reason) => (
-                        <option key={reason} value={reason}>
-                          {reason}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="Type the reason that will be sent to the student..."
+                      rows={5}
+                    />
                     <p className="confirmation-help">
-                      This selected reason will be included in the email notice.
+                      This typed reason will be included in the email notice.
                     </p>
                   </div>
                 </>
@@ -9609,17 +12150,16 @@ export default function AdminEnrollees({
             </div>
             <div className="review-modal-footer">
               <button
+                className={`action-btn ${selectedAction.action === "approve" ? "approve" : "reject"}`}
+                onClick={confirmAction}
+              >
+                {selectedAction.action === "approve" ? "Approve" : "Reject"}
+              </button>
+              <button
                 className="action-btn cancel"
                 onClick={closeConfirmModal}
               >
                 Cancel
-              </button>
-              <button
-                className={`action-btn ${selectedAction.action === "approve" ? "approve" : "reject"}`}
-                onClick={confirmAction}
-              >
-                Yes,{" "}
-                {selectedAction.action === "approve" ? "Approve" : "Reject"}
               </button>
             </div>
           </div>
@@ -9667,13 +12207,12 @@ export default function AdminEnrollees({
                       {sectionManagerScope === "transferees"
                         ? "transferee(s)"
                         : "student(s)"}{" "}
-                      need section
-                      assignment
+                      need section assignment
                     </strong>
                     <p>
                       {sectionManagerScope === "transferees"
-                        ? "These transferees have been approved but not yet assigned to a class section."
-                        : "These students have been approved but not yet assigned to a class section."}
+                        ? "These transferee students are active in the student list but not yet assigned to a class section."
+                        : "These students are active in the student list but not yet assigned to a class section."}
                     </p>
                   </div>
                   <div className="pending-alert-actions">
@@ -9697,9 +12236,9 @@ export default function AdminEnrollees({
                 <h3>{editingSection ? "Edit Section" : "Add New Section"}</h3>
                 {editingSection && (
                   <p className="section-form-note">
-                    Program, year level, and strand/course stay locked while
-                    editing. You can update the semester, rename the section,
-                    and adjust its capacity.
+                    Program and strand/course stay locked while editing. You
+                    can update the year level, semester, section name, and
+                    capacity.
                   </p>
                 )}
                 <div className="add-section-form-row">
@@ -9722,7 +12261,6 @@ export default function AdminEnrollees({
                   </select>
                   <select
                     value={newSection.yearLevel}
-                    disabled={Boolean(editingSection)}
                     onChange={(e) =>
                       setNewSection({
                         ...newSection,
@@ -9832,17 +12370,22 @@ export default function AdminEnrollees({
                 {classSections.map((section) => (
                   <div
                     key={section.id}
-                    className={`section-card ${section.currentEnrollees >= section.maxCapacity ? "full" : ""}`}
+                    className={`section-card ${section.currentEnrollees >= section.maxCapacity ? "full" : ""} ${isSectionLocked(section) ? "locked" : ""}`}
                   >
                     <div className="section-header">
                       <h3>{section.code}</h3>
-                      <span
-                        className={`section-status ${section.currentEnrollees >= section.maxCapacity ? "full" : "available"}`}
-                      >
-                        {section.currentEnrollees >= section.maxCapacity
-                          ? "Full"
-                          : "Available"}
-                      </span>
+                      <div className="section-status-group">
+                        {isSectionLocked(section) && (
+                          <span className="section-status locked">Locked</span>
+                        )}
+                        <span
+                          className={`section-status ${section.currentEnrollees >= section.maxCapacity ? "full" : "available"}`}
+                        >
+                          {section.currentEnrollees >= section.maxCapacity
+                            ? "Full"
+                            : "Available"}
+                        </span>
+                      </div>
                     </div>
                     <div className="section-details">
                       <p>
@@ -9854,11 +12397,14 @@ export default function AdminEnrollees({
                       <p>
                         <strong>Semester:</strong> {section.semester}
                       </p>
-                      {section.strand && (
-                        <p>
-                          <strong>Strand:</strong> {section.strand}
-                        </p>
-                      )}
+                      <p>
+                        <strong>
+                          {section.program === "College" ? "Course" : "Strand"}:
+                        </strong>{" "}
+                        {section.program === "College"
+                          ? DEFAULT_COLLEGE_COURSE
+                          : section.strand || "All"}
+                      </p>
                       <p>
                         <strong>Section:</strong> {section.section}
                       </p>
@@ -9890,6 +12436,13 @@ export default function AdminEnrollees({
                         onClick={() => startEditingSection(section)}
                       >
                         Edit
+                      </button>
+                      <button
+                        className={`action-btn ${isSectionLocked(section) ? "unlock" : "lock"}`}
+                        type="button"
+                        onClick={() => handleToggleSectionLock(section)}
+                      >
+                        {isSectionLocked(section) ? "Unlock" : "Lock"}
                       </button>
                       <button
                         className="action-btn delete"
@@ -9929,9 +12482,14 @@ export default function AdminEnrollees({
                       Select Section
                     </option>
                     {classSections.map((section) => (
-                      <option key={section.id} value={section.id}>
+                      <option
+                        key={section.id}
+                        value={section.id}
+                        disabled={isSectionLocked(section)}
+                      >
                         {section.code} - {section.semester} (
                         {section.currentEnrollees}/{section.maxCapacity})
+                        {isSectionLocked(section) ? " - Locked" : ""}
                       </option>
                     ))}
                   </select>
@@ -9995,6 +12553,8 @@ export default function AdminEnrollees({
                       <th>Student Name</th>
                       <th>Student Number</th>
                       <th>Program</th>
+                      <th>Year Level</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -10003,6 +12563,21 @@ export default function AdminEnrollees({
                         <td>{student.name}</td>
                         <td>{student.studentNumber}</td>
                         <td>{student.program}</td>
+                        <td>{student.yearLevel}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="action-btn remove-student"
+                            onClick={() =>
+                              handleRemoveStudentFromSection({
+                                studentNumber: student.studentNumber,
+                                name: student.name,
+                              })
+                            }
+                          >
+                            Remove
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -10010,6 +12585,300 @@ export default function AdminEnrollees({
               ) : (
                 <p>No students assigned to this section yet.</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDepartmentManagerModal && (
+        <div className="review-modal-overlay" role="dialog" aria-modal="true">
+          <div className="review-modal academic-management-modal">
+            <div className="review-modal-header">
+              <div>
+                <h2>Manage Departments</h2>
+                <p className="assignment-helper-text">
+                  Add departments once, then choose them when creating or editing
+                  instructors.
+                </p>
+              </div>
+              <button
+                className="review-modal-close"
+                onClick={() => setShowDepartmentManagerModal(false)}
+              >
+                x
+              </button>
+            </div>
+            <div className="review-modal-body">
+              <div className="academic-management-create-row">
+                <input
+                  type="text"
+                  placeholder="Department name"
+                  value={newDepartmentName}
+                  onChange={(event) => setNewDepartmentName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleCreateDepartmentOption();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="assignment-selection-btn"
+                  onClick={handleCreateDepartmentOption}
+                >
+                  <FaPlus /> Add Department
+                </button>
+              </div>
+              <div className="academic-management-list-toolbar">
+                <span>{selectedDepartmentNames.length} selected</span>
+                <button
+                  type="button"
+                  className="assignment-selection-btn secondary"
+                  onClick={() =>
+                    setSelectedDepartmentNames(
+                      selectedDepartmentNames.length ===
+                        instructorDepartmentOptions.length
+                        ? []
+                        : instructorDepartmentOptions,
+                    )
+                  }
+                  disabled={instructorDepartmentOptions.length === 0}
+                >
+                  {selectedDepartmentNames.length ===
+                    instructorDepartmentOptions.length &&
+                  instructorDepartmentOptions.length > 0
+                    ? "Clear Selection"
+                    : "Select All"}
+                </button>
+                <button
+                  type="button"
+                  className="action-btn delete"
+                  onClick={handleDeleteSelectedDepartments}
+                  disabled={selectedDepartmentNames.length === 0}
+                >
+                  <FaTrash /> Delete Selected
+                </button>
+              </div>
+              <div className="academic-management-option-list">
+                {instructorDepartmentOptions.length > 0 ? (
+                  instructorDepartmentOptions.map((department) => {
+                    const isSelected =
+                      selectedDepartmentNames.includes(department);
+
+                    return (
+                      <label
+                        key={department}
+                        className={`academic-management-option-row ${isSelected ? "selected" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleDepartmentSelection(department)}
+                        />
+                        <span>{department}</span>
+                        <button
+                          type="button"
+                          className="trash-icon-btn"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            handleDeleteDepartmentOption(department);
+                          }}
+                          aria-label={`Remove ${department}`}
+                          title={`Remove ${department}`}
+                        >
+                          <FaTrash />
+                        </button>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <div className="assignment-subject-empty">
+                    No departments added yet.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="review-modal-footer">
+              <button
+                className="action-btn cancel"
+                onClick={() => setShowDepartmentManagerModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showClassroomManagerModal && (
+        <div className="review-modal-overlay" role="dialog" aria-modal="true">
+          <div className="review-modal academic-management-modal">
+            <div className="review-modal-header">
+              <div>
+                <h2>Classroom Management</h2>
+                <p className="assignment-helper-text">
+                  Add classrooms here so assignment schedules can use them from
+                  the room dropdown.
+                </p>
+              </div>
+              <button
+                className="review-modal-close"
+                onClick={() => setShowClassroomManagerModal(false)}
+              >
+                x
+              </button>
+            </div>
+            <div className="review-modal-body">
+              <div className="academic-management-create-row">
+                <input
+                  type="text"
+                  placeholder="Classroom name"
+                  value={newRoomName}
+                  onChange={(event) => setNewRoomName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleCreateRoomOption();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="assignment-selection-btn"
+                  onClick={() => {
+                    void handleCreateRoomOption();
+                  }}
+                >
+                  <FaPlus /> Add Classroom
+                </button>
+              </div>
+              <div className="academic-management-list-toolbar">
+                <span>{selectedClassroomNames.length} selected</span>
+                <button
+                  type="button"
+                  className="assignment-selection-btn secondary"
+                  onClick={() =>
+                    setSelectedClassroomNames(
+                      selectedClassroomNames.length ===
+                        assignmentRoomOptions.length
+                        ? []
+                        : assignmentRoomOptions,
+                    )
+                  }
+                  disabled={assignmentRoomOptions.length === 0}
+                >
+                  {selectedClassroomNames.length === assignmentRoomOptions.length &&
+                  assignmentRoomOptions.length > 0
+                    ? "Clear Selection"
+                    : "Select All"}
+                </button>
+                <button
+                  type="button"
+                  className="action-btn delete"
+                  onClick={() => {
+                    void handleDeleteSelectedClassrooms();
+                  }}
+                  disabled={selectedClassroomNames.length === 0}
+                >
+                  <FaTrash /> Delete Selected
+                </button>
+              </div>
+              <div className="academic-management-option-list">
+                {assignmentRoomOptions.length > 0 ? (
+                  assignmentRoomOptions.map((room) => {
+                    const isSelected = selectedClassroomNames.includes(room);
+
+                    return (
+                      <label
+                        key={room}
+                        className={`academic-management-option-row ${isSelected ? "selected" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleClassroomSelection(room)}
+                        />
+                        <span>{room}</span>
+                        <button
+                          type="button"
+                          className="trash-icon-btn"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            void handleDeleteRoomOption(room);
+                          }}
+                          aria-label={`Remove ${room}`}
+                          title={`Remove ${room}`}
+                        >
+                          <FaTrash />
+                        </button>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <div className="assignment-subject-empty">
+                    No classrooms added yet.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="review-modal-footer">
+              <button
+                className="action-btn cancel"
+                onClick={() => setShowClassroomManagerModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingAcademicOptionDelete && (
+        <div className="review-modal-overlay" role="dialog" aria-modal="true">
+          <div className="review-modal academic-delete-confirm-modal">
+            <div className="review-modal-header">
+              <h2>
+                Delete{" "}
+                {pendingAcademicOptionDelete.kind === "department"
+                  ? "Department"
+                  : "Classroom"}
+              </h2>
+              <button
+                className="review-modal-close"
+                onClick={() => setPendingAcademicOptionDelete(null)}
+              >
+                x
+              </button>
+            </div>
+            <div className="review-modal-body">
+              <div className="assignment-delete-summary">
+                <strong>Confirm deletion</strong>
+                {pendingAcademicOptionDelete.kind !== "department" ? (
+                  <p>{pendingAcademicOptionDelete.message}</p>
+                ) : null}
+              </div>
+              <div className="academic-delete-list">
+                {pendingAcademicOptionDelete.names.map((name) => (
+                  <span key={name}>{name}</span>
+                ))}
+              </div>
+            </div>
+            <div className="review-modal-footer">
+              <button
+                className="action-btn cancel"
+                onClick={() => setPendingAcademicOptionDelete(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="action-btn delete"
+                onClick={() => {
+                  void handleConfirmAcademicOptionDelete();
+                }}
+              >
+                <FaTrash /> Delete
+              </button>
             </div>
           </div>
         </div>
@@ -10267,6 +13136,14 @@ export default function AdminEnrollees({
               </button>
             </div>
             <div className="review-modal-body">
+              <div className="form-group">
+                <label>Instructor Portal Account</label>
+                <p className="modal-helper-text">
+                  {editingInstructor
+                    ? "Use Reset Temporary Password to generate a new one-time password."
+                    : "A secure temporary password will be generated after saving."}
+                </p>
+              </div>
               <form
                 id="instructor-config-form"
                 onSubmit={(event) => {
@@ -10302,8 +13179,7 @@ export default function AdminEnrollees({
                 </div>
                 <div className="form-group">
                   <label>Department</label>
-                  <input
-                    type="text"
+                  <select
                     value={instructorForm.department}
                     onChange={(event) =>
                       setInstructorForm((prev) => ({
@@ -10311,7 +13187,14 @@ export default function AdminEnrollees({
                         department: event.target.value,
                       }))
                     }
-                  />
+                  >
+                    <option value="">Select department</option>
+                    {instructorDepartmentOptions.map((department) => (
+                      <option key={department} value={department}>
+                        {department}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="form-group">
                   <label>Email</label>
@@ -10348,6 +13231,17 @@ export default function AdminEnrollees({
               >
                 Cancel
               </button>
+              {editingInstructor && (
+                <button
+                  type="button"
+                  className="action-btn warning"
+                  onClick={() => {
+                    void handleResetInstructorPassword();
+                  }}
+                >
+                  Reset Temporary Password
+                </button>
+              )}
               <button
                 type="submit"
                 form="instructor-config-form"
@@ -10500,25 +13394,17 @@ export default function AdminEnrollees({
                           : "Choose a section first to load the matching strand/course subjects."}
                       </p>
                     </div>
-                    {!editingAssignment &&
-                      availableAssignmentSubjects.length > 0 && (
-                        <div className="assignment-selection-actions">
-                          <button
-                            type="button"
-                            className="assignment-selection-btn"
-                            onClick={selectAllAssignmentSubjects}
-                          >
-                            Select All
-                          </button>
-                          <button
-                            type="button"
-                            className="assignment-selection-btn secondary"
-                            onClick={clearAssignmentSubjects}
-                          >
-                            Clear
-                          </button>
-                        </div>
-                      )}
+                    {availableAssignmentSubjects.length > 0 && (
+                      <div className="assignment-selection-actions">
+                        <button
+                          type="button"
+                          className="assignment-selection-btn secondary"
+                          onClick={clearAssignmentSubjects}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="assignment-subject-selector">
                     {availableAssignmentSubjects.length > 0 ? (
@@ -10534,7 +13420,7 @@ export default function AdminEnrollees({
                           >
                             <span className="assignment-subject-control">
                               <input
-                                type={editingAssignment ? "radio" : "checkbox"}
+                                type="radio"
                                 name="assignment-subjects"
                                 checked={isSelected}
                                 onChange={() =>
@@ -10567,57 +13453,146 @@ export default function AdminEnrollees({
                 <div className="assignment-schedule-panel">
                   <div className="assignment-schedule-heading">
                     <label>Scheduling</label>
-                    <span>Set the day, time, and room for this assignment.</span>
+                    <span>
+                      Add every meeting day for this subject. Each saved slot
+                      will appear in the class schedule.
+                    </span>
                   </div>
-                  <div className="schedule-inputs">
-                    <div className="schedule-field">
-                      <span className="schedule-field-label">Day</span>
-                      <select
-                        value={assignmentForm.scheduleDay}
-                        onChange={(e) =>
-                          setAssignmentForm((prev) => ({
-                            ...prev,
-                            scheduleDay: e.target.value,
-                          }))
-                        }
-                      >
-                        <option value="">Select day</option>
-                        {SCHEDULE_DAYS.map((day) => (
-                          <option key={day} value={day}>
-                            {day}
-                          </option>
-                        ))}
-                      </select>
+                  {assignmentForm.schedule.length > 0 && (
+                    <div className="assignment-schedule-slots">
+                      {assignmentForm.schedule.map((slot, index) => (
+                        <div
+                          className="assignment-schedule-slot"
+                          key={`${slot.day}-${slot.startTime}-${slot.endTime}-${index}`}
+                        >
+                          <div className="schedule-field">
+                            <span className="schedule-field-label">Day</span>
+                            <select
+                              value={slot.day}
+                              onChange={(e) =>
+                                updateAssignmentScheduleSlot(
+                                  index,
+                                  "day",
+                                  e.target.value,
+                                )
+                              }
+                            >
+                              <option value="">Select day</option>
+                              {SCHEDULE_DAYS.map((day) => (
+                                <option key={day} value={day}>
+                                  {day}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="schedule-field">
+                            <span className="schedule-field-label">Start time</span>
+                            <input
+                              type="time"
+                              value={slot.startTime}
+                              onChange={(e) =>
+                                updateAssignmentScheduleSlot(
+                                  index,
+                                  "startTime",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                          </div>
+                          <div className="schedule-field">
+                            <span className="schedule-field-label">End time</span>
+                            <input
+                              type="time"
+                              value={slot.endTime}
+                              onChange={(e) =>
+                                updateAssignmentScheduleSlot(
+                                  index,
+                                  "endTime",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                          </div>
+                          <div className="schedule-field schedule-field-room">
+                            <span className="schedule-field-label">Room</span>
+                            <select
+                              value={slot.room}
+                              onChange={(e) =>
+                                updateAssignmentScheduleSlot(
+                                  index,
+                                  "room",
+                                  e.target.value,
+                                )
+                              }
+                            >
+                              <option value="">TBA</option>
+                              {assignmentRoomOptions.map((room) => (
+                                <option key={room} value={room}>
+                                  {room}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <button
+                            type="button"
+                            className="assignment-schedule-remove-btn"
+                            onClick={() => removeAssignmentScheduleSlot(index)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                    <div className="schedule-field">
-                      <span className="schedule-field-label">Start time</span>
-                      <input
-                        type="time"
-                        value={assignmentForm.startTime}
-                        onChange={(e) =>
-                          setAssignmentForm((prev) => ({
-                            ...prev,
-                            startTime: e.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="schedule-field">
-                      <span className="schedule-field-label">End time</span>
-                      <input
-                        type="time"
-                        value={assignmentForm.endTime}
-                        onChange={(e) =>
-                          setAssignmentForm((prev) => ({
-                            ...prev,
-                            endTime: e.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="schedule-field schedule-field-room">
-                      <span className="schedule-field-label">Room</span>
-                      <div className="room-select-row">
+                  )}
+                  {showScheduleDraftFields && (
+                    <div className="schedule-inputs">
+                      <div className="schedule-field">
+                        <span className="schedule-field-label">Day</span>
+                        <select
+                          value={assignmentForm.scheduleDay}
+                          onChange={(e) =>
+                            setAssignmentForm((prev) => ({
+                              ...prev,
+                              scheduleDay: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Select day</option>
+                          {SCHEDULE_DAYS.map((day) => (
+                            <option key={day} value={day}>
+                              {day}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="schedule-field">
+                        <span className="schedule-field-label">Start time</span>
+                        <input
+                          type="time"
+                          value={assignmentForm.startTime}
+                          onChange={(e) =>
+                            setAssignmentForm((prev) => ({
+                              ...prev,
+                              startTime: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="schedule-field">
+                        <span className="schedule-field-label">End time</span>
+                        <input
+                          type="time"
+                          value={assignmentForm.endTime}
+                          onChange={(e) =>
+                            setAssignmentForm((prev) => ({
+                              ...prev,
+                              endTime: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="schedule-field schedule-field-room">
+                        <span className="schedule-field-label">Room</span>
                         <select
                           value={assignmentForm.room}
                           onChange={(e) =>
@@ -10634,60 +13609,30 @@ export default function AdminEnrollees({
                             </option>
                           ))}
                         </select>
-                        <button
-                          type="button"
-                          className="assignment-room-add-btn"
-                          onClick={() => {
-                            if (showRoomCreator) {
-                              resetRoomCreator();
-                              return;
-                            }
-
-                            setShowRoomCreator(true);
-                            setNewRoomName("");
-                          }}
-                          aria-label="Add room"
-                          title="Add room"
-                        >
-                          <FaPlus />
-                        </button>
                       </div>
                     </div>
-                  </div>
-                  {showRoomCreator && (
-                    <div className="room-creator-panel">
-                      <input
-                        type="text"
-                        placeholder="Enter room name"
-                        value={newRoomName}
-                        onChange={(e) => setNewRoomName(e.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            handleCreateRoomOption();
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="assignment-selection-btn"
-                        onClick={handleCreateRoomOption}
-                      >
-                        Save room
-                      </button>
+                  )}
+                  <div className="assignment-schedule-actions">
+                    <button
+                      type="button"
+                      className="assignment-selection-btn"
+                      onClick={addAssignmentScheduleSlot}
+                    >
+                      <FaPlus />{" "}
+                      {showScheduleDraftFields
+                        ? "Save Schedule Day"
+                        : "Add Schedule Day"}
+                    </button>
+                    {showScheduleDraftFields && (
                       <button
                         type="button"
                         className="assignment-selection-btn secondary"
-                        onClick={resetRoomCreator}
+                        onClick={clearAssignmentScheduleDraft}
                       >
                         Cancel
                       </button>
-                    </div>
-                  )}
-                  <p className="assignment-helper-text assignment-schedule-note">
-                    Leave the schedule blank if you want to assign the subject
-                    now and finalize the timing later.
-                  </p>
+                    )}
+                  </div>
                 </div>
               </form>
             </div>
@@ -10846,9 +13791,7 @@ export default function AdminEnrollees({
                       <span>
                         {selectedMoveStudent.program} |{" "}
                         {selectedMoveStudent.yearLevel}
-                        {selectedMoveStudent.strandOrCourse
-                          ? ` | ${selectedMoveStudent.strandOrCourse}`
-                          : ""}
+                        {` | ${getCourseStrandDisplay(selectedMoveStudent)}`}
                       </span>
                     </div>
                     {selectedMoveStudentCurrentSectionChoice ? (
@@ -10881,8 +13824,21 @@ export default function AdminEnrollees({
                         >
                           <option value="">Select section</option>
                           {selectedMoveStudentSectionChoices.map((sectionChoice) => (
-                            <option key={sectionChoice.id} value={sectionChoice.code}>
+                            <option
+                              key={sectionChoice.id}
+                              value={sectionChoice.code}
+                              disabled={
+                                isSectionChoiceLocked(sectionChoice.code) &&
+                                normalizeSectionCodeValue(sectionChoice.code) !==
+                                  normalizeSectionCodeValue(
+                                    selectedMoveStudent.section,
+                                  )
+                              }
+                            >
                               {buildStudentSectionOptionLabel(sectionChoice)}
+                              {isSectionChoiceLocked(sectionChoice.code)
+                                ? " - Locked"
+                                : ""}
                             </option>
                           ))}
                         </select>

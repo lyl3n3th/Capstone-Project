@@ -1,5 +1,7 @@
 import { supabase } from "../lib/supabase";
 import {
+  forgetDeletedStoredStudent,
+  isStoredStudentDeleted,
   normalizeBranchName,
   type StudentStorageRecord,
 } from "./adminStorage";
@@ -8,6 +10,10 @@ import {
   saveStudentPlanningState,
   fetchStudentPlanningStates,
 } from "./studentPlanningApi";
+import {
+  toDisplayCapitalization,
+  toNameCapitalization,
+} from "../utils/textFormatting";
 
 type SupabaseErrorLike = {
   code?: string;
@@ -150,33 +156,33 @@ const mapAdminStudentRow = (
   row: AdminStudentApiRecord,
 ): StudentStorageRecord => ({
   id: row.student_number,
-  name: row.full_name,
-  program: row.program,
-  yearLevel: row.year_level,
-  section: row.section || "",
-  shsTrackType: row.shs_track_type || "",
-  strandOrCourse: row.strand_or_course || "",
+  name: toNameCapitalization(row.full_name),
+  program: toDisplayCapitalization(row.program),
+  yearLevel: toDisplayCapitalization(row.year_level),
+  section: toDisplayCapitalization(row.section),
+  shsTrackType: toDisplayCapitalization(row.shs_track_type),
+  strandOrCourse: toDisplayCapitalization(row.strand_or_course),
   documentSubmitted: toIsoDateInput(row.document_submitted_date),
   contact: row.contact_number || "",
   email: row.email || "",
-  address: row.address || "",
+  address: toDisplayCapitalization(row.address),
   status: row.status,
   branch: normalizeBranchName(row.branch),
   trackingNumber:
     row.tracking_number && row.tracking_number !== row.student_number
       ? row.tracking_number
       : undefined,
-  studentStatus: row.student_status || "",
+  studentStatus: toDisplayCapitalization(row.student_status),
   requestedOwnSchedule: row.requested_own_schedule,
   ownScheduleRequestStatus: row.own_schedule_request_status || undefined,
   ownScheduleAcademicYear: row.own_schedule_academic_year || undefined,
   ownScheduleSemester: row.own_schedule_semester || undefined,
   ownScheduleSelectionStatus: row.own_schedule_selection_status || undefined,
   birthDate: toIsoDateInput(row.birth_date),
-  guardianName: row.guardian_name || "",
+  guardianName: toNameCapitalization(row.guardian_name),
   guardianContact: row.guardian_contact || "",
   gender: row.sex,
-  civilStatus: row.civil_status,
+  civilStatus: toDisplayCapitalization(row.civil_status),
 });
 
 const buildStudentPayload = (
@@ -221,7 +227,9 @@ export async function fetchAdminStudents(branch?: string | null) {
   }
 
   const rows = Array.isArray(data) ? data : [];
-  const students = rows.map(mapAdminStudentRow);
+  const students = rows
+    .map(mapAdminStudentRow)
+    .filter((student) => !isStoredStudentDeleted(student));
 
   try {
     const planningStates = await fetchStudentPlanningStates(branch);
@@ -253,6 +261,8 @@ export async function getNextAdminStudentNumber(branch?: string | null) {
 }
 
 export async function saveAdminStudent(student: StudentStorageRecord) {
+  forgetDeletedStoredStudent(student);
+
   const { data, error } = await supabase
     .rpc("upsert_admin_student", {
       p_payload: buildStudentPayload(student),
@@ -326,6 +336,40 @@ export async function saveAdminStudent(student: StudentStorageRecord) {
   };
 }
 
+export async function updateAdminStudentEmail({
+  branch,
+  studentNumber,
+  trackingNumber,
+  email,
+}: {
+  branch?: string | null;
+  studentNumber: string;
+  trackingNumber?: string | null;
+  email: string;
+}) {
+  const { data, error } = await supabase
+    .rpc("update_admin_student_email", {
+      p_payload: {
+        branch: branch ? normalizeBranchName(branch) : null,
+        student_number: studentNumber,
+        tracking_number: trackingNumber || null,
+        email,
+      },
+    })
+    .returns<AdminStudentApiRecord[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<AdminStudentApiRecord>(data);
+  if (!row) {
+    throw new Error("Supabase did not return the updated student email.");
+  }
+
+  return mapAdminStudentRow(row);
+}
+
 export async function updateAdminStudentStatus({
   branch,
   studentNumber,
@@ -355,4 +399,38 @@ export async function updateAdminStudentStatus({
   }
 
   return mapAdminStudentRow(row);
+}
+
+export async function deleteAdminStudent({
+  branch,
+  studentNumber,
+  trackingNumber,
+}: {
+  branch?: string | null;
+  studentNumber: string;
+  trackingNumber?: string | null;
+}) {
+  const { data, error } = await supabase
+    .rpc("delete_admin_student", {
+      p_payload: {
+        branch: branch ? normalizeBranchName(branch) : null,
+        student_number: studentNumber,
+        tracking_number: trackingNumber || null,
+      },
+    })
+    .returns<Array<{ student_number: string; tracking_number: string | null }>>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<{ student_number: string; tracking_number: string | null }>(
+    data,
+  );
+
+  if (!row) {
+    throw new Error("Supabase did not confirm the deleted student.");
+  }
+
+  return row;
 }

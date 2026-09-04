@@ -251,16 +251,17 @@ export default function AdminDashboard({
               <ResponsiveContainer
                 width="100%"
                 height="100%"
-                minWidth={0}
-                minHeight={300}
+                minWidth={1}
+                minHeight={280}
+                initialDimension={{ width: 360, height: 360 }}
               >
                 <PieChart>
                   <Pie
                     data={programData}
                     cx="50%"
                     cy="50%"
-                    innerRadius={60}
-                    outerRadius={110}
+                    innerRadius="38%"
+                    outerRadius="70%"
                     paddingAngle={5}
                     dataKey="value"
                   >

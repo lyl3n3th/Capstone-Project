@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Progress from "../../components/Progress";
 import { StatusDropdown } from "../../components/common/StatusDropdown";
 import { BranchCard } from "../../components/common/BranchCard";
@@ -9,17 +9,18 @@ import { useAdmissionPortalOverview } from "../../hooks/useAdmissionPortalStatus
 import {
   admissionBranches,
   admissionStatusOptions,
+  fetchAdmissionBranches,
   generateAicsTrackingNumber,
+  type AdmissionBranchOption,
 } from "../../services/admission";
 import { formatAdmissionCloseDate } from "../../services/admissionPortal";
 
-// Data
-const branchRules: Record<string, string[]> = {
-  "Junior High Completer": ["bacoor", "taytay", "gma"],
-  "Senior High Graduate": ["bacoor"],
-  Transferee: ["bacoor", "taytay", "gma"],
-  "Foreign Student": ["bacoor", "taytay", "gma"],
-  "Cross-Registrant": ["bacoor", "taytay", "gma"],
+const isBranchAllowedForStatus = (status: string, branchCode: string) => {
+  if (status === "Senior High Graduate") {
+    return branchCode === "bacoor";
+  }
+
+  return ["Junior High Completer", "Transferee"].includes(status);
 };
 
 interface Toast {
@@ -29,6 +30,10 @@ interface Toast {
 }
 
 const getInitialAdmissionStep1Draft = () => {
+  const isAvailableStatus = (
+    value?: string,
+  ): value is (typeof admissionStatusOptions)[number] =>
+    admissionStatusOptions.includes(value as (typeof admissionStatusOptions)[number]);
   const savedDraft = sessionStorage.getItem("enrollmentDraft");
   if (!savedDraft) {
     return {
@@ -40,12 +45,20 @@ const getInitialAdmissionStep1Draft = () => {
   try {
     const draft = JSON.parse(savedDraft) as {
       branch?: string;
+      submitted?: boolean;
       status?: string;
     };
 
+    if (draft.submitted) {
+      return {
+        branch: "",
+        status: "Select Status",
+      };
+    }
+
     return {
       branch: draft.branch ?? "",
-      status: draft.status ?? "Select Status",
+      status: isAvailableStatus(draft.status) ? draft.status : "Select Status",
     };
   } catch (error) {
     console.warn("Failed to parse draft", error);
@@ -63,8 +76,24 @@ function AdmissionStep1() {
   );
   const [status, setStatus] = useState(initialDraft.status);
   const [loading, setLoading] = useState(false);
+  const [branchOptions, setBranchOptions] = useState<
+    AdmissionBranchOption[]
+  >([...admissionBranches]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const { branches: branchStatuses } = useAdmissionPortalOverview();
+
+  useEffect(() => {
+    const loadBranches = async () => {
+      try {
+        const branches = await fetchAdmissionBranches();
+        setBranchOptions(branches);
+      } catch (error) {
+        console.error("Unable to load admission branches", error);
+      }
+    };
+
+    void loadBranches();
+  }, []);
 
   const addToast = (message: string, type: Toast["type"]) => {
     const id = Date.now().toString();
@@ -86,7 +115,7 @@ function AdmissionStep1() {
       return true;
     }
 
-    if (!branchRules[status]?.includes(branchCode)) {
+    if (!isBranchAllowedForStatus(status, branchCode)) {
       return true;
     }
 
@@ -99,7 +128,7 @@ function AdmissionStep1() {
       branchStatus?.closeOnDate ?? "",
     );
 
-    if (!branchStatus?.isOpen) {
+    if (branchStatus && !branchStatus.isOpen) {
       return formattedCloseDate
         ? `${branchName} branch - Admissions closed on ${formattedCloseDate}`
         : `${branchName} branch - Admissions closed`;
@@ -166,10 +195,13 @@ function AdmissionStep1() {
     if (existingDraft) {
       try {
         const parsed = JSON.parse(existingDraft);
+        const shouldStartFresh = Boolean(parsed.submitted);
         const trackingNum =
-          parsed.trackingNumber || generateAicsTrackingNumber();
+          shouldStartFresh || !parsed.trackingNumber
+            ? generateAicsTrackingNumber()
+            : parsed.trackingNumber;
         draftData = {
-          ...parsed,
+          ...(shouldStartFresh ? {} : parsed),
           trackingNumber: trackingNum,
           branch: activeSelectedBranch,
           status,
@@ -230,7 +262,7 @@ function AdmissionStep1() {
             <p>Choose the branch you wish to enroll in</p>
           </div>
 
-          {admissionBranches.map((branch) => (
+          {branchOptions.map((branch) => (
             <BranchCard
               key={branch.code}
               branch={branch}
