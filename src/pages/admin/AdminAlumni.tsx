@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   FaSearch,
   FaUserGraduate,
@@ -415,13 +415,16 @@ export default function AdminAlumni({
     }
   };
 
+  const loadAlumniAndStudentsRef = useRef(loadAlumniAndStudents);
+  loadAlumniAndStudentsRef.current = loadAlumniAndStudents;
+
   useEffect(() => {
-    loadAlumniAndStudents();
+    void loadAlumniAndStudentsRef.current();
   }, []);
 
   useEffect(() => {
     const handleBackupRestoreApplied = () => {
-      void loadAlumniAndStudents();
+      void loadAlumniAndStudentsRef.current();
     };
 
     window.addEventListener(

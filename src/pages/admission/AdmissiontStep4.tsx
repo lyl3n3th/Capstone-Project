@@ -2,7 +2,7 @@ import "../../styles/main.css";
 import { FaCopy } from "react-icons/fa";
 import { FaCircleExclamation } from "react-icons/fa6";
 import Progress from "../../components/Progress";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import {
@@ -66,7 +66,7 @@ function AdmissionStep4() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  const persistOwnScheduleRequest = (nextValue: boolean) => {
+  const persistOwnScheduleRequest = useCallback((nextValue: boolean) => {
     if (nextValue && applicationData?.programLevel !== "college") {
       setRequestOwnSchedule(false);
       mergeAdmissionDraft({
@@ -79,7 +79,7 @@ function AdmissionStep4() {
     mergeAdmissionDraft({
       requestOwnSchedule: nextValue,
     });
-  };
+  }, [applicationData?.programLevel]);
 
   const handleScheduleRequestClick = () => {
     if (requestOwnSchedule) {
@@ -406,7 +406,12 @@ function AdmissionStep4() {
     if (applicationData && !isCollege && requestOwnSchedule) {
       persistOwnScheduleRequest(false);
     }
-  }, [applicationData, isCollege, requestOwnSchedule]);
+  }, [
+    applicationData,
+    isCollege,
+    persistOwnScheduleRequest,
+    requestOwnSchedule,
+  ]);
 
   const tuitionEstimate = getEstimatedCollegeTuition({
     honorLabel: applicationData?.honorLabel ?? null,

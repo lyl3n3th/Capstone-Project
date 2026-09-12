@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FaUserPlus,
   FaUserGraduate,
@@ -1401,6 +1401,20 @@ const buildProgressedBlockSectionCode = ({
   return `${prefix}${requestedYearCode}-${blockLabel}`;
 };
 
+const storageScopes = {
+  enrollees: "enrollees",
+  enrollmentRequests: "enrollment-requests",
+  classSections: "class-sections",
+  sectionAssignments: "section-assignments",
+  subjects: "subjects",
+  instructors: "instructors",
+  instructorDepartments: "instructor-departments",
+  subjectAssignments: "subject-assignments",
+  assignmentRooms: "assignment-rooms",
+  transfereeEvaluations: "transferee-evaluations",
+  studentSubjectPlans: "student-subject-plans",
+} as const;
+
 export default function AdminEnrollees({
   onLogout,
   loggedInUsername,
@@ -1677,19 +1691,6 @@ export default function AdminEnrollees({
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  const storageScopes = {
-    enrollees: "enrollees",
-    enrollmentRequests: "enrollment-requests",
-    classSections: "class-sections",
-    sectionAssignments: "section-assignments",
-    subjects: "subjects",
-    instructors: "instructors",
-    instructorDepartments: "instructor-departments",
-    subjectAssignments: "subject-assignments",
-    assignmentRooms: "assignment-rooms",
-    transfereeEvaluations: "transferee-evaluations",
-    studentSubjectPlans: "student-subject-plans",
-  } as const;
   const reflectedAcademicYear =
     enrollmentRequests[0]?.academicYear ||
     subjectAssignments[0]?.academicYear ||
@@ -4666,8 +4667,9 @@ export default function AdminEnrollees({
     },
   });
 
-  const updatePendingAssignments = () => {
-    const approvedUnassigned = getActiveBranchStudents()
+  const updatePendingAssignments = useCallback(() => {
+    const approvedUnassigned = getStudentsForBranch(currentBranch)
+      .filter((student) => student.status !== "Archived")
       .filter(
         (student) =>
           !normalizeSectionCodeValue(student.section) &&
@@ -4677,7 +4679,7 @@ export default function AdminEnrollees({
       .map(mapStoredStudentToSectionCandidate);
 
     setPendingAssignments(approvedUnassigned);
-  };
+  }, [currentBranch]);
 
   const syncStudentSection = (enrollee: Enrollee, sectionCode: string) => {
     if (!enrollee.studentNumber) {
@@ -6416,6 +6418,23 @@ export default function AdminEnrollees({
     }
   };
 
+  const branchLoadersRef = useRef({
+    loadClassSections,
+    loadSubjects,
+    loadInstructors,
+    loadSubjectAssignments,
+    loadEnrollmentRequests,
+    loadEnrollees,
+  });
+  branchLoadersRef.current = {
+    loadClassSections,
+    loadSubjects,
+    loadInstructors,
+    loadSubjectAssignments,
+    loadEnrollmentRequests,
+    loadEnrollees,
+  };
+
   useEffect(() => {
     if (!hasInitializedBranchData) {
       return;
@@ -6457,6 +6476,15 @@ export default function AdminEnrollees({
   }, [currentBranch, studentSubjectPlans, hasInitializedBranchData]);
 
   useEffect(() => {
+    const {
+      loadClassSections: loadBranchClassSections,
+      loadSubjects: loadBranchSubjects,
+      loadInstructors: loadBranchInstructors,
+      loadSubjectAssignments: loadBranchSubjectAssignments,
+      loadEnrollmentRequests: loadBranchEnrollmentRequests,
+      loadEnrollees: loadBranchEnrollees,
+    } = branchLoadersRef.current;
+
     const initializeBranchData = async () => {
       const storedSectionAssignments = readBranchScopedData<
         SectionAssignment[]
@@ -6509,13 +6537,15 @@ export default function AdminEnrollees({
         remoteRooms.length > 0 ? remoteRooms : fallbackRooms;
       setCustomAssignmentRooms(resolvedRoomOptions);
 
-      await loadEnrollmentRequests();
-      const loadedEnrollees = await loadEnrollees();
-      const loadedSections = await loadClassSections(
+      await loadBranchEnrollmentRequests();
+      const loadedEnrollees = await loadBranchEnrollees();
+      const loadedSections = await loadBranchClassSections(
         remoteAcademicSnapshot?.classSections,
       );
-      const loadedSubjects = await loadSubjects(remoteAcademicSnapshot?.subjects);
-      const loadedInstructors = await loadInstructors(
+      const loadedSubjects = await loadBranchSubjects(
+        remoteAcademicSnapshot?.subjects,
+      );
+      const loadedInstructors = await loadBranchInstructors(
         remoteAcademicSnapshot?.instructors,
       );
       setInstructorDepartments(
@@ -6524,7 +6554,7 @@ export default function AdminEnrollees({
           ...loadedInstructors.map((instructor) => instructor.department),
         ]),
       );
-      const loadedAssignments = await loadSubjectAssignments(
+      const loadedAssignments = await loadBranchSubjectAssignments(
         remoteAcademicSnapshot?.subjectAssignments,
       );
 
@@ -6636,7 +6666,6 @@ export default function AdminEnrollees({
     currentBranch,
     hasInitializedBranchData,
     instructorDepartmentOptions,
-    storageScopes.instructorDepartments,
   ]);
 
   useEffect(() => {
@@ -6665,7 +6694,7 @@ export default function AdminEnrollees({
 
   useEffect(() => {
     updatePendingAssignments();
-  }, [currentBranch, enrollees, sectionAssignments]);
+  }, [currentBranch, enrollees, sectionAssignments, updatePendingAssignments]);
 
   const handleAttachmentStatusUpdate = async (
     requestId: string,

@@ -1581,7 +1581,7 @@ function StudentEnrollment() {
     return () => {
       isCancelled = true;
     };
-  }, [student?.branch, student?.studentNumber, student?.trackingNumber]);
+  }, [student]);
 
   useEffect(() => {
     if (!activeEnrollmentRequest?.attachments?.length) {

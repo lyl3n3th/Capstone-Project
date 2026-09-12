@@ -127,8 +127,10 @@ function AdmissionStep3() {
   }, [program]); // Re-run when program changes
 
   useEffect(() => {
+    const previewUrls = previewUrlsRef.current;
+
     return () => {
-      Object.values(previewUrlsRef.current).forEach((previewUrl) => {
+      Object.values(previewUrls).forEach((previewUrl) => {
         URL.revokeObjectURL(previewUrl);
       });
     };

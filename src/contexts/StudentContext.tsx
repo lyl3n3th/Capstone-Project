@@ -105,7 +105,7 @@ export const StudentProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Load data only once on mount
   useEffect(() => {
-    loadStudent(true);
+    void loadStudentRef.current(true);
   }, []);
 
   useEffect(() => {

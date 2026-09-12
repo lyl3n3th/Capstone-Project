@@ -158,8 +158,11 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
     }
   };
 
+  const fetchReportsRef = useRef(fetchReports);
+  fetchReportsRef.current = fetchReports;
+
   useEffect(() => {
-    void fetchReports();
+    void fetchReportsRef.current();
   }, []);
 
   const inboxCount = reports.length;

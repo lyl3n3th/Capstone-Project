@@ -380,9 +380,14 @@ function AdmissionStep2() {
     }
   };
 
+  const loadDraftRef = useRef(loadDraft);
+  const saveDraftRef = useRef(saveDraft);
+  loadDraftRef.current = loadDraft;
+  saveDraftRef.current = saveDraft;
+
   useEffect(() => {
     if (fromRequirements) {
-      loadDraft();
+      loadDraftRef.current();
     }
   }, [fromRequirements]);
 
@@ -390,11 +395,12 @@ function AdmissionStep2() {
   useEffect(() => {
     if (!isLoadingDraft) {
       const timeoutId = setTimeout(() => {
-        saveDraft();
+        saveDraftRef.current();
       }, 1000);
       return () => clearTimeout(timeoutId);
     }
   }, [
+    isLoadingDraft,
     fname,
     lname,
     mname,
@@ -414,7 +420,7 @@ function AdmissionStep2() {
   ]);
 
   useEffect(() => {
-    loadDraft();
+    loadDraftRef.current();
   }, []);
 
   // Handle input changes

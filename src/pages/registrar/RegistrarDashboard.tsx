@@ -74,12 +74,16 @@ export default function RegistrarDashboard({
 
   const hasStudentData = students.length > 0;
 
-  const activeStudents = hasStudentData
-    ? students.filter(
-        (student) =>
-          student.status !== "Archived" && student.status !== "Graduated",
-      )
-    : [];
+  const activeStudents = useMemo(
+    () =>
+      hasStudentData
+        ? students.filter(
+            (student) =>
+              student.status !== "Archived" && student.status !== "Graduated",
+          )
+        : [],
+    [hasStudentData, students],
+  );
 
   const totalStudents = hasStudentData ? activeStudents.length : 250;
   const completeRequirements = hasStudentData

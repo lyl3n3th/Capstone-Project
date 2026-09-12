@@ -1664,8 +1664,11 @@ export default function AdminStudents({
   }, [currentBranch, hasLoadedStudentPlanData, studentSubjectPlans]);
 
   const studentAcademicStandingById = useMemo(
-    () =>
-      Object.fromEntries(
+    () => {
+      // Grade records are stored outside React state, so this version invalidates
+      // the derived standings after a grade update event.
+      void gradeRecordsVersion;
+      return Object.fromEntries(
         students.map((student) => [
           student.id,
           getStudentAcademicStanding({
@@ -1674,7 +1677,8 @@ export default function AdminStudents({
             studentId: student.id,
           }),
         ]),
-      ),
+      );
+    },
     [students, currentBranch, gradeRecordsVersion],
   );
   const getStudentAcademicStandingLabel = (student: Student) =>
@@ -3030,13 +3034,16 @@ export default function AdminStudents({
       ) ?? null
     : null;
   const viewingStudentGradeRecords = useMemo(
-    () =>
-      viewingStudent
+    () => {
+      // Grade records are stored outside React state; refresh when their version changes.
+      void gradeRecordsVersion;
+      return viewingStudent
         ? getStudentGradeRecords({
             branch: viewingStudent.branch || currentBranch,
             studentId: viewingStudent.id,
           })
-        : [],
+        : [];
+    },
     [currentBranch, gradeRecordsVersion, viewingStudent],
   );
   const viewingStudentGradeTriggerIds = useMemo(
@@ -3219,14 +3226,17 @@ export default function AdminStudents({
     0,
   );
   const viewingStudentPayments = useMemo(
-    () =>
-      viewingStudent
+    () => {
+      // Payment records are stored outside React state; refresh when their version changes.
+      void paymentRecordsVersion;
+      return viewingStudent
         ? getStudentPayments({
             branch: viewingStudent.branch || currentBranch,
             studentNumber: viewingStudent.id,
             trackingNumber: viewingStudent.trackingNumber,
           })
-        : [],
+        : [];
+    },
     [currentBranch, paymentRecordsVersion, viewingStudent],
   );
   const viewingStudentTotalAssessment =
@@ -5444,8 +5454,8 @@ export default function AdminStudents({
                                     record.subjectCode,
                                     record.subjectTitle,
                                   ),
-      ),
-    );
+                                ),
+                              );
                               const activeShsQuarterLabels =
                                 getShsQuarterLabelsForSemester(semester);
                               const shsRows = buildShsGradeSummaryRows(
