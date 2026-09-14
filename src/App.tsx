@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import { lazy, Suspense, useEffect, useState } from "react";
+=======
+import { useEffect, useState } from "react";
+>>>>>>> f8e21f2 (For deployment)
 import type { ReactNode } from "react";
 import {
   BrowserRouter,
@@ -9,7 +13,41 @@ import {
   useLocation,
 } from "react-router-dom";
 import { AuthProvider, StudentProvider } from "./contexts";
+<<<<<<< HEAD
 import BackupScheduler from "./components/admin/BackupScheduler";
+=======
+import StudentHome from "./pages/student/StudentHome.tsx";
+import StudentProfile from "./pages/student/StudentProfile.tsx";
+import StudentGrades from "./pages/student/StudentGrades.tsx";
+import StudentSubjects from "./pages/student/StudentSubjects.tsx";
+import StudentEnrollment from "./pages/student/StudentEnrollment.tsx";
+import StudentEvaluation from "./pages/student/StudentEvaluation.tsx";
+import StudentLogin from "./pages/student/StudentLogin.tsx";
+
+import AdminDashboard from "./pages/admin/AdminDashboard.tsx";
+import AdminStudents from "./pages/admin/AdminStudents.tsx";
+import AdminGrades from "./pages/admin/AdminGrades.tsx";
+import AdminEnrollees from "./pages/admin/AdminEnrollees.tsx";
+import AdminAlumni from "./pages/admin/AdminAlumni.tsx";
+import AdminReports from "./pages/admin/AdminReports.tsx";
+import AdminBackup from "./pages/admin/AdminBackup.tsx";
+import AdminArchive from "./pages/admin/AdminTrash.tsx";
+
+import RegistrarDashboard from "./pages/registrar/RegistrarDashboard.tsx";
+
+import AreaManagerDashboard from "./pages/manager/AreaManagerDashboard.tsx";
+import AreaManagerStudents from "./pages/manager/AreaManagerStudents.tsx";
+import AreaManagerStaffAccounts from "./pages/manager/AreaManagerStaffAccounts.tsx";
+import AreaManagerReports from "./pages/manager/AreaManagerReports.tsx";
+import BackupScheduler from "./components/admin/BackupScheduler";
+import InstructorLayout from "./components/instructor/InstructorLayout";
+import InstructorHome from "./pages/instructor/InstructorHome";
+import InstructorStudents from "./pages/instructor/InstructorStudents";
+import InstructorGrades from "./pages/instructor/InstructorGrades";
+import InstructorGradeChanges from "./pages/instructor/InstructorGradeChanges";
+
+import StaffLogin from "./pages/staff/StaffLogin.tsx";
+>>>>>>> f8e21f2 (For deployment)
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import PublicOnlyRoute from "./components/auth/PublicOnlyRoute";
 import {

@@ -66,7 +66,11 @@ function AdmissionStep4() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
+<<<<<<< HEAD
   const persistOwnScheduleRequest = useCallback((nextValue: boolean) => {
+=======
+  const persistOwnScheduleRequest = (nextValue: boolean) => {
+>>>>>>> f8e21f2 (For deployment)
     if (nextValue && applicationData?.programLevel !== "college") {
       setRequestOwnSchedule(false);
       mergeAdmissionDraft({
@@ -406,12 +410,16 @@ function AdmissionStep4() {
     if (applicationData && !isCollege && requestOwnSchedule) {
       persistOwnScheduleRequest(false);
     }
+<<<<<<< HEAD
   }, [
     applicationData,
     isCollege,
     persistOwnScheduleRequest,
     requestOwnSchedule,
   ]);
+=======
+  }, [applicationData, isCollege, requestOwnSchedule]);
+>>>>>>> f8e21f2 (For deployment)
 
   const tuitionEstimate = getEstimatedCollegeTuition({
     honorLabel: applicationData?.honorLabel ?? null,

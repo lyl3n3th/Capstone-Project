@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import { useState, useEffect, useMemo, useRef } from "react";
+=======
+import { useState, useEffect, useMemo } from "react";
+>>>>>>> f8e21f2 (For deployment)
 import {
   FaSearch,
   FaUserGraduate,

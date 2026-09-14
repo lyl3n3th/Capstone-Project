@@ -1231,8 +1231,12 @@ function StudentGrades() {
           }).filter(
             (record) => record.programType === (isSHS ? "SHS" : "College"),
           )
+<<<<<<< HEAD
         : [];
     },
+=======
+        : [],
+>>>>>>> f8e21f2 (For deployment)
     [gradeRecordsVersion, isSHS, student],
   );
 
@@ -1496,10 +1500,16 @@ function StudentGrades() {
   const tableColumns = isSHS
     ? getShsColumnsForSemester(effectiveSemester)
     : collegeColumns;
+<<<<<<< HEAD
   const activeShsQuarterLabels = useMemo(
     () => (isSHS ? getShsQuarterLabelsForSemester(effectiveSemester) : []),
     [effectiveSemester, isSHS],
   );
+=======
+  const activeShsQuarterLabels = isSHS
+    ? getShsQuarterLabelsForSemester(effectiveSemester)
+    : [];
+>>>>>>> f8e21f2 (For deployment)
   const shsGeneralAverage = useMemo(
     () => (isSHS ? formatShsGeneralAverage(displayRows) : placeholderGrade),
     [displayRows, isSHS],

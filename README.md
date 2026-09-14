@@ -1,3 +1,14 @@
+# AICSync System
+
+## Deployment
+
+The frontend is prepared for Vercel deployment. Start with the project-specific
+[Vercel deployment guide](docs/VERCEL_DEPLOYMENT.md), which covers the required
+environment variables, build settings, direct-link routing, and the Render CORS
+handoff.
+
+---
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

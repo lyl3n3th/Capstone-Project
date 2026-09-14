@@ -577,9 +577,9 @@ as $$
   join public.admission_branches branch
     on branch.id = instructor.branch_id
   where instructor.is_active
+    and trim(coalesce(p_branch, '')) <> ''
     and (
-      p_branch is null
-      or lower(branch.code) = lower(trim(p_branch))
+      lower(branch.code) = lower(trim(p_branch))
       or lower(branch.name) = lower(trim(p_branch))
     )
   order by instructor.name;

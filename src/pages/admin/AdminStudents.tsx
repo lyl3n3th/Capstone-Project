@@ -3226,17 +3226,26 @@ export default function AdminStudents({
     0,
   );
   const viewingStudentPayments = useMemo(
+<<<<<<< HEAD
     () => {
       // Payment records are stored outside React state; refresh when their version changes.
       void paymentRecordsVersion;
       return viewingStudent
+=======
+    () =>
+      viewingStudent
+>>>>>>> f8e21f2 (For deployment)
         ? getStudentPayments({
             branch: viewingStudent.branch || currentBranch,
             studentNumber: viewingStudent.id,
             trackingNumber: viewingStudent.trackingNumber,
           })
+<<<<<<< HEAD
         : [];
     },
+=======
+        : [],
+>>>>>>> f8e21f2 (For deployment)
     [currentBranch, paymentRecordsVersion, viewingStudent],
   );
   const viewingStudentTotalAssessment =
@@ -5454,8 +5463,13 @@ export default function AdminStudents({
                                     record.subjectCode,
                                     record.subjectTitle,
                                   ),
+<<<<<<< HEAD
                                 ),
                               );
+=======
+      ),
+    );
+>>>>>>> f8e21f2 (For deployment)
                               const activeShsQuarterLabels =
                                 getShsQuarterLabelsForSemester(semester);
                               const shsRows = buildShsGradeSummaryRows(

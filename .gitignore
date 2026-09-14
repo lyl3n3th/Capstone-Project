@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.vercel
 *.local
 
 # Editor directories and files
@@ -33,9 +34,16 @@ dist-ssr
 venv/
 __pycache__/
 *.py[cod]
+<<<<<<< HEAD
 
 # Django runtime data
 backend/db.sqlite3
 backend/media/
 backend/staticfiles/
+=======
+>>>>>>> f8e21f2 (For deployment)
 
+# Django runtime data
+backend/db.sqlite3
+backend/media/
+backend/staticfiles/

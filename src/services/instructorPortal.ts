@@ -34,6 +34,11 @@ import {
 const INSTRUCTOR_GRADE_SUBMISSIONS_SCOPE = "instructor-grade-submissions";
 const INSTRUCTOR_GRADE_CHANGE_REQUESTS_SCOPE =
   "instructor-grade-change-requests";
+<<<<<<< HEAD
+=======
+export const INSTRUCTOR_TEMPORARY_PASSWORD_UPDATED_EVENT =
+  "aicsync:instructor-temporary-password-updated";
+>>>>>>> f8e21f2 (For deployment)
 
 if (typeof window !== "undefined") {
   const legacyPasswordKeyParts = [
@@ -245,6 +250,100 @@ const generateInstructorTemporaryPassword = () => {
     .join("");
 };
 
+<<<<<<< HEAD
+=======
+const getInstructorTemporaryPasswordStorageKey = (
+  branch?: string | null,
+  employeeId?: string | null,
+) =>
+  `aicsync:instructor-temporary-password:${normalizeBranchName(
+    branch,
+  ).toLowerCase()}:${(employeeId || "").trim().toUpperCase()}`;
+
+const dispatchInstructorTemporaryPasswordUpdated = ({
+  branch,
+  employeeId,
+}: {
+  branch?: string | null;
+  employeeId?: string | null;
+}) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent(INSTRUCTOR_TEMPORARY_PASSWORD_UPDATED_EVENT, {
+      detail: {
+        branch: normalizeBranchName(branch),
+        employeeId: (employeeId || "").trim().toUpperCase(),
+      },
+    }),
+  );
+};
+
+export const readInstructorTemporaryPassword = ({
+  branch,
+  employeeId,
+}: {
+  branch?: string | null;
+  employeeId?: string | null;
+}) => {
+  const normalizedEmployeeId = (employeeId || "").trim().toUpperCase();
+
+  if (typeof window === "undefined" || !normalizedEmployeeId) {
+    return "";
+  }
+
+  return (
+    window.localStorage.getItem(
+      getInstructorTemporaryPasswordStorageKey(branch, normalizedEmployeeId),
+    ) || ""
+  );
+};
+
+const rememberInstructorTemporaryPassword = ({
+  branch,
+  employeeId,
+  password,
+}: {
+  branch?: string | null;
+  employeeId: string;
+  password: string;
+}) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    getInstructorTemporaryPasswordStorageKey(branch, employeeId),
+    password,
+  );
+  dispatchInstructorTemporaryPasswordUpdated({ branch, employeeId });
+};
+
+export const clearInstructorTemporaryPassword = ({
+  branch,
+  employeeId,
+}: {
+  branch?: string | null;
+  employeeId?: string | null;
+}) => {
+  const normalizedEmployeeId = (employeeId || "").trim().toUpperCase();
+
+  if (typeof window === "undefined" || !normalizedEmployeeId) {
+    return;
+  }
+
+  window.localStorage.removeItem(
+    getInstructorTemporaryPasswordStorageKey(branch, normalizedEmployeeId),
+  );
+  dispatchInstructorTemporaryPasswordUpdated({
+    branch,
+    employeeId: normalizedEmployeeId,
+  });
+};
+
+>>>>>>> f8e21f2 (For deployment)
 export const setInstructorPassword = async ({
   branch,
   employeeId,
@@ -267,6 +366,14 @@ export const setInstructorPassword = async ({
   if (error) {
     throw new Error(getErrorMessage(error));
   }
+<<<<<<< HEAD
+=======
+
+  clearInstructorTemporaryPassword({
+    branch,
+    employeeId: normalizedEmployeeId,
+  });
+>>>>>>> f8e21f2 (For deployment)
 };
 
 export const resetInstructorTemporaryPassword = async ({
@@ -293,6 +400,15 @@ export const resetInstructorTemporaryPassword = async ({
     throw new Error(getErrorMessage(error));
   }
 
+<<<<<<< HEAD
+=======
+  rememberInstructorTemporaryPassword({
+    branch: resolvedBranch,
+    employeeId: normalizedEmployeeId,
+    password: temporaryPassword,
+  });
+
+>>>>>>> f8e21f2 (For deployment)
   return temporaryPassword;
 };
 

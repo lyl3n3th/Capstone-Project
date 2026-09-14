@@ -83,6 +83,11 @@ import {
 } from "../../services/academicData";
 import { resetInstructorTemporaryPassword } from "../../services/instructorPortal";
 import {
+  INSTRUCTOR_TEMPORARY_PASSWORD_UPDATED_EVENT,
+  readInstructorTemporaryPassword,
+  resetInstructorTemporaryPassword,
+} from "../../services/instructorPortal";
+import {
   getEstimatedCollegeTuition,
   getAdmissionRequirements,
   SCHOLARSHIP_EXAM_MAX_SCORE,
@@ -591,6 +596,48 @@ const createDefaultInstructorForm = (): InstructorFormState => ({
   email: "",
   contactNumber: "",
 });
+
+const INSTRUCTOR_EMPLOYEE_ID_PREFIX = "TCH";
+const INSTRUCTOR_EMPLOYEE_ID_MIN_DIGITS = 3;
+
+const getNextInstructorEmployeeId = (
+  instructors: Pick<Instructor, "employeeId">[],
+  reservedEmployeeIds: string[] = [],
+) => {
+  const usedNumbers = new Set<number>();
+
+  [...instructors.map((instructor) => instructor.employeeId), ...reservedEmployeeIds]
+    .map((employeeId) => employeeId.trim().toUpperCase())
+    .forEach((employeeId) => {
+      const match = employeeId.match(
+        new RegExp(`^${INSTRUCTOR_EMPLOYEE_ID_PREFIX}(\\d+)$`),
+      );
+
+      if (!match) {
+        return;
+      }
+
+      const parsedNumber = Number.parseInt(match[1], 10);
+      if (Number.isFinite(parsedNumber)) {
+        usedNumbers.add(parsedNumber);
+      }
+    });
+
+  let nextNumber = 1;
+
+  while (usedNumbers.has(nextNumber)) {
+    nextNumber += 1;
+  }
+
+  return `${INSTRUCTOR_EMPLOYEE_ID_PREFIX}${String(nextNumber).padStart(
+    INSTRUCTOR_EMPLOYEE_ID_MIN_DIGITS,
+    "0",
+  )}`;
+};
+
+const isDuplicateInstructorEmployeeIdError = (error: unknown) =>
+  error instanceof Error &&
+  /duplicate|unique|employee/i.test(error.message);
 
 const createDefaultTransfereeEvaluation = (
   enrollee: Pick<Enrollee, "id" | "yearLevel">,
@@ -1572,6 +1619,8 @@ export default function AdminEnrollees({
   const [editingInstructor, setEditingInstructor] = useState<Instructor | null>(
     null,
   );
+  const [currentInstructorTemporaryPassword, setCurrentInstructorTemporaryPassword] =
+    useState("");
   const [instructorForm, setInstructorForm] = useState<InstructorFormState>(
     createDefaultInstructorForm(),
   );
@@ -1691,6 +1740,90 @@ export default function AdminEnrollees({
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
+<<<<<<< HEAD
+=======
+  useEffect(() => {
+    if (!showInstructorModal || !editingInstructor) {
+      return;
+    }
+
+    const refreshTemporaryPassword = () => {
+      setCurrentInstructorTemporaryPassword(
+        readInstructorTemporaryPassword({
+          branch: currentBranch,
+          employeeId: editingInstructor.employeeId,
+        }),
+      );
+    };
+    const handleTemporaryPasswordUpdate = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ branch?: string; employeeId?: string }>
+      ).detail;
+
+      if (
+        detail?.branch &&
+        normalizeBranchName(detail.branch) !== currentBranch
+      ) {
+        return;
+      }
+
+      if (
+        detail?.employeeId &&
+        detail.employeeId.trim().toUpperCase() !==
+          editingInstructor.employeeId.trim().toUpperCase()
+      ) {
+        return;
+      }
+
+      refreshTemporaryPassword();
+    };
+
+    refreshTemporaryPassword();
+    window.addEventListener(
+      INSTRUCTOR_TEMPORARY_PASSWORD_UPDATED_EVENT,
+      handleTemporaryPasswordUpdate,
+    );
+    window.addEventListener("storage", refreshTemporaryPassword);
+
+    return () => {
+      window.removeEventListener(
+        INSTRUCTOR_TEMPORARY_PASSWORD_UPDATED_EVENT,
+        handleTemporaryPasswordUpdate,
+      );
+      window.removeEventListener("storage", refreshTemporaryPassword);
+    };
+  }, [currentBranch, editingInstructor, showInstructorModal]);
+
+  useEffect(() => {
+    if (!showInstructorModal || editingInstructor) {
+      return;
+    }
+
+    const nextEmployeeId = getNextInstructorEmployeeId(instructors);
+    setInstructorForm((prev) =>
+      prev.employeeId === nextEmployeeId
+        ? prev
+        : {
+            ...prev,
+            employeeId: nextEmployeeId,
+          },
+    );
+  }, [editingInstructor, instructors, showInstructorModal]);
+
+  const storageScopes = {
+    enrollees: "enrollees",
+    enrollmentRequests: "enrollment-requests",
+    classSections: "class-sections",
+    sectionAssignments: "section-assignments",
+    subjects: "subjects",
+    instructors: "instructors",
+    instructorDepartments: "instructor-departments",
+    subjectAssignments: "subject-assignments",
+    assignmentRooms: "assignment-rooms",
+    transfereeEvaluations: "transferee-evaluations",
+    studentSubjectPlans: "student-subject-plans",
+  } as const;
+>>>>>>> f8e21f2 (For deployment)
   const reflectedAcademicYear =
     enrollmentRequests[0]?.academicYear ||
     subjectAssignments[0]?.academicYear ||
@@ -2940,11 +3073,11 @@ export default function AdminEnrollees({
     return normalizedMockSubjects;
   };
 
-  // Load instructors with updated names
+  // Load instructors for the active branch only.
   const loadInstructors = async (
     remoteInstructors?: Instructor[] | null,
   ): Promise<Instructor[]> => {
-    if (remoteInstructors && remoteInstructors.length > 0) {
+    if (remoteInstructors) {
       setInstructors(remoteInstructors);
       return remoteInstructors;
     }
@@ -2959,98 +3092,140 @@ export default function AdminEnrollees({
       return storedInstructors;
     }
 
-    const mockInstructors: Instructor[] = [
-      {
-        id: "1",
-        name: "Kenneth Lyle Sohot",
-        employeeId: "TCH001",
-        department: "Computer Science",
-        email: "kenneth.sohot@university.edu",
-        contactNumber: "09123456789",
-      },
-      {
-        id: "2",
-        name: "Neil John Velasco",
-        employeeId: "TCH002",
-        department: "Mathematics",
-        email: "neil.velasco@university.edu",
-        contactNumber: "09123456790",
-      },
-      {
-        id: "3",
-        name: "Hener Verdida",
-        employeeId: "TCH003",
-        department: "English",
-        email: "hener.verdida@university.edu",
-        contactNumber: "09123456791",
-      },
-      {
-        id: "4",
-        name: "Queenie Mier Senantes",
-        employeeId: "TCH004",
-        department: "Humanities",
-        email: "queenie.senantes@university.edu",
-        contactNumber: "09123456792",
-      },
-      {
-        id: "5",
-        name: "Dean Paul Quioyo",
-        employeeId: "TCH005",
-        department: "Physics",
-        email: "dean.quioyo@university.edu",
-        contactNumber: "09123456793",
-      },
-      {
-        id: "6",
-        name: "Don Rich Ulanday",
-        employeeId: "TCH006",
-        department: "Physical Education",
-        email: "don.ulanday@university.edu",
-        contactNumber: "09123456794",
-      },
-      {
-        id: "7",
-        name: "Mark Kervin Toledo",
-        employeeId: "TCH007",
-        department: "Information Technology",
-        email: "mark.toledo@university.edu",
-        contactNumber: "09123456795",
-      },
-      {
-        id: "8",
-        name: "Elijah Bulotano",
-        employeeId: "TCH008",
-        department: "Social Sciences",
-        email: "elijah.bulotano@university.edu",
-        contactNumber: "09123456796",
-      },
-      {
-        id: "9",
-        name: "Christian Dave Vargas",
-        employeeId: "TCH009",
-        department: "Business",
-        email: "christian.vargas@university.edu",
-        contactNumber: "09123456797",
-      },
-      {
-        id: "10",
-        name: "Jay Iverson Dela Cruz",
-        employeeId: "TCH010",
-        department: "Arts",
-        email: "jay.delacruz@university.edu",
-        contactNumber: "09123456798",
-      },
-      {
-        id: "11",
-        name: "Gilbert Torres",
-        employeeId: "TCH011",
-        department: "Research",
-        email: "gilbert.torres@university.edu",
-        contactNumber: "09123456799",
-      },
-    ];
-    setInstructors(mockInstructors);
-    return mockInstructors;
+    setInstructors([]);
+    return [];
+  };
+
+  const instructorDepartmentOptions = getUniqueTrimmedValues([
+    ...instructorDepartments,
+    ...instructors.map((instructor) => instructor.department),
+  ]);
+
+  const handleCreateDepartmentOption = () => {
+    const trimmedDepartmentName = newDepartmentName.trim();
+
+    if (!trimmedDepartmentName) {
+      addToast("Enter a department name first.", "warning");
+      return;
+    }
+
+    const matchingDepartment = instructorDepartmentOptions.find(
+      (department) =>
+        department.toLowerCase() === trimmedDepartmentName.toLowerCase(),
+    );
+
+    if (matchingDepartment) {
+      setInstructorForm((prev) => ({
+        ...prev,
+        department: matchingDepartment,
+      }));
+      setNewDepartmentName("");
+      addToast(`${matchingDepartment} is already in the department list.`, "info");
+      return;
+    }
+
+    setInstructorDepartments((prev) =>
+      getUniqueTrimmedValues([...prev, trimmedDepartmentName]),
+    );
+    setInstructorForm((prev) => ({
+      ...prev,
+      department: trimmedDepartmentName,
+    }));
+    setNewDepartmentName("");
+    addToast(`${trimmedDepartmentName} added to departments.`, "success");
+  };
+
+  const handleDeleteDepartmentOption = (departmentName: string) => {
+    const departmentInUse = instructors.some(
+      (instructor) =>
+        instructor.department.trim().toLowerCase() ===
+        departmentName.trim().toLowerCase(),
+    );
+
+    if (departmentInUse) {
+      addToast("This department is still used by an instructor.", "warning");
+      return;
+    }
+
+    setPendingAcademicOptionDelete({
+      kind: "department",
+      names: [departmentName],
+      message: `Delete department "${departmentName}"?`,
+    });
+  };
+
+  const deleteDepartmentOptions = (departmentNames: string[]) => {
+    setInstructorDepartments((prev) =>
+      prev.filter(
+        (department) =>
+          !departmentNames.some(
+            (departmentName) =>
+              department.trim().toLowerCase() ===
+              departmentName.trim().toLowerCase(),
+          ),
+      ),
+    );
+    if (
+      departmentNames.some(
+        (departmentName) =>
+          instructorForm.department.trim().toLowerCase() ===
+          departmentName.trim().toLowerCase(),
+      )
+    ) {
+      setInstructorForm((prev) => ({ ...prev, department: "" }));
+    }
+    setSelectedDepartmentNames((prev) =>
+      prev.filter((department) => !departmentNames.includes(department)),
+    );
+    addToast(
+      `Deleted ${departmentNames.length} department${
+        departmentNames.length === 1 ? "" : "s"
+      }.`,
+      "success",
+    );
+  };
+
+  const toggleDepartmentSelection = (departmentName: string) => {
+    setSelectedDepartmentNames((prev) =>
+      prev.includes(departmentName)
+        ? prev.filter((item) => item !== departmentName)
+        : [...prev, departmentName],
+    );
+  };
+
+  const handleDeleteSelectedDepartments = () => {
+    if (selectedDepartmentNames.length === 0) {
+      addToast("Select departments to delete first.", "warning");
+      return;
+    }
+
+    const usedDepartments = selectedDepartmentNames.filter((departmentName) =>
+      instructors.some(
+        (instructor) =>
+          instructor.department.trim().toLowerCase() ===
+          departmentName.trim().toLowerCase(),
+      ),
+    );
+    const removableDepartments = selectedDepartmentNames.filter(
+      (departmentName) => !usedDepartments.includes(departmentName),
+    );
+
+    if (removableDepartments.length === 0) {
+      addToast("Selected departments are still used by instructors.", "warning");
+      return;
+    }
+
+    setPendingAcademicOptionDelete({
+      kind: "department",
+      names: removableDepartments,
+      message: `Delete ${removableDepartments.length} selected department${
+        removableDepartments.length === 1 ? "" : "s"
+      }?`,
+    });
+
+    if (usedDepartments.length > 0) {
+      addToast("Some selected departments are still in use.", "warning");
+    }
   };
 
   const instructorDepartmentOptions = getUniqueTrimmedValues([
@@ -3188,17 +3363,28 @@ export default function AdminEnrollees({
   const closeInstructorModal = () => {
     setShowInstructorModal(false);
     setEditingInstructor(null);
+    setCurrentInstructorTemporaryPassword("");
     setInstructorForm(createDefaultInstructorForm());
   };
 
   const openCreateInstructorModal = () => {
     setEditingInstructor(null);
-    setInstructorForm(createDefaultInstructorForm());
+    setCurrentInstructorTemporaryPassword("");
+    setInstructorForm({
+      ...createDefaultInstructorForm(),
+      employeeId: getNextInstructorEmployeeId(instructors),
+    });
     setShowInstructorModal(true);
   };
 
   const openEditInstructorModal = (instructor: Instructor) => {
     setEditingInstructor(instructor);
+    setCurrentInstructorTemporaryPassword(
+      readInstructorTemporaryPassword({
+        branch: currentBranch,
+        employeeId: instructor.employeeId,
+      }),
+    );
     setInstructorForm({
       name: instructor.name,
       employeeId: instructor.employeeId,
@@ -3211,7 +3397,9 @@ export default function AdminEnrollees({
 
   const handleSaveInstructor = async () => {
     const nextName = instructorForm.name.trim();
-    const nextEmployeeId = instructorForm.employeeId.trim().toUpperCase();
+    const nextEmployeeId = editingInstructor
+      ? instructorForm.employeeId.trim().toUpperCase()
+      : getNextInstructorEmployeeId(instructors);
     const nextDepartment = instructorForm.department.trim();
 
     if (!nextName || !nextEmployeeId || !nextDepartment) {
@@ -3231,22 +3419,51 @@ export default function AdminEnrollees({
       return;
     }
 
-    const nextInstructor: Instructor = {
-      id:
-        editingInstructor?.id ||
-        `instructor_${Date.now()}_${nextEmployeeId.toLowerCase()}`,
-      name: nextName,
-      employeeId: nextEmployeeId,
-      department: nextDepartment,
-      email: instructorForm.email.trim() || undefined,
-      contactNumber: instructorForm.contactNumber.trim() || undefined,
-    };
-
     try {
+<<<<<<< HEAD
       const savedInstructor = await saveAcademicInstructor(
         currentBranch,
         nextInstructor,
       );
+=======
+      const reservedEmployeeIds: string[] = [];
+      let savedInstructor: Instructor | null = null;
+
+      for (let attempt = 0; attempt < 25; attempt += 1) {
+        const employeeId = editingInstructor
+          ? nextEmployeeId
+          : getNextInstructorEmployeeId(instructors, reservedEmployeeIds);
+        const nextInstructor: Instructor = {
+          id:
+            editingInstructor?.id ||
+            `instructor_${Date.now()}_${employeeId.toLowerCase()}`,
+          name: nextName,
+          employeeId,
+          department: nextDepartment,
+          email: instructorForm.email.trim() || undefined,
+          contactNumber: instructorForm.contactNumber.trim() || undefined,
+        };
+
+        try {
+          savedInstructor = await saveAcademicInstructor(
+            currentBranch,
+            nextInstructor,
+          );
+          break;
+        } catch (error) {
+          if (editingInstructor || !isDuplicateInstructorEmployeeIdError(error)) {
+            throw error;
+          }
+
+          reservedEmployeeIds.push(employeeId);
+        }
+      }
+
+      if (!savedInstructor) {
+        throw new Error("Unable to generate an available instructor employee ID.");
+      }
+
+>>>>>>> f8e21f2 (For deployment)
       let temporaryPassword = "";
 
       if (!editingInstructor) {
@@ -3267,10 +3484,27 @@ export default function AdminEnrollees({
       addToast(
         editingInstructor
           ? `${savedInstructor.name} updated successfully.`
+<<<<<<< HEAD
           : `${savedInstructor.name} added. Temporary password: ${temporaryPassword}`,
+=======
+          : `${savedInstructor.name} added. Temporary password is shown in this modal.`,
+>>>>>>> f8e21f2 (For deployment)
         "success",
       );
-      closeInstructorModal();
+      if (editingInstructor) {
+        closeInstructorModal();
+        return;
+      }
+
+      setEditingInstructor(savedInstructor);
+      setCurrentInstructorTemporaryPassword(temporaryPassword);
+      setInstructorForm({
+        name: savedInstructor.name,
+        employeeId: savedInstructor.employeeId,
+        department: savedInstructor.department,
+        email: savedInstructor.email || "",
+        contactNumber: savedInstructor.contactNumber || "",
+      });
     } catch (error) {
       console.error("Failed to save shared instructor", error);
       addToast(
@@ -3343,8 +3577,14 @@ export default function AdminEnrollees({
         branch: currentBranch,
         employeeId: editingInstructor.employeeId,
       });
+<<<<<<< HEAD
       addToast(
         `${editingInstructor.name}'s new temporary password is ${temporaryPassword}.`,
+=======
+      setCurrentInstructorTemporaryPassword(temporaryPassword);
+      addToast(
+        `${editingInstructor.name}'s new temporary password is shown in this modal.`,
+>>>>>>> f8e21f2 (For deployment)
         "success",
       );
     } catch (error) {
@@ -4605,6 +4845,7 @@ export default function AdminEnrollees({
         console.warn("Some archived enrollment requests could not be synced.", results);
       }
     });
+<<<<<<< HEAD
 
     addToast(
       requestsToArchive.length === 1
@@ -4693,6 +4934,95 @@ export default function AdminEnrollees({
       nextSectionCode: sectionCode,
     });
 
+=======
+
+    addToast(
+      requestsToArchive.length === 1
+        ? "Enrollment request moved to Archive."
+        : `${requestsToArchive.length} enrollment requests moved to Archive.`,
+      "success",
+    );
+  };
+
+  const handleArchiveSelectedEnrollmentRequests = (
+    requestsToArchive: EnrollmentRequest[],
+  ) => {
+    if (requestsToArchive.length === 0) {
+      addToast("Select at least one enrollment request to archive.", "info");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Archive ${requestsToArchive.length} selected enrollment request${requestsToArchive.length === 1 ? "" : "s"}?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    archiveEnrollmentRequests(requestsToArchive);
+  };
+
+  // Update pending assignments
+  const mapStoredStudentToSectionCandidate = (
+    student: StudentStorageRecord,
+  ): Enrollee => ({
+    id: student.id,
+    trackingNumber: student.trackingNumber || "",
+    studentNumber: student.id,
+    fullName: student.name,
+    program: student.program,
+    yearLevel: student.yearLevel,
+    strandOrCourse: student.strandOrCourse || "",
+    applicationDate: student.documentSubmitted || "",
+    documentsSubmitted: 0,
+    totalDocuments: 0,
+    status: "Approved",
+    branch: student.branch,
+    studentStatus: student.studentStatus || "",
+    requestedOwnSchedule: student.requestedOwnSchedule,
+    ownScheduleRequestStatus: student.ownScheduleRequestStatus,
+    ownScheduleAcademicYear: student.ownScheduleAcademicYear,
+    ownScheduleSemester: student.ownScheduleSemester,
+    personalInfo: {
+      fullName: student.name,
+      birthDate: student.birthDate || "",
+      contactNumber: student.contact || "",
+      program: student.program,
+      guardianName: student.guardianName || "",
+      email: student.email || "",
+      address: student.address || "",
+      yearLevel: student.yearLevel,
+      guardianContact: student.guardianContact || "",
+    },
+  });
+
+  const updatePendingAssignments = () => {
+    const approvedUnassigned = getActiveBranchStudents()
+      .filter(
+        (student) =>
+          !normalizeSectionCodeValue(student.section) &&
+          !student.requestedOwnSchedule &&
+          student.ownScheduleRequestStatus !== "Approved",
+      )
+      .map(mapStoredStudentToSectionCandidate);
+
+    setPendingAssignments(approvedUnassigned);
+  };
+
+  const syncStudentSection = (enrollee: Enrollee, sectionCode: string) => {
+    if (!enrollee.studentNumber) {
+      return null;
+    }
+
+    const sectionUpdateResult = updateStoredStudentSection({
+      branch: currentBranch,
+      studentNumber: enrollee.studentNumber,
+      trackingNumber: enrollee.trackingNumber,
+      nextSectionCode: sectionCode,
+    });
+
+>>>>>>> f8e21f2 (For deployment)
     if (sectionUpdateResult?.student) {
       void syncStoredStudentsToSupabase([sectionUpdateResult.student.id]);
     }
@@ -6554,7 +6884,11 @@ export default function AdminEnrollees({
           ...loadedInstructors.map((instructor) => instructor.department),
         ]),
       );
+<<<<<<< HEAD
       const loadedAssignments = await loadBranchSubjectAssignments(
+=======
+      const loadedAssignments = await loadSubjectAssignments(
+>>>>>>> f8e21f2 (For deployment)
         remoteAcademicSnapshot?.subjectAssignments,
       );
 
@@ -6666,6 +7000,10 @@ export default function AdminEnrollees({
     currentBranch,
     hasInitializedBranchData,
     instructorDepartmentOptions,
+<<<<<<< HEAD
+=======
+    storageScopes.instructorDepartments,
+>>>>>>> f8e21f2 (For deployment)
   ]);
 
   useEffect(() => {
@@ -6694,7 +7032,11 @@ export default function AdminEnrollees({
 
   useEffect(() => {
     updatePendingAssignments();
+<<<<<<< HEAD
   }, [currentBranch, enrollees, sectionAssignments, updatePendingAssignments]);
+=======
+  }, [currentBranch, enrollees, sectionAssignments]);
+>>>>>>> f8e21f2 (For deployment)
 
   const handleAttachmentStatusUpdate = async (
     requestId: string,
@@ -13173,6 +13515,22 @@ export default function AdminEnrollees({
                     : "A secure temporary password will be generated after saving."}
                 </p>
               </div>
+<<<<<<< HEAD
+=======
+              {editingInstructor && currentInstructorTemporaryPassword && (
+                <div className="form-group">
+                  <label>Temporary Password</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={currentInstructorTemporaryPassword}
+                  />
+                  <p className="modal-helper-text">
+                    This disappears after the instructor changes their password.
+                  </p>
+                </div>
+              )}
+>>>>>>> f8e21f2 (For deployment)
               <form
                 id="instructor-config-form"
                 onSubmit={(event) => {
@@ -13198,13 +13556,13 @@ export default function AdminEnrollees({
                   <input
                     type="text"
                     value={instructorForm.employeeId}
-                    onChange={(event) =>
-                      setInstructorForm((prev) => ({
-                        ...prev,
-                        employeeId: event.target.value,
-                      }))
-                    }
+                    readOnly
                   />
+                  <p className="modal-helper-text">
+                    {editingInstructor
+                      ? "Employee ID is locked for this instructor."
+                      : "Generated automatically from the next available instructor number."}
+                  </p>
                 </div>
                 <div className="form-group">
                   <label>Department</label>
