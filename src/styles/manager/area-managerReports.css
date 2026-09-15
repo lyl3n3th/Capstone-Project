@@ -1261,7 +1261,7 @@
   }
   
   .am-reports-detail-pane { 
-    display: none;
+    display: none; 
   }
 
   .am-reports-detail-actions {
@@ -1279,13 +1279,8 @@
     box-sizing: border-box;
   }
   
-<<<<<<< HEAD
   .am-reports-container.detail-open .am-reports-mobile-back-btn { 
     display: none; 
-=======
-  .am-reports-container.detail-open .am-reports-mobile-back-btn {
-    display: none;
->>>>>>> f8e21f2 (For deployment)
   }
 
   .am-reports-detail-title { 
@@ -1442,11 +1437,7 @@
   }
 
   .am-reports-select-all-btn span { 
-<<<<<<< HEAD
     display: inline; 
-=======
-    display: inline;
->>>>>>> f8e21f2 (For deployment)
   }
 
   .am-reports-modal-overlay {

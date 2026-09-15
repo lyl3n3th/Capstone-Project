@@ -273,15 +273,11 @@ const mergeAcademicSnapshotWithLocalCache = (
     storageScopes.subjects,
     snapshot.subjects,
   ),
-<<<<<<< HEAD
   instructors: resolveSnapshotScopeForCache(
     branch,
     storageScopes.instructors,
     snapshot.instructors,
   ),
-=======
-  instructors: snapshot.instructors,
->>>>>>> f8e21f2 (For deployment)
   classSections: resolveSnapshotScopeForCache(
     branch,
     storageScopes.classSections,

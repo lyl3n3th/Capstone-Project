@@ -99,7 +99,6 @@ export default function BackupScheduler() {
   const timerRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
   const ownerIdRef = useRef(createSchedulerOwnerId());
-  const ownerId = ownerIdRef.current;
 
   useEffect(() => {
     if (currentUser?.role !== "admin" || !currentUser.branch) {
@@ -107,7 +106,7 @@ export default function BackupScheduler() {
         window.clearInterval(timerRef.current);
         timerRef.current = null;
       }
-      releaseSchedulerLock(ownerId);
+      releaseSchedulerLock(ownerIdRef.current);
       return;
     }
 
@@ -116,24 +115,24 @@ export default function BackupScheduler() {
         return;
       }
 
-      if (!tryAcquireSchedulerLock(ownerId)) {
+      if (!tryAcquireSchedulerLock(ownerIdRef.current)) {
         return;
       }
 
       try {
         inFlightRef.current = true;
         try {
-          renewSchedulerLock(ownerId);
+          renewSchedulerLock(ownerIdRef.current);
           await syncBackupSnapshot();
         } catch (error) {
           console.error("Backup snapshot sync failed", error);
         }
-        renewSchedulerLock(ownerId);
+        renewSchedulerLock(ownerIdRef.current);
         await dispatchDueAutomatedBackups();
       } catch (error) {
         console.error("Automated backup dispatch failed", error);
       } finally {
-        renewSchedulerLock(ownerId);
+        renewSchedulerLock(ownerIdRef.current);
         inFlightRef.current = false;
       }
     };
@@ -148,9 +147,9 @@ export default function BackupScheduler() {
         window.clearInterval(timerRef.current);
         timerRef.current = null;
       }
-      releaseSchedulerLock(ownerId);
+      releaseSchedulerLock(ownerIdRef.current);
     };
-  }, [currentUser?.branch, currentUser?.role, ownerId]);
+  }, [currentUser?.branch, currentUser?.role]);
 
   return null;
 }

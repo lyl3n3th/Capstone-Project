@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-import { lazy, Suspense, useEffect, useState } from "react";
-=======
 import { useEffect, useState } from "react";
->>>>>>> f8e21f2 (For deployment)
 import type { ReactNode } from "react";
 import {
   BrowserRouter,
@@ -12,10 +8,14 @@ import {
   Routes,
   useLocation,
 } from "react-router-dom";
+import AdmissionHome from "./pages/admission/AdmissionHome";
+import AdmissionStep1 from "./pages/admission/AdmissionStep1";
+import AdmissionStep2 from "./pages/admission/AdmissionStep2";
+import AdmissionStep3 from "./pages/admission/AdmissionStep3";
+import AdmissionStep4 from "./pages/admission/AdmissiontStep4";
+import AdmissionStep5 from "./pages/admission/AdmissionStep5";
+
 import { AuthProvider, StudentProvider } from "./contexts";
-<<<<<<< HEAD
-import BackupScheduler from "./components/admin/BackupScheduler";
-=======
 import StudentHome from "./pages/student/StudentHome.tsx";
 import StudentProfile from "./pages/student/StudentProfile.tsx";
 import StudentGrades from "./pages/student/StudentGrades.tsx";
@@ -47,7 +47,6 @@ import InstructorGrades from "./pages/instructor/InstructorGrades";
 import InstructorGradeChanges from "./pages/instructor/InstructorGradeChanges";
 
 import StaffLogin from "./pages/staff/StaffLogin.tsx";
->>>>>>> f8e21f2 (For deployment)
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import PublicOnlyRoute from "./components/auth/PublicOnlyRoute";
 import {
@@ -61,55 +60,8 @@ import {
 import { useAuth } from "./hooks/useAuth";
 import { STAFF_PORTAL_ROLES } from "./types/user";
 
-const AdmissionHome = lazy(() => import("./pages/admission/AdmissionHome"));
-const AdmissionStep1 = lazy(() => import("./pages/admission/AdmissionStep1"));
-const AdmissionStep2 = lazy(() => import("./pages/admission/AdmissionStep2"));
-const AdmissionStep3 = lazy(() => import("./pages/admission/AdmissionStep3"));
-const AdmissionStep4 = lazy(() => import("./pages/admission/AdmissiontStep4"));
-const AdmissionStep5 = lazy(() => import("./pages/admission/AdmissionStep5"));
-const StudentHome = lazy(() => import("./pages/student/StudentHome"));
-const StudentProfile = lazy(() => import("./pages/student/StudentProfile"));
-const StudentGrades = lazy(() => import("./pages/student/StudentGrades"));
-const StudentSubjects = lazy(() => import("./pages/student/StudentSubjects"));
-const StudentEnrollment = lazy(() => import("./pages/student/StudentEnrollment"));
-const StudentEvaluation = lazy(() => import("./pages/student/StudentEvaluation"));
-const StudentLogin = lazy(() => import("./pages/student/StudentLogin"));
-const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
-const AdminStudents = lazy(() => import("./pages/admin/AdminStudents"));
-const AdminGrades = lazy(() => import("./pages/admin/AdminGrades"));
-const AdminEnrollees = lazy(() => import("./pages/admin/AdminEnrollees"));
-const AdminAlumni = lazy(() => import("./pages/admin/AdminAlumni"));
-const AdminReports = lazy(() => import("./pages/admin/AdminReports"));
-const AdminBackup = lazy(() => import("./pages/admin/AdminBackup"));
-const AdminArchive = lazy(() => import("./pages/admin/AdminTrash"));
-const RegistrarDashboard = lazy(() => import("./pages/registrar/RegistrarDashboard"));
-const AreaManagerDashboard = lazy(
-  () => import("./pages/manager/AreaManagerDashboard"),
-);
-const AreaManagerStudents = lazy(
-  () => import("./pages/manager/AreaManagerStudents"),
-);
-const AreaManagerStaffAccounts = lazy(
-  () => import("./pages/manager/AreaManagerStaffAccounts"),
-);
-const AreaManagerReports = lazy(
-  () => import("./pages/manager/AreaManagerReports"),
-);
-const InstructorLayout = lazy(
-  () => import("./components/instructor/InstructorLayout"),
-);
-const InstructorHome = lazy(() => import("./pages/instructor/InstructorHome"));
-const InstructorStudents = lazy(
-  () => import("./pages/instructor/InstructorStudents"),
-);
-const InstructorGrades = lazy(() => import("./pages/instructor/InstructorGrades"));
-const InstructorGradeChanges = lazy(
-  () => import("./pages/instructor/InstructorGradeChanges"),
-);
-const StaffLogin = lazy(() => import("./pages/staff/StaffLogin"));
-const ManagerLayout = lazy(
-  () => import("./components/manager/ManagerLayout"),
-);
+// Import Layouts
+import ManagerLayout from "./components/manager/ManagerLayout";
 
 function StudentPortalRoute({ children }: { children: ReactNode }) {
   return (
@@ -431,15 +383,7 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <BackupScheduler />
-        <Suspense
-          fallback={
-            <div role="status" aria-live="polite">
-              Loading page…
-            </div>
-          }
-        >
-          <AppRoutes />
-        </Suspense>
+        <AppRoutes />
       </AuthProvider>
     </BrowserRouter>
   );

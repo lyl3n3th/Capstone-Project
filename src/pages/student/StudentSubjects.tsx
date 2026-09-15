@@ -1146,8 +1146,6 @@ function StudentSubjects() {
     return sortSemesters(Array.from(semesters));
   }, [
     allSubjects,
-    currentTerm?.academicYear,
-    currentTerm?.semester,
     effectiveAcademicYear,
     ownScheduleAcademicYear,
     ownScheduleSemester,

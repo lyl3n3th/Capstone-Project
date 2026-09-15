@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Chart as ChartJS,
   ArcElement,
@@ -300,14 +300,14 @@ const AreaManagerDashboard = ({
   });
   const [loading, setLoading] = useState(true);
 
-  const applyDashboardState = useCallback((dashboardState: DashboardState) => {
+  const applyDashboardState = (dashboardState: DashboardState) => {
     setDashboardData(dashboardState.branches);
     setBarData(dashboardState.barData);
     setReportsCount(dashboardState.reportsCount);
     setEnrollmentStats(dashboardState.enrollmentStats);
-  }, []);
+  };
 
-  const fetchAllData = useCallback(async () => {
+  const fetchAllData = async () => {
     try {
       const [inboxReports, managedBranches, staffMembers] = await Promise.all([
         fetchInboxReports(),
@@ -345,7 +345,7 @@ const AreaManagerDashboard = ({
     } finally {
       setLoading(false);
     }
-  }, [applyDashboardState]);
+  };
 
   useEffect(() => {
     void fetchAllData();
@@ -354,7 +354,7 @@ const AreaManagerDashboard = ({
     return () => {
       window.removeEventListener("focus", fetchAllData);
     };
-  }, [fetchAllData]);
+  }, []);
 
   const totalStudentsCount = dashboardData.reduce(
     (accumulator, currentBranch) =>

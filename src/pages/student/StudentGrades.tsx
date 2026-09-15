@@ -1221,22 +1221,15 @@ function StudentGrades() {
   }, [student?.branch]);
 
   const studentGradeRecords = useMemo(
-    () => {
-      // Grade records are stored outside React state; refresh when their version changes.
-      void gradeRecordsVersion;
-      return student?.studentNumber
+    () =>
+      student?.studentNumber
         ? getStudentGradeRecords({
             branch: student.branch,
             studentId: student.studentNumber,
           }).filter(
             (record) => record.programType === (isSHS ? "SHS" : "College"),
           )
-<<<<<<< HEAD
-        : [];
-    },
-=======
         : [],
->>>>>>> f8e21f2 (For deployment)
     [gradeRecordsVersion, isSHS, student],
   );
 
@@ -1500,16 +1493,9 @@ function StudentGrades() {
   const tableColumns = isSHS
     ? getShsColumnsForSemester(effectiveSemester)
     : collegeColumns;
-<<<<<<< HEAD
-  const activeShsQuarterLabels = useMemo(
-    () => (isSHS ? getShsQuarterLabelsForSemester(effectiveSemester) : []),
-    [effectiveSemester, isSHS],
-  );
-=======
   const activeShsQuarterLabels = isSHS
     ? getShsQuarterLabelsForSemester(effectiveSemester)
     : [];
->>>>>>> f8e21f2 (For deployment)
   const shsGeneralAverage = useMemo(
     () => (isSHS ? formatShsGeneralAverage(displayRows) : placeholderGrade),
     [displayRows, isSHS],
