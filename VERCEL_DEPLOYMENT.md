@@ -49,8 +49,9 @@ Set **Root Directory** to `backend`, then configure:
 | Health Check Path | `/api/health/` |
 
 In Render's environment-variable settings, add `DEBUG=false`, a newly
-generated `SECRET_KEY`, the Render hostname (without `https://`) as
-`ALLOWED_HOSTS`, and the Vercel production URL for both
+generated `SECRET_KEY`, and `PYTHON_VERSION=3.13.5`. Render automatically
+supplies its hostname to this project; add any custom API hostname (without
+`https://`) to `ALLOWED_HOSTS`. Add the Vercel production URL to both
 `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS`. Configure the Supabase
 Postgres connection with `DB_ENGINE=django.db.backends.postgresql` plus
 `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT` from Supabase's
