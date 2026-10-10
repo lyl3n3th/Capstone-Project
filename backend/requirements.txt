@@ -1,6 +1,7 @@
 asgiref==3.11.1
 celery==5.5.3
-Django==6.0.3
+# django-celery-beat==2.8.1 supports Django versions below 6.0.
+Django==5.2.18
 django-cors-headers==4.9.0
 django-celery-beat==2.8.1
 django-filter==25.2

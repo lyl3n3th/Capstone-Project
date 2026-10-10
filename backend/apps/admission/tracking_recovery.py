@@ -12,6 +12,9 @@ class TrackingRecoveryDeliveryError(RuntimeError):
     """Raised when tracking-number delivery fails."""
 
 
+ADMISSION_PORTAL_LINK = "https://capstone-project-alpha-nine.vercel.app/"
+
+
 @dataclass(frozen=True)
 class TrackingRecoveryMatch:
     tracking_number: str
@@ -348,6 +351,7 @@ def build_requirement_redo_email_message(target, *, requirement_name):
         f"Tracking Number: {target.tracking_number}",
         "",
         "Use this tracking number on the admission portal to return to the Upload Requirements page and submit the corrected file.",
+        f"Admission Portal: {ADMISSION_PORTAL_LINK}",
     ]
 
     if support_email_line:

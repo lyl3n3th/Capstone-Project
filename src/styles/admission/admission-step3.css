@@ -123,6 +123,24 @@
   background: #fbfdff;
 }
 
+.admission-req-container .upload-group.has-error {
+  border-color: #d92d20;
+  background: #fff8f6;
+}
+
+.admission-req-container .upload-group.has-error .upload-label {
+  color: #b42318;
+}
+
+.admission-req-container .upload-group.has-error .file-wrapper {
+  border-color: #f04438;
+  background: #fffafa;
+}
+
+.admission-req-container .upload-group.has-error .file-wrapper:hover {
+  border-color: #d92d20;
+}
+
 .admission-req-container .upload-group-head {
   display: flex;
   align-items: flex-start;
@@ -240,6 +258,14 @@
   inset: 0;
   opacity: 0;
   cursor: pointer;
+}
+
+.admission-req-container .upload-error-message {
+  margin: -4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #b42318;
 }
 
 .admission-req-container .selected-file-bar {

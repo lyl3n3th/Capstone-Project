@@ -54,6 +54,9 @@ function AdmissionStep3() {
   const [existingCredentialItems, setExistingCredentialItems] = useState<
     StudentPortalCredentialItem[]
   >([]);
+  const [missingRequirementErrors, setMissingRequirementErrors] = useState<
+    Record<string, string>
+  >({});
   const [redoRequirementCodeOverrides, setRedoRequirementCodeOverrides] =
     useState<string[]>([]);
   const previewUrlsRef = useRef<Record<string, string>>({});
@@ -310,6 +313,17 @@ function AdmissionStep3() {
     (requirement) => requirement.code === "honor_certificate",
   );
 
+  const showMissingRequiredErrors = () => {
+    const nextErrors = Object.fromEntries(
+      missingRequiredRequirements.map((requirement) => [
+        requirement.code,
+        `${requirement.name} is required to upload.`,
+      ]),
+    );
+    setMissingRequirementErrors(nextErrors);
+    addToast("Please upload all required files before continuing.", "error");
+  };
+
   // Handle file selection
   const handleFileChange = (
     requirementCode: string,
@@ -333,6 +347,10 @@ function AdmissionStep3() {
           previewUrl,
         },
       }));
+      setMissingRequirementErrors((prev) => {
+        const { [requirementCode]: _removedError, ...nextErrors } = prev;
+        return nextErrors;
+      });
       addToast(`${requirementName} selected successfully!`, "success");
     }
   };
@@ -340,12 +358,7 @@ function AdmissionStep3() {
   // Function to continue without uploading
   const handleContinueWithoutUpload = async () => {
     if (hasMissingRequiredRequirements) {
-      addToast(
-        `Please upload ${missingRequiredRequirements
-          .map((requirement) => requirement.name)
-          .join(", ")} before continuing.`,
-        "error",
-      );
+      showMissingRequiredErrors();
       return;
     }
 
@@ -387,12 +400,7 @@ function AdmissionStep3() {
     e.preventDefault();
 
     if (hasMissingRequiredRequirements) {
-      addToast(
-        `Please upload ${missingRequiredRequirements
-          .map((requirement) => requirement.name)
-          .join(", ")} before continuing.`,
-        "error",
-      );
+      showMissingRequiredErrors();
       return;
     }
 
@@ -577,7 +585,7 @@ function AdmissionStep3() {
             )}
           </div>
 
-          <form className="upload-form" onSubmit={handleSubmit}>
+          <form className="upload-form" onSubmit={handleSubmit} noValidate>
             <div className="upload-grid">
               {visibleRequirements.map((requirement) => {
                 const inputId = requirement.code;
@@ -590,6 +598,8 @@ function AdmissionStep3() {
                   isRedoUploadMode &&
                   existingCredential?.isSubmitted &&
                   existingCredential.statusLabel !== "Needs Reupload";
+                const requirementError =
+                  missingRequirementErrors[requirement.code];
                 const statusClass = hasFile
                   ? "ready"
                   : isExistingUploaded
@@ -603,7 +613,7 @@ function AdmissionStep3() {
                 return (
                   <div
                     key={requirement.code}
-                    className={`upload-group ${hasFile || isExistingUploaded ? "has-file" : ""}`}
+                    className={`upload-group ${hasFile || isExistingUploaded ? "has-file" : ""} ${requirementError ? "has-error" : ""}`}
                   >
                     <div className="upload-group-head">
                       <div>
@@ -678,6 +688,10 @@ function AdmissionStep3() {
                         }
                       />
                     </label>
+
+                    {requirementError && (
+                      <p className="upload-error-message">{requirementError}</p>
+                    )}
 
                     {hasFile && (
                       <div className="selected-file-bar">

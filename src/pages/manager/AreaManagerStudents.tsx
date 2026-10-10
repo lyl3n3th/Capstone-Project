@@ -20,6 +20,7 @@ interface Student {
   id: string;
   first_name: string;
   last_name: string;
+  gender: "Male" | "Female" | "";
   student_id: string;
   status: string;
   credential_status: string;
@@ -151,6 +152,7 @@ const mapStoredStudentToDirectoryRow = (
     id: student.id,
     first_name: firstName,
     last_name: lastName,
+    gender: student.gender || "",
     student_id: student.id,
     status: isVisibleManagerStudentRecord(student) ? "active" : "inactive",
     credential_status: getCredentialStatusLabel(student),
@@ -187,6 +189,7 @@ const AreaManagerStudents: React.FC = () => {
   const [filterBranch, setFilterBranch] = useState("");
   const [filterYear, setFilterYear] = useState("");
   const [filterStrand, setFilterStrand] = useState("");
+  const [filterGender, setFilterGender] = useState("");
 
   const [sortConfig, setSortConfig] = useState<{
     key: SortKeys;
@@ -260,7 +263,10 @@ const AreaManagerStudents: React.FC = () => {
   ).sort();
 
   const totalStudents = students.length;
-  const activeStudents = students.filter((s) => s.status === "active").length;
+  const femaleStudents = students.filter((student) => student.gender === "Female").length;
+  const maleStudents = students.filter((student) => student.gender === "Male").length;
+  const isCollegeCourseFilterSelected =
+    filterCourse !== "" && filterCourse !== "SHS";
 
   const processedStudents = useMemo(() => {
     const filtered = students.filter((student) => {
@@ -270,6 +276,7 @@ const AreaManagerStudents: React.FC = () => {
       const matchesSearch =
         fullName.includes(normalizedSearchTerm) ||
         student.student_id.toLowerCase().includes(normalizedSearchTerm) ||
+        student.gender.toLowerCase().includes(normalizedSearchTerm) ||
         student.academic_standing
           .toLowerCase()
           .includes(normalizedSearchTerm);
@@ -280,6 +287,7 @@ const AreaManagerStudents: React.FC = () => {
       const matchesBranch = filterBranch ? student.branch === filterBranch : true;
       const matchesYear = filterYear ? student.year_level === filterYear : true;
       const matchesStrand = filterStrand ? student.strand === filterStrand : true;
+      const matchesGender = filterGender ? student.gender === filterGender : true;
 
       return (
         matchesSearch &&
@@ -287,7 +295,8 @@ const AreaManagerStudents: React.FC = () => {
         matchesAcademicStanding &&
         matchesBranch &&
         matchesYear &&
-        matchesStrand
+        matchesStrand &&
+        matchesGender
       );
     });
 
@@ -339,6 +348,7 @@ const AreaManagerStudents: React.FC = () => {
     filterBranch,
     filterYear,
     filterStrand,
+    filterGender,
     sortConfig,
   ]);
 
@@ -422,8 +432,12 @@ const AreaManagerStudents: React.FC = () => {
           <span className="am-students-stat-value">{totalStudents}</span>
         </div>
         <div className="am-students-stat-badge">
-          <span className="am-students-stat-label">Active</span>
-          <span className="am-students-stat-value">{activeStudents}</span>
+          <span className="am-students-stat-label">Female Students</span>
+          <span className="am-students-stat-value">{femaleStudents}</span>
+        </div>
+        <div className="am-students-stat-badge">
+          <span className="am-students-stat-label">Male Students</span>
+          <span className="am-students-stat-value">{maleStudents}</span>
         </div>
       </div>
 
@@ -446,6 +460,9 @@ const AreaManagerStudents: React.FC = () => {
               value={filterCourse}
               onChange={(event) => {
                 setFilterCourse(event.target.value);
+                if (event.target.value !== "SHS") {
+                  setFilterStrand("");
+                }
                 setCurrentPage(1);
               }}
             >
@@ -462,13 +479,18 @@ const AreaManagerStudents: React.FC = () => {
                 setFilterStrand(event.target.value);
                 setCurrentPage(1);
               }}
+              disabled={isCollegeCourseFilterSelected}
             >
-              <option value="">All Strands</option>
-              {uniqueStrands.map((strand) => (
-                <option key={strand} value={strand}>
-                  {strand}
-                </option>
-              ))}
+              <option value="">
+                {isCollegeCourseFilterSelected ? "" : "All Strands"}
+              </option>
+              {!isCollegeCourseFilterSelected
+                ? uniqueStrands.map((strand) => (
+                    <option key={strand} value={strand}>
+                      {strand}
+                    </option>
+                  ))
+                : null}
             </select>
             <select
               value={filterAcademicStanding}
@@ -508,6 +530,17 @@ const AreaManagerStudents: React.FC = () => {
                   {yearLevel}
                 </option>
               ))}
+            </select>
+            <select
+              value={filterGender}
+              onChange={(event) => {
+                setFilterGender(event.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="">All Gender</option>
+              <option value="Female">Female</option>
+              <option value="Male">Male</option>
             </select>
           </div>
         </div>
@@ -634,6 +667,11 @@ const AreaManagerStudents: React.FC = () => {
                 <span className="am-students-card-badge">
                   {student.year_level}
                 </span>
+                {student.gender ? (
+                  <span className="am-students-card-badge">
+                    {student.gender}
+                  </span>
+                ) : null}
                 <span
                   className={`am-students-card-badge am-students-standing-${student.academic_standing.toLowerCase()}`}
                 >
@@ -716,6 +754,12 @@ const AreaManagerStudents: React.FC = () => {
                     className={`am-students-value-box am-students-value-box-highlight am-students-standing-${selectedStudent.academic_standing.toLowerCase()}`}
                   >
                     {selectedStudent.academic_standing}
+                  </div>
+                </div>
+                <div className="am-students-field">
+                  <label>Gender</label>
+                  <div className="am-students-value-box">
+                    {selectedStudent.gender || "N/A"}
                   </div>
                 </div>
                 <div className="am-students-field">

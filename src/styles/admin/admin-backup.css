@@ -283,8 +283,15 @@
   color: #374151;
   font-size: 14px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
+  min-height: 36px;
+  line-height: 1.25;
+}
+
+.form-group label svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 .form-group input {

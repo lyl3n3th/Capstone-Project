@@ -801,6 +801,7 @@ const SUPABASE_MIRRORED_BRANCH_SCOPES = new Set([
   "student-subject-plans",
   "student-schedule-requests",
   "instructor-grade-change-requests",
+  "grade-change-request-settings",
 ]);
 
 const getBranchScopeSupabaseErrorMessage = (error: {
@@ -2447,6 +2448,33 @@ export const findStoredStudent = ({
 
     return false;
   });
+};
+
+export const findStoredApplicant = ({
+  branch,
+  trackingNumber,
+}: {
+  branch?: string | null;
+  trackingNumber?: string | null;
+}) => {
+  const normalizedTrackingNumber = trackingNumber?.trim();
+  if (!normalizedTrackingNumber) {
+    return null;
+  }
+
+  const resolvedBranch = normalizeBranchName(branch);
+  const storedEnrollees =
+    readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ?? [];
+
+  return (
+    storedEnrollees
+      .map(normalizeAdminEnrolleeCapitalization)
+      .find(
+        (record) =>
+          record.trackingNumber === normalizedTrackingNumber &&
+          normalizeBranchName(record.branch) === resolvedBranch,
+      ) || null
+  );
 };
 
 export const findApprovedEnrolleeByStudentNumber = ({
@@ -4431,7 +4459,9 @@ export const fetchSupabaseAdmissionApplicants = async (
     throw new Error(error.message);
   }
 
-  const queueRows = Array.isArray(data) ? data : [];
+  const queueRows = (Array.isArray(data) ? data : []).filter(
+    (row) => row.application_status !== "draft",
+  );
   const applicantRecords = await Promise.all(
     queueRows.map(mapSupabaseApplicantToAdminRecord),
   );
@@ -4479,6 +4509,23 @@ export const upsertSubmittedApplicant = ({
     ),
     scholarshipExamScore: application.scholarshipExamScore,
   });
+  const existingApplicantIndex = existingApplicants.findIndex(
+    (applicant) => applicant.trackingNumber === application.trackingNumber,
+  );
+  const existingApplicant =
+    existingApplicantIndex >= 0 ? existingApplicants[existingApplicantIndex] : null;
+  const requestedOwnSchedule =
+    Boolean(draft?.requestOwnSchedule) ||
+    Boolean(existingApplicant?.requestedOwnSchedule);
+  const ownScheduleRequestStatus = requestedOwnSchedule
+    ? existingApplicant?.ownScheduleRequestStatus || "Pending"
+    : undefined;
+  const ownScheduleRequestSubmittedAt =
+    requestedOwnSchedule
+      ? existingApplicant?.ownScheduleRequestSubmittedAt ||
+        application.submittedAt ||
+        application.updatedAt
+      : undefined;
   const applicantRecord: AdminEnrolleeRecord = normalizeAdminEnrolleeCapitalization({
     id: application.trackingNumber,
     trackingNumber: application.trackingNumber,
@@ -4500,26 +4547,32 @@ export const upsertSubmittedApplicant = ({
     scholarshipExamScore: application.scholarshipExamScore,
     effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
     effectiveDiscountSource: tuitionEstimate.effectiveDiscountSource,
-    requestedOwnSchedule: Boolean(draft?.requestOwnSchedule),
-    ownScheduleRequestStatus: draft?.requestOwnSchedule ? "Pending" : undefined,
-    ownScheduleRequestSubmittedAt: draft?.requestOwnSchedule
-      ? application.submittedAt || application.updatedAt
-      : undefined,
+    requestedOwnSchedule,
+    ownScheduleRequestStatus,
+    ownScheduleRequestSubmittedAt,
     personalInfo: {
       fullName: fullName || `${application.firstName} ${application.lastName}`.trim(),
       birthDate: "",
-      contactNumber: draft?.contact || "",
+      contactNumber: draft?.contact || application.phoneNumber || "",
       program,
       guardianName: "",
-      email: draft?.email || "",
-      address: draft?.address || "",
+      email: draft?.email || application.email || "",
+      address: draft?.address || application.address || "",
       yearLevel,
       guardianContact: "",
-      middleName: draft?.middle_name || draft?.mname || "",
-      sex: draft?.sex || "",
-      civilStatus: draft?.civil_status || "",
-      lastSchoolAttended: draft?.last_school_attended || draft?.lastSchool || "",
-      yearCompletion: draft?.year_completion || draft?.yearCompletion || "",
+      middleName: draft?.middle_name || draft?.mname || application.middleName || "",
+      sex: draft?.sex || application.sex || "",
+      civilStatus: draft?.civil_status || application.civilStatus || "",
+      lastSchoolAttended:
+        draft?.last_school_attended ||
+        draft?.lastSchool ||
+        application.lastSchoolAttended ||
+        "",
+      yearCompletion:
+        draft?.year_completion ||
+        draft?.yearCompletion ||
+        application.yearCompletion ||
+        "",
       requestedYearLevel:
         draft?.requested_year_level ||
         draft?.requestedYearLevel ||
@@ -4529,10 +4582,6 @@ export const upsertSubmittedApplicant = ({
     },
     attachments: [],
   });
-
-  const existingApplicantIndex = existingApplicants.findIndex(
-    (applicant) => applicant.trackingNumber === application.trackingNumber,
-  );
 
   const nextApplicants =
     existingApplicantIndex >= 0
@@ -4544,6 +4593,12 @@ export const upsertSubmittedApplicant = ({
                 studentNumber: applicant.studentNumber,
                 status: applicant.status,
                 convertedAt: applicant.convertedAt,
+                requestedOwnSchedule,
+                ownScheduleRequestStatus,
+                ownScheduleRequestSubmittedAt,
+                ownScheduleAcademicYear: applicant.ownScheduleAcademicYear,
+                ownScheduleSemester: applicant.ownScheduleSemester,
+                ownScheduleDecisionAt: applicant.ownScheduleDecisionAt,
               }
             : applicant,
         )

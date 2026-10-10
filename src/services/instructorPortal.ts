@@ -34,6 +34,7 @@ import {
 const INSTRUCTOR_GRADE_SUBMISSIONS_SCOPE = "instructor-grade-submissions";
 const INSTRUCTOR_GRADE_CHANGE_REQUESTS_SCOPE =
   "instructor-grade-change-requests";
+const GRADE_CHANGE_REQUEST_SETTINGS_SCOPE = "grade-change-request-settings";
 
 if (typeof window !== "undefined") {
   const legacyPasswordKeyParts = [
@@ -140,6 +141,12 @@ export interface InstructorGradeChangeRequest {
   errorRows?: InstructorGradeChangeRequestErrorRow[];
   reviewedAt?: string;
   reviewedBy?: string;
+}
+
+export interface GradeChangeRequestSettings {
+  isOpen: boolean;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export interface InstructorGradeChangeTemplateFilters {
@@ -454,6 +461,34 @@ export const saveInstructorGradeChangeRequest = (
     request,
     ...existing.filter((item) => item.id !== request.id),
   ]);
+};
+
+export const getGradeChangeRequestSettings = (
+  branch?: string | null,
+): GradeChangeRequestSettings =>
+  readBranchScopedData<GradeChangeRequestSettings>(
+    GRADE_CHANGE_REQUEST_SETTINGS_SCOPE,
+    branch,
+  ) ?? { isOpen: false };
+
+export const fetchAndCacheGradeChangeRequestSettings = async (
+  branch?: string | null,
+) => {
+  const settings =
+    await fetchAndCacheBranchScopedData<GradeChangeRequestSettings>(
+      GRADE_CHANGE_REQUEST_SETTINGS_SCOPE,
+      branch,
+    );
+
+  return settings ?? getGradeChangeRequestSettings(branch);
+};
+
+export const writeGradeChangeRequestSettings = (
+  branch: string | null | undefined,
+  settings: GradeChangeRequestSettings,
+) => {
+  writeBranchScopedData(GRADE_CHANGE_REQUEST_SETTINGS_SCOPE, branch, settings);
+  return settings;
 };
 
 const downloadBlob = (fileName: string, blob: Blob) => {
@@ -821,6 +856,7 @@ const getRowHasRelevantGradeData = (row: Record<string, unknown>) =>
     "Subject Title",
     "SUBJECT_TITLE",
     "Grade",
+    "Grade (0-100)",
     "Grades",
     "GRADES",
     "Unit",
@@ -965,6 +1001,8 @@ export const downloadInstructorGradeTemplate = ({
     existingSheets.push({
       academicYear: sectionAssignments[0]?.academicYear || "2026-2027",
       descriptor: getSectionAcademicDescriptor(section, sectionStudents),
+      headerOverrides:
+        programType === "College" ? { F: "GRADE (0-100)" } : undefined,
       rows: buildInstructorTemplateRows({
         assignments: sectionAssignments,
         programType,
@@ -1157,7 +1195,7 @@ export const downloadInstructorGradeChangeTemplate = async ({
       headerOverrides: {
         E: programType === "SHS" ? "QUARTER" : "UNITS",
         F: "CURRENT GRADE",
-        G: "REQUESTED GRADE",
+        G: programType === "College" ? "REQUESTED GRADE (0-100)" : "REQUESTED GRADE",
       },
       rows,
       sectionCode: section.code,
@@ -1211,6 +1249,7 @@ const getRowHasRelevantGradeChangeData = (row: Record<string, unknown>) =>
     "Current Grade",
     "CURRENT_GRADE",
     "Requested Grade",
+    "Requested Grade (0-100)",
     "REQUESTED_GRADE",
   ].some((alias) => getValueByAliases(row, [alias]).trim() !== "");
 
@@ -1290,6 +1329,7 @@ export const parseInstructorGradeChangeWorkbook = async ({
       .forEach(({ rowNumber, values: row }) => {
         const requestedGrade = getValueByAliases(row, [
           "Requested Grade",
+          "Requested Grade (0-100)",
           "REQUESTED_GRADE",
           "New Grade",
           "NEW_GRADE",
@@ -1587,7 +1627,12 @@ export const parseInstructorGradeWorkbook = async ({
           "SUBJECT_TITLE",
         ]),
         units: getValueByAliases(row, ["Unit", "Units", "UNITS"]),
-        grade: getValueByAliases(row, ["Grade", "Grades", "GRADES"]),
+        grade: getValueByAliases(row, [
+          "Grade",
+          "Grade (0-100)",
+          "Grades",
+          "GRADES",
+        ]),
         instructorName: getValueByAliases(row, ["Instructor", "INSTRUCTOR"]),
         academicYear:
           getValueByAliases(row, ["Academic Year", "ACADEMIC_YEAR"]) ||

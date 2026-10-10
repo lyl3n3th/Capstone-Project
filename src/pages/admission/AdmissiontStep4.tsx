@@ -18,6 +18,7 @@ import {
   type AdmissionSubmissionNotificationResponse,
 } from "../../services/admissionSubmissionNotificationApi";
 import {
+  findStoredApplicant,
   findStoredStudent,
   normalizeBranchName,
   upsertSubmittedApplicant,
@@ -29,6 +30,50 @@ function getQueryParam(name: string): string | null {
   const params = new URLSearchParams(window.location.search);
   return params.get(name);
 }
+
+const OWN_SCHEDULE_REQUEST_STORAGE_KEY = "aics-admission-own-schedule-requests";
+
+const normalizeTrackingNumber = (value: string | null | undefined) =>
+  value?.trim().toUpperCase() || "";
+
+const readStoredOwnScheduleRequests = () => {
+  try {
+    const rawValue = localStorage.getItem(OWN_SCHEDULE_REQUEST_STORAGE_KEY);
+    if (!rawValue) {
+      return {};
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+    return parsedValue && typeof parsedValue === "object"
+      ? (parsedValue as Record<string, boolean>)
+      : {};
+  } catch (error) {
+    console.warn("Failed to read saved own schedule requests", error);
+    return {};
+  }
+};
+
+const getStoredOwnScheduleRequest = (trackingNumber: string) =>
+  Boolean(readStoredOwnScheduleRequests()[normalizeTrackingNumber(trackingNumber)]);
+
+const setStoredOwnScheduleRequest = (
+  trackingNumber: string,
+  requested: boolean,
+) => {
+  const normalizedTrackingNumber = normalizeTrackingNumber(trackingNumber);
+  if (!normalizedTrackingNumber) {
+    return;
+  }
+
+  const storedRequests = readStoredOwnScheduleRequests();
+  localStorage.setItem(
+    OWN_SCHEDULE_REQUEST_STORAGE_KEY,
+    JSON.stringify({
+      ...storedRequests,
+      [normalizedTrackingNumber]: requested,
+    }),
+  );
+};
 
 interface Toast {
   id: string;
@@ -72,6 +117,7 @@ function AdmissionStep4() {
       mergeAdmissionDraft({
         requestOwnSchedule: false,
       });
+      setStoredOwnScheduleRequest(trackingNumber, false);
       return;
     }
 
@@ -79,6 +125,10 @@ function AdmissionStep4() {
     mergeAdmissionDraft({
       requestOwnSchedule: nextValue,
     });
+    setStoredOwnScheduleRequest(
+      applicationData?.trackingNumber || trackingNumber,
+      nextValue,
+    );
   };
 
   const handleScheduleRequestClick = () => {
@@ -106,6 +156,9 @@ function AdmissionStep4() {
       const draft = getAdmissionDraft();
       const draftTrackingNumber = draft?.trackingNumber || "";
       const resolvedTrackingNumber = urlTrackingNumber || draftTrackingNumber;
+      const draftMatchesTrackingNumber =
+        normalizeTrackingNumber(draftTrackingNumber) ===
+        normalizeTrackingNumber(resolvedTrackingNumber);
 
       if (!resolvedTrackingNumber) {
         setPageError("No admission record was found for this page.");
@@ -114,8 +167,14 @@ function AdmissionStep4() {
       }
 
       setTrackingNumber(resolvedTrackingNumber);
-      setApplyScholarship(Boolean(draft?.apply_scholarship));
-      setRequestOwnSchedule(Boolean(draft?.requestOwnSchedule));
+      setApplyScholarship(
+        draftMatchesTrackingNumber ? Boolean(draft?.apply_scholarship) : false,
+      );
+      setRequestOwnSchedule(
+        draftMatchesTrackingNumber
+          ? Boolean(draft?.requestOwnSchedule)
+          : getStoredOwnScheduleRequest(resolvedTrackingNumber),
+      );
 
       try {
         const application = await getAdmissionProgress(resolvedTrackingNumber);
@@ -128,12 +187,34 @@ function AdmissionStep4() {
 
         setApplicationData(application);
         setTrackingNumber(application.trackingNumber);
-        if (draft?.apply_scholarship !== undefined) {
+        const storedApplicant = findStoredApplicant({
+          branch: application.branchName,
+          trackingNumber: application.trackingNumber,
+        });
+        const storedStudent = findStoredStudent({
+          branch: application.branchName,
+          trackingNumber: application.trackingNumber,
+        });
+        const restoredOwnScheduleRequest =
+          application.programLevel === "college" &&
+          (Boolean(storedApplicant?.requestedOwnSchedule) ||
+            Boolean(storedStudent?.requestedOwnSchedule) ||
+            getStoredOwnScheduleRequest(application.trackingNumber) ||
+            (draftMatchesTrackingNumber && Boolean(draft?.requestOwnSchedule)));
+
+        if (draftMatchesTrackingNumber && draft?.apply_scholarship !== undefined) {
           setApplyScholarship(Boolean(draft.apply_scholarship));
         } else {
           setApplyScholarship(application.appliedForScholarship);
         }
-        setRequestOwnSchedule(Boolean(draft?.requestOwnSchedule));
+        setRequestOwnSchedule(restoredOwnScheduleRequest);
+        if (restoredOwnScheduleRequest) {
+          mergeAdmissionDraft({
+            trackingNumber: application.trackingNumber,
+            requestOwnSchedule: true,
+          });
+          setStoredOwnScheduleRequest(application.trackingNumber, true);
+        }
       } catch (err) {
         console.error(err);
         setPageError(
@@ -172,7 +253,10 @@ function AdmissionStep4() {
 
     const isCollege = applicationData.programLevel === "college";
     const shouldProceedToScholarshipExam = isCollege && applyScholarship;
-    const effectiveRequestOwnSchedule = isCollege && requestOwnSchedule;
+    const effectiveRequestOwnSchedule =
+      isCollege &&
+      (requestOwnSchedule ||
+        getStoredOwnScheduleRequest(applicationData.trackingNumber));
 
     try {
       const updatedApplication = await updateAdmissionProgress({
@@ -296,8 +380,8 @@ function AdmissionStep4() {
 
     if (sentChannels.length === 1 && failedChannels.length > 0) {
       return {
-        type: "warning",
-        message: `Application submitted. Tracking number sent by ${sentChannels[0]}, but automatic ${failedChannels.join(" and ")} delivery failed.`,
+        type: "success",
+        message: `Application submitted. Tracking number sent by ${sentChannels[0]}.`,
       };
     }
 
@@ -311,7 +395,8 @@ function AdmissionStep4() {
     if (failedChannels.length > 0) {
       return {
         type: "warning",
-        message: `Application submitted, but automatic ${failedChannels.join(" and ")} delivery could not be completed right now.`,
+        message:
+          "Application submitted successfully. Please keep your tracking number.",
       };
     }
 

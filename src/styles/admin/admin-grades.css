@@ -842,6 +842,59 @@
   overflow-x: auto;
 }
 
+.grade-change-window-control {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  margin: 0 0 16px;
+  border: 1px solid #dbe5ef;
+  border-radius: 8px;
+  background: #f8fbfd;
+}
+
+.grade-change-window-control strong {
+  display: block;
+  color: #172033;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.grade-change-window-control p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.grade-change-window-toggle {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.grade-change-window-toggle.open {
+  background: #be123c;
+  border-color: #be123c;
+}
+
+.grade-change-window-toggle.closed {
+  background: #15803d;
+  border-color: #15803d;
+}
+
+.grade-change-window-toggle:hover {
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
+}
+
 .instructor-submissions-card .history-table {
   width: max-content;
   min-width: 0;

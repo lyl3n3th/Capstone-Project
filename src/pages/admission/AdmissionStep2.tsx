@@ -7,6 +7,7 @@ import {
   civilStatusOptions,
   getAdmissionBranchName,
   getAdmissionYearLevelOptions,
+  getAdmissionProgress,
   getAvailablePrograms,
   normalizeAdmissionYearLevel,
   getTrackOptions,
@@ -299,6 +300,43 @@ function AdmissionStep2() {
     return fieldsToValidate.every((fieldId) => !getFieldError(fieldId));
   };
 
+  const applyApplicationToForm = (application: Awaited<ReturnType<typeof getAdmissionProgress>>) => {
+    if (!application) {
+      return;
+    }
+
+    setTrackingNumber(application.trackingNumber);
+    setFname((current) => current || application.firstName || "");
+    setLname((current) => current || application.lastName || "");
+    setMname((current) => current || application.middleName || "");
+    setAddress((current) => current || application.address || "");
+    setEmail((current) => current || application.email || "");
+    setContact((current) => current || application.phoneNumber || "");
+    setLastSchool((current) => current || application.lastSchoolAttended || "");
+    setYearCompletion((current) => current || application.yearCompletion || "");
+    setRequestedYearLevel((current) =>
+      current !== YEAR_LEVEL_PLACEHOLDER
+        ? current
+        : application.requestedYearLevel || YEAR_LEVEL_PLACEHOLDER,
+    );
+    setSex((current) => (current !== "Sex" ? current : application.sex || "Sex"));
+    setCivilStatus((current) =>
+      current !== "Civil Status"
+        ? current
+        : application.civilStatus || "Civil Status",
+    );
+    setProgram((current) =>
+      !isEducationalLevelPlaceholder(current) ? current : application.programName,
+    );
+    setProgram1((current) =>
+      !isTrackSelectionPlaceholder(current) ? current : application.trackName,
+    );
+    setHonor((current) =>
+      current !== "Select Honor" ? current : application.honorLabel || "No Honor",
+    );
+    setApplyScholarship(application.appliedForScholarship);
+  };
+
   // Save draft to sessionStorage
   const saveDraft = () => {
     const draftData = {
@@ -328,9 +366,24 @@ function AdmissionStep2() {
   };
 
   // Load draft from sessionStorage
-  const loadDraft = () => {
+  const loadDraft = async () => {
     const saved = sessionStorage.getItem("enrollmentDraft");
+    const loadSavedApplication = async () => {
+      const resolvedTrackingNumber = trackingNumber || initialTrackingNumber;
+      if (!resolvedTrackingNumber) {
+        return;
+      }
+
+      try {
+        const application = await getAdmissionProgress(resolvedTrackingNumber);
+        applyApplicationToForm(application);
+      } catch (error) {
+        console.warn("Failed to load saved admission progress", error);
+      }
+    };
+
     if (!saved) {
+      await loadSavedApplication();
       setIsLoadingDraft(false);
       return;
     }
@@ -339,6 +392,7 @@ function AdmissionStep2() {
       const draft = JSON.parse(saved);
       if (draft.branch !== selectedBranch || draft.status !== studentStatus) {
         sessionStorage.removeItem("enrollmentDraft");
+        await loadSavedApplication();
         setIsLoadingDraft(false);
         return;
       }
@@ -373,8 +427,10 @@ function AdmissionStep2() {
           }, 100);
         }
       }
+      await loadSavedApplication();
     } catch (err) {
       console.warn("Failed to load draft", err);
+      await loadSavedApplication();
     } finally {
       setIsLoadingDraft(false);
     }
@@ -382,7 +438,7 @@ function AdmissionStep2() {
 
   useEffect(() => {
     if (fromRequirements) {
-      loadDraft();
+      void loadDraft();
     }
   }, [fromRequirements]);
 
@@ -414,7 +470,7 @@ function AdmissionStep2() {
   ]);
 
   useEffect(() => {
-    loadDraft();
+    void loadDraft();
   }, []);
 
   // Handle input changes

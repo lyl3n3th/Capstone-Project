@@ -384,6 +384,7 @@ class AdmissionRequirementRedoNotificationApiTests(TestCase):
         self.assertIn("Form 137", message)
         self.assertIn("AICS-20260425-REDO1", message)
         self.assertIn("Upload Requirements page", message)
+        self.assertIn("https://capstone-project-alpha-nine.vercel.app/", message)
 
 
 class AdmissionDecisionNotificationApiTests(TestCase):

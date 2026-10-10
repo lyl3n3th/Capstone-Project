@@ -244,6 +244,45 @@
   border-bottom: none;
 }
 
+.s-grading-system-section {
+  margin: 0 0 24px;
+}
+
+.s-grading-system-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.s-grading-system-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  background: #ffffff;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.s-grading-system-table th,
+.s-grading-system-table td {
+  border: 1px solid #2f343a;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.25;
+  color: #111827;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.s-grading-system-table th {
+  font-weight: 700;
+  background: #f8f9fa;
+}
+
+.s-grading-system-table td:nth-child(2),
+.s-grading-system-table td:nth-child(5) {
+  font-weight: 600;
+}
+
 /* Column Specific Styles */
 .s-subject-code {
   font-weight: 600;

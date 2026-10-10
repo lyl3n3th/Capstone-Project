@@ -1,76 +1,80 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FiAlertTriangle,
   FiCheckCircle,
-  FiDownload,
-  FiUpload,
+  FiEdit3,
+  FiSearch,
+  FiTrash2,
   FiX,
 } from "react-icons/fi";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import { useInstructorPortal } from "../../hooks/useInstructorPortal";
+import type { AcademicClassSectionRecord } from "../../services/academicData";
+import type { StudentStorageRecord } from "../../services/adminStorage";
 import {
-  downloadInstructorGradeChangeTemplate,
+  fetchAndCacheStudentGradeRecordsForBranch,
+  readStudentGradeRecordsForBranch,
+  validateAndNormalizeUploadedGradeRow,
+  type StoredStudentGradeRecord,
+  type StudentGradeProgramType,
+} from "../../services/studentGrades";
+import {
+  fetchAndCacheGradeChangeRequestSettings,
   fetchAndCacheInstructorGradeChangeRequests,
+  getGradeChangeRequestSettings,
   getInstructorGradeChangeRequests,
-  parseInstructorGradeChangeWorkbook,
   saveInstructorGradeChangeRequest,
   type InstructorGradeChangeRequest,
-  type InstructorGradeChangeRequestErrorRow,
+  writeInstructorGradeChangeRequests,
 } from "../../services/instructorPortal";
 
-const SEMESTER_OPTIONS = ["1st Semester", "2nd Semester", "Summer"];
-const SHS_QUARTER_OPTIONS_BY_SEMESTER: Record<string, string[]> = {
-  "1st Semester": ["1st Quarter", "2nd Quarter"],
-  "2nd Semester": ["3rd Quarter", "4th Quarter"],
-  Summer: ["1st Quarter", "2nd Quarter"],
+type GradeChangeDraftRow = {
+  id: string;
+  studentId: string;
+  fullName: string;
+  section: string;
+  subjectCode: string;
+  subjectTitle: string;
+  units: number | null;
+  academicYear: string;
+  semester: string;
+  gradingPeriod: string;
+  programType: StudentGradeProgramType;
+  currentGrade: string;
+  currentRecord?: StoredStudentGradeRecord;
 };
-
-const getDefaultAcademicYear = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-
-  return month >= 6 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
-};
-
-const getSectionLabel = (section: { code: string; section?: string }) =>
-  [section.code, section.section && section.section !== section.code ? section.section : ""]
-    .filter(Boolean)
-    .join(" - ");
 
 const getCompactFileName = (fileName: string) =>
-  fileName.length > 21 ? `${fileName.slice(0, 18)}...` : fileName;
+  fileName.length > 26 ? `${fileName.slice(0, 23)}...` : fileName;
 
-const getGradeChangeErrorCells = (row: InstructorGradeChangeRequestErrorRow) => {
-  const cells = new Set<string>();
-  const rowNumber = row.rowNumber;
-  const rowCell = (label: string, column: string) =>
-    `${label} (${column}${rowNumber})`;
+const normalizeValue = (value?: string | null) =>
+  (value || "").trim().toLowerCase();
 
-  row.errors.forEach((error) => {
-    const normalized = error.toLowerCase();
+const studentMatchesSection = (
+  student: StudentStorageRecord,
+  section: AcademicClassSectionRecord,
+) =>
+  section.enrolleeIds.includes(student.id) ||
+  normalizeValue(student.section) === normalizeValue(section.code) ||
+  normalizeValue(student.section) === normalizeValue(section.section);
 
-    if (normalized.includes("student id")) cells.add(rowCell("Student ID", "A"));
-    if (normalized.includes("full name")) cells.add(rowCell("Full Name", "B"));
-    if (normalized.includes("subject code")) cells.add(rowCell("Subject Code", "C"));
-    if (normalized.includes("subject title")) cells.add(rowCell("Subject Title", "D"));
-    if (normalized.includes("unit")) cells.add(rowCell("Units", "E"));
-    if (normalized.includes("grading period")) {
-      cells.add(rowCell("Grading Period", "E"));
-    }
-    if (normalized.includes("current grade")) {
-      cells.add(rowCell("Current Grade", "F"));
-    }
-    if (normalized.includes("requested grade") || normalized.includes("grade")) {
-      cells.add(rowCell("Requested Grade", "G"));
-    }
-    if (normalized.includes("instructor")) cells.add(rowCell("Instructor", "H"));
-    if (normalized.includes("academic year")) cells.add("Academic Year header");
-    if (normalized.includes("semester")) cells.add("Semester header");
-    if (normalized.includes("section")) cells.add("Section sheet/header");
-  });
+const getProgramType = (
+  section?: AcademicClassSectionRecord,
+): StudentGradeProgramType => (section?.program === "SHS" ? "SHS" : "College");
 
-  return Array.from(cells);
+const sanitizeRequestedGradeInput = (value: string) => {
+  const numericValue = value.replace(/[^\d.]/g, "");
+  const [wholePart = "", ...decimalParts] = numericValue.split(".");
+  const decimalValue = decimalParts.join("");
+
+  return decimalParts.length > 0
+    ? `${wholePart.slice(0, 3)}.${decimalValue.slice(0, 2)}`
+    : wholePart.slice(0, 3);
+};
+
+const isRequestedGradeInAllowedRange = (value: string) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) && numericValue >= 70 && numericValue <= 100;
 };
 
 export default function InstructorGradeChanges() {
@@ -82,29 +86,35 @@ export default function InstructorGradeChanges() {
     students,
     isLoading,
   } = useInstructorPortal();
-  const [sectionFilter, setSectionFilter] = useState("all");
-  const [academicYear, setAcademicYear] = useState(getDefaultAcademicYear);
-  const [semester, setSemester] = useState("1st Semester");
-  const [shsQuarter, setShsQuarter] = useState("1st Quarter");
   const [message, setMessage] = useState("");
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [isParsing, setIsParsing] = useState(false);
   const [requestsVersion, setRequestsVersion] = useState(0);
+  const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
+  const [settingsVersion, setSettingsVersion] = useState(0);
+  const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
+  const [requestedGrades, setRequestedGrades] = useState<Record<string, string>>({});
+  const [gradeSearchTerm, setGradeSearchTerm] = useState("");
   const [viewingRequest, setViewingRequest] =
     useState<InstructorGradeChangeRequest | null>(null);
-  const [errorPreviewRequest, setErrorPreviewRequest] =
-    useState<InstructorGradeChangeRequest | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [selectedRequestIds, setSelectedRequestIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!currentUser?.branch) {
       return;
     }
 
-    void fetchAndCacheInstructorGradeChangeRequests(currentUser.branch)
-      .then(() => setRequestsVersion((previousValue) => previousValue + 1))
+    void Promise.all([
+      fetchAndCacheInstructorGradeChangeRequests(currentUser.branch),
+      fetchAndCacheGradeChangeRequestSettings(currentUser.branch),
+      fetchAndCacheStudentGradeRecordsForBranch(currentUser.branch),
+    ])
+      .then(() => {
+        setRequestsVersion((previousValue) => previousValue + 1);
+        setSettingsVersion((previousValue) => previousValue + 1);
+        setGradeRecordsVersion((previousValue) => previousValue + 1);
+      })
       .catch((error) => {
-        console.warn("Unable to load grade change requests.", error);
+        console.warn("Unable to load grade change request data.", error);
       });
   }, [currentUser?.branch]);
 
@@ -129,38 +139,6 @@ export default function InstructorGradeChanges() {
       );
   }, [assignments, sections]);
 
-  const academicYearOptions = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          ...assignments.map((assignment) => assignment.academicYear),
-          academicYear,
-        ]),
-      )
-        .filter(Boolean)
-        .sort((left, right) => right.localeCompare(left)),
-    [academicYear, assignments],
-  );
-
-  const availableQuarterOptions =
-    SHS_QUARTER_OPTIONS_BY_SEMESTER[semester] ??
-    SHS_QUARTER_OPTIONS_BY_SEMESTER["1st Semester"];
-
-  useEffect(() => {
-    if (!availableQuarterOptions.includes(shsQuarter)) {
-      setShsQuarter(availableQuarterOptions[0]);
-    }
-  }, [availableQuarterOptions, shsQuarter]);
-
-  useEffect(() => {
-    if (
-      assignments.length > 0 &&
-      !assignments.some((assignment) => assignment.academicYear === academicYear)
-    ) {
-      setAcademicYear(assignments[0].academicYear || getDefaultAcademicYear());
-    }
-  }, [academicYear, assignments]);
-
   const requests = useMemo<InstructorGradeChangeRequest[]>(() => {
     void requestsVersion;
     return getInstructorGradeChangeRequests(currentUser?.branch).filter(
@@ -168,104 +146,280 @@ export default function InstructorGradeChanges() {
     );
   }, [currentUser?.branch, currentUser?.id, requestsVersion]);
 
-  const handleDownloadTemplate = async () => {
+  const gradeChangeSettings = useMemo(() => {
+    void settingsVersion;
+    return getGradeChangeRequestSettings(currentUser?.branch);
+  }, [currentUser?.branch, settingsVersion]);
+
+  const approvedGradeRecords = useMemo(() => {
+    void gradeRecordsVersion;
+    return readStudentGradeRecordsForBranch(currentUser?.branch);
+  }, [currentUser?.branch, gradeRecordsVersion]);
+
+  const gradeChangeRows = useMemo<GradeChangeDraftRow[]>(() => {
+    return assignments
+      .flatMap((assignment) => {
+        const section = assignedSectionOptions.find(
+          (item) =>
+            item.id === assignment.sectionId ||
+            item.code === assignment.sectionCode,
+        );
+        const programType = getProgramType(section);
+        const sectionStudents = section
+          ? students.filter((student) => studentMatchesSection(student, section))
+          : students;
+
+        return sectionStudents
+          .flatMap((student) => {
+            const studentGradeRecords = approvedGradeRecords.filter(
+              (record) =>
+                record.studentId === student.id &&
+                record.subjectCode.trim().toUpperCase() ===
+                  assignment.subjectCode.trim().toUpperCase() &&
+                record.academicYear === assignment.academicYear &&
+                record.semester === assignment.semester &&
+                record.programType === programType,
+            );
+
+            if (studentGradeRecords.length === 0) {
+              const pendingRow: GradeChangeDraftRow = {
+                id: `${student.id}::${assignment.subjectCode}::${assignment.academicYear}::${assignment.semester}::pending`,
+                studentId: student.id,
+                fullName: student.name,
+                section: section?.code || assignment.sectionCode,
+                subjectCode: assignment.subjectCode,
+                subjectTitle: assignment.subjectName,
+                units: null,
+                academicYear: assignment.academicYear,
+                semester: assignment.semester,
+                gradingPeriod:
+                  programType === "SHS" ? "No approved grade" : assignment.semester,
+                programType,
+                currentGrade: "No approved grade",
+                currentRecord: undefined,
+              };
+
+              return [pendingRow];
+            }
+
+            return studentGradeRecords.map<GradeChangeDraftRow>((currentRecord) => ({
+              id: currentRecord.id,
+              studentId: currentRecord.studentId,
+              fullName: currentRecord.fullName || student.name,
+              section: section?.code || assignment.sectionCode,
+              subjectCode: currentRecord.subjectCode,
+              subjectTitle: currentRecord.subjectTitle,
+              units: currentRecord.units,
+              academicYear: currentRecord.academicYear,
+              semester: currentRecord.semester,
+              gradingPeriod: currentRecord.gradingPeriod,
+              programType: currentRecord.programType,
+              currentGrade: currentRecord.normalizedGrade,
+              currentRecord,
+            }));
+          })
+      })
+      .sort(
+        (left, right) =>
+          left.section.localeCompare(right.section) ||
+          left.fullName.localeCompare(right.fullName) ||
+          left.subjectCode.localeCompare(right.subjectCode),
+      );
+  }, [
+    approvedGradeRecords,
+    assignedSectionOptions,
+    assignments,
+    students,
+  ]);
+
+  const handleRequestedGradeChange = (rowId: string, value: string) => {
+    const sanitizedValue = sanitizeRequestedGradeInput(value);
+
+    setRequestedGrades((previousValues) => ({
+      ...previousValues,
+      [rowId]: sanitizedValue,
+    }));
+  };
+
+  const filteredGradeChangeRows = useMemo(() => {
+    const normalizedSearchTerm = gradeSearchTerm.trim().toLowerCase();
+
+    if (!normalizedSearchTerm) {
+      return gradeChangeRows;
+    }
+
+    return gradeChangeRows.filter((row) =>
+      [
+        row.studentId,
+        row.fullName,
+        row.section,
+        row.subjectCode,
+        row.subjectTitle,
+        row.currentGrade,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedSearchTerm),
+    );
+  }, [gradeChangeRows, gradeSearchTerm]);
+
+  const handleOpenRequestModal = () => {
+    if (!gradeChangeSettings.isOpen) {
+      setMessage("Grade change requests are currently closed by the administrator.");
+      return;
+    }
+
+    setRequestedGrades({});
+    setGradeSearchTerm("");
+    setIsRequestModalOpen(true);
+  };
+
+  const handleSubmitGradeChangeRequest = () => {
     if (!instructor || !currentUser?.branch) {
       setMessage("Instructor profile is still loading.");
       return;
     }
 
-    try {
-      setIsDownloading(true);
-      await downloadInstructorGradeChangeTemplate({
-        instructor,
-        branch: currentUser.branch,
-        assignments,
-        sections,
-        students,
-        filters: {
-          sectionIds: sectionFilter === "all" ? [] : [sectionFilter],
-          academicYear,
-          semester,
-          gradingPeriod: shsQuarter,
-        },
-      });
-      setMessage("Grade change template downloaded.");
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to download the grade change template.",
-      );
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
-  const handleUpload = async (file?: File) => {
-    if (!file || !instructor || !currentUser?.branch) {
+    if (!gradeChangeSettings.isOpen) {
+      setMessage("Grade change requests are currently closed by the administrator.");
       return;
     }
 
-    try {
-      setIsParsing(true);
-      const result = await parseInstructorGradeChangeWorkbook({
-        file,
-        branch: currentUser.branch,
-        instructor,
-        allowedAssignments: assignments,
-      });
-      const hasErrors = result.errorRows.length > 0;
+    const requestedRows = gradeChangeRows
+      .map((row) => ({
+        row,
+        requestedGrade: (requestedGrades[row.id] || "").trim(),
+      }))
+      .filter((entry) => entry.requestedGrade);
+    const errors: string[] = [];
+    const changes: InstructorGradeChangeRequest["changes"] = [];
 
-      if (result.changes.length === 0 && !hasErrors) {
-        setMessage(
-          result.skippedBlankRows > 0
-            ? "No requested grade changes were found. Blank Requested Grade cells were ignored."
-            : "No requested grade changes were found in this file.",
+    requestedRows.forEach(({ row, requestedGrade }) => {
+      if (!isRequestedGradeInAllowedRange(requestedGrade)) {
+        errors.push(
+          `${row.fullName} - ${row.subjectCode}: Requested grade must be 70-100.`,
         );
         return;
       }
 
-      saveInstructorGradeChangeRequest(currentUser.branch, {
-        id: `grade-change-request-${Date.now()}`,
+      const validationResult = validateAndNormalizeUploadedGradeRow({
+        studentId: row.studentId,
+        fullName: row.fullName,
+        subjectCode: row.subjectCode,
+        subjectTitle: row.subjectTitle,
+        grade: requestedGrade,
+        unit: row.units === null ? "" : String(row.units),
+        gradingPeriod: row.gradingPeriod,
+        programType: row.programType,
+        academicYear: row.academicYear,
+        semester: row.semester,
         branch: currentUser.branch,
-        instructorId: instructor.id,
-        instructorName: instructor.name,
-        employeeId: instructor.employeeId,
-        fileName: file.name,
-        submittedAt: new Date().toISOString(),
-        status: hasErrors ? "Error" : "Pending",
-        changes: result.changes,
-        errors: result.errors,
-        errorRows: result.errorRows,
       });
-      setRequestsVersion((previousValue) => previousValue + 1);
-      setMessage(
-        hasErrors
-          ? `${result.errorRows.length} row(s) need correction. Valid requested changes were saved for review.`
-          : `${result.changes.length} grade change request(s) submitted.`,
-      );
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to parse the grade change file.",
-      );
-    } finally {
-      setIsParsing(false);
 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+      if (validationResult.errorReason || !validationResult.normalizedRecord) {
+        errors.push(
+          `${row.fullName} - ${row.subjectCode}: ${
+            validationResult.errorReason || "Invalid requested grade."
+          }`,
+        );
+        return;
       }
-    }
-  };
 
-  const handleOpenErrors = (request: InstructorGradeChangeRequest) => {
-    if ((request.errorRows?.length ?? 0) === 0) {
-      setMessage("This request does not have row errors to review.");
+      if (
+        validationResult.normalizedRecord.normalizedGrade === row.currentGrade
+      ) {
+        return;
+      }
+
+      if (!row.currentRecord) {
+        errors.push(
+          `${row.fullName} - ${row.subjectCode}: No approved current grade exists for this row.`,
+        );
+        return;
+      }
+
+      changes.push({
+        id: `${validationResult.normalizedRecord.id}::${Date.now()}::${changes.length}`,
+        studentId: row.studentId,
+        fullName: row.fullName,
+        section: row.section,
+        subjectCode: row.subjectCode,
+        subjectTitle: row.subjectTitle,
+        units: row.units,
+        academicYear: row.academicYear,
+        semester: row.semester,
+        gradingPeriod: row.gradingPeriod,
+        programType: row.programType,
+        currentGrade: row.currentGrade,
+        requestedGrade: validationResult.normalizedRecord.normalizedGrade,
+        currentRecord: row.currentRecord,
+        requestedRecord: validationResult.normalizedRecord,
+      });
+    });
+
+    if (requestedRows.length === 0) {
+      setMessage("Enter at least one requested grade before sending.");
       return;
     }
 
-    setErrorPreviewRequest(request);
+    if (errors.length > 0) {
+      setMessage(errors.join(" "));
+      return;
+    }
+
+    if (changes.length === 0) {
+      setMessage("No grade changes were found. Requested grades matched current grades.");
+      return;
+    }
+
+    saveInstructorGradeChangeRequest(currentUser.branch, {
+      id: `grade-change-request-${Date.now()}`,
+      branch: currentUser.branch,
+      instructorId: instructor.id,
+      instructorName: instructor.name,
+      employeeId: instructor.employeeId,
+      fileName: `Grade change request - ${new Date().toLocaleString()}`,
+      submittedAt: new Date().toISOString(),
+      status: "Pending",
+      changes,
+      errors: [],
+      errorRows: [],
+    });
+    setRequestsVersion((previousValue) => previousValue + 1);
+    setIsRequestModalOpen(false);
+    setRequestedGrades({});
+    setMessage(`${changes.length} grade change request(s) submitted.`);
+  };
+
+  const handleToggleDeleteMode = () => {
+    setIsDeleteMode((previousValue) => !previousValue);
+    setSelectedRequestIds([]);
+  };
+
+  const handleToggleRequestSelection = (requestId: string) => {
+    setSelectedRequestIds((previousIds) =>
+      previousIds.includes(requestId)
+        ? previousIds.filter((id) => id !== requestId)
+        : [...previousIds, requestId],
+    );
+  };
+
+  const handleDeleteSelectedRequests = () => {
+    if (!currentUser?.branch || selectedRequestIds.length === 0) {
+      return;
+    }
+
+    const selectedIds = new Set(selectedRequestIds);
+    writeInstructorGradeChangeRequests(
+      currentUser.branch,
+      getInstructorGradeChangeRequests(currentUser.branch).filter(
+        (request) => !selectedIds.has(request.id),
+      ),
+    );
+    setSelectedRequestIds([]);
+    setIsDeleteMode(false);
+    setRequestsVersion((previousValue) => previousValue + 1);
+    setMessage("Selected grade change request(s) deleted.");
   };
 
   if (isLoading) {
@@ -289,92 +443,59 @@ export default function InstructorGradeChanges() {
         <strong>{requests.length} request{requests.length === 1 ? "" : "s"}</strong>
       </div>
 
-      <section className="instructor-filters">
-        <label>
-          Sections
-          <select
-            value={sectionFilter}
-            onChange={(event) => setSectionFilter(event.target.value)}
-          >
-            <option value="all">All assigned sections</option>
-            {assignedSectionOptions.map((section) => (
-              <option key={section.id} value={section.id}>
-                {getSectionLabel(section)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Academic Year
-          <select
-            value={academicYear}
-            onChange={(event) => setAcademicYear(event.target.value)}
-          >
-            {academicYearOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Semester
-          <select
-            value={semester}
-            onChange={(event) => setSemester(event.target.value)}
-          >
-            {SEMESTER_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          SHS Quarter
-          <select
-            value={shsQuarter}
-            onChange={(event) => setShsQuarter(event.target.value)}
-          >
-            {availableQuarterOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
-
       <section className="instructor-actions-panel">
         <button
           type="button"
-          onClick={() => void handleDownloadTemplate()}
-          disabled={isDownloading}
+          onClick={handleOpenRequestModal}
+          disabled={!gradeChangeSettings.isOpen}
         >
-          <FiDownload />
-          {isDownloading ? "Preparing..." : "Download Change Template"}
+          <FiEdit3 />
+          Request Grade Change
         </button>
-        <label>
-          <FiUpload /> {isParsing ? "Reading..." : "Upload Change Request"}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={(event) => void handleUpload(event.target.files?.[0])}
-          />
-        </label>
       </section>
 
+      {!gradeChangeSettings.isOpen ? (
+        <p className="instructor-message">
+          Grade change requests are currently closed by the administrator.
+        </p>
+      ) : null}
       {message ? <p className="instructor-message">{message}</p> : null}
 
       <section className="instructor-section">
-        <h2>My Grade Change Requests</h2>
+        <div className="instructor-section-header">
+          <h2>My Grade Change Requests</h2>
+          <div className="instructor-section-actions">
+            {isDeleteMode ? (
+              <>
+                <button type="button" onClick={handleToggleDeleteMode}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSelectedRequests}
+                  disabled={selectedRequestIds.length === 0}
+                >
+                  <FiTrash2 /> Delete Selected
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleToggleDeleteMode}
+                disabled={requests.length === 0}
+              >
+                <FiTrash2 /> Delete
+              </button>
+            )}
+          </div>
+        </div>
         <div className="instructor-table-wrap">
           <table className="instructor-table">
             <thead>
               <tr>
+                {isDeleteMode ? <th>Select</th> : null}
                 <th>Date</th>
-                <th>File</th>
+                <th>Request</th>
                 <th>Rows</th>
                 <th>Status</th>
                 <th className="instructor-table-actions-heading">Actions</th>
@@ -383,6 +504,16 @@ export default function InstructorGradeChanges() {
             <tbody>
               {requests.map((request) => (
                 <tr key={request.id}>
+                  {isDeleteMode ? (
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedRequestIds.includes(request.id)}
+                        onChange={() => handleToggleRequestSelection(request.id)}
+                        aria-label={`Select ${request.fileName}`}
+                      />
+                    </td>
+                  ) : null}
                   <td>{new Date(request.submittedAt).toLocaleString()}</td>
                   <td title={request.fileName}>
                     <span className="instructor-compact-file-name">
@@ -402,8 +533,8 @@ export default function InstructorGradeChanges() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleOpenErrors(request)}
-                        disabled={(request.errorRows?.length ?? 0) === 0}
+                        disabled
+                        title="New grade change requests are checked before sending."
                       >
                         <FiAlertTriangle /> Errors
                       </button>
@@ -413,13 +544,142 @@ export default function InstructorGradeChanges() {
               ))}
               {requests.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>No grade change requests yet.</td>
+                  <td colSpan={isDeleteMode ? 6 : 5}>
+                    No grade change requests yet.
+                  </td>
                 </tr>
               ) : null}
             </tbody>
           </table>
         </div>
       </section>
+
+      {isRequestModalOpen ? (
+        <div
+          className="instructor-file-modal-overlay"
+          role="presentation"
+          onClick={() => setIsRequestModalOpen(false)}
+        >
+          <section
+            className="instructor-file-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="instructor-create-change-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="instructor-file-modal-header">
+              <div>
+                <span>Request grade correction</span>
+                <h2 id="instructor-create-change-modal-title">
+                  Current Approved Grades
+                </h2>
+                <p>
+                  Enter a requested grade only for rows that need correction.
+                  Blank rows are ignored. Requested grades must be 70-100.
+                </p>
+              </div>
+              <div className="instructor-file-modal-actions">
+                <button
+                  type="button"
+                  onClick={handleSubmitGradeChangeRequest}
+                >
+                  Send Request
+                </button>
+                <button
+                  type="button"
+                  className="instructor-file-modal-close"
+                  aria-label="Close request modal"
+                  onClick={() => setIsRequestModalOpen(false)}
+                >
+                  <FiX />
+                </button>
+              </div>
+            </div>
+
+            <div className="instructor-grade-change-search">
+              <FiSearch aria-hidden="true" />
+              <input
+                type="search"
+                value={gradeSearchTerm}
+                onChange={(event) => setGradeSearchTerm(event.target.value)}
+                placeholder="Search student, section, or subject"
+                aria-label="Search grade change rows"
+              />
+            </div>
+
+            <div className="instructor-file-table-wrap">
+              <table className="instructor-file-table">
+                <thead>
+                  <tr>
+                    <th>Student ID</th>
+                    <th>Full Name</th>
+                    <th>Section</th>
+                    <th>Subject Code</th>
+                    <th>Subject Title</th>
+                    <th>Units / Period</th>
+                    <th>Current Grade</th>
+                    <th>Requested Grade</th>
+                    <th>Academic Year</th>
+                    <th>Semester</th>
+                    <th>Program</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredGradeChangeRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.studentId}</td>
+                      <td>{row.fullName}</td>
+                      <td>{row.section}</td>
+                      <td>{row.subjectCode}</td>
+                      <td>{row.subjectTitle}</td>
+                      <td>
+                        {row.programType === "SHS"
+                          ? row.gradingPeriod || "-"
+                          : row.units ?? "-"}
+                      </td>
+                      <td>{row.currentGrade}</td>
+                      <td>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="instructor-grade-change-input"
+                          value={requestedGrades[row.id] || ""}
+                          onChange={(event) =>
+                            handleRequestedGradeChange(row.id, event.target.value)
+                          }
+                          disabled={!row.currentRecord}
+                          placeholder={
+                            !row.currentRecord
+                              ? "Unavailable"
+                              : "70-100"
+                          }
+                        />
+                      </td>
+                      <td>{row.academicYear}</td>
+                      <td>{row.semester}</td>
+                      <td>{row.programType}</td>
+                    </tr>
+                  ))}
+                  {gradeChangeRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={11}>
+                        No approved grades were found for the selected section
+                        and term.
+                      </td>
+                    </tr>
+                  ) : filteredGradeChangeRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={11}>
+                        No students or subjects match your search.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {viewingRequest ? (
         <div
@@ -499,115 +759,6 @@ export default function InstructorGradeChanges() {
                       <td colSpan={11}>No grade changes were found.</td>
                     </tr>
                   ) : null}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-      ) : null}
-
-      {errorPreviewRequest ? (
-        <div
-          className="instructor-error-modal-overlay"
-          role="presentation"
-          onClick={() => setErrorPreviewRequest(null)}
-        >
-          <section
-            className="instructor-error-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="instructor-change-error-modal-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="instructor-error-modal-header">
-              <div>
-                <span>Uploaded file</span>
-                <h2 id="instructor-change-error-modal-title">
-                  {errorPreviewRequest.fileName}
-                </h2>
-                <p>
-                  {(errorPreviewRequest.errorRows?.length ?? 0).toLocaleString()}{" "}
-                  row(s) need correction before this request can be reviewed.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="instructor-error-modal-close"
-                aria-label="Close error review"
-                onClick={() => setErrorPreviewRequest(null)}
-              >
-                <FiX />
-              </button>
-            </div>
-
-            <div className="instructor-error-table-wrap">
-              <table className="instructor-error-table">
-                <thead>
-                  <tr>
-                    <th>Sheet</th>
-                    <th>Excel Row</th>
-                    <th>Cells</th>
-                    <th>Student ID</th>
-                    <th>Full Name</th>
-                    <th>Section</th>
-                    <th>Subject Code</th>
-                    <th>Subject Title</th>
-                    <th>Units / Period</th>
-                    <th>Current Grade</th>
-                    <th>Requested Grade</th>
-                    <th>Instructor</th>
-                    <th>Academic Year</th>
-                    <th>Semester</th>
-                    <th>Program</th>
-                    <th>Errors</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(errorPreviewRequest.errorRows ?? []).map((row, index) => {
-                    const errorCells = getGradeChangeErrorCells(row);
-
-                    return (
-                      <tr
-                        key={`${row.sheetName}-${row.rowNumber}-${index}`}
-                        className="instructor-error-row"
-                      >
-                        <td>{row.sheetName}</td>
-                        <td>{row.rowNumber}</td>
-                        <td>
-                          <div className="instructor-error-cell-list">
-                            {errorCells.length > 0
-                              ? errorCells.map((cell) => (
-                                  <span key={cell}>{cell}</span>
-                                ))
-                              : <span>Row data</span>}
-                          </div>
-                        </td>
-                        <td>{row.studentId || "-"}</td>
-                        <td>{row.fullName || "-"}</td>
-                        <td>{row.section || "-"}</td>
-                        <td>{row.subjectCode || "-"}</td>
-                        <td>{row.subjectTitle || "-"}</td>
-                        <td>
-                          {row.programType === "SHS"
-                            ? row.gradingPeriod || "-"
-                            : row.units || "-"}
-                        </td>
-                        <td>{row.currentGrade || "-"}</td>
-                        <td>{row.requestedGrade || "-"}</td>
-                        <td>{row.instructorName || "-"}</td>
-                        <td>{row.academicYear || "-"}</td>
-                        <td>{row.semester || "-"}</td>
-                        <td>{row.programType}</td>
-                        <td>
-                          <ul className="instructor-error-problems">
-                            {row.errors.map((error) => (
-                              <li key={error}>{error}</li>
-                            ))}
-                          </ul>
-                        </td>
-                      </tr>
-                    );
-                  })}
                 </tbody>
               </table>
             </div>

@@ -87,22 +87,118 @@ const SHS_QUARTER_ORDER = [
   "3rd Quarter",
   "4th Quarter",
 ];
-const COLLEGE_GRADE_SCALE = [
-  1,
-  1.25,
-  1.5,
-  1.75,
-  2,
-  2.25,
-  2.5,
-  2.75,
-  3,
-  4,
-  5,
+export const COLLEGE_GRADE_CONVERSION_SCALE = [
+  {
+    grade: "1.00",
+    description: "Marked Excellent",
+    range: "96.7 - 100",
+    min: 96.7,
+    max: 100,
+    evaluation: "Passed" as const,
+  },
+  {
+    grade: "1.25",
+    description: "Excellent",
+    range: "93.4 - 96.6",
+    min: 93.4,
+    max: 96.6,
+    evaluation: "Passed" as const,
+  },
+  {
+    grade: "1.50",
+    description: "Very Superior",
+    range: "90.1 - 93.3",
+    min: 90.1,
+    max: 93.3,
+    evaluation: "Passed" as const,
+  },
+  {
+    grade: "1.75",
+    description: "Superior",
+    range: "86.7 - 90.0",
+    min: 86.7,
+    max: 90,
+    evaluation: "Passed" as const,
+  },
+  {
+    grade: "2.00",
+    description: "Very Good",
+    range: "83.4 - 86.6",
+    min: 83.4,
+    max: 86.6,
+    evaluation: "Passed" as const,
+  },
+  {
+    grade: "2.25",
+    description: "Good",
+    range: "80.1 - 83.3",
+    min: 80.1,
+    max: 83.3,
+    evaluation: "Passed" as const,
+  },
+  {
+    grade: "2.50",
+    description: "Satisfactory",
+    range: "76.7 - 80.0",
+    min: 76.7,
+    max: 80,
+    evaluation: "Passed" as const,
+  },
+  {
+    grade: "2.75",
+    description: "Fair",
+    range: "73.4 - 76.6",
+    min: 73.4,
+    max: 76.6,
+    evaluation: "Passed" as const,
+  },
+  {
+    grade: "3.00",
+    description: "Passed",
+    range: "70.0 - 73.3",
+    min: 70,
+    max: 73.3,
+    evaluation: "Passed" as const,
+  },
+  {
+    grade: "4.00",
+    description: "Conditional Failure",
+    range: "50.0 - 69.9",
+    min: 50,
+    max: 69.9,
+    evaluation: "Failed" as const,
+  },
+  {
+    grade: "5.00",
+    description: "Failed",
+    range: "below 50",
+    min: Number.NEGATIVE_INFINITY,
+    max: 49.999,
+    evaluation: "Failed" as const,
+  },
 ];
-const COLLEGE_GRADE_SCALE_SET = new Set(COLLEGE_GRADE_SCALE);
+export const COLLEGE_GRADE_SPECIAL_MARKS = [
+  { grade: "INC", description: "Incomplete", range: "" },
+  { grade: "DRP", description: "Dropped Subject", range: "" },
+];
 const COLLEGE_GRADE_ERROR_MESSAGE =
-  "College grades must use 1.00 - 5.00";
+  "College grades must be numeric percentage grades from 0-100";
+
+export const convertCollegePercentageGrade = (percentageGrade: number) => {
+  if (
+    !Number.isFinite(percentageGrade) ||
+    percentageGrade < 0 ||
+    percentageGrade > 100
+  ) {
+    return undefined;
+  }
+
+  const roundedPercentageGrade = Math.round(percentageGrade * 10) / 10;
+  return COLLEGE_GRADE_CONVERSION_SCALE.find(
+    (item) =>
+      roundedPercentageGrade >= item.min && roundedPercentageGrade <= item.max,
+  );
+};
 
 const getDefaultAcademicYear = () => {
   const now = new Date();
@@ -382,13 +478,7 @@ const evaluateGradeValue = (
   const normalized = trimmed.toUpperCase();
 
   if (programType === "College") {
-    if (
-      normalized === "INC" ||
-      normalized === "INCOMPLETE" ||
-      normalized === "4" ||
-      normalized === "4.0" ||
-      normalized === "4.00"
-    ) {
+    if (normalized === "INC" || normalized === "INCOMPLETE") {
       return {
         normalizedGrade: "INC",
         numericGrade: null,
@@ -399,28 +489,33 @@ const evaluateGradeValue = (
     if (
       normalized === "FAILED" ||
       normalized === "FAIL" ||
-      normalized === "5" ||
-      normalized === "5.0" ||
-      normalized === "5.00"
+      normalized === "DRP" ||
+      normalized === "DROPPED" ||
+      normalized === "DROPPED SUBJECT"
     ) {
       return {
-        normalizedGrade: "FAILED",
+        normalizedGrade:
+          normalized === "DRP" ||
+          normalized === "DROPPED" ||
+          normalized === "DROPPED SUBJECT"
+            ? "DRP"
+            : "5.00",
         numericGrade: null,
         evaluation: "Failed",
       };
     }
 
-    const numericGrade = Number(trimmed);
-    const normalizedNumericGrade = Number(numericGrade.toFixed(2));
+    const percentageGrade = Number(trimmed);
+    const convertedGrade = Number.isFinite(percentageGrade)
+      ? convertCollegePercentageGrade(percentageGrade)
+      : undefined;
 
-    if (
-      Number.isFinite(numericGrade) &&
-      COLLEGE_GRADE_SCALE_SET.has(normalizedNumericGrade)
-    ) {
+    if (convertedGrade) {
+      const numericGrade = Number(convertedGrade.grade);
       return {
-        normalizedGrade: normalizedNumericGrade.toFixed(2),
-        numericGrade: normalizedNumericGrade,
-        evaluation: normalizedNumericGrade <= 3 ? "Passed" : "Failed",
+        normalizedGrade: convertedGrade.grade,
+        numericGrade,
+        evaluation: convertedGrade.evaluation,
       };
     }
 

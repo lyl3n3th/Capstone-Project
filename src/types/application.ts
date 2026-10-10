@@ -112,6 +112,14 @@ export interface AdmissionApplicationSummary {
   currentStep: number;
   firstName: string;
   lastName: string;
+  middleName?: string;
+  sex?: AdmissionSex;
+  civilStatus?: AdmissionCivilStatus;
+  address?: string;
+  email?: string;
+  phoneNumber?: string;
+  lastSchoolAttended?: string;
+  yearCompletion?: string;
   createdAt: string;
   updatedAt: string;
   submittedAt: string | null;

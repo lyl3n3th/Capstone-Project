@@ -101,13 +101,15 @@ export default defineConfig([
 
 //----------------BACKEND--------------------
 
+// From the repository root:
+
 // cd backend
 
 // python -m venv .venv (/)
 
-// .venv\Scripts\activate.bat (/)
-
-// pip install -r requirements.txt (/)
+// In PowerShell, activate with: .\.venv\Scripts\Activate.ps1
+// Or install without activating (works in every Windows shell):
+// .\.venv\Scripts\python.exe -m pip install -r requirements.txt (/)
 
 // mkdir logs (/)
 

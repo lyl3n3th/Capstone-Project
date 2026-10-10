@@ -42,9 +42,12 @@ import {
 } from "../../services/studentPortalResolver";
 import {
   getInstructorGradeSubmissions,
+  getGradeChangeRequestSettings,
+  fetchAndCacheGradeChangeRequestSettings,
   fetchAndCacheInstructorGradeSubmissions,
   getInstructorGradeChangeRequests,
   fetchAndCacheInstructorGradeChangeRequests,
+  writeGradeChangeRequestSettings,
   writeInstructorGradeChangeRequests,
   writeInstructorGradeSubmissions,
   type InstructorGradeChangeRequest,
@@ -456,6 +459,8 @@ export default function AdminGrades({
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [instructorSubmissionVersion, setInstructorSubmissionVersion] =
     useState(0);
+  const [gradeChangeSettingsVersion, setGradeChangeSettingsVersion] =
+    useState(0);
   const [viewingInstructorGradeItem, setViewingInstructorGradeItem] =
     useState<InstructorGradeApprovalItem | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -464,9 +469,11 @@ export default function AdminGrades({
     void Promise.all([
       fetchAndCacheInstructorGradeSubmissions(currentBranch),
       fetchAndCacheInstructorGradeChangeRequests(currentBranch),
+      fetchAndCacheGradeChangeRequestSettings(currentBranch),
     ])
       .then(() => {
         setInstructorSubmissionVersion((previousValue) => previousValue + 1);
+        setGradeChangeSettingsVersion((previousValue) => previousValue + 1);
       })
       .catch((error) => {
         console.warn("Unable to load instructor grade approvals from Supabase.", error);
@@ -535,6 +542,9 @@ export default function AdminGrades({
   const instructorGradeSubmissions = getInstructorGradeSubmissions(currentBranch);
   const instructorGradeChangeRequests =
     getInstructorGradeChangeRequests(currentBranch);
+  void gradeChangeSettingsVersion;
+  const gradeChangeRequestSettings =
+    getGradeChangeRequestSettings(currentBranch);
   const instructorGradeApprovalItems: InstructorGradeApprovalItem[] = [
     ...instructorGradeSubmissions.map((submission) => ({
       kind: "upload" as const,
@@ -2852,6 +2862,22 @@ export default function AdminGrades({
     }
   };
 
+  const handleToggleGradeChangeRequests = () => {
+    const nextSettings = writeGradeChangeRequestSettings(currentBranch, {
+      isOpen: !gradeChangeRequestSettings.isOpen,
+      updatedAt: new Date().toISOString(),
+      updatedBy: loggedInUsername,
+    });
+
+    setGradeChangeSettingsVersion((previousValue) => previousValue + 1);
+    addToast(
+      nextSettings.isOpen
+        ? "Instructor grade change requests are now open."
+        : "Instructor grade change requests are now closed.",
+      nextSettings.isOpen ? "success" : "info",
+    );
+  };
+
   const handleUploadGrades = () => {
     if (!selectedFile) {
       addToast("Please choose a grade file first.", "warning");
@@ -3245,6 +3271,26 @@ export default function AdminGrades({
                 student accounts.
               </p>
             </div>
+          </div>
+
+          <div className="grade-change-window-control">
+            <div>
+              <strong>Grade Change Request Window</strong>
+              <p>
+                {gradeChangeRequestSettings.isOpen
+                  ? "Open. Instructors can submit grade change requests."
+                  : "Closed. Instructors cannot submit new grade change requests."}
+              </p>
+            </div>
+            <button
+              type="button"
+              className={`grade-change-window-toggle ${
+                gradeChangeRequestSettings.isOpen ? "open" : "closed"
+              }`}
+              onClick={handleToggleGradeChangeRequests}
+            >
+              {gradeChangeRequestSettings.isOpen ? "Close Requests" : "Open Requests"}
+            </button>
           </div>
 
           <div className="table-container history-table-container">

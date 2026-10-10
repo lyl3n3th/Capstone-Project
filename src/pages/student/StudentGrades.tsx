@@ -22,6 +22,8 @@ import {
 } from "../../services/adminStorage";
 import { getCurrentTermEvaluationLockStatus } from "../../services/studentEvaluationLock";
 import {
+  COLLEGE_GRADE_CONVERSION_SCALE,
+  COLLEGE_GRADE_SPECIAL_MARKS,
   fetchAndCacheStudentGradeRecordsForBranch,
   getRequiredShsQuarterLabelsForSemester,
   getStudentGradeRecords,
@@ -40,6 +42,16 @@ const shsQuarterOrder = [
 const placeholderGrade = "-";
 const lockedGradeValue = "Locked";
 const studentGradeStorageKeyPrefix = "aics-admin:student-grades:";
+const collegeGradingSystemRows = [
+  ...COLLEGE_GRADE_CONVERSION_SCALE.map((item) => ({
+    grade: item.grade,
+    description: item.description,
+    range: item.range,
+  })),
+  ...COLLEGE_GRADE_SPECIAL_MARKS,
+];
+const collegeGradingSystemLeftRows = collegeGradingSystemRows.slice(0, 7);
+const collegeGradingSystemRightRows = collegeGradingSystemRows.slice(7);
 
 type ShsQuarterLabel = (typeof shsQuarterOrder)[number];
 
@@ -452,9 +464,9 @@ const buildCollegePerformanceSummary = (
 
     if (
       record.numericGrade !== null &&
-      record.normalizedGrade !== "5.0" &&
-      record.numericGrade >= 0 &&
-      record.numericGrade <= 100
+      record.evaluation === "Passed" &&
+      record.numericGrade >= 1 &&
+      record.numericGrade <= 3
     ) {
       weightedGradeTotal += record.numericGrade * resolvedUnits;
       weightedGradeUnits += resolvedUnits;
@@ -1095,6 +1107,66 @@ const buildReportCardPdf = async ({
     });
     y -= boxHeight;
   };
+  const drawCollegeGradingSystem = () => {
+    const gradingRows = collegeGradingSystemLeftRows.map((leftRow, index) => [
+      leftRow,
+      collegeGradingSystemRightRows[index],
+    ]);
+    const gradingColumnWidths = [70, 164, 106, 70, 164, 106];
+    const gradingTableWidth = gradingColumnWidths.reduce(
+      (sum, width) => sum + width,
+      0,
+    );
+    const gradingX = margin + (contentWidth - gradingTableWidth) / 2;
+    const rowHeight = 18;
+    const requiredHeight = rowHeight * (gradingRows.length + 1) + 18;
+
+    if (y - requiredHeight < margin + 44) {
+      startPage(true);
+    }
+
+    y -= 16;
+
+    let x = gradingX;
+    gradingColumnWidths.forEach((width, index) => {
+      rect(x, y - rowHeight, width, rowHeight, {
+        fill: headerFillColor,
+        stroke: [0.18, 0.2, 0.23],
+        strokeWidth: 0.7,
+      });
+
+      if (index === 0) {
+        text("Grading System", x + 8, y - 12, 7.5, textColor);
+      }
+
+      x += width;
+    });
+    y -= rowHeight;
+
+    gradingRows.forEach(([leftRow, rightRow]) => {
+      const values = [
+        leftRow.grade,
+        leftRow.description,
+        leftRow.range,
+        rightRow?.grade ?? "",
+        rightRow?.description ?? "",
+        rightRow?.range ?? "",
+      ];
+      let rowX = gradingX;
+
+      values.forEach((value, index) => {
+        const width = gradingColumnWidths[index];
+
+        rect(rowX, y - rowHeight, width, rowHeight, {
+          stroke: [0.18, 0.2, 0.23],
+          strokeWidth: 0.7,
+        });
+        text(value, rowX + 6, y - 12, 7.2, textColor);
+        rowX += width;
+      });
+      y -= rowHeight;
+    });
+  };
 
   startPage();
   drawMeta();
@@ -1144,6 +1216,10 @@ const buildReportCardPdf = async ({
     });
     y -= rowHeight;
   });
+
+  if (!isSHS) {
+    drawCollegeGradingSystem();
+  }
 
   if (y < margin + 80) {
     startPage(true);
@@ -1913,6 +1989,39 @@ function StudentGrades() {
               </table>
             </div>
           </div>
+
+          {!isSHS ? (
+            <section className="s-grading-system-section">
+              <div className="s-grading-system-table-wrapper">
+                <table className="s-grading-system-table">
+                  <tbody>
+                    <tr>
+                      <th>Grading System</th>
+                      <th></th>
+                      <th></th>
+                      <th></th>
+                      <th></th>
+                      <th></th>
+                    </tr>
+                    {collegeGradingSystemLeftRows.map((leftRow, index) => {
+                      const rightRow = collegeGradingSystemRightRows[index];
+
+                      return (
+                        <tr key={`${leftRow.grade}-${rightRow?.grade ?? index}`}>
+                          <td>{leftRow.grade}</td>
+                          <td>{leftRow.description}</td>
+                          <td>{leftRow.range}</td>
+                          <td>{rightRow?.grade ?? ""}</td>
+                          <td>{rightRow?.description ?? ""}</td>
+                          <td>{rightRow?.range ?? ""}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
 
           <div className="s-subjects-summary s-grades-summary">
             <div className="s-summary-card">

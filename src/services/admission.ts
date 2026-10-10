@@ -38,6 +38,14 @@ type AdmissionSummaryRow = {
   honor_discount_percentage: number | string;
   honor_label: string | null;
   last_name: string;
+  middle_name?: string | null;
+  sex?: string | null;
+  civil_status?: string | null;
+  address?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  last_school_attended?: string | null;
+  year_completion?: number | string | null;
   program_level: AdmissionProgramLevel;
   program_name: string;
   requested_year_level: string | null;
@@ -409,6 +417,23 @@ const mapAdmissionSummary = (
     currentStep: row.current_step,
     firstName: row.first_name,
     lastName: row.last_name,
+    middleName: row.middle_name || undefined,
+    sex: row.sex === "Male" || row.sex === "Female" ? row.sex : undefined,
+    civilStatus:
+      row.civil_status === "Single" ||
+      row.civil_status === "Married" ||
+      row.civil_status === "Widowed" ||
+      row.civil_status === "Separated"
+        ? row.civil_status
+        : undefined,
+    address: row.address || undefined,
+    email: row.email || undefined,
+    phoneNumber: row.phone_number || undefined,
+    lastSchoolAttended: row.last_school_attended || undefined,
+    yearCompletion:
+      row.year_completion === null || row.year_completion === undefined
+        ? undefined
+        : String(row.year_completion),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     submittedAt: row.submitted_at,

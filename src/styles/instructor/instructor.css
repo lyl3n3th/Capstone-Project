@@ -413,6 +413,53 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.instructor-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.instructor-section-header h2 {
+  margin: 0;
+}
+
+.instructor-section-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.instructor-section-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #b8d9ea;
+  border-radius: 8px;
+  color: #066287;
+  background: #e8f6fb;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.instructor-section-actions button:hover:not(:disabled) {
+  border-color: #066287;
+  background: #dff1f8;
+}
+
+.instructor-section-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .instructor-filters {
   display: grid;
   grid-template-columns: repeat(3, minmax(180px, 1fr));
@@ -622,6 +669,34 @@
   min-width: 0;
 }
 
+.instructor-guide-download-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 38px;
+  padding: 0 14px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  background: #066287;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.instructor-guide-download-btn:hover {
+  background: #044e6d;
+}
+
+.instructor-guide-download-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+
 .instructor-upload-guide ul li {
   display: flex;
   align-items: flex-start;
@@ -803,6 +878,42 @@
   overflow: auto;
 }
 
+.instructor-grade-change-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 32px));
+  margin: 0 16px 14px;
+  padding: 0 12px;
+  min-height: 42px;
+  border: 1px solid #d7e0eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #64748b;
+}
+
+.instructor-grade-change-search svg {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+}
+
+.instructor-grade-change-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: #172033;
+  font: inherit;
+  background: transparent;
+}
+
+.instructor-grade-change-search:focus-within {
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+}
+
 .instructor-error-table,
 .instructor-file-table {
   width: 100%;
@@ -832,6 +943,30 @@
   background: #f7f9fc;
   font-size: 0.74rem;
   text-transform: uppercase;
+}
+
+.instructor-grade-change-input {
+  width: 96px;
+  min-height: 34px;
+  box-sizing: border-box;
+  border: 1px solid #d7e0eb;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #172033;
+  font: inherit;
+  background: #ffffff;
+}
+
+.instructor-grade-change-input:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+}
+
+.instructor-grade-change-input:disabled {
+  cursor: not-allowed;
+  color: #7b8791;
+  background: #f1f5f9;
 }
 
 .instructor-error-row td {
@@ -1016,6 +1151,16 @@
     justify-self: start;
   }
 
+  .instructor-section-header {
+    align-items: flex-start;
+  }
+
+  .instructor-section-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
   .instructor-section,
   .instructor-upload-guide,
   .instructor-actions-panel,
@@ -1069,7 +1214,11 @@
 
   .instructor-error-modal-header,
   .instructor-file-modal-header {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     padding: 14px;
+    padding-right: 60px;
   }
 
   .instructor-error-modal-header h2,
@@ -1077,12 +1226,29 @@
     font-size: 1rem;
   }
 
-  .instructor-file-modal-header {
-    display: grid;
+  .instructor-file-modal-actions {
+    display: contents;
   }
 
-  .instructor-file-modal-actions {
-    justify-content: space-between;
+  .instructor-file-modal-actions button:not(.instructor-file-modal-close) {
+    justify-self: start;
+    margin-top: 12px;
+  }
+
+  .instructor-grade-change-search {
+    width: auto;
+    max-width: none;
+    margin: 0 14px 14px;
+  }
+
+  .instructor-error-modal-close,
+  .instructor-file-modal-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 34px;
+    height: 34px;
+    padding: 0;
   }
 }
 

@@ -5,6 +5,7 @@ import {
   FiCheckCircle,
   FiDownload,
   FiInfo,
+  FiTrash2,
   FiUpload,
   FiX,
 } from "react-icons/fi";
@@ -13,10 +14,12 @@ import { useInstructorPortal } from "../../hooks/useInstructorPortal";
 import {
   downloadInstructorGradeTemplate,
   downloadInstructorSubmittedFile,
+  getInstructorGradeSubmissions,
   parseInstructorGradeWorkbook,
   saveInstructorGradeSubmission,
   type InstructorGradeSubmission,
   type InstructorGradeSubmissionErrorRow,
+  writeInstructorGradeSubmissions,
 } from "../../services/instructorPortal";
 
 const readFileAsBase64 = (file: File) =>
@@ -33,7 +36,8 @@ const readFileAsBase64 = (file: File) =>
     reader.readAsDataURL(file);
   });
 
-const COMPACT_COLLEGE_GRADE_ERROR = "College grades must use 1.00 - 5.00";
+const COMPACT_COLLEGE_GRADE_ERROR =
+  "College grades must be numeric percentage grades from 0-100";
 const LEGACY_COLLEGE_GRADE_ERROR_PARTS = new Set([
   "1.25",
   "1.50",
@@ -134,6 +138,7 @@ const getPreviewRowHasData = (row: Record<string, unknown>) =>
     "Subject Title",
     "SUBJECT_TITLE",
     "Grade",
+    "Grade (0-100)",
     "Grades",
     "GRADES",
     "Unit",
@@ -282,7 +287,12 @@ const buildGradeFilePreview = (
         unitsOrPeriod:
           getValueByAliases(values, ["Unit", "Units", "UNITS"]) ||
           getValueByAliases(values, ["Grading Period", "Quarter", "QUARTER"]),
-        grade: getValueByAliases(values, ["Grade", "Grades", "GRADES"]),
+        grade: getValueByAliases(values, [
+          "Grade",
+          "Grade (0-100)",
+          "Grades",
+          "GRADES",
+        ]),
         instructorName: getValueByAliases(values, ["Instructor", "INSTRUCTOR"]),
         academicYear,
         semester,
@@ -316,6 +326,8 @@ export default function InstructorGrades() {
   const [filePreview, setFilePreview] = useState<GradeFilePreview | null>(null);
   const [errorPreviewSubmission, setErrorPreviewSubmission] =
     useState<InstructorGradeSubmission | null>(null);
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<string[]>([]);
 
   const handleDownloadTemplate = async () => {
     if (!instructor) {
@@ -428,6 +440,37 @@ export default function InstructorGrades() {
     setErrorPreviewSubmission(submission);
   };
 
+  const handleToggleDeleteMode = () => {
+    setIsDeleteMode((previousValue) => !previousValue);
+    setSelectedSubmissionIds([]);
+  };
+
+  const handleToggleSubmissionSelection = (submissionId: string) => {
+    setSelectedSubmissionIds((previousIds) =>
+      previousIds.includes(submissionId)
+        ? previousIds.filter((id) => id !== submissionId)
+        : [...previousIds, submissionId],
+    );
+  };
+
+  const handleDeleteSelectedSubmissions = () => {
+    if (!currentUser?.branch || selectedSubmissionIds.length === 0) {
+      return;
+    }
+
+    const selectedIds = new Set(selectedSubmissionIds);
+    writeInstructorGradeSubmissions(
+      currentUser.branch,
+      getInstructorGradeSubmissions(currentUser.branch).filter(
+        (submission) => !selectedIds.has(submission.id),
+      ),
+    );
+    setSelectedSubmissionIds([]);
+    setIsDeleteMode(false);
+    refreshSubmissions();
+    setMessage("Selected grade submission request(s) deleted.");
+  };
+
   if (isLoading) {
     return (
       <SkeletonPage
@@ -461,7 +504,18 @@ export default function InstructorGrades() {
           <div>
             <h3>What to do</h3>
             <ol>
-              <li>Download My Template.</li>
+              <li>
+                <span>Download the template.</span>
+                <button
+                  type="button"
+                  className="instructor-guide-download-btn"
+                  onClick={() => void handleDownloadTemplate()}
+                  disabled={isDownloadingTemplate}
+                >
+                  <FiDownload />{" "}
+                  {isDownloadingTemplate ? "Preparing..." : "Download Template"}
+                </button>
+              </li>
               <li>Open the file and enter grades in the Grade column.</li>
               <li>Keep the student, subject, section, semester, and instructor details unchanged.</li>
               <li>Save the file as .xlsx or .xls, then upload it here.</li>
@@ -474,7 +528,7 @@ export default function InstructorGrades() {
             <ul>
               <li>
                 <FiCheckCircle aria-hidden="true" />
-                <span>College: 1.00 - 5.00.</span>
+                <span>College: numeric percentage grades from 0 to 100. The system converts them to 1.00 - 5.00.</span>
               </li>
               <li>
                 <FiCheckCircle aria-hidden="true" />
@@ -490,16 +544,8 @@ export default function InstructorGrades() {
       </section>
 
       <section className="instructor-actions-panel">
-        <button
-          type="button"
-          onClick={() => void handleDownloadTemplate()}
-          disabled={isDownloadingTemplate}
-        >
-          <FiDownload />{" "}
-          {isDownloadingTemplate ? "Preparing..." : "Download My Template"}
-        </button>
         <label>
-          <FiUpload /> {isParsing ? "Reading..." : "Upload Completed Template"}
+          <FiUpload /> {isParsing ? "Reading..." : "Upload Grades"}
           <input
             type="file"
             accept=".xlsx,.xls"
@@ -511,11 +557,38 @@ export default function InstructorGrades() {
       {message ? <p className="instructor-message">{message}</p> : null}
 
       <section className="instructor-section">
-        <h2>My Grade Submissions</h2>
+        <div className="instructor-section-header">
+          <h2>My Grade Submissions</h2>
+          <div className="instructor-section-actions">
+            {isDeleteMode ? (
+              <>
+                <button type="button" onClick={handleToggleDeleteMode}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSelectedSubmissions}
+                  disabled={selectedSubmissionIds.length === 0}
+                >
+                  <FiTrash2 /> Delete Selected
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleToggleDeleteMode}
+                disabled={submissions.length === 0}
+              >
+                <FiTrash2 /> Delete
+              </button>
+            )}
+          </div>
+        </div>
         <div className="instructor-table-wrap">
           <table className="instructor-table">
             <thead>
               <tr>
+                {isDeleteMode ? <th>Select</th> : null}
                 <th>Date</th>
                 <th>File</th>
                 <th>Rows</th>
@@ -526,6 +599,18 @@ export default function InstructorGrades() {
             <tbody>
               {submissions.map((submission) => (
                 <tr key={submission.id}>
+                  {isDeleteMode ? (
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedSubmissionIds.includes(submission.id)}
+                        onChange={() =>
+                          handleToggleSubmissionSelection(submission.id)
+                        }
+                        aria-label={`Select ${submission.fileName}`}
+                      />
+                    </td>
+                  ) : null}
                   <td>{new Date(submission.submittedAt).toLocaleString()}</td>
                   <td>{submission.fileName}</td>
                   <td>{submission.records.length}</td>
@@ -552,7 +637,7 @@ export default function InstructorGrades() {
               ))}
               {submissions.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>No grade submissions yet.</td>
+                  <td colSpan={isDeleteMode ? 6 : 5}>No grade submissions yet.</td>
                 </tr>
               ) : null}
             </tbody>
