@@ -1,9 +1,16 @@
 from django.urls import path
 
-from .views import StaffDetailView, StaffListCreateView, StaffLoginView, StaffTrashView
+from .views import (
+    HealthCheckView,
+    StaffDetailView,
+    StaffListCreateView,
+    StaffLoginView,
+    StaffTrashView,
+)
 
 
 urlpatterns = [
+    path("health/", HealthCheckView.as_view(), name="health-check"),
     path("staff/", StaffListCreateView.as_view(), name="staff-list-create"),
     path("staff/login/", StaffLoginView.as_view(), name="staff-login"),
     path("staff/<str:employee_id>/", StaffDetailView.as_view(), name="staff-detail"),

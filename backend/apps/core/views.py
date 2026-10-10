@@ -22,6 +22,16 @@ ROLE_ALIASES = {
 }
 
 
+class HealthCheckView(APIView):
+    """Public liveness endpoint used by the Render web service."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({"status": "ok"})
+
+
 def normalize_text(value):
     return value.strip() if isinstance(value, str) else ""
 

@@ -36,6 +36,30 @@ the deployed origins from these variables.
 Render must use Supabase Postgres rather than the repository's local SQLite
 file because Render's normal service filesystem is ephemeral.
 
+#### Render web-service settings
+
+Create a **Web Service** from the same repository and use the
+`initial-progress` branch until the project is ready to merge into `main`.
+Set **Root Directory** to `backend`, then configure:
+
+| Setting | Value |
+| --- | --- |
+| Build Command | `pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate` |
+| Start Command | `gunicorn aicsync.wsgi:application --bind 0.0.0.0:$PORT` |
+| Health Check Path | `/api/health/` |
+
+In Render's environment-variable settings, add `DEBUG=false`, a newly
+generated `SECRET_KEY`, the Render hostname (without `https://`) as
+`ALLOWED_HOSTS`, and the Vercel production URL for both
+`CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS`. Configure the Supabase
+Postgres connection with `DB_ENGINE=django.db.backends.postgresql` plus
+`DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT` from Supabase's
+Connect dialog. Keep all credentials in Render—not in Git.
+
+Celery-powered backup automation additionally needs a managed Redis URL and
+separate Render worker/scheduler services. Deploy the web service first; add
+those services only when automated backups are ready to test.
+
 ### 3. Connect Vercel to Render
 
 Copy the Render origin, without `/api` and without a trailing slash, into

@@ -25,6 +25,12 @@ class StaffAccountApiTests(TestCase):
         payload.update(overrides)
         return self.client.post("/api/staff/", payload, format="json")
 
+    def test_health_check_is_public(self):
+        response = self.client.get("/api/health/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {"status": "ok"})
+
     def test_create_staff_account_generates_branch_employee_id(self):
         response = self.create_staff_account(branch="Bacoor")
 
