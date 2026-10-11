@@ -6268,7 +6268,7 @@ export default function AdminStudents({
 
         {/* Archive Confirmation Modal */}
         {isArchiveModalOpen && (
-          <div className="students-modal-overlay">
+          <div className="students-modal-overlay students-archive-confirm-overlay">
             <div className="students-modal students-archive-confirm-modal">
               <div className="students-modal-header">
                 <h2>Confirm Archive</h2>

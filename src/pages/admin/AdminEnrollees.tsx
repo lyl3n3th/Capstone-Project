@@ -21,6 +21,7 @@ import {
   FaSearch,
   FaChevronDown,
   FaChevronUp,
+  FaCopy,
   FaFilter,
   FaTrash,
   FaStar,
@@ -1561,6 +1562,10 @@ export default function AdminEnrollees({
   const [instructorForm, setInstructorForm] = useState<InstructorFormState>(
     createDefaultInstructorForm(),
   );
+  const [temporaryInstructorPassword, setTemporaryInstructorPassword] =
+    useState("");
+  const [isResettingInstructorPassword, setIsResettingInstructorPassword] =
+    useState(false);
   const [editingAssignment, setEditingAssignment] =
     useState<SubjectAssignment | null>(null);
   const [selectedAssignmentIds, setSelectedAssignmentIds] = useState<string[]>(
@@ -3188,11 +3193,13 @@ export default function AdminEnrollees({
     setShowInstructorModal(false);
     setEditingInstructor(null);
     setInstructorForm(createDefaultInstructorForm());
+    setTemporaryInstructorPassword("");
   };
 
   const openCreateInstructorModal = () => {
     setEditingInstructor(null);
     setInstructorForm(createDefaultInstructorForm());
+    setTemporaryInstructorPassword("");
     setShowInstructorModal(true);
   };
 
@@ -3205,6 +3212,7 @@ export default function AdminEnrollees({
       email: instructor.email || "",
       contactNumber: instructor.contactNumber || "",
     });
+    setTemporaryInstructorPassword("");
     setShowInstructorModal(true);
   };
 
@@ -3325,7 +3333,7 @@ export default function AdminEnrollees({
   };
 
   const handleResetInstructorPassword = async () => {
-    if (!editingInstructor) {
+    if (!editingInstructor || isResettingInstructorPassword) {
       return;
     }
 
@@ -3338,12 +3346,14 @@ export default function AdminEnrollees({
     }
 
     try {
+      setIsResettingInstructorPassword(true);
       const temporaryPassword = await resetInstructorTemporaryPassword({
         branch: currentBranch,
         employeeId: editingInstructor.employeeId,
       });
+      setTemporaryInstructorPassword(temporaryPassword);
       addToast(
-        `${editingInstructor.name}'s new temporary password is ${temporaryPassword}.`,
+        "A new temporary password is ready to copy below.",
         "success",
       );
     } catch (error) {
@@ -3353,6 +3363,25 @@ export default function AdminEnrollees({
           ? error.message
           : "Unable to reset the instructor password.",
         "error",
+      );
+    } finally {
+      setIsResettingInstructorPassword(false);
+    }
+  };
+
+  const handleCopyTemporaryInstructorPassword = async () => {
+    if (!temporaryInstructorPassword) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(temporaryInstructorPassword);
+      addToast("Temporary password copied to clipboard.", "success");
+    } catch (error) {
+      console.error("Failed to copy instructor temporary password", error);
+      addToast(
+        "Unable to copy automatically. Select the password and copy it manually.",
+        "warning",
       );
     }
   };
@@ -13144,6 +13173,38 @@ export default function AdminEnrollees({
                     : "A secure temporary password will be generated after saving."}
                 </p>
               </div>
+              {editingInstructor && temporaryInstructorPassword && (
+                <section
+                  className="instructor-temporary-password"
+                  aria-live="polite"
+                >
+                  <div>
+                    <strong>New temporary password</strong>
+                    <p>
+                      Give this to {editingInstructor.name}. It remains visible
+                      here until you close this window.
+                    </p>
+                  </div>
+                  <div className="instructor-temporary-password-value">
+                    <input
+                      aria-label="New temporary password"
+                      readOnly
+                      value={temporaryInstructorPassword}
+                      onFocus={(event) => event.currentTarget.select()}
+                    />
+                    <button
+                      type="button"
+                      className="action-btn secondary instructor-password-copy-btn"
+                      onClick={() => {
+                        void handleCopyTemporaryInstructorPassword();
+                      }}
+                    >
+                      <FaCopy aria-hidden="true" />
+                      Copy
+                    </button>
+                  </div>
+                </section>
+              )}
               <form
                 id="instructor-config-form"
                 onSubmit={(event) => {
@@ -13238,8 +13299,11 @@ export default function AdminEnrollees({
                   onClick={() => {
                     void handleResetInstructorPassword();
                   }}
+                  disabled={isResettingInstructorPassword}
                 >
-                  Reset Temporary Password
+                  {isResettingInstructorPassword
+                    ? "Resetting..."
+                    : "Reset Temporary Password"}
                 </button>
               )}
               <button

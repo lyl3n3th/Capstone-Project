@@ -2196,6 +2196,12 @@
 }
 
 /* Archive Confirm Modal */
+.students-modal-overlay.students-archive-confirm-overlay {
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+}
+
 .students-archive-confirm-modal {
   max-width: 400px;
   text-align: center;
