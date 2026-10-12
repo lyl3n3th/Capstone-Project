@@ -71,6 +71,20 @@ function StudentPortalRoute({ children }: { children: ReactNode }) {
   );
 }
 
+function PublicLandingRoute() {
+  const { currentUser, isReady } = useAuth();
+
+  if (!isReady) {
+    return null;
+  }
+
+  if (currentUser?.role === "student") {
+    return <Navigate to="/student/home" replace />;
+  }
+
+  return <AdmissionHome />;
+}
+
 function StaffConnectionGuard({ children }: { children: ReactNode }) {
   const { logout } = useAuth();
   const [shouldReturnToLogin, setShouldReturnToLogin] = useState(false);
@@ -179,7 +193,7 @@ function AppRoutes() {
   return (
     <Routes>
       {/* Public Admission Routes */}
-      <Route path="/" element={<AdmissionHome />} />
+      <Route path="/" element={<PublicLandingRoute />} />
       <Route path="/admission" element={<AdmissionHome />} />
       <Route
         path="/enroll"
