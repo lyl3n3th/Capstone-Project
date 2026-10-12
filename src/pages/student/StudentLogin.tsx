@@ -7,6 +7,7 @@ import bg from "../../assets/images/bg.jpg";
 import aicslogst from "../../assets/images/aicslogst-2.png";
 import AuthModal from "../../components/common/AuthModal";
 import { useAuth } from "../../hooks/useAuth";
+import { STUDENT_GOOGLE_LOGIN_ERROR_STORAGE_KEY } from "../../services/auth";
 import "../../styles/student/student-login.css";
 
 function StudentLogin() {
@@ -24,14 +25,14 @@ function StudentLogin() {
     }
 
     const googleLoginError = window.sessionStorage.getItem(
-      "student-google-login-error",
+      STUDENT_GOOGLE_LOGIN_ERROR_STORAGE_KEY,
     );
 
     if (!googleLoginError) {
       return null;
     }
 
-    window.sessionStorage.removeItem("student-google-login-error");
+    window.sessionStorage.removeItem(STUDENT_GOOGLE_LOGIN_ERROR_STORAGE_KEY);
     return {
       title: "Unable to Sign In",
       message: googleLoginError,

@@ -19,8 +19,32 @@ import {
   loginStudentPortalWithEmail,
   mapStudentIdentityToAuthUser,
   startStudentGoogleLogin,
+  STUDENT_GOOGLE_LOGIN_ERROR_STORAGE_KEY,
+  STUDENT_GOOGLE_LOGIN_PENDING_STORAGE_KEY,
 } from "../services/auth";
 import { supabase } from "../lib/supabase";
+
+const getGoogleCallbackError = () => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const parameterSets = [
+    new URLSearchParams(window.location.search),
+    new URLSearchParams(window.location.hash.replace(/^#/, "")),
+  ];
+
+  for (const parameters of parameterSets) {
+    const message =
+      parameters.get("error_description") || parameters.get("error");
+
+    if (message) {
+      return message;
+    }
+  }
+
+  return "";
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -65,28 +89,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const storedSession = localStorage.getItem(AUTH_STORAGE_KEY);
 
     if (!storedSession) {
+      const googleLoginPending =
+        sessionStorage.getItem(STUDENT_GOOGLE_LOGIN_PENDING_STORAGE_KEY) ===
+        "true";
+      const returnToStudentLoginWithError = (message: string) => {
+        sessionStorage.removeItem(STUDENT_GOOGLE_LOGIN_PENDING_STORAGE_KEY);
+        sessionStorage.setItem(STUDENT_GOOGLE_LOGIN_ERROR_STORAGE_KEY, message);
+
+        if (window.location.pathname !== "/student/login") {
+          window.location.replace("/student/login");
+        }
+      };
+      const googleCallbackError = getGoogleCallbackError();
+
+      if (googleLoginPending && googleCallbackError) {
+        returnToStudentLoginWithError(googleCallbackError);
+        setIsReady(true);
+        return;
+      }
+
       void supabase.auth
         .getSession()
         .then(async ({ data }) => {
           const email = data.session?.user.email;
 
           if (!email) {
+            if (googleLoginPending) {
+              returnToStudentLoginWithError(
+                "Google sign-in was not completed. Please try again.",
+              );
+            }
+
             return;
           }
 
           await createStudentSessionFromEmail(email);
           await supabase.auth.signOut();
+
+          if (googleLoginPending) {
+            sessionStorage.removeItem(STUDENT_GOOGLE_LOGIN_PENDING_STORAGE_KEY);
+
+            if (window.location.pathname !== "/student/home") {
+              window.location.replace("/student/home");
+            }
+          }
         })
         .catch(async (error) => {
           console.error("Failed to restore Google student session", error);
           localStorage.removeItem(AUTH_STORAGE_KEY);
-          sessionStorage.setItem(
-            "student-google-login-error",
+          const message =
             error instanceof Error
               ? error.message
-              : "Unable to sign in with that Google account.",
-          );
+              : "Unable to sign in with that Google account.";
+
+          sessionStorage.setItem(STUDENT_GOOGLE_LOGIN_ERROR_STORAGE_KEY, message);
           await supabase.auth.signOut();
+
+          if (googleLoginPending) {
+            returnToStudentLoginWithError(message);
+          }
         })
         .finally(() => setIsReady(true));
       return;

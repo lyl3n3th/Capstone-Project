@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import { supabase } from "../lib/supabase";
 import {
+  getStudentPortalSubjects,
   getStudentsForBranch,
   normalizeBranchName,
   fetchAndCacheBranchScopedData,
@@ -15,6 +16,8 @@ import {
   type AcademicInstructorRecord,
   type AcademicSubjectAssignmentRecord,
 } from "./academicData";
+import { fetchAdminStudents } from "./adminStudentsApi";
+import { fetchStudentSubjectPlans } from "./studentPlanningApi";
 import {
   fetchAndCacheStudentGradeRecordsForBranch,
   findApprovedStudentGradeConflict,
@@ -607,6 +610,27 @@ const studentMatchesSection = (
   normalizeValue(student.section) === normalizeValue(section.code) ||
   normalizeValue(student.section) === normalizeValue(section.section);
 
+export const studentHasAssignedInstructorSubject = (
+  student: StudentStorageRecord,
+  assignment: AcademicSubjectAssignmentRecord,
+) => {
+  const assignmentId = normalizeValue(assignment.id);
+  const assignmentInstructorId = normalizeValue(assignment.instructorId);
+  const assignmentSubjectCode = normalizeValue(assignment.subjectCode);
+
+  return getStudentPortalSubjects(student).some((subject) => {
+    if (normalizeValue(subject.id) === assignmentId) {
+      return true;
+    }
+
+    return (
+      Boolean(subject.instructorId) &&
+      normalizeValue(subject.instructorId) === assignmentInstructorId &&
+      normalizeValue(subject.code) === assignmentSubjectCode
+    );
+  });
+};
+
 export const getInstructorScopedData = async ({
   branch,
   instructorId,
@@ -615,7 +639,26 @@ export const getInstructorScopedData = async ({
   instructorId: string;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
-  const snapshot = await fetchAndCacheAcademicSnapshot(resolvedBranch);
+  const [snapshot, remoteStudentsResult] = await Promise.all([
+    fetchAndCacheAcademicSnapshot(resolvedBranch),
+    fetchAdminStudents(resolvedBranch).catch((error) => {
+      console.warn(
+        "Unable to load the current instructor roster from Supabase; using the local roster.",
+        error,
+      );
+      return getStudentsForBranch(resolvedBranch);
+    }),
+  ]);
+
+  try {
+    await fetchStudentSubjectPlans(resolvedBranch);
+  } catch (error) {
+    console.warn(
+      "Unable to load approved individual schedules from Supabase; using cached schedules.",
+      error,
+    );
+  }
+
   const assignments = snapshot.subjectAssignments.filter(
     (assignment) => assignment.instructorId === instructorId,
   );
@@ -624,10 +667,13 @@ export const getInstructorScopedData = async ({
   const sections = snapshot.classSections.filter(
     (section) => sectionIds.has(section.id) || sectionCodes.has(section.code),
   );
-  const students = getStudentsForBranch(resolvedBranch).filter(
+  const students = remoteStudentsResult.filter(
     (student) =>
       student.status !== "Archived" &&
-      sections.some((section) => studentMatchesSection(student, section)),
+      (sections.some((section) => studentMatchesSection(student, section)) ||
+        assignments.some((assignment) =>
+          studentHasAssignedInstructorSubject(student, assignment),
+        )),
   );
 
   return {
@@ -856,6 +902,7 @@ const getRowHasRelevantGradeData = (row: Record<string, unknown>) =>
     "Subject Title",
     "SUBJECT_TITLE",
     "Grade",
+    "Grade (50-100)",
     "Grade (0-100)",
     "Grades",
     "GRADES",
@@ -1002,7 +1049,7 @@ export const downloadInstructorGradeTemplate = ({
       academicYear: sectionAssignments[0]?.academicYear || "2026-2027",
       descriptor: getSectionAcademicDescriptor(section, sectionStudents),
       headerOverrides:
-        programType === "College" ? { F: "GRADE (0-100)" } : undefined,
+        programType === "College" ? { F: "GRADE (50-100)" } : undefined,
       rows: buildInstructorTemplateRows({
         assignments: sectionAssignments,
         programType,
@@ -1125,12 +1172,6 @@ export const downloadInstructorGradeChangeTemplate = async ({
       filters.semester,
       filters.gradingPeriod,
     );
-    const sectionStudents = students
-      .filter((student) => studentMatchesSection(student, section))
-      .sort(
-        (left, right) =>
-          left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
-      );
     const sectionKey = getSectionKey(section);
     const sectionCode = normalizeTemplateLookupValue(section.code);
     const sectionAssignments = assignments.filter(
@@ -1140,11 +1181,30 @@ export const downloadInstructorGradeChangeTemplate = async ({
         normalizeTemplateLookupValue(assignment.semester) ===
           normalizeTemplateLookupValue(filters.semester),
     );
+    const sectionStudents = students
+      .filter(
+        (student) =>
+          studentMatchesSection(student, section) ||
+          sectionAssignments.some((assignment) =>
+            studentHasAssignedInstructorSubject(student, assignment),
+          ),
+      )
+      .sort(
+        (left, right) =>
+          left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+      );
 
     const rows: string[][] = [];
 
     sectionStudents.forEach((student) => {
       sectionAssignments.forEach((assignment) => {
+        if (
+          !studentMatchesSection(student, section) &&
+          !studentHasAssignedInstructorSubject(student, assignment)
+        ) {
+          return;
+        }
+
         const currentRecord = findApprovedStudentGradeConflict({
           branch: resolvedBranch,
           record: {
@@ -1629,6 +1689,7 @@ export const parseInstructorGradeWorkbook = async ({
         units: getValueByAliases(row, ["Unit", "Units", "UNITS"]),
         grade: getValueByAliases(row, [
           "Grade",
+          "Grade (50-100)",
           "Grade (0-100)",
           "Grades",
           "GRADES",

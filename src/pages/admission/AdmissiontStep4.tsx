@@ -716,6 +716,14 @@ function AdmissionStep4() {
                   {applicationData.branchName}
                 </span>
               </div>
+              {applicationData.academicYear ? (
+                <div className="conf-summary-item">
+                  <span className="conf-summary-label">School Year:</span>
+                  <span className="conf-summary-value">
+                    {applicationData.academicYear}
+                  </span>
+                </div>
+              ) : null}
               <div className="conf-summary-item">
                 <span className="conf-summary-label">Status:</span>
                 <span className="conf-summary-value">

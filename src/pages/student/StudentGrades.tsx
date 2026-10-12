@@ -949,13 +949,14 @@ const buildReportCardPdf = async ({
   const pageContents: string[][] = [[]];
   const pageWidth = isSHS ? 595 : 842;
   const pageHeight = isSHS ? 842 : 595;
-  const margin = 26;
+  const margin = 20;
   const contentWidth = pageWidth - margin * 2;
-  const rowPadding = 7;
-  const lineHeight = 10.5;
+  const rowPadding = 4;
+  const lineHeight = 8.5;
+  const footerClearance = 22;
   const columnWidths = isSHS
-    ? [78, 195, 55, 55, 100, 60]
-    : [120, 260, 62, 78, 92, 178];
+    ? [78, 207, 55, 55, 100, 60]
+    : [120, 260, 62, 78, 92, 190];
   const logoResource = await loadPdfJpegImage(aicsLogo, "AicsLogo");
   let currentPage = 0;
   let y = pageHeight - margin;
@@ -1027,26 +1028,26 @@ const buildReportCardPdf = async ({
     text(
       continued ? "Student Report Card (continued)" : "Student Report Card",
       margin,
-      y - 10,
-      18,
+      y - 8,
+      16,
       brandColor,
     );
-    text(`${academicYear} | ${semester}`, margin, y - 34, 10, textColor);
-    const logoHeight = 46;
+    text(`${academicYear} | ${semester}`, margin, y - 28, 9, textColor);
+    const logoHeight = 38;
     const logoWidth = (logoResource.width / logoResource.height) * logoHeight;
     image(
       logoResource.name,
       pageWidth - margin - logoWidth,
-      pageHeight - margin - logoHeight + 2,
+      pageHeight - margin - logoHeight,
       logoWidth,
       logoHeight,
     );
-    line(margin, y - 56, pageWidth - margin, y - 56, brandColor, 1.1);
-    y -= 86;
+    line(margin, y - 48, pageWidth - margin, y - 48, brandColor, 1.1);
+    y -= 66;
   };
   const drawTableHeader = () => {
     let x = margin;
-    const headerHeight = isSHS ? 34 : 26;
+    const headerHeight = isSHS ? 24 : 20;
 
     columns.forEach((column, index) => {
       const width = columnWidths[index] ?? 80;
@@ -1063,8 +1064,8 @@ const buildReportCardPdf = async ({
         text(
           headerLine,
           x + 8,
-          y - 17 - lineIndex * 9,
-          8,
+          y - 13 - lineIndex * 7,
+          7,
           [0.01, 0.16, 0.28],
         );
       });
@@ -1077,21 +1078,21 @@ const buildReportCardPdf = async ({
 
     text(`Student: ${studentName}`, margin, y, 9, mutedColor);
     text(`Student Number: ${studentNumber || "N/A"}`, rightColumnX, y, 9, mutedColor);
-    y -= 20;
+    y -= 16;
     text(`Program: ${program || "N/A"}`, margin, y, 9, mutedColor);
     text(`Term: ${semester}`, rightColumnX, y, 9, mutedColor);
-    y -= 30;
+    y -= 22;
   };
   const drawSummary = () => {
-    const boxGap = 10;
-    const boxHeight = 30;
+    const boxGap = 8;
+    const boxHeight = 24;
     const boxWidth =
       (contentWidth - boxGap * Math.max(0, summaryItems.length - 1)) /
       Math.max(1, summaryItems.length);
 
-    y -= 18;
+    y -= 10;
 
-    if (y - boxHeight < margin + 44) {
+    if (y - boxHeight < margin + footerClearance) {
       startPage(true);
       y -= 6;
     }
@@ -1103,7 +1104,7 @@ const buildReportCardPdf = async ({
         fill: softFillColor,
         stroke: gridColor,
       });
-      text(`${label}: ${value}`, x + 10, y - 19, 9, mutedColor);
+      text(`${label}: ${value}`, x + 7, y - 15, 8, mutedColor);
     });
     y -= boxHeight;
   };
@@ -1112,20 +1113,20 @@ const buildReportCardPdf = async ({
       leftRow,
       collegeGradingSystemRightRows[index],
     ]);
-    const gradingColumnWidths = [70, 164, 106, 70, 164, 106];
+    const gradingColumnWidths = [52, 132, 96, 52, 132, 96];
     const gradingTableWidth = gradingColumnWidths.reduce(
       (sum, width) => sum + width,
       0,
     );
     const gradingX = margin + (contentWidth - gradingTableWidth) / 2;
-    const rowHeight = 18;
-    const requiredHeight = rowHeight * (gradingRows.length + 1) + 18;
+    const rowHeight = 13;
+    const requiredHeight = rowHeight * (gradingRows.length + 1) + 10;
 
-    if (y - requiredHeight < margin + 44) {
+    if (y - requiredHeight < margin + footerClearance + 34) {
       startPage(true);
     }
 
-    y -= 16;
+    y -= 10;
 
     let x = gradingX;
     gradingColumnWidths.forEach((width, index) => {
@@ -1136,7 +1137,7 @@ const buildReportCardPdf = async ({
       });
 
       if (index === 0) {
-        text("Grading System", x + 8, y - 12, 7.5, textColor);
+        text("Grading System", x + 6, y - 9, 6.7, textColor);
       }
 
       x += width;
@@ -1161,7 +1162,7 @@ const buildReportCardPdf = async ({
           stroke: [0.18, 0.2, 0.23],
           strokeWidth: 0.7,
         });
-        text(value, rowX + 6, y - 12, 7.2, textColor);
+        text(value, rowX + 5, y - 9, 6.7, textColor);
         rowX += width;
       });
       y -= rowHeight;
@@ -1171,6 +1172,12 @@ const buildReportCardPdf = async ({
   startPage();
   drawMeta();
   drawTableHeader();
+
+  const gradingSystemHeight =
+    10 + 13 * (collegeGradingSystemLeftRows.length + 1);
+  const summaryHeight = 10 + 24;
+  const reservedHeightAfterTable =
+    footerClearance + summaryHeight + (isSHS ? 0 : gradingSystemHeight);
 
   const tableRows =
     rows.length > 0
@@ -1192,7 +1199,7 @@ const buildReportCardPdf = async ({
       Math.max(...wrappedCells.map((cellLines) => cellLines.length)) * lineHeight +
       rowPadding * 2;
 
-    if (y - rowHeight < margin + 70) {
+    if (y - rowHeight < margin + reservedHeightAfterTable) {
       startPage(true);
       drawTableHeader();
     }
@@ -1207,8 +1214,8 @@ const buildReportCardPdf = async ({
         text(
           cellLine,
           x + 8,
-          y - rowPadding - 8 - lineIndex * lineHeight,
-          8.5,
+          y - rowPadding - 7 - lineIndex * lineHeight,
+          7.5,
           textColor,
         );
       });
@@ -1219,10 +1226,6 @@ const buildReportCardPdf = async ({
 
   if (!isSHS) {
     drawCollegeGradingSystem();
-  }
-
-  if (y < margin + 80) {
-    startPage(true);
   }
 
   drawSummary();
@@ -1989,39 +1992,6 @@ function StudentGrades() {
               </table>
             </div>
           </div>
-
-          {!isSHS ? (
-            <section className="s-grading-system-section">
-              <div className="s-grading-system-table-wrapper">
-                <table className="s-grading-system-table">
-                  <tbody>
-                    <tr>
-                      <th>Grading System</th>
-                      <th></th>
-                      <th></th>
-                      <th></th>
-                      <th></th>
-                      <th></th>
-                    </tr>
-                    {collegeGradingSystemLeftRows.map((leftRow, index) => {
-                      const rightRow = collegeGradingSystemRightRows[index];
-
-                      return (
-                        <tr key={`${leftRow.grade}-${rightRow?.grade ?? index}`}>
-                          <td>{leftRow.grade}</td>
-                          <td>{leftRow.description}</td>
-                          <td>{leftRow.range}</td>
-                          <td>{rightRow?.grade ?? ""}</td>
-                          <td>{rightRow?.description ?? ""}</td>
-                          <td>{rightRow?.range ?? ""}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          ) : null}
 
           <div className="s-subjects-summary s-grades-summary">
             <div className="s-summary-card">

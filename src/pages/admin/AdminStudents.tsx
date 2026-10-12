@@ -1047,6 +1047,13 @@ const needsStudentRecordSync = (
   normalizeComparableText(localStudent.status) !==
     normalizeComparableText(fetchedStudent.status);
 
+const hasFinalRemoteStudentStatus = (
+  student: Pick<Student, "status">,
+) => {
+  const status = normalizeComparableText(student.status);
+  return status === "archived" || status === "graduated";
+};
+
 type StoredSectionAssignmentRecord = {
   enrolleeId: string;
   assignedSection: string;
@@ -1195,6 +1202,12 @@ const syncLocalStudentsToSupabase = async (
         return true;
       }
 
+      // An archived or graduated record from the shared source must never be
+      // reopened by an older active copy left in this browser's cache.
+      if (hasFinalRemoteStudentStatus(fetchedStudent)) {
+        return false;
+      }
+
       return needsStudentRecordSync(
         resolvedLocalStudent,
         resolveStudentWithApprovedEnrollment(fetchedStudent),
@@ -1241,7 +1254,7 @@ export default function AdminStudents({
   const { currentUser } = useAuth();
   const currentBranch = normalizeBranchName(currentUser?.branch);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterProgram, setFilterProgram] = useState("All Programs");
   const [filterYearLevel, setFilterYearLevel] = useState("");
@@ -4130,7 +4143,7 @@ export default function AdminStudents({
                     className="students-selection-checkbox"
                     checked={areAllVisibleStudentsSelected}
                     onChange={toggleVisibleStudentSelection}
-                    disabled={visibleStudentIds.length === 0}
+                    disabled={isLoading || visibleStudentIds.length === 0}
                     aria-label="Select all visible students"
                   />
                 </th>
@@ -4153,7 +4166,7 @@ export default function AdminStudents({
               </tr>
             </thead>
             <tbody>
-              {sortedStudents.length > 0 ? (
+              {!isLoading && sortedStudents.length > 0 ? (
                 sortedStudents.map((student) => (
                   <tr
                     key={student.id}

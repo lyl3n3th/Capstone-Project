@@ -27,6 +27,7 @@ type SupabaseErrorLike = {
 type AdmissionSummaryRow = {
   application_id: string;
   application_status: AdmissionApplicationStatus;
+  academic_year?: string | null;
   applied_for_scholarship: boolean;
   branch_code: string;
   branch_name: string;
@@ -399,6 +400,7 @@ const mapAdmissionSummary = (
     trackingNumber: row.tracking_number,
     branchCode: row.branch_code,
     branchName: row.branch_name,
+    academicYear: row.academic_year?.trim() || undefined,
     studentStatus: row.student_status_label,
     programName: row.program_name,
     programLevel: row.program_level,
@@ -611,6 +613,7 @@ export const saveAdmissionApplication = async (
         ? normalizeTrackingNumber(input.trackingNumber)
         : null,
       p_branch_code: normalizeBranchCode(input.branchCode),
+      p_academic_year: input.academicYear?.trim() || null,
       p_student_status_label: input.studentStatus.trim(),
       p_program_name: input.programName.trim(),
       p_track_name: input.trackName.trim(),

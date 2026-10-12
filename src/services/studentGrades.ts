@@ -171,7 +171,7 @@ export const COLLEGE_GRADE_CONVERSION_SCALE = [
   {
     grade: "5.00",
     description: "Failed",
-    range: "below 50",
+    range: "Use FAILED",
     min: Number.NEGATIVE_INFINITY,
     max: 49.999,
     evaluation: "Failed" as const,
@@ -181,13 +181,13 @@ export const COLLEGE_GRADE_SPECIAL_MARKS = [
   { grade: "INC", description: "Incomplete", range: "" },
   { grade: "DRP", description: "Dropped Subject", range: "" },
 ];
-const COLLEGE_GRADE_ERROR_MESSAGE =
-  "College grades must be numeric percentage grades from 0-100";
+export const COLLEGE_GRADE_ERROR_MESSAGE =
+  "College grades must be numeric percentage grades from 50-100";
 
 export const convertCollegePercentageGrade = (percentageGrade: number) => {
   if (
     !Number.isFinite(percentageGrade) ||
-    percentageGrade < 0 ||
+    percentageGrade < 50 ||
     percentageGrade > 100
   ) {
     return undefined;

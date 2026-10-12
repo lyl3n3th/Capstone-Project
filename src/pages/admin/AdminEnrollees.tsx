@@ -1695,14 +1695,13 @@ export default function AdminEnrollees({
     transfereeEvaluations: "transferee-evaluations",
     studentSubjectPlans: "student-subject-plans",
   } as const;
+  // Enrollment requests are often for an upcoming term. They must not change
+  // the term presented to a new admission applicant.
   const reflectedAcademicYear =
-    enrollmentRequests[0]?.academicYear ||
-    subjectAssignments[0]?.academicYear ||
-    "2026-2027";
+    subjectAssignments[0]?.academicYear || "2026-2027";
   const reflectedSemester =
-    normalizeSectionSemester(
-      enrollmentRequests[0]?.semester || subjectAssignments[0]?.semester,
-    ) || DEFAULT_SECTION_SEMESTER;
+    normalizeSectionSemester(subjectAssignments[0]?.semester) ||
+    DEFAULT_SECTION_SEMESTER;
   const resolveOwnScheduleAcademicYear = (
     enrollee: Pick<Enrollee, "ownScheduleAcademicYear">,
   ) => enrollee.ownScheduleAcademicYear?.trim() || reflectedAcademicYear;

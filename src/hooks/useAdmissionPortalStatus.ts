@@ -65,11 +65,13 @@ export function useAdmissionPortalStatus(branch: string) {
   const setAdmissionPortalOpen = (
     isOpen: boolean,
     closeOnDate?: string | null,
+    academicYear?: string | null,
   ) => {
     const nextStatus = persistAdmissionPortalOpen(
       resolvedBranch,
       isOpen,
       closeOnDate,
+      academicYear,
     );
     setPortalStatus(nextStatus);
     return nextStatus;
@@ -78,14 +80,17 @@ export function useAdmissionPortalStatus(branch: string) {
   const setAdmissionPortalStatus = ({
     isOpen,
     closeOnDate = "",
+    academicYear,
   }: {
     isOpen: boolean;
     closeOnDate?: string | null;
+    academicYear?: string | null;
   }) => {
     const nextStatus = persistAdmissionPortalStatus({
       branch: resolvedBranch,
       isOpen,
       closeOnDate,
+      academicYear,
     });
     setPortalStatus(nextStatus);
     return nextStatus;

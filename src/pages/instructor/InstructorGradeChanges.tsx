@@ -24,6 +24,7 @@ import {
   getGradeChangeRequestSettings,
   getInstructorGradeChangeRequests,
   saveInstructorGradeChangeRequest,
+  studentHasAssignedInstructorSubject,
   type InstructorGradeChangeRequest,
   writeInstructorGradeChangeRequests,
 } from "../../services/instructorPortal";
@@ -165,9 +166,11 @@ export default function InstructorGradeChanges() {
             item.code === assignment.sectionCode,
         );
         const programType = getProgramType(section);
-        const sectionStudents = section
-          ? students.filter((student) => studentMatchesSection(student, section))
-          : students;
+        const sectionStudents = students.filter(
+          (student) =>
+            (section && studentMatchesSection(student, section)) ||
+            studentHasAssignedInstructorSubject(student, assignment),
+        );
 
         return sectionStudents
           .flatMap((student) => {

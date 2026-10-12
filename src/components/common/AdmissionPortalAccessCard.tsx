@@ -5,6 +5,7 @@ import {
   ADMISSION_PORTAL_CLOSED_DESCRIPTION,
   ADMISSION_PORTAL_OPEN_DESCRIPTION,
   formatAdmissionCloseDate,
+  normalizeAdmissionAcademicYear,
 } from "../../services/admissionPortal";
 import { getAdmissionBranchName } from "../../services/admission";
 import {
@@ -42,12 +43,14 @@ export default function AdmissionPortalAccessCard() {
   const {
     isOpen: isAdmissionOpen,
     closeOnDate,
+    academicYear,
     updatedAt,
     isAutoClosed,
     setAdmissionPortalOpen,
     setAdmissionPortalStatus,
   } = useAdmissionPortalStatus(managedBranch);
   const scheduleSourceKey = `${managedBranch}:${isAdmissionOpen}:${closeOnDate}`;
+  const academicYearSourceKey = `${managedBranch}:${academicYear}`;
   const todayDateInputValue = getTodayDateInputValue();
   const minimumScheduledCloseDate = getTomorrowDateInputValue();
   const defaultScheduledCloseDate =
@@ -60,6 +63,14 @@ export default function AdmissionPortalAccessCard() {
   }));
   const [validationState, setValidationState] = useState(() => ({
     sourceKey: scheduleSourceKey,
+    message: "",
+  }));
+  const [academicYearDraft, setAcademicYearDraft] = useState(() => ({
+    sourceKey: academicYearSourceKey,
+    value: academicYear,
+  }));
+  const [academicYearMessage, setAcademicYearMessage] = useState(() => ({
+    sourceKey: academicYearSourceKey,
     message: "",
   }));
   const [studentNumberSetting, setStudentNumberSetting] =
@@ -77,6 +88,14 @@ export default function AdmissionPortalAccessCard() {
   const validationMessage =
     validationState.sourceKey === scheduleSourceKey
       ? validationState.message
+      : "";
+  const selectedAcademicYear =
+    academicYearDraft.sourceKey === academicYearSourceKey
+      ? academicYearDraft.value
+      : academicYear;
+  const schoolYearValidationMessage =
+    academicYearMessage.sourceKey === academicYearSourceKey
+      ? academicYearMessage.message
       : "";
   const formattedCloseDate = formatAdmissionCloseDate(closeOnDate);
 
@@ -212,6 +231,32 @@ export default function AdmissionPortalAccessCard() {
     });
   };
 
+  const handleSaveAcademicYear = () => {
+    const nextAcademicYear = normalizeAdmissionAcademicYear(selectedAcademicYear);
+
+    if (!nextAcademicYear) {
+      setAcademicYearMessage({
+        sourceKey: academicYearSourceKey,
+        message: "Enter the school year as YYYY-YYYY, such as 2026-2027.",
+      });
+      return;
+    }
+
+    setAdmissionPortalStatus({
+      isOpen: isAdmissionOpen,
+      closeOnDate,
+      academicYear: nextAcademicYear,
+    });
+    setAcademicYearDraft({
+      sourceKey: `${managedBranch}:${nextAcademicYear}`,
+      value: nextAcademicYear,
+    });
+    setAcademicYearMessage({
+      sourceKey: `${managedBranch}:${nextAcademicYear}`,
+      message: "School year saved. New applications will be connected to it.",
+    });
+  };
+
   const handleSaveStudentNumberSetting = async () => {
     const normalizedDigits = normalizeStudentNumberStartDigits(studentNumberDraft);
 
@@ -260,6 +305,9 @@ export default function AdmissionPortalAccessCard() {
             : `${managedBranchName} Admission Status`}
         </h3>
         <p>{admissionDescription}</p>
+        <p className="admission-portal-meta">
+          Admission School Year: <strong>{academicYear}</strong>
+        </p>
         {admissionMeta ? (
           <p className="admission-portal-meta">{admissionMeta}</p>
         ) : null}
@@ -312,6 +360,48 @@ export default function AdmissionPortalAccessCard() {
                 Close Admission Now
               </button>
             ) : null}
+          </div>
+          <div className="admission-portal-control-group">
+            <label className="admission-portal-date-field">
+              <span>Admission school year</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{4}-[0-9]{4}"
+                maxLength={9}
+                className="admission-portal-date-input"
+                value={selectedAcademicYear}
+                placeholder="2026-2027"
+                onChange={(event) => {
+                  setAcademicYearDraft({
+                    sourceKey: academicYearSourceKey,
+                    value: event.target.value,
+                  });
+                  setAcademicYearMessage({
+                    sourceKey: academicYearSourceKey,
+                    message: "",
+                  });
+                }}
+              />
+            </label>
+            <p
+              className={`admission-portal-helper ${
+                schoolYearValidationMessage &&
+                !schoolYearValidationMessage.toLowerCase().startsWith("school year saved")
+                  ? "is-error"
+                  : ""
+              }`}
+            >
+              {schoolYearValidationMessage ||
+                "Use YYYY-YYYY. New admission applications are saved under this school year."}
+            </p>
+            <button
+              type="button"
+              className="admission-portal-secondary"
+              onClick={handleSaveAcademicYear}
+            >
+              Save School Year
+            </button>
           </div>
           <div className="admission-portal-control-group admission-student-number-settings">
             <label className="admission-portal-date-field">

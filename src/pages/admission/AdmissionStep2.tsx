@@ -6,6 +6,7 @@ import "../../styles/main.css";
 import {
   civilStatusOptions,
   getAdmissionBranchName,
+  getAdmissionDraft,
   getAdmissionYearLevelOptions,
   getAdmissionProgress,
   getAvailablePrograms,
@@ -15,6 +16,10 @@ import {
   saveAdmissionApplication,
   sexOptions,
 } from "../../services/admission";
+import {
+  getDefaultAdmissionAcademicYear,
+  getAdmissionPortalStatus,
+} from "../../services/admissionPortal";
 
 const EDUCATIONAL_LEVEL_PLACEHOLDER = "Educational Level";
 const TRACK_SELECTION_PLACEHOLDER = "Strand / Program";
@@ -339,10 +344,17 @@ function AdmissionStep2() {
 
   // Save draft to sessionStorage
   const saveDraft = () => {
+    const previousDraft = getAdmissionDraft() ?? {};
+    const academicYear =
+      previousDraft.academicYear ||
+      getAdmissionPortalStatus(selectedBranch)?.academicYear ||
+      getDefaultAdmissionAcademicYear();
     const draftData = {
+      ...previousDraft,
       step: 2,
       trackingNumber,
       branch: selectedBranch,
+      academicYear,
       status: studentStatus,
       timestamp: new Date().toISOString(),
       fname,
@@ -363,6 +375,7 @@ function AdmissionStep2() {
       apply_scholarship: applyScholarship,
     };
     sessionStorage.setItem("enrollmentDraft", JSON.stringify(draftData));
+    return draftData;
   };
 
   // Load draft from sessionStorage
@@ -519,12 +532,13 @@ function AdmissionStep2() {
     }
 
     setIsSubmitting(true);
-    saveDraft();
+    const savedDraft = saveDraft();
 
     try {
       const savedApplication = await saveAdmissionApplication({
         trackingNumber: trackingNumber || initialTrackingNumber,
         branchCode: selectedBranch,
+        academicYear: savedDraft.academicYear,
         studentStatus,
         programName: program,
         trackName: program1,

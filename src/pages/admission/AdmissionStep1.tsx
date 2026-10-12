@@ -127,16 +127,19 @@ function AdmissionStep1() {
     const formattedCloseDate = formatAdmissionCloseDate(
       branchStatus?.closeOnDate ?? "",
     );
+    const schoolYearPrefix = branchStatus?.academicYear
+      ? `School Year ${branchStatus.academicYear} · `
+      : "";
 
     if (branchStatus && !branchStatus.isOpen) {
       return formattedCloseDate
-        ? `${branchName} branch - Admissions closed on ${formattedCloseDate}`
-        : `${branchName} branch - Admissions closed`;
+        ? `${schoolYearPrefix}${branchName} branch - Admissions closed on ${formattedCloseDate}`
+        : `${schoolYearPrefix}${branchName} branch - Admissions closed`;
     }
 
     return formattedCloseDate
-      ? `${branchName} branch - Scheduled to close on ${formattedCloseDate}`
-      : `${branchName} branch - Admissions open`;
+      ? `${schoolYearPrefix}${branchName} branch - Scheduled to close on ${formattedCloseDate}`
+      : `${schoolYearPrefix}${branchName} branch - Admissions open`;
   };
 
   const activeSelectedBranch =
@@ -189,6 +192,7 @@ function AdmissionStep1() {
     }
 
     setLoading(true);
+    const academicYear = getBranchStatus(activeSelectedBranch)?.academicYear;
     const existingDraft = sessionStorage.getItem("enrollmentDraft");
     let draftData;
 
@@ -204,6 +208,7 @@ function AdmissionStep1() {
           ...(shouldStartFresh ? {} : parsed),
           trackingNumber: trackingNum,
           branch: activeSelectedBranch,
+          academicYear,
           status,
           step: 1,
           lastUpdated: new Date().toISOString(),
@@ -212,6 +217,7 @@ function AdmissionStep1() {
         draftData = {
           trackingNumber: generateAicsTrackingNumber(),
           branch: activeSelectedBranch,
+          academicYear,
           status,
           step: 1,
           createdAt: new Date().toISOString(),

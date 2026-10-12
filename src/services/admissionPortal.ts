@@ -20,6 +20,7 @@ export const ADMISSION_PORTAL_CLOSED_DESCRIPTION =
 export type AdmissionPortalStatusRecord = {
   isOpen: boolean;
   closeOnDate: string;
+  academicYear: string;
   updatedAt: string;
 };
 
@@ -54,10 +55,12 @@ type AdmissionPortalStatusRow = {
   branch: string;
   is_open: boolean;
   close_on_date: string | null;
+  academic_year?: string | null;
   updated_at: string;
 };
 
 const ADMISSION_CLOSE_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ADMISSION_ACADEMIC_YEAR_PATTERN = /^(\d{4})\s*-\s*(\d{4})$/;
 export const DEFAULT_ADMISSION_BRANCH_CODE: AdmissionBranchCode =
   admissionBranches[0].code;
 
@@ -71,8 +74,33 @@ const getErrorMessage = (error: SupabaseErrorLike) =>
 const getDefaultAdmissionPortalStatus = (): AdmissionPortalStatusRecord => ({
   isOpen: true,
   closeOnDate: "",
+  academicYear: getDefaultAdmissionAcademicYear(),
   updatedAt: "",
 });
+
+export const getDefaultAdmissionAcademicYear = (date = new Date()) => {
+  const year = date.getFullYear();
+  const startingYear = date.getMonth() >= 5 ? year : year - 1;
+
+  return `${startingYear}-${startingYear + 1}`;
+};
+
+export const normalizeAdmissionAcademicYear = (
+  value: string | null | undefined,
+) => {
+  const matchedYears = value?.trim().match(ADMISSION_ACADEMIC_YEAR_PATTERN);
+
+  if (!matchedYears) {
+    return "";
+  }
+
+  const startingYear = Number.parseInt(matchedYears[1], 10);
+  const endingYear = Number.parseInt(matchedYears[2], 10);
+
+  return endingYear === startingYear + 1
+    ? `${startingYear}-${endingYear}`
+    : "";
+};
 
 const normalizeAdmissionPortalBranchOptions = (
   branches: AdmissionBranchOption[],
@@ -216,6 +244,7 @@ const resolveAdmissionPortalStatus = (
   return {
     isOpen: status.isOpen && !isAutoClosed,
     closeOnDate,
+    academicYear: status.academicYear,
     updatedAt: status.updatedAt,
     isAutoClosed,
   };
@@ -226,6 +255,9 @@ const normalizeStoredAdmissionPortalStatus = (
 ): AdmissionPortalStatusRecord => ({
   isOpen: value?.isOpen ?? true,
   closeOnDate: normalizeAdmissionCloseOnDate(value?.closeOnDate),
+  academicYear:
+    normalizeAdmissionAcademicYear(value?.academicYear) ||
+    getDefaultAdmissionAcademicYear(),
   updatedAt: typeof value?.updatedAt === "string" ? value.updatedAt : "",
 });
 
@@ -319,6 +351,7 @@ export const fetchAndCacheAdmissionPortalStatuses = async () => {
     store[branchCode] = normalizeStoredAdmissionPortalStatus({
       isOpen: row.is_open,
       closeOnDate: row.close_on_date || "",
+      academicYear: row.academic_year || "",
       updatedAt: row.updated_at,
     });
   });
@@ -398,17 +431,25 @@ export const setAdmissionPortalStatus = ({
   branch,
   isOpen,
   closeOnDate = "",
+  academicYear,
 }: {
   branch: string;
   isOpen: boolean;
   closeOnDate?: string | null;
+  academicYear?: string | null;
 }) => {
   const branchCode =
     resolveAdmissionPortalBranchCode(branch) ?? DEFAULT_ADMISSION_BRANCH_CODE;
   const store = readStoredAdmissionPortalStore();
+  const currentStatus = normalizeStoredAdmissionPortalStatus(store[branchCode]);
   const nextStatus: AdmissionPortalStatusRecord = {
     isOpen,
     closeOnDate: isOpen ? normalizeAdmissionCloseOnDate(closeOnDate) : "",
+    academicYear:
+      academicYear === undefined
+        ? currentStatus.academicYear
+        : normalizeAdmissionAcademicYear(academicYear) ||
+          getDefaultAdmissionAcademicYear(),
     updatedAt: new Date().toISOString(),
   };
   const nextStore = {
@@ -422,6 +463,7 @@ export const setAdmissionPortalStatus = ({
       p_branch: getAdmissionPortalBranchName(branchCode),
       p_is_open: nextStatus.isOpen,
       p_close_on_date: nextStatus.closeOnDate,
+      p_academic_year: nextStatus.academicYear,
     })
     .then(({ error }) => {
       if (error) {
@@ -447,7 +489,8 @@ export const setAdmissionPortalOpen = (
   branch: string,
   isOpen: boolean,
   closeOnDate?: string | null,
-) => setAdmissionPortalStatus({ branch, isOpen, closeOnDate });
+  academicYear?: string | null,
+) => setAdmissionPortalStatus({ branch, isOpen, closeOnDate, academicYear });
 
 export const formatAdmissionCloseDate = (closeOnDate: string) => {
   const normalizedCloseOnDate = normalizeAdmissionCloseOnDate(closeOnDate);

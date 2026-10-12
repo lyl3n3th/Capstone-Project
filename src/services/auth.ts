@@ -6,6 +6,11 @@ import {
   toNameCapitalization,
 } from "../utils/textFormatting";
 
+export const STUDENT_GOOGLE_LOGIN_PENDING_STORAGE_KEY =
+  "student-google-login-pending";
+export const STUDENT_GOOGLE_LOGIN_ERROR_STORAGE_KEY =
+  "student-google-login-error";
+
 type SupabaseErrorLike = {
   code?: string;
   details?: string | null;
@@ -296,6 +301,13 @@ export const loginStudentPortalWithEmail = async ({
 };
 
 export const startStudentGoogleLogin = async () => {
+  if (typeof window !== "undefined") {
+    window.sessionStorage.setItem(
+      STUDENT_GOOGLE_LOGIN_PENDING_STORAGE_KEY,
+      "true",
+    );
+  }
+
   const redirectTo =
     typeof window === "undefined"
       ? undefined
@@ -312,6 +324,12 @@ export const startStudentGoogleLogin = async () => {
   });
 
   if (error) {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(
+        STUDENT_GOOGLE_LOGIN_PENDING_STORAGE_KEY,
+      );
+    }
+
     throw new Error(error.message);
   }
 };

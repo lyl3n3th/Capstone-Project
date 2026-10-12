@@ -21,6 +21,7 @@ import {
   type InstructorGradeSubmissionErrorRow,
   writeInstructorGradeSubmissions,
 } from "../../services/instructorPortal";
+import { COLLEGE_GRADE_ERROR_MESSAGE } from "../../services/studentGrades";
 
 const readFileAsBase64 = (file: File) =>
   new Promise<string>((resolve, reject) => {
@@ -36,8 +37,7 @@ const readFileAsBase64 = (file: File) =>
     reader.readAsDataURL(file);
   });
 
-const COMPACT_COLLEGE_GRADE_ERROR =
-  "College grades must be numeric percentage grades from 0-100";
+const COMPACT_COLLEGE_GRADE_ERROR = COLLEGE_GRADE_ERROR_MESSAGE;
 const LEGACY_COLLEGE_GRADE_ERROR_PARTS = new Set([
   "1.25",
   "1.50",
@@ -138,6 +138,7 @@ const getPreviewRowHasData = (row: Record<string, unknown>) =>
     "Subject Title",
     "SUBJECT_TITLE",
     "Grade",
+    "Grade (50-100)",
     "Grade (0-100)",
     "Grades",
     "GRADES",
@@ -164,7 +165,7 @@ const getDisplayGradeErrors = (errors: string[]) => {
     }
 
     if (
-      trimmedError.startsWith("College grades must use") ||
+      trimmedError.startsWith("College grades must") ||
       LEGACY_COLLEGE_GRADE_ERROR_PARTS.has(trimmedError)
     ) {
       hasCollegeGradeScaleError = true;
@@ -289,6 +290,7 @@ const buildGradeFilePreview = (
           getValueByAliases(values, ["Grading Period", "Quarter", "QUARTER"]),
         grade: getValueByAliases(values, [
           "Grade",
+          "Grade (50-100)",
           "Grade (0-100)",
           "Grades",
           "GRADES",
@@ -528,7 +530,7 @@ export default function InstructorGrades() {
             <ul>
               <li>
                 <FiCheckCircle aria-hidden="true" />
-                <span>College: numeric percentage grades from 0 to 100. The system converts them to 1.00 - 5.00.</span>
+                <span>College: numeric percentage grades from 50 to 100. The system converts them to 1.00 - 4.00.</span>
               </li>
               <li>
                 <FiCheckCircle aria-hidden="true" />

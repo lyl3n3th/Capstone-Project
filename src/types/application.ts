@@ -30,6 +30,7 @@ export type AdmissionDiscountSource = "none" | "honor" | "scholarship_exam";
 export interface AdmissionDraft {
   trackingNumber?: string;
   branch?: string;
+  academicYear?: string;
   status?: string;
   requestOwnSchedule?: boolean;
   step?: number;
@@ -71,6 +72,7 @@ export interface AdmissionRequirementDefinition {
 export interface SaveAdmissionApplicationInput {
   trackingNumber?: string;
   branchCode: string;
+  academicYear?: string;
   studentStatus: string;
   programName: string;
   trackName: string;
@@ -96,6 +98,7 @@ export interface AdmissionApplicationSummary {
   trackingNumber: string;
   branchCode: string;
   branchName: string;
+  academicYear?: string;
   studentStatus: string;
   programName: string;
   programLevel: AdmissionProgramLevel;

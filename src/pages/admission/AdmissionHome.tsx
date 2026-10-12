@@ -29,6 +29,19 @@ function AdmissionHome() {
 
   const openBranchNames = openBranches.map((branch) => branch.branchName);
   const closedBranchNames = closedBranches.map((branch) => branch.branchName);
+  const admissionSchoolYears = Array.from(
+    new Set(
+      branches
+        .map((branch) => branch.academicYear)
+        .filter((academicYear) => academicYear.trim() !== ""),
+    ),
+  );
+  const admissionSchoolYearLabel =
+    admissionSchoolYears.length === 1
+      ? `Admission School Year ${admissionSchoolYears[0]}`
+      : admissionSchoolYears.length > 1
+        ? "Admission school year is shown when you select a branch."
+        : "";
   const admissionStatusLabel = !isAnyOpen
     ? "Admissions are currently closed in all branches"
     : openBranches.length === branches.length
@@ -129,6 +142,9 @@ function AdmissionHome() {
             <h2>Asian Institute of Computer Studies</h2>
             <p className="content-kicker">Go Beyond Learning</p>
             <p id="p2">{admissionStatusLabel}</p>
+            {admissionSchoolYearLabel ? (
+              <p className="content-kicker">{admissionSchoolYearLabel}</p>
+            ) : null}
           </div>
 
           <button
