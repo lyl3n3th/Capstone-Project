@@ -40,7 +40,6 @@ import {
   getStudentSectionChoices,
   getStudentsForBranch,
   INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
-  mergeAdminEnrolleeRecords,
   normalizeBranchName,
   promoteApplicantToStoredStudent,
   readBranchScopedData,
@@ -6371,70 +6370,11 @@ export default function AdminEnrollees({
       const supabaseApplicants = (await fetchSupabaseAdmissionApplicants(
         currentBranch,
       )) as Enrollee[];
-      const mergedEnrollees = mergeAdminEnrolleeRecords(
-        supabaseApplicants,
-        storedEnrollees,
-      ) as Enrollee[];
-
-      const syncedApprovedEnrollees = await Promise.all(
-        mergedEnrollees.map(async (enrollee) => {
-          if (
-            enrollee.archivedAt ||
-            enrollee.status !== "Approved" ||
-            !enrollee.trackingNumber
-          ) {
-            return enrollee;
-          }
-
-          try {
-            const activatedStudent = await activateApprovedStudent(
-              enrollee.trackingNumber,
-            );
-            const nextStudentNumber =
-              activatedStudent.studentNumber || enrollee.studentNumber;
-
-            if (
-              enrollee.requestedOwnSchedule ||
-              enrollee.ownScheduleRequestStatus
-            ) {
-              try {
-                await saveStudentPlanningState({
-                  branch: enrollee.branch || currentBranch,
-                  studentNumber: nextStudentNumber || enrollee.trackingNumber,
-                  trackingNumber: enrollee.trackingNumber,
-                  requestedOwnSchedule: Boolean(enrollee.requestedOwnSchedule),
-                  ownScheduleRequestStatus: enrollee.ownScheduleRequestStatus,
-                  ownScheduleAcademicYear: enrollee.ownScheduleAcademicYear,
-                  ownScheduleSemester: enrollee.ownScheduleSemester,
-                  ownScheduleSelectionStatus:
-                    enrollee.ownScheduleRequestStatus === "Approved"
-                      ? "Not Submitted"
-                      : undefined,
-                });
-              } catch (planningSyncError) {
-                console.warn(
-                  "Unable to refresh the approved own-schedule admission state.",
-                  planningSyncError,
-                );
-              }
-            }
-
-            return {
-              ...enrollee,
-              studentNumber: nextStudentNumber,
-            };
-          } catch (error) {
-            console.warn(
-              "Unable to sync approved enrollee to Supabase student portal record.",
-              error,
-            );
-            return enrollee;
-          }
-        }),
-      );
-
-      setEnrollees(syncedApprovedEnrollees);
-      return syncedApprovedEnrollees;
+      // Loading the admission queue must not activate students. Activation is
+      // performed only when an admission is explicitly approved, so stale
+      // browser data cannot recreate a permanently deleted student profile.
+      setEnrollees(supabaseApplicants);
+      return supabaseApplicants;
     } catch (error) {
       console.error("Failed to fetch enrollees", error);
       setEnrollees(storedEnrollees);

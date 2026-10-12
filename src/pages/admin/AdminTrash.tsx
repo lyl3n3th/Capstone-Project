@@ -315,9 +315,7 @@ export default function AdminTrash({
 
   const isMissingSupabaseStudentError = (error: unknown) =>
     error instanceof Error &&
-    /student number\s+".*?"\s+was not found|function public\.delete_admin_student/i.test(
-      error.message,
-    );
+    /student number\s+".*?"\s+was not found/i.test(error.message);
 
   const isMissingSupabaseEnrollmentRequestDeleteError = (error: unknown) =>
     error instanceof Error &&
@@ -399,10 +397,12 @@ export default function AdminTrash({
   const deleteStudentRecord = async (student: Student) => {
     const { trackingNumber, studentNumber } = resolveStudentLink(student);
     const warnings: string[] = [];
+    let linkedAdmissionWasDeleted = false;
 
     if (trackingNumber) {
       try {
         await deleteAdmissionApplication(trackingNumber);
+        linkedAdmissionWasDeleted = true;
       } catch (error) {
         if (!isMissingSupabaseAdmissionError(error)) {
           throw error;
@@ -410,15 +410,17 @@ export default function AdminTrash({
       }
     }
 
-    try {
-      await deleteAdminStudent({
-        branch: student.branch || currentBranch,
-        studentNumber: studentNumber || student.id,
-        trackingNumber,
-      });
-    } catch (error) {
-      if (!isMissingSupabaseStudentError(error)) {
-        throw error;
+    if (!linkedAdmissionWasDeleted) {
+      try {
+        await deleteAdminStudent({
+          branch: student.branch || currentBranch,
+          studentNumber: studentNumber || student.id,
+          trackingNumber,
+        });
+      } catch (error) {
+        if (!isMissingSupabaseStudentError(error)) {
+          throw error;
+        }
       }
     }
 
@@ -461,8 +463,20 @@ export default function AdminTrash({
 
   const deleteEnrolleeRecord = async (enrollee: Enrollee) => {
     const warnings: string[] = [];
+    let linkedAdmissionWasDeleted = false;
 
-    if (enrollee.studentNumber) {
+    if (enrollee.trackingNumber) {
+      try {
+        await deleteAdmissionApplication(enrollee.trackingNumber);
+        linkedAdmissionWasDeleted = true;
+      } catch (error) {
+        if (!isMissingSupabaseAdmissionError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    if (enrollee.studentNumber && !linkedAdmissionWasDeleted) {
       try {
         await deleteAdminStudent({
           branch: enrollee.branch || currentBranch,
@@ -471,16 +485,6 @@ export default function AdminTrash({
         });
       } catch (error) {
         if (!isMissingSupabaseStudentError(error)) {
-          throw error;
-        }
-      }
-    }
-
-    if (enrollee.trackingNumber) {
-      try {
-        await deleteAdmissionApplication(enrollee.trackingNumber);
-      } catch (error) {
-        if (!isMissingSupabaseAdmissionError(error)) {
           throw error;
         }
       }

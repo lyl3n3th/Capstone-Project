@@ -14,16 +14,13 @@ import {
   type AlumniBackupRecord,
 } from "../../services/backupApi";
 import {
-  fetchSupabaseAdmissionApplicants,
   getNextStudentNumber,
   getStudentRequirementSnapshot,
   updateStoredStudentOwnScheduleState,
   getStudentsForBranch,
-  dedupeStoredStudents,
   forgetDeletedStoredStudent,
   normalizeBranchName,
   normalizeStudentNumberInput,
-  promoteApplicantToStoredStudent,
   readBranchScopedData,
   readStoredStudents,
   removeStudentCredentialUpload,
@@ -86,7 +83,6 @@ import {
   removeStudentPayment,
   STUDENT_PAYMENTS_UPDATED_EVENT,
 } from "../../services/studentPayments";
-import { stripLegacyMockAdmissionRecords } from "../../services/legacyMockData";
 import "../../styles/admin/admin-students.css";
 
 interface StudentsProps {
@@ -174,7 +170,6 @@ const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const ALUMNI_API_URL = `${API_BASE_URL}/api/alumni/`;
 const ENROLLEE_STORAGE_SCOPE = "enrollees";
-const RECOVERABLE_BRANCHES = ["Bacoor", "Taytay", "GMA"] as const;
 const STUDENT_EXPORT_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const COLLEGE_TUITION_PER_UNIT = 600;
@@ -734,80 +729,6 @@ const buildGradeClearIdentityFromRecord = (record: StoredStudentGradeRecord) => 
   programType: record.programType,
 });
 
-const mergeApprovedEnrollees = (records: AdminEnrolleeRecord[]) => {
-  const mergedRecords = new Map<string, AdminEnrolleeRecord>();
-
-  records
-    .filter((record) => record.status === "Approved")
-    .forEach((record) => {
-      const resolvedBranch = normalizeBranchName(record.branch);
-      const key =
-        record.trackingNumber ||
-        record.studentNumber ||
-        `${resolvedBranch}:${record.fullName}`;
-      const existingRecord = mergedRecords.get(key);
-
-      mergedRecords.set(
-        key,
-        existingRecord
-          ? {
-              ...existingRecord,
-              ...record,
-              branch: resolvedBranch,
-              personalInfo: {
-                ...existingRecord.personalInfo,
-                ...record.personalInfo,
-              },
-              attachments: record.attachments ?? existingRecord.attachments,
-            }
-          : {
-              ...record,
-              branch: resolvedBranch,
-            },
-      );
-    });
-
-  return Array.from(mergedRecords.values());
-};
-
-const recoverApprovedStudentsForBranch = async (
-  branch: string,
-): Promise<number> => {
-  const resolvedBranch = normalizeBranchName(branch);
-  const storedApprovedEnrollees = stripLegacyMockAdmissionRecords(
-    readBranchScopedData<AdminEnrolleeRecord[]>(
-      ENROLLEE_STORAGE_SCOPE,
-      resolvedBranch,
-    ) ?? [],
-  );
-
-  let supabaseApprovedEnrollees: AdminEnrolleeRecord[] = [];
-  try {
-    supabaseApprovedEnrollees = await fetchSupabaseAdmissionApplicants(
-      resolvedBranch,
-    );
-  } catch (error) {
-    console.warn(
-      `Unable to load approved enrollees from Supabase for ${resolvedBranch}.`,
-      error,
-    );
-  }
-
-  const recoverableEnrollees = mergeApprovedEnrollees([
-    ...storedApprovedEnrollees,
-    ...supabaseApprovedEnrollees,
-  ]);
-
-  recoverableEnrollees.forEach((enrollee) => {
-    promoteApplicantToStoredStudent({
-      ...enrollee,
-      branch: resolvedBranch,
-    });
-  });
-
-  return recoverableEnrollees.length;
-};
-
 type StudentIdentityInput = Pick<
   Student,
   "id" | "trackingNumber" | "email" | "name"
@@ -1036,215 +957,6 @@ const resolveStudentWithApprovedEnrollment = (student: Student): Student => {
   };
 };
 
-const needsStudentRecordSync = (
-  localStudent: Pick<Student, "yearLevel" | "section" | "status">,
-  fetchedStudent: Pick<Student, "yearLevel" | "section" | "status">,
-) =>
-  normalizeComparableText(localStudent.yearLevel) !==
-    normalizeComparableText(fetchedStudent.yearLevel) ||
-  normalizeComparableText(localStudent.section) !==
-    normalizeComparableText(fetchedStudent.section) ||
-  normalizeComparableText(localStudent.status) !==
-    normalizeComparableText(fetchedStudent.status);
-
-const hasFinalRemoteStudentStatus = (
-  student: Pick<Student, "status">,
-) => {
-  const status = normalizeComparableText(student.status);
-  return status === "archived" || status === "graduated";
-};
-
-type StoredSectionAssignmentRecord = {
-  enrolleeId: string;
-  assignedSection: string;
-};
-
-const getRecoveredStudentSection = (
-  student: Pick<Student, "id" | "trackingNumber" | "branch">,
-) => {
-  const resolvedBranch = normalizeBranchName(student.branch);
-  const linkedEnrollee =
-    (
-      readBranchScopedData<AdminEnrolleeRecord[]>(
-        ENROLLEE_STORAGE_SCOPE,
-        resolvedBranch,
-      ) ?? []
-    ).find((record) => {
-      if (
-        student.trackingNumber &&
-        record.trackingNumber === student.trackingNumber
-      ) {
-        return true;
-      }
-
-      return record.studentNumber === student.id;
-    }) ?? null;
-
-  if (!linkedEnrollee) {
-    return "";
-  }
-
-  return (
-    (
-      readBranchScopedData<StoredSectionAssignmentRecord[]>(
-        "section-assignments",
-        resolvedBranch,
-      ) ?? []
-    ).find((assignment) => assignment.enrolleeId === linkedEnrollee.id)
-      ?.assignedSection || ""
-  );
-};
-
-const mergeFetchedStudentsWithLocalState = (
-  fetchedStudents: Student[],
-  localStudents: Student[],
-  preferLocalStudentKeys: Set<string> = new Set(),
-) => {
-  const mergedFetchedStudents = fetchedStudents.map((student) => {
-    const resolvedFetchedStudent = resolveStudentWithApprovedEnrollment(student);
-    const localStudent = localStudents.find((candidate) =>
-      studentsMatch(candidate, resolvedFetchedStudent),
-    );
-
-    if (!localStudent) {
-      return {
-        ...resolvedFetchedStudent,
-        section:
-          resolvedFetchedStudent.section ||
-          getRecoveredStudentSection(resolvedFetchedStudent),
-      };
-    }
-
-    const resolvedLocalStudent = resolveStudentWithApprovedEnrollment(localStudent);
-    const shouldPreferLocalStudentState = preferLocalStudentKeys.has(
-      getStudentSyncKey(resolvedLocalStudent),
-    );
-
-    const mergedStudent = {
-      ...resolvedFetchedStudent,
-      id:
-        resolvedFetchedStudent.id === resolvedLocalStudent.id
-          ? resolvedFetchedStudent.id
-          : resolvedLocalStudent.id || resolvedFetchedStudent.id,
-      trackingNumber:
-        resolvedFetchedStudent.trackingNumber ||
-        resolvedLocalStudent.trackingNumber,
-      yearLevel: shouldPreferLocalStudentState
-        ? resolvedLocalStudent.yearLevel || resolvedFetchedStudent.yearLevel
-        : resolvedFetchedStudent.yearLevel,
-      section:
-        shouldPreferLocalStudentState
-          ? resolvedLocalStudent.section ||
-            resolvedFetchedStudent.section ||
-            getRecoveredStudentSection(resolvedLocalStudent)
-          : resolvedFetchedStudent.section ||
-            resolvedLocalStudent.section ||
-            getRecoveredStudentSection(resolvedLocalStudent),
-      status: shouldPreferLocalStudentState
-        ? resolvedLocalStudent.status
-        : resolvedFetchedStudent.status,
-      ...mergeStudentOwnScheduleState(
-        resolvedFetchedStudent,
-        resolvedLocalStudent,
-      ),
-    };
-
-    return mergedStudent;
-  });
-
-  const localOnlyStudents = localStudents.filter(
-    (student) =>
-      !fetchedStudents.some((candidate) => studentsMatch(candidate, student)),
-  );
-
-  return dedupeStoredStudents([
-    ...mergedFetchedStudents,
-    ...localOnlyStudents.map((student) => ({
-      ...student,
-      section: student.section || getRecoveredStudentSection(student),
-    })),
-  ]) as Student[];
-};
-
-const buildStudentSyncMessage = (
-  _syncedCount: number,
-  failedStudents: string[],
-) => {
-  if (failedStudents.length === 0) {
-    return null;
-  }
-
-  const failedLabel =
-    failedStudents.length > 0
-      ? `${failedStudents.length} student${failedStudents.length === 1 ? "" : "s"} stayed on this device only because Supabase rejected the record.`
-      : "";
-
-  return failedLabel.trim();
-};
-
-const syncLocalStudentsToSupabase = async (
-  branch: string,
-  localStudents: Student[],
-  fetchedStudents: Student[],
-  shouldStopSync: () => boolean = () => false,
-) => {
-  const branchStudents = dedupeStoredStudents(localStudents).filter(
-    (student) => normalizeBranchName(student.branch) === normalizeBranchName(branch),
-  ) as Student[];
-  const studentsToSync = branchStudents.filter(
-    (student) => {
-      const resolvedLocalStudent = resolveStudentWithApprovedEnrollment(student);
-      const fetchedStudent = fetchedStudents.find((candidate) =>
-        studentsMatch(candidate, resolvedLocalStudent),
-      );
-
-      if (!fetchedStudent) {
-        return true;
-      }
-
-      // An archived or graduated record from the shared source must never be
-      // reopened by an older active copy left in this browser's cache.
-      if (hasFinalRemoteStudentStatus(fetchedStudent)) {
-        return false;
-      }
-
-      return needsStudentRecordSync(
-        resolvedLocalStudent,
-        resolveStudentWithApprovedEnrollment(fetchedStudent),
-      );
-    },
-  );
-  const failedStudents: string[] = [];
-  const failedStudentKeys = new Set<string>();
-  let syncedCount = 0;
-
-  for (const student of studentsToSync) {
-    if (shouldStopSync()) {
-      break;
-    }
-
-    try {
-      await saveAdminStudent(resolveStudentWithApprovedEnrollment(student));
-
-      if (shouldStopSync()) {
-        break;
-      }
-
-      syncedCount += 1;
-    } catch (error) {
-      console.warn("Unable to sync local student to Supabase.", student, error);
-      failedStudents.push(student.name || student.id);
-      failedStudentKeys.add(getStudentSyncKey(student));
-    }
-  }
-
-  return {
-    syncedCount,
-    failedStudents,
-    failedStudentKeys,
-  };
-};
-
 export default function AdminStudents({
   onLogout,
   loggedInUsername,
@@ -1373,8 +1085,6 @@ export default function AdminStudents({
       setStudentRecoveryMessage(null);
 
       try {
-        const localBranchStudents = getStudentsForBranch(currentBranch) as Student[];
-
         if (hasFreshRestoreSnapshotForBranch(currentBranch)) {
           if (isCurrentLoad()) {
             setStudents(getActiveStudentsForAdminList(currentBranch));
@@ -1396,31 +1106,8 @@ export default function AdminStudents({
           return;
         }
 
-        const syncSummary = await syncLocalStudentsToSupabase(
-          currentBranch,
-          localBranchStudents,
-          fetchedBranchStudents,
-          () => !isCurrentLoad(),
-        );
-
-        if (!isCurrentLoad()) {
-          return;
-        }
-
-        if (syncSummary.syncedCount > 0) {
-          fetchedBranchStudents = (await fetchAdminStudents(
-            currentBranch,
-          )) as Student[];
-
-          if (!isCurrentLoad()) {
-            return;
-          }
-        }
-
-        const branchStudents = mergeFetchedStudentsWithLocalState(
-          fetchedBranchStudents,
-          localBranchStudents,
-          syncSummary.failedStudentKeys,
+        fetchedBranchStudents = fetchedBranchStudents.map(
+          resolveStudentWithApprovedEnrollment,
         );
 
         if (isCurrentLoad()) {
@@ -1430,16 +1117,17 @@ export default function AdminStudents({
             return;
           }
 
-          setStudents(removeHiddenStudentsFromAdminList(branchStudents));
-
-          const syncMessage = buildStudentSyncMessage(
-            syncSummary.syncedCount,
-            syncSummary.failedStudents,
+          const studentsFromOtherBranches = readStoredStudents().filter(
+            (student) =>
+              normalizeBranchName(student.branch) !==
+              normalizeBranchName(currentBranch),
           );
 
-          if (syncMessage) {
-            setStudentRecoveryMessage(syncMessage);
-          }
+          // The shared database is the source of truth. Replacing only this
+          // branch's cache prevents an old browser tab from reviving a student
+          // who was permanently deleted elsewhere.
+          writeStoredStudents([...studentsFromOtherBranches, ...fetchedBranchStudents]);
+          setStudents(removeHiddenStudentsFromAdminList(fetchedBranchStudents));
         }
       } catch (error) {
         console.error("Failed to load branch students", error);
@@ -1449,52 +1137,11 @@ export default function AdminStudents({
         }
 
         let branchStudents = getActiveStudentsForAdminList(currentBranch);
-        let recoveryMessage: string | null = null;
-
-        try {
-          if (branchStudents.length === 0) {
-            const storedStudentCount = readStoredStudents().length;
-            const branchesToRecover =
-              storedStudentCount === 0
-                ? [...RECOVERABLE_BRANCHES]
-                : [currentBranch];
-
-            let recoveredBranches = 0;
-
-            for (const branch of branchesToRecover) {
-              const existingBranchStudents = getStudentsForBranch(branch);
-
-              if (existingBranchStudents.length > 0) {
-                continue;
-              }
-
-              const recoveredCount = await recoverApprovedStudentsForBranch(
-                branch,
-              );
-
-              if (recoveredCount > 0) {
-                recoveredBranches += 1;
-              }
-            }
-
-            branchStudents = getActiveStudentsForAdminList(currentBranch);
-
-            if (branchStudents.length > 0) {
-              recoveryMessage =
-                storedStudentCount === 0
-                  ? `Recovered approved students for ${recoveredBranches} branch${recoveredBranches === 1 ? "" : "es"}.`
-                  : `Recovered ${branchStudents.length} approved student${branchStudents.length === 1 ? "" : "s"} for ${currentBranch}.`;
-            } else if (recoveredBranches === 0) {
-              recoveryMessage = `No approved students were found to restore for ${currentBranch}.`;
-            }
-          }
-        } catch (recoveryError) {
-          console.error("Failed to recover local branch students", recoveryError);
-        }
-
         if (isCurrentLoad()) {
           setStudents(branchStudents);
-          setStudentRecoveryMessage(recoveryMessage);
+          setStudentRecoveryMessage(
+            "Unable to load the shared student list. Showing this device's cached records; no students were restored or synchronized.",
+          );
         }
       } finally {
         if (!isCancelled) {

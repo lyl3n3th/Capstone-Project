@@ -17,7 +17,10 @@ import { useAuth } from "../../hooks/useAuth";
 import {
   getStudentsForBranch,
   normalizeBranchName,
+  readStoredStudents,
+  writeStoredStudents,
 } from "../../services/adminStorage";
+import { fetchAdminStudents } from "../../services/adminStudentsApi";
 import "../../styles/admin/admin-dashboard.css";
 
 interface ProgramData {
@@ -68,8 +71,40 @@ export default function RegistrarDashboard({
   const { currentUser } = useAuth();
   const currentBranch = normalizeBranchName(currentUser?.branch);
 
-  const students = useMemo<StudentRecord[]>(() => {
-    return getStudentsForBranch(currentBranch);
+  const [students, setStudents] = useState<StudentRecord[]>(() =>
+    getStudentsForBranch(currentBranch),
+  );
+
+  useEffect(() => {
+    let isCancelled = false;
+    setStudents(getStudentsForBranch(currentBranch));
+
+    const loadSharedStudents = async () => {
+      try {
+        const sharedStudents = await fetchAdminStudents(currentBranch);
+
+        if (isCancelled) {
+          return;
+        }
+
+        const studentsFromOtherBranches = readStoredStudents().filter(
+          (student) =>
+            normalizeBranchName(student.branch) !==
+            normalizeBranchName(currentBranch),
+        );
+
+        writeStoredStudents([...studentsFromOtherBranches, ...sharedStudents]);
+        setStudents(sharedStudents);
+      } catch (error) {
+        console.warn("Unable to refresh shared registrar student data.", error);
+      }
+    };
+
+    void loadSharedStudents();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [currentBranch]);
 
   const hasStudentData = students.length > 0;

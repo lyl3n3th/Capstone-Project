@@ -2,12 +2,17 @@ import type { Student } from "../types/student";
 import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 import { isCachedAlumniStudent } from "./backupApi";
 import {
+  fetchSupabaseAdmissionApplicants,
   getStudentCredentialOverview,
   getStudentsForBranch,
+  mergeAdminEnrolleeRecords,
   normalizeStudentNumberInput,
   normalizeBranchName,
+  readBranchScopedData,
   readStoredStudents,
+  writeBranchScopedData,
   writeStoredStudents,
+  type AdminEnrolleeRecord,
   type StudentPortalCredentialItem,
   type StudentPortalCredentialSummary,
   type StudentPortalSubject,
@@ -198,6 +203,51 @@ const syncStudentPortalAcademicCache = async (
   ]);
 };
 
+const syncStudentCredentialCache = async ({
+  branch,
+  studentNumber,
+  trackingNumber,
+}: {
+  branch?: string | null;
+  studentNumber?: string | null;
+  trackingNumber?: string | null;
+}) => {
+  if (!branch?.trim() || (!studentNumber?.trim() && !trackingNumber?.trim())) {
+    return;
+  }
+
+  try {
+    const resolvedBranch = normalizeBranchName(branch);
+    const applicants = await fetchSupabaseAdmissionApplicants(resolvedBranch);
+    const applicant = applicants.find(
+      (candidate) =>
+        Boolean(
+          trackingNumber && candidate.trackingNumber === trackingNumber,
+        ) ||
+        studentNumbersMatch(candidate.studentNumber, studentNumber, resolvedBranch),
+    );
+
+    if (!applicant) {
+      return;
+    }
+
+    const storedEnrollees =
+      readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ??
+      [];
+    const mergedEnrollees = mergeAdminEnrolleeRecords(
+      [applicant],
+      storedEnrollees,
+    );
+
+    writeBranchScopedData("enrollees", resolvedBranch, mergedEnrollees);
+  } catch (error) {
+    console.warn(
+      "Unable to load the linked admission credentials; using the cached credential status.",
+      error,
+    );
+  }
+};
+
 const fetchRemoteStudentRecordForCurrentSession = async (
   sessionUser: AuthSession["user"],
 ) => {
@@ -302,6 +352,12 @@ const getStudentPortalDataForCurrentSession = async (): Promise<StudentPortalDat
   }
 
   if (storedStudent) {
+    await syncStudentCredentialCache({
+      branch: storedStudent.branch,
+      studentNumber: storedStudent.id,
+      trackingNumber: storedStudent.trackingNumber,
+    });
+
     const { resolvedStudentRecord, currentTerm, subjects } =
       resolveStudentPortalContext(storedStudent);
     const student = {
