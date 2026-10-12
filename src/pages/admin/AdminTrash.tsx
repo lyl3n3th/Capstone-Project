@@ -18,6 +18,7 @@ import {
 } from "../../services/adminStorage";
 import {
   deleteAdminStudent,
+  purgeArchivedAdminStudents,
   updateAdminStudentStatus,
 } from "../../services/adminStudentsApi";
 import {
@@ -772,6 +773,23 @@ export default function AdminTrash({
 
     setIsProcessingTrash(true);
 
+    let remotelyPurgedStudentCount = 0;
+    try {
+      remotelyPurgedStudentCount = await purgeArchivedAdminStudents(
+        currentBranch,
+      );
+    } catch (error) {
+      console.error("Failed to purge archived students from Supabase", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to permanently clear the shared archived student records.",
+        "error",
+      );
+      setIsProcessingTrash(false);
+      return;
+    }
+
     let deletedCount = 0;
     let warningCount = 0;
     let failedCount = 0;
@@ -798,7 +816,7 @@ export default function AdminTrash({
       const message =
         warningCount > 0
           ? `${deletedLabel} removed from Archive, but ${warningCount} legacy student record${warningCount === 1 ? "" : "s"} still need API cleanup.`
-          : `${deletedLabel} permanently deleted from Archive.`;
+          : `${deletedLabel} permanently deleted from Archive.${remotelyPurgedStudentCount > 0 ? ` Removed ${remotelyPurgedStudentCount} archived student${remotelyPurgedStudentCount === 1 ? "" : "s"} from the shared database.` : ""}`;
       addToast(message, warningCount > 0 ? "warning" : "success");
     }
 

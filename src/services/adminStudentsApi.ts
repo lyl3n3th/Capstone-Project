@@ -434,3 +434,18 @@ export async function deleteAdminStudent({
 
   return row;
 }
+
+export async function purgeArchivedAdminStudents(branch: string) {
+  const { data, error } = await supabase
+    .rpc("purge_archived_admin_students", {
+      p_branch: normalizeBranchName(branch),
+    })
+    .returns<number>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const deletedCount = Number(data);
+  return Number.isFinite(deletedCount) ? deletedCount : 0;
+}
