@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MdArchive } from "react-icons/md";
 import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
@@ -1179,6 +1179,7 @@ const syncLocalStudentsToSupabase = async (
   branch: string,
   localStudents: Student[],
   fetchedStudents: Student[],
+  shouldStopSync: () => boolean = () => false,
 ) => {
   const branchStudents = dedupeStoredStudents(localStudents).filter(
     (student) => normalizeBranchName(student.branch) === normalizeBranchName(branch),
@@ -1205,8 +1206,17 @@ const syncLocalStudentsToSupabase = async (
   let syncedCount = 0;
 
   for (const student of studentsToSync) {
+    if (shouldStopSync()) {
+      break;
+    }
+
     try {
       await saveAdminStudent(resolveStudentWithApprovedEnrollment(student));
+
+      if (shouldStopSync()) {
+        break;
+      }
+
       syncedCount += 1;
     } catch (error) {
       console.warn("Unable to sync local student to Supabase.", student, error);
@@ -1333,9 +1343,17 @@ export default function AdminStudents({
   const [students, setStudents] = useState<Student[]>(() =>
     getActiveStudentsForAdminList(currentBranch),
   );
+  const studentDataRevisionRef = useRef(0);
+
+  const invalidateStudentDataLoad = () => {
+    studentDataRevisionRef.current += 1;
+  };
 
   useEffect(() => {
     let isCancelled = false;
+    const loadRevision = studentDataRevisionRef.current;
+    const isCurrentLoad = () =>
+      !isCancelled && studentDataRevisionRef.current === loadRevision;
 
     const loadStudentsForBranch = async () => {
       setIsLoading(true);
@@ -1345,7 +1363,7 @@ export default function AdminStudents({
         const localBranchStudents = getStudentsForBranch(currentBranch) as Student[];
 
         if (hasFreshRestoreSnapshotForBranch(currentBranch)) {
-          if (!isCancelled) {
+          if (isCurrentLoad()) {
             setStudents(getActiveStudentsForAdminList(currentBranch));
             setStudentRecoveryMessage(null);
           }
@@ -1360,16 +1378,30 @@ export default function AdminStudents({
         let fetchedBranchStudents = (await fetchAdminStudents(
           currentBranch,
         )) as Student[];
+
+        if (!isCurrentLoad()) {
+          return;
+        }
+
         const syncSummary = await syncLocalStudentsToSupabase(
           currentBranch,
           localBranchStudents,
           fetchedBranchStudents,
+          () => !isCurrentLoad(),
         );
+
+        if (!isCurrentLoad()) {
+          return;
+        }
 
         if (syncSummary.syncedCount > 0) {
           fetchedBranchStudents = (await fetchAdminStudents(
             currentBranch,
           )) as Student[];
+
+          if (!isCurrentLoad()) {
+            return;
+          }
         }
 
         const branchStudents = mergeFetchedStudentsWithLocalState(
@@ -1378,7 +1410,7 @@ export default function AdminStudents({
           syncSummary.failedStudentKeys,
         );
 
-        if (!isCancelled) {
+        if (isCurrentLoad()) {
           if (hasFreshRestoreSnapshotForBranch(currentBranch)) {
             setStudents(getActiveStudentsForAdminList(currentBranch));
             setStudentRecoveryMessage(null);
@@ -1398,6 +1430,11 @@ export default function AdminStudents({
         }
       } catch (error) {
         console.error("Failed to load branch students", error);
+
+        if (!isCurrentLoad()) {
+          return;
+        }
+
         let branchStudents = getActiveStudentsForAdminList(currentBranch);
         let recoveryMessage: string | null = null;
 
@@ -1442,7 +1479,7 @@ export default function AdminStudents({
           console.error("Failed to recover local branch students", recoveryError);
         }
 
-        if (!isCancelled) {
+        if (isCurrentLoad()) {
           setStudents(branchStudents);
           setStudentRecoveryMessage(recoveryMessage);
         }
@@ -2130,6 +2167,7 @@ export default function AdminStudents({
     }
 
     const student = students.find((record) => record.id === studentToArchive);
+    invalidateStudentDataLoad();
     const archiveStudentLocally = () => {
       if (student) {
         forgetDeletedStoredStudent({
@@ -2178,6 +2216,8 @@ export default function AdminStudents({
   const archiveSelectedStudents = async (studentsToArchive: Student[]) => {
     const archivedStudentIds: string[] = [];
     const failedStudents: string[] = [];
+
+    invalidateStudentDataLoad();
 
     for (const student of studentsToArchive) {
       try {

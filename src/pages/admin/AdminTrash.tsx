@@ -400,23 +400,12 @@ export default function AdminTrash({
     const { trackingNumber, studentNumber } = resolveStudentLink(student);
     const warnings: string[] = [];
 
-    rememberDeletedStoredStudent({
-      branch: student.branch || currentBranch,
-      id: studentNumber || student.id,
-      trackingNumber,
-      name: student.name,
-    });
-
     if (trackingNumber) {
       try {
         await deleteAdmissionApplication(trackingNumber);
       } catch (error) {
         if (!isMissingSupabaseAdmissionError(error)) {
-          warnings.push(
-            error instanceof Error
-              ? error.message
-              : "Linked admission record could not be deleted.",
-          );
+          throw error;
         }
       }
     }
@@ -429,11 +418,7 @@ export default function AdminTrash({
       });
     } catch (error) {
       if (!isMissingSupabaseStudentError(error)) {
-        warnings.push(
-          error instanceof Error
-            ? error.message
-            : "Shared student record could not be deleted.",
-        );
+        throw error;
       }
     }
 
@@ -458,6 +443,13 @@ export default function AdminTrash({
       }
     }
 
+    rememberDeletedStoredStudent({
+      branch: student.branch || currentBranch,
+      id: studentNumber || student.id,
+      trackingNumber,
+      name: student.name,
+    });
+
     removeLinkedRecordsLocally({
       studentId: student.id,
       trackingNumber,
@@ -471,13 +463,6 @@ export default function AdminTrash({
     const warnings: string[] = [];
 
     if (enrollee.studentNumber) {
-      rememberDeletedStoredStudent({
-        branch: enrollee.branch || currentBranch,
-        id: enrollee.studentNumber,
-        trackingNumber: enrollee.trackingNumber,
-        name: enrollee.fullName,
-      });
-
       try {
         await deleteAdminStudent({
           branch: enrollee.branch || currentBranch,
@@ -486,11 +471,7 @@ export default function AdminTrash({
         });
       } catch (error) {
         if (!isMissingSupabaseStudentError(error)) {
-          warnings.push(
-            error instanceof Error
-              ? error.message
-              : "Shared student record could not be deleted.",
-          );
+          throw error;
         }
       }
     }
@@ -500,13 +481,18 @@ export default function AdminTrash({
         await deleteAdmissionApplication(enrollee.trackingNumber);
       } catch (error) {
         if (!isMissingSupabaseAdmissionError(error)) {
-          warnings.push(
-            error instanceof Error
-              ? error.message
-              : "Linked admission record could not be deleted.",
-          );
+          throw error;
         }
       }
+    }
+
+    if (enrollee.studentNumber) {
+      rememberDeletedStoredStudent({
+        branch: enrollee.branch || currentBranch,
+        id: enrollee.studentNumber,
+        trackingNumber: enrollee.trackingNumber,
+        name: enrollee.fullName,
+      });
     }
 
     removeLinkedRecordsLocally({
@@ -527,11 +513,7 @@ export default function AdminTrash({
       await deleteEnrollmentRequest(enrollmentRequest);
     } catch (error) {
       if (!isMissingSupabaseEnrollmentRequestDeleteError(error)) {
-        warnings.push(
-          error instanceof Error
-            ? error.message
-            : "Shared enrollment request could not be deleted.",
-        );
+        throw error;
       }
     }
 
