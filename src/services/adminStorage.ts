@@ -4148,10 +4148,8 @@ export const getStudentScheduleChoiceGroups = ({
       subjectName: subject.name,
       units: subject.units,
       assignmentOptions: semesterFallbackAssignments
-        .filter(
-          (assignment) =>
-            (assignment.subjectId === subject.id ||
-              assignment.subjectCode === subject.code),
+        .filter((assignment) =>
+          storedSubjectMatchesAssignment(subject, assignment),
         )
         .map((assignment) => ({
           assignmentId: assignment.id,
