@@ -350,46 +350,56 @@ export default function AdminTrash({
     studentNumber?: string;
   }) => {
     if (studentId || trackingNumber || studentNumber) {
-      setStudents((prev) =>
-        prev.filter((record) => {
-          const matchesStudentId = studentId
-            ? record.id === studentId
-            : false;
-          const matchesTrackingNumber = trackingNumber
-            ? record.trackingNumber === trackingNumber
-            : false;
-          const matchesStudentNumber = studentNumber
-            ? record.id === studentNumber
-            : false;
+      const matchesStudent = (record: Student) => {
+        const matchesStudentId = studentId ? record.id === studentId : false;
+        const matchesTrackingNumber = trackingNumber
+          ? record.trackingNumber === trackingNumber
+          : false;
+        const matchesStudentNumber = studentNumber
+          ? record.id === studentNumber
+          : false;
 
-          return !(
-            matchesStudentId ||
-            matchesTrackingNumber ||
-            matchesStudentNumber
-          );
-        }),
+        return (
+          matchesStudentId || matchesTrackingNumber || matchesStudentNumber
+        );
+      };
+
+      // Persist the removal immediately. State effects may not finish if the
+      // tab is closed straight after Clear Archive is confirmed.
+      writeStoredStudents(
+        (readStoredStudents() as Student[]).filter(
+          (record) => !matchesStudent(record),
+        ),
+      );
+      setStudents((prev) =>
+        prev.filter((record) => !matchesStudent(record)),
       );
     }
 
     if (enrolleeId || trackingNumber || studentNumber) {
-      setEnrollees((prev) =>
-        prev.filter((record) => {
-          const matchesEnrolleeId = enrolleeId
-            ? record.id === enrolleeId
-            : false;
-          const matchesTrackingNumber = trackingNumber
-            ? record.trackingNumber === trackingNumber
-            : false;
-          const matchesStudentNumber = studentNumber
-            ? record.studentNumber === studentNumber
-            : false;
+      const matchesEnrollee = (record: Enrollee) => {
+        const matchesEnrolleeId = enrolleeId ? record.id === enrolleeId : false;
+        const matchesTrackingNumber = trackingNumber
+          ? record.trackingNumber === trackingNumber
+          : false;
+        const matchesStudentNumber = studentNumber
+          ? record.studentNumber === studentNumber
+          : false;
 
-          return !(
-            matchesEnrolleeId ||
-            matchesTrackingNumber ||
-            matchesStudentNumber
-          );
-        }),
+        return (
+          matchesEnrolleeId || matchesTrackingNumber || matchesStudentNumber
+        );
+      };
+
+      writeBranchScopedData(
+        "enrollees",
+        currentBranch,
+        (
+          readBranchScopedData<Enrollee[]>("enrollees", currentBranch) ?? []
+        ).filter((record) => !matchesEnrollee(record)),
+      );
+      setEnrollees((prev) =>
+        prev.filter((record) => !matchesEnrollee(record)),
       );
     }
   };
