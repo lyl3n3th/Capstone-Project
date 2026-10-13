@@ -22,7 +22,7 @@ from .repository import (
 )
 from .storage import (
     delete_backup_blob,
-    download_backup_blob,
+    download_backup_archive_blob,
     guess_content_type,
     upload_backup_blob,
     upload_media_blob,
@@ -39,6 +39,23 @@ RESTORE_PROGRESS_STEPS = {
     "media_restored": 95,
     "finished": 100,
 }
+
+
+def get_backup_archive_payload(history):
+    archive_payload, recovered_bucket = download_backup_archive_blob(
+        object_path=history.file_path,
+        storage_bucket=history.storage_bucket,
+    )
+
+    # Repair old history entries after a successful fallback so subsequent
+    # download and restore requests use the working location immediately.
+    if recovered_bucket != (history.storage_bucket or ""):
+        history = update_backup_history(
+            history.id,
+            storage_bucket=recovered_bucket,
+        ) or history
+
+    return archive_payload
 
 
 def set_history_progress(history, *, status=None, progress=None, error_message=None, metadata=None):
@@ -656,10 +673,7 @@ def restore_branch_backup(history):
         error_message="",
     ) or history
 
-    archive_payload = download_backup_blob(
-        object_path=history.file_path,
-        storage_bucket=history.storage_bucket,
-    )
+    archive_payload = get_backup_archive_payload(history)
     history = set_history_progress(history, progress=RESTORE_PROGRESS_STEPS["downloaded"])
 
     with zipfile.ZipFile(io.BytesIO(archive_payload), "r") as archive:
@@ -715,10 +729,7 @@ def restore_branch_backup(history):
 
 
 def read_backup_snapshot(history):
-    archive_payload = download_backup_blob(
-        object_path=history.file_path,
-        storage_bucket=history.storage_bucket,
-    )
+    archive_payload = get_backup_archive_payload(history)
 
     with zipfile.ZipFile(io.BytesIO(archive_payload), "r") as archive:
         try:

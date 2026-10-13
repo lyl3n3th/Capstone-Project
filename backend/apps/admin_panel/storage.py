@@ -1,6 +1,8 @@
+import io
 import json
 import mimetypes
 import os
+import zipfile
 from urllib import error, parse, request
 
 from django.conf import settings
@@ -90,6 +92,45 @@ def download_backup_blob(*, object_path, storage_bucket=None):
     download_request = request.Request(download_url, headers=_build_headers(api_key))
     with request.urlopen(download_request, timeout=60) as response:
         return response.read()
+
+
+def download_backup_archive_blob(*, object_path, storage_bucket=None):
+    """Return a readable ZIP archive, recovering from stale bucket metadata.
+
+    Backup history is kept longer than storage configuration.  A history row
+    can therefore reference an old bucket (or predate the bucket column).
+    Try only the known backup locations and validate the returned bytes before
+    a restore uses them.
+    """
+    try:
+        _project_url, _api_key, configured_bucket = get_storage_config()
+    except ImproperlyConfigured:
+        configured_bucket = None
+
+    candidate_buckets = []
+    for bucket in (storage_bucket, configured_bucket, LOCAL_BACKUP_STORAGE_BUCKET):
+        if bucket and bucket not in candidate_buckets:
+            candidate_buckets.append(bucket)
+
+    last_error = None
+    for candidate_bucket in candidate_buckets:
+        try:
+            payload = download_backup_blob(
+                object_path=object_path,
+                storage_bucket=candidate_bucket,
+            )
+        except Exception as exc:
+            last_error = exc
+            continue
+
+        if zipfile.is_zipfile(io.BytesIO(payload)):
+            return payload, candidate_bucket
+
+        last_error = ValueError("Downloaded backup data is not a ZIP archive.")
+
+    raise ValueError(
+        "Backup archive could not be read from its stored location."
+    ) from last_error
 
 
 def delete_backup_blob(*, object_path, storage_bucket=None):

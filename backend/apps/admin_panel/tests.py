@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 from apps.admin_panel.automation import is_automated_backup_due
 from apps.admin_panel.models import BackupHistory, BackupSnapshot
 from apps.admin_panel.repository import BackupSettingsRecord
-from apps.admin_panel.storage import download_backup_blob
+from apps.admin_panel.storage import download_backup_archive_blob, download_backup_blob
 
 
 class BackupAutomationTimingTests(TestCase):
@@ -200,6 +200,39 @@ class BackupArchiveApiTests(TestCase):
             download_request.full_url,
         )
 
+    @patch("apps.admin_panel.storage.download_backup_blob")
+    @patch("apps.admin_panel.storage.get_storage_config")
+    def test_archive_download_recovers_using_configured_bucket(
+        self,
+        storage_config_mock,
+        download_blob_mock,
+    ):
+        storage_config_mock.return_value = (
+            "https://project.supabase.co",
+            "service-role-key",
+            "current-backup-bucket",
+        )
+        download_blob_mock.side_effect = [
+            b"not-a-zip",
+            self._build_snapshot_zip(),
+        ]
+
+        payload, recovered_bucket = download_backup_archive_blob(
+            object_path="branches/bacoor/manual/bacoor_backup.zip",
+            storage_bucket="old-backup-bucket",
+        )
+
+        self.assertEqual(recovered_bucket, "current-backup-bucket")
+        self.assertTrue(zipfile.is_zipfile(io.BytesIO(payload)))
+        self.assertEqual(
+            download_blob_mock.call_args_list[0].kwargs["storage_bucket"],
+            "old-backup-bucket",
+        )
+        self.assertEqual(
+            download_blob_mock.call_args_list[1].kwargs["storage_bucket"],
+            "current-backup-bucket",
+        )
+
     @patch("apps.admin_panel.services.upload_backup_blob")
     def test_upload_backup_archive_creates_completed_history_entry(self, upload_blob_mock):
         upload_blob_mock.return_value = (
@@ -237,9 +270,9 @@ class BackupArchiveApiTests(TestCase):
             "branches/bacoor/uploads/bacoor_backup.zip",
         )
 
-    @patch("apps.admin_panel.views.download_backup_blob")
-    def test_download_backup_archive_returns_zip_attachment(self, download_blob_mock):
-        download_blob_mock.return_value = b"zip-payload"
+    @patch("apps.admin_panel.views.get_backup_archive_payload")
+    def test_download_backup_archive_returns_zip_attachment(self, archive_payload_mock):
+        archive_payload_mock.return_value = b"zip-payload"
         history = BackupHistory.objects.create(
             branch="Bacoor",
             backup_type=BackupHistory.TYPE_MANUAL,
@@ -264,14 +297,14 @@ class BackupArchiveApiTests(TestCase):
             response["Content-Disposition"],
         )
         self.assertEqual(response.content, b"zip-payload")
-        download_blob_mock.assert_called_once_with(
-            object_path=history.file_path,
-            storage_bucket="local-media",
-        )
+        archive_payload_mock.assert_called_once()
+        passed_history = archive_payload_mock.call_args.args[0]
+        self.assertEqual(passed_history.file_path, history.file_path)
+        self.assertEqual(passed_history.storage_bucket, "local-media")
 
-    @patch("apps.admin_panel.services.download_backup_blob")
-    def test_restore_json_backup_completes_inline(self, download_blob_mock):
-        download_blob_mock.return_value = self._build_snapshot_zip()
+    @patch("apps.admin_panel.services.get_backup_archive_payload")
+    def test_restore_json_backup_completes_inline(self, archive_payload_mock):
+        archive_payload_mock.return_value = self._build_snapshot_zip()
         source_history = BackupHistory.objects.create(
             branch="Bacoor",
             backup_type=BackupHistory.TYPE_MANUAL,
@@ -301,10 +334,7 @@ class BackupArchiveApiTests(TestCase):
         restore_history = BackupHistory.objects.get(pk=response.data["id"])
         self.assertEqual(restore_history.status, BackupHistory.STATUS_COMPLETED)
         self.assertEqual(restore_history.progress, 100)
-        download_blob_mock.assert_called_once_with(
-            object_path=source_history.file_path,
-            storage_bucket="local-media",
-        )
+        archive_payload_mock.assert_called_once()
         restored_snapshot = BackupSnapshot.objects.get(branch="Bacoor")
         self.assertEqual(
             restored_snapshot.students,

@@ -33,11 +33,11 @@ from .serializers import (
 from .services import (
     create_branch_backup,
     delete_backup_artifacts,
+    get_backup_archive_payload,
     read_backup_snapshot,
     restore_branch_backup,
     store_uploaded_backup_archive,
 )
-from .storage import download_backup_blob
 
 
 logger = logging.getLogger(__name__)
@@ -385,10 +385,7 @@ class BackupHistoryDownloadView(APIView):
             return Response({"detail": "Backup ZIP is not available for download."}, status=status.HTTP_404_NOT_FOUND)
 
         try:
-            payload = download_backup_blob(
-                object_path=history.file_path,
-                storage_bucket=history.storage_bucket,
-            )
+            payload = get_backup_archive_payload(history)
         except Exception:
             logger.exception("Failed to download backup archive %s", backup_history_id)
             return Response(
