@@ -656,7 +656,10 @@ def restore_branch_backup(history):
         error_message="",
     ) or history
 
-    archive_payload = download_backup_blob(object_path=history.file_path)
+    archive_payload = download_backup_blob(
+        object_path=history.file_path,
+        storage_bucket=history.storage_bucket,
+    )
     history = set_history_progress(history, progress=RESTORE_PROGRESS_STEPS["downloaded"])
 
     with zipfile.ZipFile(io.BytesIO(archive_payload), "r") as archive:
@@ -712,7 +715,10 @@ def restore_branch_backup(history):
 
 
 def read_backup_snapshot(history):
-    archive_payload = download_backup_blob(object_path=history.file_path)
+    archive_payload = download_backup_blob(
+        object_path=history.file_path,
+        storage_bucket=history.storage_bucket,
+    )
 
     with zipfile.ZipFile(io.BytesIO(archive_payload), "r") as archive:
         try:
@@ -735,8 +741,22 @@ def read_backup_snapshot(history):
 
 
 def delete_backup_artifacts(history):
-    archive_deleted = delete_backup_blob(object_path=history.file_path) if history.file_path else True
-    sql_deleted = delete_backup_blob(object_path=history.sql_file_path) if history.sql_file_path else True
+    archive_deleted = (
+        delete_backup_blob(
+            object_path=history.file_path,
+            storage_bucket=history.storage_bucket,
+        )
+        if history.file_path
+        else True
+    )
+    sql_deleted = (
+        delete_backup_blob(
+            object_path=history.sql_file_path,
+            storage_bucket=history.storage_bucket,
+        )
+        if history.sql_file_path
+        else True
+    )
     update_backup_history(
         history.id,
         status=BackupHistory.STATUS_DELETED,

@@ -9,6 +9,9 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 
 
+LOCAL_BACKUP_STORAGE_BUCKET = "local-media"
+
+
 def get_storage_config():
     project_url = getattr(settings, "SUPABASE_URL", "") or os.getenv("SUPABASE_URL", "")
     service_role_key = getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "") or os.getenv(
@@ -61,12 +64,24 @@ def upload_backup_blob(*, object_path, payload, content_type="application/octet-
         return bucket, object_path
 
 
-def download_backup_blob(*, object_path):
+def download_backup_blob(*, object_path, storage_bucket=None):
+    # Archives made before Supabase backup storage was configured live in the
+    # Django media storage.  Keep resolving those records locally even if
+    # Supabase is configured later.
+    if storage_bucket == LOCAL_BACKUP_STORAGE_BUCKET:
+        with default_storage.open(object_path, "rb") as file_handle:
+            return file_handle.read()
+
     try:
-        project_url, api_key, bucket = get_storage_config()
+        project_url, api_key, configured_bucket = get_storage_config()
     except ImproperlyConfigured:
         with default_storage.open(object_path, "rb") as file_handle:
             return file_handle.read()
+
+    # A history record retains the bucket that held the archive when it was
+    # created.  Prefer it so configuration changes do not make an existing
+    # archive appear to be an invalid ZIP file.
+    bucket = storage_bucket or configured_bucket
 
     download_url = (
         f"{project_url}/storage/v1/object/"
@@ -77,14 +92,22 @@ def download_backup_blob(*, object_path):
         return response.read()
 
 
-def delete_backup_blob(*, object_path):
+def delete_backup_blob(*, object_path, storage_bucket=None):
+    if storage_bucket == LOCAL_BACKUP_STORAGE_BUCKET:
+        if default_storage.exists(object_path):
+            default_storage.delete(object_path)
+            return True
+        return False
+
     try:
-        project_url, api_key, bucket = get_storage_config()
+        project_url, api_key, configured_bucket = get_storage_config()
     except ImproperlyConfigured:
         if default_storage.exists(object_path):
             default_storage.delete(object_path)
             return True
         return False
+
+    bucket = storage_bucket or configured_bucket
 
     delete_url = f"{project_url}/storage/v1/object/{parse.quote(bucket, safe='')}"
     payload = json.dumps([object_path]).encode("utf-8")

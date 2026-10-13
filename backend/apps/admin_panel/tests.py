@@ -12,6 +12,7 @@ from rest_framework.test import APIClient
 from apps.admin_panel.automation import is_automated_backup_due
 from apps.admin_panel.models import BackupHistory, BackupSnapshot
 from apps.admin_panel.repository import BackupSettingsRecord
+from apps.admin_panel.storage import download_backup_blob
 
 
 class BackupAutomationTimingTests(TestCase):
@@ -177,6 +178,28 @@ class BackupArchiveApiTests(TestCase):
         archive_buffer.seek(0)
         return archive_buffer.getvalue()
 
+    @patch("apps.admin_panel.storage.request.urlopen")
+    @patch("apps.admin_panel.storage.get_storage_config")
+    def test_download_uses_bucket_recorded_with_backup(self, storage_config_mock, urlopen_mock):
+        storage_config_mock.return_value = (
+            "https://project.supabase.co",
+            "service-role-key",
+            "current-backup-bucket",
+        )
+        urlopen_mock.return_value.__enter__.return_value.read.return_value = b"zip-payload"
+
+        payload = download_backup_blob(
+            object_path="branches/bacoor/manual/bacoor_backup.zip",
+            storage_bucket="original-backup-bucket",
+        )
+
+        self.assertEqual(payload, b"zip-payload")
+        download_request = urlopen_mock.call_args.args[0]
+        self.assertIn(
+            "/storage/v1/object/original-backup-bucket/",
+            download_request.full_url,
+        )
+
     @patch("apps.admin_panel.services.upload_backup_blob")
     def test_upload_backup_archive_creates_completed_history_entry(self, upload_blob_mock):
         upload_blob_mock.return_value = (
@@ -241,6 +264,10 @@ class BackupArchiveApiTests(TestCase):
             response["Content-Disposition"],
         )
         self.assertEqual(response.content, b"zip-payload")
+        download_blob_mock.assert_called_once_with(
+            object_path=history.file_path,
+            storage_bucket="local-media",
+        )
 
     @patch("apps.admin_panel.services.download_backup_blob")
     def test_restore_json_backup_completes_inline(self, download_blob_mock):
@@ -274,6 +301,10 @@ class BackupArchiveApiTests(TestCase):
         restore_history = BackupHistory.objects.get(pk=response.data["id"])
         self.assertEqual(restore_history.status, BackupHistory.STATUS_COMPLETED)
         self.assertEqual(restore_history.progress, 100)
+        download_blob_mock.assert_called_once_with(
+            object_path=source_history.file_path,
+            storage_bucket="local-media",
+        )
         restored_snapshot = BackupSnapshot.objects.get(branch="Bacoor")
         self.assertEqual(
             restored_snapshot.students,

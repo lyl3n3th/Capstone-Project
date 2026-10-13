@@ -385,7 +385,10 @@ class BackupHistoryDownloadView(APIView):
             return Response({"detail": "Backup ZIP is not available for download."}, status=status.HTTP_404_NOT_FOUND)
 
         try:
-            payload = download_backup_blob(object_path=history.file_path)
+            payload = download_backup_blob(
+                object_path=history.file_path,
+                storage_bucket=history.storage_bucket,
+            )
         except Exception:
             logger.exception("Failed to download backup archive %s", backup_history_id)
             return Response(
