@@ -60,6 +60,20 @@ type AdmissionSummaryRow = {
   updated_at: string;
 };
 
+type AdmissionOwnScheduleRequestRow = {
+  requested_own_schedule: boolean;
+  own_schedule_request_status: string | null;
+  own_schedule_request_submitted_at: string | null;
+  own_schedule_request_decided_at: string | null;
+};
+
+export type AdmissionOwnScheduleRequest = {
+  requested: boolean;
+  status: "Pending" | "Approved" | "Rejected" | null;
+  submittedAt: string | null;
+  decidedAt: string | null;
+};
+
 type RequirementUploadRow = {
   file_name: string;
   requirement_code: string;
@@ -470,6 +484,20 @@ const getSingleRow = <T>(data: unknown): T | null => {
   return null;
 };
 
+const mapAdmissionOwnScheduleRequest = (
+  row: AdmissionOwnScheduleRequestRow,
+): AdmissionOwnScheduleRequest => ({
+  requested: Boolean(row.requested_own_schedule),
+  status:
+    row.own_schedule_request_status === "Pending" ||
+    row.own_schedule_request_status === "Approved" ||
+    row.own_schedule_request_status === "Rejected"
+      ? row.own_schedule_request_status
+      : null,
+  submittedAt: row.own_schedule_request_submitted_at,
+  decidedAt: row.own_schedule_request_decided_at,
+});
+
 export const normalizeBranchCode = (branchCode: string) =>
   branchCode.trim().toLowerCase() as AdmissionBranchCode;
 
@@ -666,6 +694,75 @@ export const getAdmissionProgress = async (trackingNumber: string) => {
 
   const row = getSingleRow<AdmissionSummaryRow>(data);
   return row ? mapAdmissionSummary(row) : null;
+};
+
+export const getAdmissionOwnScheduleRequest = async (
+  trackingNumber: string,
+) => {
+  const { data, error } = await supabase
+    .rpc("get_admission_own_schedule_request", {
+      p_tracking_number: normalizeTrackingNumber(trackingNumber),
+    })
+    .returns<AdmissionOwnScheduleRequestRow[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<AdmissionOwnScheduleRequestRow>(data);
+  return row ? mapAdmissionOwnScheduleRequest(row) : null;
+};
+
+export const setAdmissionOwnScheduleRequest = async ({
+  trackingNumber,
+  requested,
+}: {
+  trackingNumber: string;
+  requested: boolean;
+}) => {
+  const { data, error } = await supabase
+    .rpc("set_admission_own_schedule_request", {
+      p_tracking_number: normalizeTrackingNumber(trackingNumber),
+      p_requested: requested,
+    })
+    .returns<AdmissionOwnScheduleRequestRow[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<AdmissionOwnScheduleRequestRow>(data);
+  if (!row) {
+    throw new Error("Supabase did not return the saved own schedule request.");
+  }
+
+  return mapAdmissionOwnScheduleRequest(row);
+};
+
+export const reviewAdmissionOwnScheduleRequest = async ({
+  trackingNumber,
+  status,
+}: {
+  trackingNumber: string;
+  status: "Approved" | "Rejected";
+}) => {
+  const { data, error } = await supabase
+    .rpc("review_admission_own_schedule_request", {
+      p_tracking_number: normalizeTrackingNumber(trackingNumber),
+      p_status: status,
+    })
+    .returns<AdmissionOwnScheduleRequestRow[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const row = getSingleRow<AdmissionOwnScheduleRequestRow>(data);
+  if (!row) {
+    throw new Error("Supabase did not return the reviewed own schedule request.");
+  }
+
+  return mapAdmissionOwnScheduleRequest(row);
 };
 
 export const updateAdmissionProgress = async ({

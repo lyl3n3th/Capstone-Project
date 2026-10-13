@@ -8,9 +8,11 @@ import SkeletonPage from "../../components/common/SkeletonPage";
 import {
   clearAdmissionDraft,
   getAdmissionDraft,
+  getAdmissionOwnScheduleRequest,
   getEstimatedCollegeTuition,
   getAdmissionProgress,
   mergeAdmissionDraft,
+  setAdmissionOwnScheduleRequest,
   updateAdmissionProgress,
 } from "../../services/admission";
 import {
@@ -111,7 +113,7 @@ function AdmissionStep4() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  const persistOwnScheduleRequest = (nextValue: boolean) => {
+  const persistOwnScheduleRequest = async (nextValue: boolean) => {
     if (nextValue && applicationData?.programLevel !== "college") {
       setRequestOwnSchedule(false);
       mergeAdmissionDraft({
@@ -121,30 +123,59 @@ function AdmissionStep4() {
       return;
     }
 
+    const requestTrackingNumber =
+      applicationData?.trackingNumber || trackingNumber;
+
+    if (!requestTrackingNumber) {
+      throw new Error("No admission record was found for this request.");
+    }
+
+    await setAdmissionOwnScheduleRequest({
+      trackingNumber: requestTrackingNumber,
+      requested: nextValue,
+    });
+
     setRequestOwnSchedule(nextValue);
     mergeAdmissionDraft({
       requestOwnSchedule: nextValue,
     });
-    setStoredOwnScheduleRequest(
-      applicationData?.trackingNumber || trackingNumber,
-      nextValue,
-    );
+    setStoredOwnScheduleRequest(requestTrackingNumber, nextValue);
   };
 
-  const handleScheduleRequestClick = () => {
+  const handleScheduleRequestClick = async () => {
     if (requestOwnSchedule) {
-      persistOwnScheduleRequest(false);
-      addToast("Own schedule request removed.", "info");
+      try {
+        await persistOwnScheduleRequest(false);
+        addToast("Own schedule request removed.", "info");
+      } catch (error) {
+        console.error("Failed to remove own schedule request", error);
+        addToast(
+          error instanceof Error
+            ? error.message
+            : "Unable to remove the own schedule request right now.",
+          "error",
+        );
+      }
       return;
     }
 
     setIsScheduleWarningModalOpen(true);
   };
 
-  const handleConfirmScheduleRequest = () => {
-    persistOwnScheduleRequest(true);
-    setIsScheduleWarningModalOpen(false);
-    addToast("Own schedule request saved.", "warning");
+  const handleConfirmScheduleRequest = async () => {
+    try {
+      await persistOwnScheduleRequest(true);
+      setIsScheduleWarningModalOpen(false);
+      addToast("Own schedule request saved for Registrar/Admin review.", "warning");
+    } catch (error) {
+      console.error("Failed to save own schedule request", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the own schedule request right now.",
+        "error",
+      );
+    }
   };
 
   const handleCloseScheduleWarningModal = () => {
@@ -187,6 +218,17 @@ function AdmissionStep4() {
 
         setApplicationData(application);
         setTrackingNumber(application.trackingNumber);
+        let savedOwnScheduleRequest: boolean | null = null;
+        try {
+          const ownScheduleRequest = await getAdmissionOwnScheduleRequest(
+            application.trackingNumber,
+          );
+          savedOwnScheduleRequest = Boolean(ownScheduleRequest?.requested);
+        } catch (error) {
+          // Keep the local draft as a temporary fallback while an older
+          // database is being upgraded with the matching migration.
+          console.warn("Unable to load saved own schedule request", error);
+        }
         const storedApplicant = findStoredApplicant({
           branch: application.branchName,
           trackingNumber: application.trackingNumber,
@@ -195,12 +237,14 @@ function AdmissionStep4() {
           branch: application.branchName,
           trackingNumber: application.trackingNumber,
         });
+        const locallyStoredOwnScheduleRequest =
+          Boolean(storedApplicant?.requestedOwnSchedule) ||
+          Boolean(storedStudent?.requestedOwnSchedule) ||
+          getStoredOwnScheduleRequest(application.trackingNumber) ||
+          (draftMatchesTrackingNumber && Boolean(draft?.requestOwnSchedule));
         const restoredOwnScheduleRequest =
           application.programLevel === "college" &&
-          (Boolean(storedApplicant?.requestedOwnSchedule) ||
-            Boolean(storedStudent?.requestedOwnSchedule) ||
-            getStoredOwnScheduleRequest(application.trackingNumber) ||
-            (draftMatchesTrackingNumber && Boolean(draft?.requestOwnSchedule)));
+          (savedOwnScheduleRequest ?? locallyStoredOwnScheduleRequest);
 
         if (draftMatchesTrackingNumber && draft?.apply_scholarship !== undefined) {
           setApplyScholarship(Boolean(draft.apply_scholarship));
@@ -259,6 +303,11 @@ function AdmissionStep4() {
         getStoredOwnScheduleRequest(applicationData.trackingNumber));
 
     try {
+      await setAdmissionOwnScheduleRequest({
+        trackingNumber: applicationData.trackingNumber,
+        requested: effectiveRequestOwnSchedule,
+      });
+
       const updatedApplication = await updateAdmissionProgress({
         trackingNumber: applicationData.trackingNumber,
         currentStep: shouldProceedToScholarshipExam ? 5 : 4,
@@ -489,7 +538,9 @@ function AdmissionStep4() {
 
   useEffect(() => {
     if (applicationData && !isCollege && requestOwnSchedule) {
-      persistOwnScheduleRequest(false);
+      void persistOwnScheduleRequest(false).catch((error) => {
+        console.warn("Unable to clear an invalid own schedule request", error);
+      });
     }
   }, [applicationData, isCollege, requestOwnSchedule]);
 
@@ -598,7 +649,7 @@ function AdmissionStep4() {
                 className={`conf-schedule-request-btn ${
                   requestOwnSchedule ? "active" : ""
                 }`}
-                onClick={handleScheduleRequestClick}
+                onClick={() => void handleScheduleRequestClick()}
               >
                 {requestOwnSchedule
                   ? "Own Schedule Requested"
@@ -891,7 +942,7 @@ function AdmissionStep4() {
               <button
                 type="button"
                 className="conf-modal-btn conf-modal-btn-primary"
-                onClick={handleConfirmScheduleRequest}
+                onClick={() => void handleConfirmScheduleRequest()}
               >
                 Continue Request
               </button>

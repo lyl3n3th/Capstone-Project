@@ -85,6 +85,7 @@ import { resetInstructorTemporaryPassword } from "../../services/instructorPorta
 import {
   getEstimatedCollegeTuition,
   getAdmissionRequirements,
+  reviewAdmissionOwnScheduleRequest,
   SCHOLARSHIP_EXAM_MAX_SCORE,
   updateAdmissionProgress,
 } from "../../services/admission";
@@ -6834,38 +6835,59 @@ export default function AdminEnrollees({
     setSelectedRejectionReason("");
   };
 
-  const handleOwnScheduleRequestDecision = (
+  const handleOwnScheduleRequestDecision = async (
     enrollee: Enrollee,
     status: "Approved" | "Rejected",
   ) => {
-    const updatedEnrollee: Enrollee = {
-      ...enrollee,
-      ownScheduleRequestStatus: status,
-      ownScheduleAcademicYear:
-        status === "Approved"
-          ? resolveOwnScheduleAcademicYear(enrollee)
-          : undefined,
-      ownScheduleSemester:
-        status === "Approved"
-          ? resolveOwnScheduleSemester(enrollee)
-          : undefined,
-      ownScheduleDecisionAt: new Date().toISOString(),
-    };
+    try {
+      const savedRequest = await reviewAdmissionOwnScheduleRequest({
+        trackingNumber: enrollee.trackingNumber,
+        status,
+      });
+      const resolvedStatus = savedRequest.status || status;
+      const updatedEnrollee: Enrollee = {
+        ...enrollee,
+        requestedOwnSchedule: savedRequest.requested,
+        ownScheduleRequestStatus: resolvedStatus,
+        ownScheduleRequestSubmittedAt:
+          savedRequest.submittedAt || enrollee.ownScheduleRequestSubmittedAt,
+        ownScheduleAcademicYear:
+          resolvedStatus === "Approved"
+            ? resolveOwnScheduleAcademicYear(enrollee)
+            : undefined,
+        ownScheduleSemester:
+          resolvedStatus === "Approved"
+            ? resolveOwnScheduleSemester(enrollee)
+            : undefined,
+        ownScheduleDecisionAt:
+          savedRequest.decidedAt || new Date().toISOString(),
+      };
 
-    setEnrollees((prev) =>
-      prev.map((record) => (record.id === enrollee.id ? updatedEnrollee : record)),
-    );
-    setSelectedRequest((prev) =>
-      prev && !isEnrollmentRequest(prev) && prev.id === enrollee.id
-        ? updatedEnrollee
-        : prev,
-    );
-    addToast(
-      status === "Approved"
-        ? "Own schedule request approved. Admission can now proceed as irregular once accepted."
-        : "Own schedule request declined. The applicant will continue under the standard schedule flow.",
-      status === "Approved" ? "success" : "warning",
-    );
+      setEnrollees((prev) =>
+        prev.map((record) =>
+          record.id === enrollee.id ? updatedEnrollee : record,
+        ),
+      );
+      setSelectedRequest((prev) =>
+        prev && !isEnrollmentRequest(prev) && prev.id === enrollee.id
+          ? updatedEnrollee
+          : prev,
+      );
+      addToast(
+        resolvedStatus === "Approved"
+          ? "Own schedule request approved. Admission can now proceed as irregular once accepted."
+          : "Own schedule request declined. The applicant will continue under the standard schedule flow.",
+        resolvedStatus === "Approved" ? "success" : "warning",
+      );
+    } catch (error) {
+      console.error("Failed to review own schedule request", error);
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the own schedule review right now.",
+        "error",
+      );
+    }
   };
 
   const handleApproveRequest = (request: EnrollmentRequest | Enrollee) => {
@@ -6930,7 +6952,8 @@ export default function AdminEnrollees({
     if (
       !isEnrollmentRequest(request) &&
       request.requestedOwnSchedule &&
-      request.ownScheduleRequestStatus !== "Approved"
+      request.ownScheduleRequestStatus !== "Approved" &&
+      request.ownScheduleRequestStatus !== "Rejected"
     ) {
       addToast(
         "Review the own schedule request first before approving the admission.",
@@ -7104,6 +7127,12 @@ export default function AdminEnrollees({
                   ...enrolleeForApproval,
                   studentNumber: syncedStudentNumber,
                   branch: currentBranch,
+                  requestedOwnSchedule:
+                    enrolleeForApproval.ownScheduleRequestStatus === "Approved",
+                  ownScheduleRequestStatus:
+                    enrolleeForApproval.ownScheduleRequestStatus === "Approved"
+                      ? "Approved"
+                      : undefined,
                   strandOrCourse: enrolleeForApproval.strandOrCourse || "",
                   studentStatus: enrolleeForApproval.studentStatus || "",
                   honorDiscountPercentage:
@@ -11170,7 +11199,7 @@ export default function AdminEnrollees({
                               type="button"
                               className="assignment-selection-btn"
                               onClick={() =>
-                                handleOwnScheduleRequestDecision(
+                                void handleOwnScheduleRequestDecision(
                                   selectedRequest,
                                   "Approved",
                                 )
@@ -11186,7 +11215,7 @@ export default function AdminEnrollees({
                               type="button"
                               className="assignment-selection-btn secondary"
                               onClick={() =>
-                                handleOwnScheduleRequestDecision(
+                                void handleOwnScheduleRequestDecision(
                                   selectedRequest,
                                   "Rejected",
                                 )

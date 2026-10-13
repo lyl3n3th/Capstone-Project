@@ -397,6 +397,7 @@ type SupabaseAdminAdmissionQueueRow = {
   rejection_reason: string | null;
   requirement_files: SupabaseRequirementFileRow[] | null;
   requirements_uploaded_at: string | null;
+  requested_own_schedule: boolean;
   scholarship_exam_score: number | string | null;
   sex: string;
   student_status_label: string;
@@ -407,6 +408,9 @@ type SupabaseAdminAdmissionQueueRow = {
   year_completion: number;
   student_number: string | null;
   portal_account_registered: boolean | null;
+  own_schedule_request_status: string | null;
+  own_schedule_request_submitted_at: string | null;
+  own_schedule_request_decided_at: string | null;
 };
 
 const readStorageItem = <T,>(key: string): T | null => {
@@ -4360,6 +4364,14 @@ const mapSupabaseApplicantToAdminRecord = async (
     ? row.requirement_files
     : [];
   const scholarshipExamScore = toOptionalNumber(row.scholarship_exam_score);
+  const requestedOwnSchedule = Boolean(row.requested_own_schedule);
+  const ownScheduleRequestStatus = requestedOwnSchedule
+    ? row.own_schedule_request_status === "Approved" ||
+      row.own_schedule_request_status === "Rejected" ||
+      row.own_schedule_request_status === "Pending"
+      ? row.own_schedule_request_status
+      : "Pending"
+    : undefined;
   const attachments = await Promise.all(
     requirements.map(async (requirement) => {
       const uploadedFile = requirementFiles.find(
@@ -4419,6 +4431,11 @@ const mapSupabaseApplicantToAdminRecord = async (
     scholarshipExamScore,
     effectiveDiscountPercentage: tuitionEstimate.effectiveDiscountPercentage,
     effectiveDiscountSource: tuitionEstimate.effectiveDiscountSource,
+    requestedOwnSchedule,
+    ownScheduleRequestStatus,
+    ownScheduleRequestSubmittedAt:
+      row.own_schedule_request_submitted_at || undefined,
+    ownScheduleDecisionAt: row.own_schedule_request_decided_at || undefined,
     personalInfo: {
       fullName,
       birthDate: "",
