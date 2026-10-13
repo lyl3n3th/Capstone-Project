@@ -164,6 +164,7 @@ interface Enrollee {
   yearLevel: string;
   strandOrCourse: string;
   applicationDate: string;
+  academicYear?: string;
   documentsSubmitted: number;
   totalDocuments: number;
   status: "Pending" | "Approved" | "Rejected";
@@ -1703,8 +1704,11 @@ export default function AdminEnrollees({
     normalizeSectionSemester(subjectAssignments[0]?.semester) ||
     DEFAULT_SECTION_SEMESTER;
   const resolveOwnScheduleAcademicYear = (
-    enrollee: Pick<Enrollee, "ownScheduleAcademicYear">,
-  ) => enrollee.ownScheduleAcademicYear?.trim() || reflectedAcademicYear;
+    enrollee: Pick<Enrollee, "academicYear" | "ownScheduleAcademicYear">,
+  ) =>
+    enrollee.ownScheduleAcademicYear?.trim() ||
+    enrollee.academicYear?.trim() ||
+    reflectedAcademicYear;
   const resolveOwnScheduleSemester = (
     enrollee: Pick<Enrollee, "ownScheduleSemester">,
   ) => normalizeSectionSemester(enrollee.ownScheduleSemester || DEFAULT_SECTION_SEMESTER);
@@ -10714,7 +10718,9 @@ export default function AdminEnrollees({
                         </div>
                         <div className="personal-info-item">
                           <span>Academic Year</span>
-                          <strong>{reflectedAcademicYear}</strong>
+                          <strong>
+                            {selectedRequest.academicYear || reflectedAcademicYear}
+                          </strong>
                         </div>
                         <div className="personal-info-item">
                           <span>Own Schedule Request</span>

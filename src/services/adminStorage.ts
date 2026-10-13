@@ -66,6 +66,7 @@ export interface AdminEnrolleeRecord {
   yearLevel: string;
   strandOrCourse: string;
   applicationDate: string;
+  academicYear?: string;
   documentsSubmitted: number;
   totalDocuments: number;
   status: AdminApplicantStatus;
@@ -372,6 +373,7 @@ type SupabaseRequirementFileRow = {
 };
 
 type SupabaseAdminAdmissionQueueRow = {
+  academic_year?: string | null;
   address: string;
   application_id: string;
   application_status: string;
@@ -411,6 +413,11 @@ type SupabaseAdminAdmissionQueueRow = {
   own_schedule_request_status: string | null;
   own_schedule_request_submitted_at: string | null;
   own_schedule_request_decided_at: string | null;
+};
+
+type SupabaseAdmissionAcademicYearRow = {
+  academic_year: string | null;
+  tracking_number: string;
 };
 
 const readStorageItem = <T,>(key: string): T | null => {
@@ -4414,6 +4421,7 @@ const mapSupabaseApplicantToAdminRecord = async (
     yearLevel,
     strandOrCourse: row.track_name,
     applicationDate: toIsoDateString(row.submitted_at || row.updated_at),
+    academicYear: row.academic_year?.trim() || undefined,
     documentsSubmitted: requirementFiles.length,
     totalDocuments: requirements.length,
     status:
@@ -4464,19 +4472,44 @@ const mapSupabaseApplicantToAdminRecord = async (
 export const fetchSupabaseAdmissionApplicants = async (
   branch: string | null | undefined,
 ) => {
-  const { data, error } = await supabase
-    .rpc("get_admin_admission_queue", {
-      p_branch_code: normalizeBranchCode(normalizeBranchName(branch)),
-    })
-    .returns<SupabaseAdminAdmissionQueueRow[]>();
+  const branchCode = normalizeBranchCode(normalizeBranchName(branch));
+  const [queueResult, academicYearResult] = await Promise.all([
+    supabase
+      .rpc("get_admin_admission_queue", {
+        p_branch_code: branchCode,
+      })
+      .returns<SupabaseAdminAdmissionQueueRow[]>(),
+    supabase
+      .rpc("list_admission_academic_years", {
+        p_branch_code: branchCode,
+      })
+      .returns<SupabaseAdmissionAcademicYearRow[]>(),
+  ]);
 
-  if (error) {
-    throw new Error(error.message);
+  if (queueResult.error) {
+    throw new Error(queueResult.error.message);
   }
 
-  const queueRows = (Array.isArray(data) ? data : []).filter(
-    (row) => row.application_status !== "draft",
+  if (academicYearResult.error) {
+    throw new Error(academicYearResult.error.message);
+  }
+
+  const academicYearByTrackingNumber = new Map(
+    (Array.isArray(academicYearResult.data) ? academicYearResult.data : []).map(
+      (row) => [row.tracking_number.trim().toUpperCase(), row.academic_year],
+    ),
   );
+  const queueRows = (Array.isArray(queueResult.data) ? queueResult.data : [])
+    .filter(
+    (row) => row.application_status !== "draft",
+    )
+    .map((row) => ({
+      ...row,
+      academic_year:
+        academicYearByTrackingNumber.get(
+          row.tracking_number.trim().toUpperCase(),
+        ) ?? null,
+    }));
   const applicantRecords = await Promise.all(
     queueRows.map(mapSupabaseApplicantToAdminRecord),
   );
@@ -4549,6 +4582,7 @@ export const upsertSubmittedApplicant = ({
     yearLevel,
     strandOrCourse,
     applicationDate: toIsoDateString(application.submittedAt || application.updatedAt),
+    academicYear: application.academicYear || draft?.academicYear,
     documentsSubmitted: 0,
     totalDocuments: requirementList.length,
     status: "Pending",
