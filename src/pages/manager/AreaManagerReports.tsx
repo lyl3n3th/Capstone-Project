@@ -1,3 +1,4 @@
+import { useConfirmation } from "../../hooks/useConfirmation";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BsArrowCounterclockwise,
@@ -95,6 +96,7 @@ const updateMatchingReport = (items: Report[], updatedReport: Report) =>
   items.map((item) => (item.id === updatedReport.id ? updatedReport : item));
 
 const AreaManagerReports: React.FC<ReportsPageProps> = () => {
+  const requestConfirmation = useConfirmation();
   const [reports, setReports] = useState<Report[]>([]);
   const [trash, setTrash] = useState<Report[]>([]);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
@@ -291,7 +293,14 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
       ids.length === 1
         ? "Move this report to trash?"
         : `Move ${ids.length} reports to trash?`;
-    if (!window.confirm(message)) {
+    if (!(await requestConfirmation(
+      message,
+      {
+        title: "Move Reports to Trash",
+        confirmLabel: "Move to trash",
+        destructive: true,
+      },
+    ))) {
       return;
     }
 
@@ -310,7 +319,13 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
   };
 
   const handleRestoreFromTrash = async (id: string) => {
-    if (!window.confirm("Restore this report to your inbox?")) {
+    if (!(await requestConfirmation(
+      "Restore this report to your inbox?",
+      {
+        title: "Restore Report",
+        confirmLabel: "Restore",
+      },
+    ))) {
       return;
     }
 
@@ -326,9 +341,14 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
 
   const handlePermanentDelete = async (id: string) => {
     if (
-      window.confirm(
+      (await requestConfirmation(
         "This action cannot be undone. Permanently delete this report?",
-      )
+        {
+          title: "Permanently Delete Report",
+          confirmLabel: "Delete permanently",
+          destructive: true,
+        },
+      ))
     ) {
       try {
         await permanentlyDeleteReport(id);
@@ -347,9 +367,14 @@ const AreaManagerReports: React.FC<ReportsPageProps> = () => {
 
   const handleEmptyTrash = async () => {
     if (
-      window.confirm(
+      (await requestConfirmation(
         "Are you sure you want to permanently delete all items in trash?",
-      )
+        {
+          title: "Empty Trash",
+          confirmLabel: "Empty trash",
+          destructive: true,
+        },
+      ))
     ) {
       try {
         const trashIds = trash.map((item) => item.id);

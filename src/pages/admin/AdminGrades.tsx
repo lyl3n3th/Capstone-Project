@@ -1,3 +1,4 @@
+import { useConfirmation } from "../../hooks/useConfirmation";
 import { useEffect, useState, useRef } from "react";
 import { PiMicrosoftExcelLogo } from "react-icons/pi";
 import { IoMdCheckmarkCircleOutline } from "react-icons/io";
@@ -439,6 +440,7 @@ export default function AdminGrades({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: GradesProps) {
+  const requestConfirmation = useConfirmation();
   const currentBranch = getCurrentBranch();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -2580,7 +2582,7 @@ export default function AdminGrades({
     }
   };
 
-  const handleRedoUploadHistoryItem = (historyItem: UploadHistoryItem) => {
+  const handleRedoUploadHistoryItem = async (historyItem: UploadHistoryItem) => {
     if (historyItem.redoneAt) {
       addToast(
         `"${historyItem.fileName}" was already redone on ${historyItem.redoneAt}.`,
@@ -2604,11 +2606,16 @@ export default function AdminGrades({
       return;
     }
 
-    const shouldRedo = window.confirm(
+    const shouldRedo = (await requestConfirmation(
       `Redo "${historyItem.fileName}"?\n\nThis will clear ${uploadedRows.length} uploaded grade${
         uploadedRows.length === 1 ? "" : "s"
       } from the student portal if those grades have not been replaced by a newer upload.`,
-    );
+      {
+        title: "Redo Grade Upload",
+        confirmLabel: "Redo upload",
+        destructive: true,
+      },
+    ));
 
     if (!shouldRedo) {
       return;
@@ -2704,17 +2711,22 @@ export default function AdminGrades({
     });
   };
 
-  const handleDeleteSelectedUploadHistory = () => {
+  const handleDeleteSelectedUploadHistory = async () => {
     if (selectedHistoryIds.length === 0) {
       addToast("Select at least one upload history item to delete.", "info");
       return;
     }
 
-    const shouldDelete = window.confirm(
+    const shouldDelete = (await requestConfirmation(
       `Delete ${selectedHistoryIds.length} selected upload histor${
         selectedHistoryIds.length === 1 ? "y" : "ies"
       }?\n\nThis only removes the history row. It will not delete posted grades.`,
-    );
+      {
+        title: "Delete Upload History",
+        confirmLabel: "Delete history",
+        destructive: true,
+      },
+    ));
 
     if (!shouldDelete) {
       return;

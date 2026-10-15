@@ -26,6 +26,7 @@ from .storage import (
     guess_content_type,
     upload_backup_blob,
     upload_media_blob,
+    verify_backup_archive,
 )
 
 
@@ -458,7 +459,7 @@ def store_uploaded_backup_archive(*, branch_id, uploaded_file_name, payload, cre
         original_name = f"{original_name}.zip"
 
     branch_slug = slugify(branch_id) or "branch"
-    timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = timezone.now().strftime("%Y%m%d_%H%M%S_%f")
     archive_stem = slugify(Path(original_name).stem) or "uploaded-backup"
     archive_name = f"{archive_stem}_{timestamp}.zip"
     archive_storage_path = (
@@ -469,6 +470,11 @@ def store_uploaded_backup_archive(*, branch_id, uploaded_file_name, payload, cre
         object_path=archive_storage_path,
         payload=payload,
         content_type="application/zip",
+    )
+    verify_backup_archive(
+        object_path=stored_archive_path,
+        storage_bucket=bucket,
+        expected_payload=payload,
     )
 
     history = create_backup_history(
@@ -510,6 +516,27 @@ def create_branch_backup(*, branch_id, backup_type, created_by=None, history=Non
         status=BackupHistory.STATUS_IN_PROGRESS,
         progress=1,
     )
+    try:
+        return _create_branch_backup(
+            branch_id=branch_id,
+            backup_type=backup_type,
+            created_by=created_by,
+            history=history,
+            snapshot_data=snapshot_data,
+        )
+    except Exception as exc:
+        current_history = get_backup_history(history.id)
+        if current_history and current_history.status != BackupHistory.STATUS_DELETED:
+            update_backup_history(
+                history.id,
+                status=BackupHistory.STATUS_FAILED,
+                progress=100,
+                error_message=str(exc),
+            )
+        raise
+
+
+def _create_branch_backup(*, branch_id, backup_type, created_by, history, snapshot_data):
     history = get_backup_history(history.id) or history
     if history.status == BackupHistory.STATUS_DELETED:
         return history
@@ -522,7 +549,7 @@ def create_branch_backup(*, branch_id, backup_type, created_by=None, history=Non
     )
 
     branch_slug = slugify(branch_id) or "branch"
-    timestamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = timezone.now().strftime("%Y%m%d_%H%M%S_%f")
     sql_file_name = f"{branch_slug}_{backup_type}_{timestamp}.sql"
     archive_name = f"{branch_slug}_{backup_type}_{timestamp}.zip"
 
@@ -591,17 +618,22 @@ def create_branch_backup(*, branch_id, backup_type, created_by=None, history=Non
         payload=archive_payload,
         content_type="application/zip",
     )
-    upload_backup_blob(
+    _sql_bucket, stored_sql_path = upload_backup_blob(
         object_path=sql_storage_path,
         payload=sql_payload,
         content_type="application/sql",
+    )
+    verify_backup_archive(
+        object_path=stored_archive_path,
+        storage_bucket=bucket,
+        expected_payload=archive_payload,
     )
 
     history_id = history.id
     history = update_backup_history(
         history_id,
         file_path=stored_archive_path,
-        sql_file_path=sql_storage_path,
+        sql_file_path=stored_sql_path,
         backup_filename=archive_name,
         storage_bucket=bucket,
         status=BackupHistory.STATUS_COMPLETED,

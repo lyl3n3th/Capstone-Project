@@ -1,3 +1,4 @@
+import { useConfirmation } from "../../hooks/useConfirmation";
 import { useEffect, useMemo, useState } from "react";
 import { FaSearch, FaTrash, FaUndo } from "react-icons/fa";
 import { FiMenu, FiX } from "react-icons/fi";
@@ -100,6 +101,7 @@ export default function AdminTrash({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: ArchiveProps) {
+  const requestConfirmation = useConfirmation();
   const { currentUser } = useAuth();
   const currentBranch = normalizeBranchName(currentUser?.branch);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -642,9 +644,14 @@ export default function AdminTrash({
   };
 
   const handleDeleteStudent = async (student: Student) => {
-    const confirmed = window.confirm(
+    const confirmed = (await requestConfirmation(
       `Delete ${student.name} permanently? This action cannot be undone.`,
-    );
+      {
+        title: "Permanently Delete Student",
+        confirmLabel: "Delete permanently",
+        destructive: true,
+      },
+    ));
 
     if (!confirmed) {
       return;
@@ -717,9 +724,14 @@ export default function AdminTrash({
 
   const handleDeleteEnrollee = (enrollee: Enrollee) => {
     void (async () => {
-      const confirmed = window.confirm(
+      const confirmed = (await requestConfirmation(
         `Delete ${enrollee.fullName} permanently? This action cannot be undone.`,
-      );
+        {
+          title: "Permanently Delete Enrollee",
+          confirmLabel: "Delete permanently",
+          destructive: true,
+        },
+      ));
 
       if (!confirmed) {
         return;
@@ -753,9 +765,14 @@ export default function AdminTrash({
     enrollmentRequest: EnrollmentRequestRecord,
   ) => {
     void (async () => {
-      const confirmed = window.confirm(
+      const confirmed = (await requestConfirmation(
         `Delete enrollment request for ${enrollmentRequest.fullName} permanently? This action cannot be undone.`,
-      );
+        {
+          title: "Permanently Delete Enrollment Request",
+          confirmLabel: "Delete permanently",
+          destructive: true,
+        },
+      ));
 
       if (!confirmed) {
         return;
@@ -790,9 +807,14 @@ export default function AdminTrash({
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = (await requestConfirmation(
       "Clear Archive and permanently delete all archived records? This action cannot be undone.",
-    );
+      {
+        title: "Clear Archive",
+        confirmLabel: "Clear archive",
+        destructive: true,
+      },
+    ));
 
     if (!confirmed) {
       return;

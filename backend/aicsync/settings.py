@@ -20,10 +20,9 @@ from corsheaders.defaults import default_headers
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR.parent
 
-# Load environment variables from the repo root first, then allow
-# backend-specific overrides when a dedicated backend/.env is present.
-load_dotenv(PROJECT_ROOT / ".env", override=True)
-load_dotenv(BASE_DIR / ".env", override=True)
+# Hosting environment values must take precedence over development .env files.
+load_dotenv(BASE_DIR / ".env", override=False)
+load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 
 # Quick-start development settings - unsuitable for production
@@ -171,6 +170,11 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "reports")
 SUPABASE_BACKUP_BUCKET = os.getenv("SUPABASE_BACKUP_BUCKET", "branch-backups")
+# Render's filesystem is temporary, even when DEBUG was accidentally left on.
+# Keep local storage available for development only.
+BACKUP_ALLOW_LOCAL_STORAGE = DEBUG and not (
+    os.getenv("RENDER") or os.getenv("RENDER_EXTERNAL_HOSTNAME")
+)
 BACKUP_DISPATCH_INTERVAL_SECONDS = float(os.getenv("BACKUP_DISPATCH_INTERVAL_SECONDS", "60"))
 
 EMAIL_BACKEND = os.getenv(

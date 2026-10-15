@@ -135,6 +135,48 @@
   background: linear-gradient(135deg, #20639e 0%, #0a7ab3 100%);
 }
 
+.confirmation-modal {
+  border: 0;
+  padding: 0;
+  width: min(480px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  background: transparent;
+  border-radius: 20px;
+  overflow: visible;
+}
+
+.confirmation-modal::backdrop {
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.confirmation-modal .auth-modal-card {
+  max-height: calc(100dvh - 32px);
+}
+
+.confirmation-modal-cancel {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.confirmation-modal-cancel:hover {
+  background: #e2e8f0;
+}
+
+.confirmation-modal-danger {
+  background: #dc2626;
+}
+
+.confirmation-modal-danger:hover {
+  background: #b91c1c;
+}
+
+.confirmation-modal button:focus-visible {
+  outline: 3px solid #0284c7;
+  outline-offset: 3px;
+}
+
 @media (max-width: 540px) {
   .auth-modal-overlay {
     padding: 12px;

@@ -11,6 +11,7 @@ from apps.manager.permissions import IsBranchAdmin, get_request_branch, resolve_
 
 from .automation import dispatch_due_automated_backups
 from .models import BackupHistory
+from .storage import BackupStorageError
 from .repository import (
     create_backup_history,
     get_backup_history,
@@ -222,13 +223,16 @@ class BackupManualCreateView(APIView):
             history = update_backup_history(history.id, task_id=task.id) or history
         except Exception as exc:
             logger.warning("Celery dispatch failed for %s backup, running inline: %s", backup_type, exc)
-            history = create_branch_backup(
-                branch_id=branch_id,
-                backup_type=backup_type,
-                created_by=user,
-                history=history,
-                snapshot_data=snapshot_data,
-            )
+            try:
+                history = create_branch_backup(
+                    branch_id=branch_id,
+                    backup_type=backup_type,
+                    created_by=user,
+                    history=history,
+                    snapshot_data=snapshot_data,
+                )
+            except BackupStorageError as storage_error:
+                return Response({"detail": str(storage_error)}, status=storage_error.status_code)
 
         if backup_type == BackupHistory.TYPE_AUTOMATED:
             settings_row = get_or_create_backup_settings(branch_id)
@@ -309,7 +313,17 @@ class BackupRestoreStartView(APIView):
             restore_history = update_backup_history(restore_history.id, task_id=task.id) or restore_history
         except Exception as exc:
             logger.warning("Celery dispatch failed for restore, running inline: %s", exc)
-            restore_history = restore_branch_backup(restore_history)
+            try:
+                restore_history = restore_branch_backup(restore_history)
+            except BackupStorageError as storage_error:
+                update_backup_history(
+                    restore_history.id,
+                    status=BackupHistory.STATUS_FAILED,
+                    progress=100,
+                    error_message=str(storage_error),
+                    restore_finished_at=timezone.now(),
+                )
+                return Response({"detail": str(storage_error)}, status=storage_error.status_code)
 
         return Response(BackupHistorySerializer(restore_history).data, status=status.HTTP_202_ACCEPTED)
 
@@ -337,6 +351,8 @@ class BackupArchiveUploadView(APIView):
                 created_by=user,
                 created_by_name=request.headers.get("X-User-Name", "").strip(),
             )
+        except BackupStorageError as exc:
+            return Response({"detail": str(exc)}, status=exc.status_code)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
@@ -386,6 +402,9 @@ class BackupHistoryDownloadView(APIView):
 
         try:
             payload = get_backup_archive_payload(history)
+        except BackupStorageError as exc:
+            logger.exception("Backup storage failed for archive %s", backup_history_id)
+            return Response({"detail": str(exc)}, status=exc.status_code)
         except Exception:
             logger.exception("Failed to download backup archive %s", backup_history_id)
             return Response(
@@ -427,4 +446,7 @@ class BackupSnapshotView(APIView):
         if not history:
             return Response({"detail": "Backup history not found for this branch."}, status=status.HTTP_404_NOT_FOUND)
 
-        return Response(read_backup_snapshot(history))
+        try:
+            return Response(read_backup_snapshot(history))
+        except BackupStorageError as exc:
+            return Response({"detail": str(exc)}, status=exc.status_code)

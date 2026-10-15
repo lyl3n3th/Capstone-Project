@@ -1,3 +1,4 @@
+import { useConfirmation } from "../../hooks/useConfirmation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaCalendarAlt,
@@ -72,6 +73,7 @@ export default function AdminBackup({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: BackupProps) {
+  const requestConfirmation = useConfirmation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const displayName = loggedInUsername.trim() || "Administrator";
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -462,9 +464,14 @@ export default function AdminBackup({
   };
 
   const handleDelete = async (backupId: string, backupName: string) => {
-    const confirmed = window.confirm(
+    const confirmed = (await requestConfirmation(
       `Delete backup "${backupName}"? This will remove it from the backup history.`,
-    );
+      {
+        title: "Delete Backup",
+        confirmLabel: "Delete",
+        destructive: true,
+      },
+    ));
     if (!confirmed) {
       return;
     }
