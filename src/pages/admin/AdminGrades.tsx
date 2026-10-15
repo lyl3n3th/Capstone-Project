@@ -42,6 +42,7 @@ import {
 } from "../../services/studentPortalResolver";
 import {
   getInstructorGradeSubmissions,
+  deleteInstructorGradeSubmissions,
   getGradeChangeRequestSettings,
   fetchAndCacheGradeChangeRequestSettings,
   fetchAndCacheInstructorGradeSubmissions,
@@ -212,6 +213,7 @@ const TEMPLATE_FILE_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const PREVIEW_PAGE_SIZE = 12;
 const UPLOAD_HISTORY_PAGE_SIZE = 6;
+const INSTRUCTOR_APPROVAL_PAGE_SIZE = 10;
 const XML_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const XML_REL_NS =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -463,6 +465,11 @@ export default function AdminGrades({
     useState(0);
   const [viewingInstructorGradeItem, setViewingInstructorGradeItem] =
     useState<InstructorGradeApprovalItem | null>(null);
+  const [instructorApprovalPage, setInstructorApprovalPage] = useState(1);
+  const [isInstructorApprovalDeleteMode, setIsInstructorApprovalDeleteMode] =
+    useState(false);
+  const [selectedInstructorApprovalKeys, setSelectedInstructorApprovalKeys] =
+    useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -541,7 +548,10 @@ export default function AdminGrades({
   void instructorSubmissionVersion;
   const instructorGradeSubmissions = getInstructorGradeSubmissions(currentBranch);
   const instructorGradeChangeRequests =
-    getInstructorGradeChangeRequests(currentBranch);
+    getInstructorGradeChangeRequests(currentBranch).filter(
+      (request) =>
+        request.status !== "Error" && (request.errorRows?.length ?? 0) === 0,
+    );
   void gradeChangeSettingsVersion;
   const gradeChangeRequestSettings =
     getGradeChangeRequestSettings(currentBranch);
@@ -583,6 +593,40 @@ export default function AdminGrades({
   const rejectedInstructorGradeSubmissions = instructorGradeApprovalItems.filter(
     (item) => item.status === "Rejected",
   );
+  const instructorApprovalPageCount = Math.max(
+    1,
+    Math.ceil(
+      instructorGradeApprovalItems.length / INSTRUCTOR_APPROVAL_PAGE_SIZE,
+    ),
+  );
+  const currentInstructorApprovalPage = Math.min(
+    instructorApprovalPage,
+    instructorApprovalPageCount,
+  );
+  const instructorApprovalStartIndex =
+    (currentInstructorApprovalPage - 1) * INSTRUCTOR_APPROVAL_PAGE_SIZE;
+  const instructorApprovalPageItems = instructorGradeApprovalItems.slice(
+    instructorApprovalStartIndex,
+    instructorApprovalStartIndex + INSTRUCTOR_APPROVAL_PAGE_SIZE,
+  );
+  const instructorApprovalRangeStart =
+    instructorGradeApprovalItems.length === 0
+      ? 0
+      : instructorApprovalStartIndex + 1;
+  const instructorApprovalRangeEnd = Math.min(
+    instructorApprovalStartIndex + INSTRUCTOR_APPROVAL_PAGE_SIZE,
+    instructorGradeApprovalItems.length,
+  );
+  const getInstructorApprovalKey = (item: InstructorGradeApprovalItem) =>
+    `${item.kind}:${item.id}`;
+  const instructorApprovalPageKeys = instructorApprovalPageItems.map(
+    getInstructorApprovalKey,
+  );
+  const areAllInstructorApprovalPageItemsSelected =
+    instructorApprovalPageKeys.length > 0 &&
+    instructorApprovalPageKeys.every((key) =>
+      selectedInstructorApprovalKeys.includes(key),
+    );
 
   const uploadedRecords = previewRows.filter(
     (row) => row.status === "Valid" && row.action === "Upload",
@@ -2878,6 +2922,76 @@ export default function AdminGrades({
     );
   };
 
+  const handleToggleInstructorApprovalDeleteMode = () => {
+    setIsInstructorApprovalDeleteMode((previousValue) => !previousValue);
+    setSelectedInstructorApprovalKeys([]);
+  };
+
+  const handleToggleInstructorApprovalSelection = (key: string) => {
+    setSelectedInstructorApprovalKeys((previousKeys) =>
+      previousKeys.includes(key)
+        ? previousKeys.filter((item) => item !== key)
+        : [...previousKeys, key],
+    );
+  };
+
+  const handleToggleInstructorApprovalPageSelection = () => {
+    setSelectedInstructorApprovalKeys((previousKeys) => {
+      const pageKeySet = new Set(instructorApprovalPageKeys);
+
+      return areAllInstructorApprovalPageItemsSelected
+        ? previousKeys.filter((key) => !pageKeySet.has(key))
+        : Array.from(new Set([...previousKeys, ...instructorApprovalPageKeys]));
+    });
+  };
+
+  const handleDeleteInstructorApprovalHistory = async () => {
+    if (selectedInstructorApprovalKeys.length === 0) {
+      return;
+    }
+
+    const selectedKeys = new Set(selectedInstructorApprovalKeys);
+    const selectedUploadIds = instructorGradeSubmissions
+      .filter((submission) => selectedKeys.has(`upload:${submission.id}`))
+      .map((submission) => submission.id);
+
+    try {
+      if (selectedUploadIds.length > 0) {
+        await deleteInstructorGradeSubmissions({
+          branch: currentBranch,
+          submissionIds: selectedUploadIds,
+        });
+        writeInstructorGradeSubmissions(
+          currentBranch,
+          instructorGradeSubmissions.filter(
+            (submission) => !selectedUploadIds.includes(submission.id),
+          ),
+        );
+      }
+
+      writeInstructorGradeChangeRequests(
+        currentBranch,
+        getInstructorGradeChangeRequests(currentBranch).filter(
+          (request) => !selectedKeys.has(`change:${request.id}`),
+        ),
+      );
+      setSelectedInstructorApprovalKeys([]);
+      setIsInstructorApprovalDeleteMode(false);
+      setInstructorSubmissionVersion((previousValue) => previousValue + 1);
+      setInstructorApprovalPage((previousPage) =>
+        Math.min(previousPage, instructorApprovalPageCount),
+      );
+      addToast("Selected instructor request histories were deleted.", "success");
+    } catch (error) {
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete the selected request histories.",
+        "error",
+      );
+    }
+  };
+
   const handleUploadGrades = () => {
     if (!selectedFile) {
       addToast("Please choose a grade file first.", "warning");
@@ -3289,17 +3403,59 @@ export default function AdminGrades({
               }`}
               onClick={handleToggleGradeChangeRequests}
             >
-              {gradeChangeRequestSettings.isOpen ? "Close Requests" : "Open Requests"}
+              {gradeChangeRequestSettings.isOpen
+                ? "Close Requests"
+                : "Open Requests"}
             </button>
+          </div>
+
+          <div className="instructor-request-delete-toolbar">
+            {isInstructorApprovalDeleteMode ? (
+              <>
+                <button
+                  type="button"
+                  className="instructor-request-delete cancel"
+                  onClick={handleToggleInstructorApprovalDeleteMode}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="instructor-request-delete confirm"
+                  onClick={() => void handleDeleteInstructorApprovalHistory()}
+                  disabled={selectedInstructorApprovalKeys.length === 0}
+                >
+                  <FiTrash2 /> Delete Selected
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="instructor-request-delete"
+                onClick={handleToggleInstructorApprovalDeleteMode}
+                disabled={instructorGradeApprovalItems.length === 0}
+              >
+                <FiTrash2 /> Delete
+              </button>
+            )}
           </div>
 
           <div className="table-container history-table-container">
             <table className="history-table">
               <thead>
                 <tr>
+                  {isInstructorApprovalDeleteMode ? (
+                    <th className="history-select-column">
+                      <input
+                        type="checkbox"
+                        checked={areAllInstructorApprovalPageItemsSelected}
+                        onChange={handleToggleInstructorApprovalPageSelection}
+                        aria-label="Select all requests on this page"
+                      />
+                    </th>
+                  ) : null}
                   <th>Instructor</th>
                   <th>Type</th>
-                  <th>File</th>
                   <th>Date Submitted</th>
                   <th>No. of Students</th>
                   <th>Status</th>
@@ -3307,9 +3463,25 @@ export default function AdminGrades({
                 </tr>
               </thead>
               <tbody>
-                {instructorGradeApprovalItems.length > 0 ? (
-                  instructorGradeApprovalItems.map((item) => (
+                {instructorApprovalPageItems.length > 0 ? (
+                  instructorApprovalPageItems.map((item) => (
                     <tr key={`${item.kind}-${item.id}`}>
+                      {isInstructorApprovalDeleteMode ? (
+                        <td className="history-select-column">
+                          <input
+                            type="checkbox"
+                            checked={selectedInstructorApprovalKeys.includes(
+                              getInstructorApprovalKey(item),
+                            )}
+                            onChange={() =>
+                              handleToggleInstructorApprovalSelection(
+                                getInstructorApprovalKey(item),
+                              )
+                            }
+                            aria-label={`Select ${item.fileName}`}
+                          />
+                        </td>
+                      ) : null}
                       <td>
                         <strong>{item.instructorName}</strong>
                         <br />
@@ -3321,12 +3493,6 @@ export default function AdminGrades({
                         >
                           {item.requestType}
                         </span>
-                      </td>
-                      <td
-                        className="instructor-submission-file-cell"
-                        title={item.fileName}
-                      >
-                        {item.fileName}
                       </td>
                       <td>{new Date(item.submittedAt).toLocaleString()}</td>
                       <td>
@@ -3382,7 +3548,10 @@ export default function AdminGrades({
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="no-results">
+                    <td
+                      colSpan={isInstructorApprovalDeleteMode ? 7 : 6}
+                      className="no-results"
+                    >
                       No instructor grade requests yet.
                     </td>
                   </tr>
@@ -3390,11 +3559,54 @@ export default function AdminGrades({
               </tbody>
             </table>
           </div>
+
+          <div
+            className="preview-pagination history-pagination"
+            aria-label="Instructor grade request pages"
+          >
+            <div className="preview-pagination-summary">
+              Showing {instructorApprovalRangeStart}-{instructorApprovalRangeEnd} of{" "}
+              {instructorGradeApprovalItems.length} requests
+            </div>
+            <div className="preview-pagination-controls">
+              <button
+                type="button"
+                className="preview-page-btn"
+                onClick={() =>
+                  setInstructorApprovalPage((previousPage) =>
+                    Math.max(1, previousPage - 1),
+                  )
+                }
+                disabled={currentInstructorApprovalPage === 1}
+                aria-label="Previous instructor request page"
+              >
+                <FiChevronLeft />
+              </button>
+              <span className="preview-page-indicator">
+                Page {currentInstructorApprovalPage} of {instructorApprovalPageCount}
+              </span>
+              <button
+                type="button"
+                className="preview-page-btn"
+                onClick={() =>
+                  setInstructorApprovalPage((previousPage) =>
+                    Math.min(instructorApprovalPageCount, previousPage + 1),
+                  )
+                }
+                disabled={
+                  currentInstructorApprovalPage === instructorApprovalPageCount
+                }
+                aria-label="Next instructor request page"
+              >
+                <FiChevronRight />
+              </button>
+            </div>
+          </div>
         </div>
 
         {viewingInstructorGradeItem?.kind === "upload" && (
           <div className="preview-modal-overlay">
-            <div className="preview-modal">
+            <div className="preview-modal grade-approval-review-modal">
               <div className="preview-modal-header">
                 <div>
                   <h2>{viewingInstructorGradeItem.fileName}</h2>
@@ -3521,7 +3733,7 @@ export default function AdminGrades({
 
         {viewingInstructorGradeItem?.kind === "change" && (
           <div className="preview-modal-overlay">
-            <div className="preview-modal">
+            <div className="preview-modal grade-approval-review-modal">
               <div className="preview-modal-header">
                 <div>
                   <h2>{viewingInstructorGradeItem.fileName}</h2>

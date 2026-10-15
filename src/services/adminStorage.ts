@@ -812,6 +812,7 @@ const SUPABASE_MIRRORED_BRANCH_SCOPES = new Set([
   "student-subject-plans",
   "student-schedule-requests",
   "instructor-grade-change-requests",
+  "instructor-grade-change-error-history",
   "grade-change-request-settings",
 ]);
 

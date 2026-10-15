@@ -18,7 +18,6 @@ import {
 } from "../../services/adminStorage";
 import {
   deleteAdminStudent,
-  purgeArchivedAdminStudents,
   updateAdminStudentStatus,
 } from "../../services/adminStudentsApi";
 import {
@@ -28,6 +27,10 @@ import {
   writeEnrollmentRequestsForBranch,
   type EnrollmentRequestRecord,
 } from "../../services/enrollmentRequests";
+import {
+  getStudentRecordProtection,
+  getStudentRecordProtectionMessage,
+} from "../../services/studentRecordProtection";
 import "../../styles/admin/admin-trash.css";
 
 interface ArchiveProps {
@@ -407,6 +410,17 @@ export default function AdminTrash({
 
   const deleteStudentRecord = async (student: Student) => {
     const { trackingNumber, studentNumber } = resolveStudentLink(student);
+    const protection = await getStudentRecordProtection({
+      branch: student.branch || currentBranch,
+      studentNumber: studentNumber || student.id,
+      trackingNumber,
+    });
+    if (protection.isProtected) {
+      throw new Error(
+        getStudentRecordProtectionMessage(protection, "deleted"),
+      );
+    }
+
     const warnings: string[] = [];
     let linkedAdmissionWasDeleted = false;
 
@@ -473,6 +487,19 @@ export default function AdminTrash({
   };
 
   const deleteEnrolleeRecord = async (enrollee: Enrollee) => {
+    if (enrollee.studentNumber) {
+      const protection = await getStudentRecordProtection({
+        branch: enrollee.branch || currentBranch,
+        studentNumber: enrollee.studentNumber,
+        trackingNumber: enrollee.trackingNumber,
+      });
+      if (protection.isProtected) {
+        throw new Error(
+          getStudentRecordProtectionMessage(protection, "deleted"),
+        );
+      }
+    }
+
     const warnings: string[] = [];
     let linkedAdmissionWasDeleted = false;
 
@@ -773,23 +800,6 @@ export default function AdminTrash({
 
     setIsProcessingTrash(true);
 
-    let remotelyPurgedStudentCount = 0;
-    try {
-      remotelyPurgedStudentCount = await purgeArchivedAdminStudents(
-        currentBranch,
-      );
-    } catch (error) {
-      console.error("Failed to purge archived students from Supabase", error);
-      addToast(
-        error instanceof Error
-          ? error.message
-          : "Unable to permanently clear the shared archived student records.",
-        "error",
-      );
-      setIsProcessingTrash(false);
-      return;
-    }
-
     let deletedCount = 0;
     let warningCount = 0;
     let failedCount = 0;
@@ -816,7 +826,7 @@ export default function AdminTrash({
       const message =
         warningCount > 0
           ? `${deletedLabel} removed from Archive, but ${warningCount} legacy student record${warningCount === 1 ? "" : "s"} still need API cleanup.`
-          : `${deletedLabel} permanently deleted from Archive.${remotelyPurgedStudentCount > 0 ? ` Removed ${remotelyPurgedStudentCount} archived student${remotelyPurgedStudentCount === 1 ? "" : "s"} from the shared database.` : ""}`;
+          : `${deletedLabel} permanently deleted from Archive.`;
       addToast(message, warningCount > 0 ? "warning" : "success");
     }
 

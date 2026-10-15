@@ -20,6 +20,7 @@ import {
   updateStaffMember,
   type StaffMember,
 } from "../../services/staffApi";
+import { fetchAdminStudents } from "../../services/adminStudentsApi";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import "../../styles/manager/area-managerStaff.css";
 
@@ -368,6 +369,20 @@ const AreaManagerStaffAccounts: React.FC = () => {
 
     const branchName = branchPendingRemoval;
     try {
+      const branchStudents = await fetchAdminStudents(branchName);
+      const enrolledStudentCount = branchStudents.filter(
+        (student) =>
+          student.status === "Complete" || student.status === "Incomplete",
+      ).length;
+
+      if (enrolledStudentCount > 0) {
+        setBranchError(
+          `${branchName} cannot be deleted because it has enrolled students.`,
+        );
+        setBranchPendingRemoval(null);
+        return;
+      }
+
       await removeManagedBranch(branchName);
       const remainingBranches = managedBranches.filter(
         (branch) => branch !== branchName,

@@ -895,6 +895,41 @@
   box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
 }
 
+.instructor-request-delete-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: -8px 16px 12px 0;
+}
+
+.instructor-request-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: #475569;
+  background: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.instructor-request-delete.confirm {
+  color: #ffffff;
+  border-color: #be123c;
+  background: #be123c;
+}
+
+.instructor-request-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .instructor-submissions-card .history-table {
   width: max-content;
   min-width: 0;
@@ -913,6 +948,13 @@
 .instructor-submissions-card .history-table th:first-child,
 .instructor-submissions-card .history-table td:first-child {
   min-width: 150px;
+}
+
+.instructor-submissions-card .history-table th.history-select-column,
+.instructor-submissions-card .history-table td.history-select-column {
+  width: 48px;
+  min-width: 48px;
+  text-align: center;
 }
 
 .instructor-submissions-card .history-table th:nth-child(2),
@@ -2238,6 +2280,16 @@
   }
 }
 
+.grades-content .instructor-submissions-card .history-table th.history-select-column:first-child,
+.grades-content .instructor-submissions-card .history-table td.history-select-column:first-child {
+  width: 40px !important;
+  min-width: 40px !important;
+  max-width: 40px !important;
+  padding-right: 6px !important;
+  padding-left: 6px !important;
+  text-align: center !important;
+}
+
 /* Grade upload review modal: keep the preview list roomy and readable. */
 .grades-content .preview-modal {
   width: min(1280px, calc(100vw - 32px));
@@ -2323,6 +2375,44 @@
   width: auto !important;
   min-width: max-content;
   max-width: 360px;
+}
+
+/* Keep approval controls directly below a maximum of ten student rows. */
+.grades-content .preview-modal.grade-approval-review-modal {
+  height: auto;
+  min-height: 0;
+  max-height: min(94vh, calc(100vh - 28px));
+  overflow: hidden;
+}
+
+.grades-content .grade-approval-review-modal .preview-modal-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.grades-content .grade-approval-review-modal .preview-card {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  height: auto;
+  min-height: 0;
+}
+
+.grades-content .grade-approval-review-modal .preview-table-container {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(592px, calc(94vh - 230px));
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+}
+
+.grades-content .grade-approval-review-modal .grades-table tbody tr {
+  height: 55px;
+}
+
+.grades-content .grade-approval-review-modal .grade-approval-modal-actions {
+  flex: 0 0 auto;
 }
 
 @media (max-width: 1024px), (max-height: 720px) {

@@ -83,6 +83,10 @@ import {
   removeStudentPayment,
   STUDENT_PAYMENTS_UPDATED_EVENT,
 } from "../../services/studentPayments";
+import {
+  getStudentRecordProtection,
+  getStudentRecordProtectionMessage,
+} from "../../services/studentRecordProtection";
 import "../../styles/admin/admin-students.css";
 
 interface StudentsProps {
@@ -1136,7 +1140,7 @@ export default function AdminStudents({
           return;
         }
 
-        let branchStudents = getActiveStudentsForAdminList(currentBranch);
+        const branchStudents = getActiveStudentsForAdminList(currentBranch);
         if (isCurrentLoad()) {
           setStudents(branchStudents);
           setStudentRecoveryMessage(
@@ -1815,7 +1819,25 @@ export default function AdminStudents({
   };
 
   // Open archive modal
-  const openArchiveConfirm = (id: string) => {
+  const openArchiveConfirm = async (id: string) => {
+    const student = students.find((record) => record.id === id);
+    if (!student) {
+      return;
+    }
+
+    const protection = await getStudentRecordProtection({
+      branch: student.branch || currentBranch,
+      studentNumber: student.id,
+      trackingNumber: student.trackingNumber,
+    });
+    if (protection.isProtected) {
+      showSystemAlert(
+        "Student Record Is Protected",
+        getStudentRecordProtectionMessage(protection),
+      );
+      return;
+    }
+
     setStudentToArchive(id);
     setIsArchiveModalOpen(true);
   };
@@ -1827,6 +1849,23 @@ export default function AdminStudents({
     }
 
     const student = students.find((record) => record.id === studentToArchive);
+    if (student) {
+      const protection = await getStudentRecordProtection({
+        branch: student.branch || currentBranch,
+        studentNumber: student.id,
+        trackingNumber: student.trackingNumber,
+      });
+      if (protection.isProtected) {
+        setIsArchiveModalOpen(false);
+        setStudentToArchive(null);
+        showSystemAlert(
+          "Student Record Is Protected",
+          getStudentRecordProtectionMessage(protection),
+        );
+        return;
+      }
+    }
+
     invalidateStudentDataLoad();
     const archiveStudentLocally = () => {
       if (student) {
@@ -1876,11 +1915,24 @@ export default function AdminStudents({
   const archiveSelectedStudents = async (studentsToArchive: Student[]) => {
     const archivedStudentIds: string[] = [];
     const failedStudents: string[] = [];
+    const protectedRecordReasons = new Set<string>();
 
     invalidateStudentDataLoad();
 
     for (const student of studentsToArchive) {
       try {
+        const protection = await getStudentRecordProtection({
+          branch: student.branch || currentBranch,
+          studentNumber: student.id,
+          trackingNumber: student.trackingNumber,
+        });
+        if (protection.isProtected) {
+          protection.reasons.forEach((reason) =>
+            protectedRecordReasons.add(reason),
+          );
+          continue;
+        }
+
         forgetDeletedStoredStudent({
           branch: student.branch || currentBranch,
           id: student.id,
@@ -1927,10 +1979,25 @@ export default function AdminStudents({
       );
     }
 
-    if (failedStudents.length > 0) {
+    if (protectedRecordReasons.size > 0 || failedStudents.length > 0) {
+      const messages: string[] = [];
+      if (protectedRecordReasons.size > 0) {
+        messages.push(
+          getStudentRecordProtectionMessage({
+            isProtected: true,
+            reasons: Array.from(protectedRecordReasons),
+            gradeCount: 0,
+            credentialCount: 0,
+            paymentCount: 0,
+          }),
+        );
+      }
+      if (failedStudents.length > 0) {
+        messages.push(failedStudents.join("\n"));
+      }
       showSystemAlert(
-        "Some Students Were Not Archived",
-        failedStudents.join("\n"),
+        "Student were not archived",
+        messages.join("\n\n"),
       );
     }
   };
@@ -3871,7 +3938,7 @@ export default function AdminStudents({
                         {student.status !== "Archived" ? (
                           <button
                             className="students-action-btn students-archive-btn students-icon-only-btn"
-                            onClick={() => openArchiveConfirm(student.id)}
+                            onClick={() => void openArchiveConfirm(student.id)}
                             disabled={isAnyBulkActionPending}
                             type="button"
                             aria-label={`Move ${student.name} to Archive`}
