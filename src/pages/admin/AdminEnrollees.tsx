@@ -1,3 +1,4 @@
+import { useConfirmation } from "../../hooks/useConfirmation";
 import { useEffect, useState } from "react";
 import {
   FaUserPlus,
@@ -1456,6 +1457,7 @@ export default function AdminEnrollees({
   canAccessBackup = true,
   instructorManagementOnly = false,
 }: EnrolleesProps) {
+  const requestConfirmation = useConfirmation();
   const { currentUser } = useAuth();
   const currentBranch = normalizeBranchName(currentUser?.branch);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -3373,9 +3375,14 @@ export default function AdminEnrollees({
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = (await requestConfirmation(
       `Delete ${instructor.name}? This action cannot be undone.`,
-    );
+      {
+        title: "Delete Instructor",
+        confirmLabel: "Delete instructor",
+        destructive: true,
+      },
+    ));
 
     if (!confirmed) {
       return;
@@ -3409,9 +3416,13 @@ export default function AdminEnrollees({
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = (await requestConfirmation(
       `Generate a new temporary password for ${editingInstructor.name}?\n\nThey will be asked to change it after signing in.`,
-    );
+      {
+        title: "Reset Instructor Password",
+        confirmLabel: "Reset password",
+      },
+    ));
 
     if (!confirmed) {
       return;
@@ -3756,9 +3767,14 @@ export default function AdminEnrollees({
   };
 
   const handleDeleteSubject = async (subject: Subject) => {
-    const confirmed = window.confirm(
+    const confirmed = (await requestConfirmation(
       `Delete ${subject.code} - ${subject.name}? This will also remove its prerequisite links and any local schedule assignments using it.`,
-    );
+      {
+        title: "Delete Subject",
+        confirmLabel: "Delete subject",
+        destructive: true,
+      },
+    ));
 
     if (!confirmed) {
       return;
@@ -4646,7 +4662,7 @@ export default function AdminEnrollees({
     );
   };
 
-  const handleArchiveEnrollee = (enrollee: Enrollee) => {
+  const handleArchiveEnrollee = async (enrollee: Enrollee) => {
     if (enrollee.status === "Pending") {
       setSystemAlert({
         title: "Request cannot be archived",
@@ -4656,9 +4672,13 @@ export default function AdminEnrollees({
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = (await requestConfirmation(
       `Archive ${enrollee.fullName}? You can restore this record from Archive later.`,
-    );
+      {
+        title: "Archive Enrollee",
+        confirmLabel: "Archive",
+      },
+    ));
 
     if (!confirmed) {
       return;
@@ -4667,7 +4687,7 @@ export default function AdminEnrollees({
     archiveEnrollees([enrollee]);
   };
 
-  const handleArchiveSelectedEnrollees = (recordsToArchive: Enrollee[]) => {
+  const handleArchiveSelectedEnrollees = async (recordsToArchive: Enrollee[]) => {
     if (recordsToArchive.length === 0) {
       addToast("Select at least one record to archive.", "info");
       return;
@@ -4682,9 +4702,13 @@ export default function AdminEnrollees({
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = (await requestConfirmation(
       `Archive ${recordsToArchive.length} selected ${activeTab === "transferees" ? "transferee" : "admission"} record${recordsToArchive.length === 1 ? "" : "s"}? You can restore them from Archive later.`,
-    );
+      {
+        title: "Archive Selected Records",
+        confirmLabel: "Archive records",
+      },
+    ));
 
     if (!confirmed) {
       return;
@@ -4754,7 +4778,7 @@ export default function AdminEnrollees({
     );
   };
 
-  const handleArchiveSelectedEnrollmentRequests = (
+  const handleArchiveSelectedEnrollmentRequests = async (
     requestsToArchive: EnrollmentRequest[],
   ) => {
     if (requestsToArchive.length === 0) {
@@ -4775,9 +4799,13 @@ export default function AdminEnrollees({
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = (await requestConfirmation(
       `Archive ${requestsToArchive.length} selected enrollment request${requestsToArchive.length === 1 ? "" : "s"}?`,
-    );
+      {
+        title: "Archive Enrollment Requests",
+        confirmLabel: "Archive requests",
+      },
+    ));
 
     if (!confirmed) {
       return;
@@ -6180,7 +6208,7 @@ export default function AdminEnrollees({
         normalizeSectionCodeValue(assignment.sectionCode) ===
           normalizedSectionCode,
     );
-    const shouldDelete = window.confirm(
+    const shouldDelete = (await requestConfirmation(
       [
         `Delete section ${section.code}?`,
         linkedStudentCount > 0
@@ -6192,7 +6220,12 @@ export default function AdminEnrollees({
       ]
         .filter(Boolean)
         .join("\n"),
-    );
+      {
+        title: "Delete Section",
+        confirmLabel: "Delete section",
+        destructive: true,
+      },
+    ));
 
     if (!shouldDelete) {
       return;
@@ -6328,9 +6361,14 @@ export default function AdminEnrollees({
       return;
     }
 
-    const shouldRemove = window.confirm(
+    const shouldRemove = (await requestConfirmation(
       `Remove ${name} from ${selectedSection.code}? The student will become unassigned.`,
-    );
+      {
+        title: "Remove Student from Section",
+        confirmLabel: "Remove student",
+        destructive: true,
+      },
+    ));
 
     if (!shouldRemove) {
       return;

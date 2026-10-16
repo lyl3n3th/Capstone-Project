@@ -16,6 +16,7 @@ import AdmissionStep4 from "./pages/admission/AdmissiontStep4";
 import AdmissionStep5 from "./pages/admission/AdmissionStep5";
 
 import { AuthProvider, StudentProvider } from "./contexts";
+import ConfirmationProvider from "./contexts/ConfirmationProvider";
 import StudentHome from "./pages/student/StudentHome.tsx";
 import StudentProfile from "./pages/student/StudentProfile.tsx";
 import StudentGrades from "./pages/student/StudentGrades.tsx";
@@ -409,8 +410,10 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <BackupScheduler />
-        <AppRoutes />
+        <ConfirmationProvider>
+          <BackupScheduler />
+          <AppRoutes />
+        </ConfirmationProvider>
       </AuthProvider>
     </BrowserRouter>
   );

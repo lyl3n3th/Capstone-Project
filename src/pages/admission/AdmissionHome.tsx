@@ -9,6 +9,8 @@ import {
 } from "../../services/admission";
 import "../../styles/admission/admission-home.css";
 
+const TRACKING_NUMBER_MAX_LENGTH = 20;
+
 function AdmissionHome() {
   const [trackingNumber, setTrackingNumber] = useState("");
   const [error, setError] = useState("");
@@ -106,7 +108,7 @@ function AdmissionHome() {
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
     const pastedText = e.clipboardData.getData("text");
-    setTrackingNumber(pastedText);
+    setTrackingNumber(pastedText.trim().slice(0, TRACKING_NUMBER_MAX_LENGTH));
     setError("");
   };
 
@@ -170,11 +172,12 @@ function AdmissionHome() {
               <input
                 id="tracking-number"
                 type="text"
+                maxLength={TRACKING_NUMBER_MAX_LENGTH}
                 placeholder="Enter tracking number"
                 className={`input-field ${error ? "input-error" : ""}`}
                 value={trackingNumber}
                 onChange={(e) => {
-                  setTrackingNumber(e.target.value);
+                  setTrackingNumber(e.target.value.slice(0, TRACKING_NUMBER_MAX_LENGTH));
                   setError("");
                 }}
                 onPaste={handlePaste}

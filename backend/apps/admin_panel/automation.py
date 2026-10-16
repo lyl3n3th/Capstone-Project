@@ -15,6 +15,7 @@ from .repository import (
     update_backup_history,
 )
 from .services import create_branch_backup
+from .storage import BackupStorageError
 
 
 logger = logging.getLogger(__name__)
@@ -180,13 +181,17 @@ def dispatch_due_automated_backups(
                 settings_row.branch,
                 exc,
             )
-            history = create_branch_backup(
-                branch_id=settings_row.branch,
-                backup_type=BackupHistory.TYPE_AUTOMATED,
-                created_by=actor,
-                history=history,
-                snapshot_data=snapshot_data,
-            )
+            try:
+                history = create_branch_backup(
+                    branch_id=settings_row.branch,
+                    backup_type=BackupHistory.TYPE_AUTOMATED,
+                    created_by=actor,
+                    history=history,
+                    snapshot_data=snapshot_data,
+                )
+            except BackupStorageError:
+                logger.exception("Permanent storage failed for automated backup on %s", settings_row.branch)
+                continue
 
         save_backup_settings(
             settings_row.branch,

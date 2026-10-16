@@ -1,3 +1,4 @@
+import { useConfirmation } from "../../hooks/useConfirmation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MdArchive } from "react-icons/md";
 import * as XLSX from "xlsx";
@@ -967,6 +968,7 @@ export default function AdminStudents({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: StudentsProps) {
+  const requestConfirmation = useConfirmation();
   const { currentUser } = useAuth();
   const currentBranch = normalizeBranchName(currentUser?.branch);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -2256,7 +2258,7 @@ export default function AdminStudents({
     input.click();
   };
 
-  const handleAdminCredentialRemove = (requirementName: string) => {
+  const handleAdminCredentialRemove = async (requirementName: string) => {
     if (!viewingStudent || !viewingStudentApplicantRecord?.trackingNumber) {
       setCredentialActionFeedback({
         type: "error",
@@ -2265,9 +2267,14 @@ export default function AdminStudents({
       return;
     }
 
-    const shouldRemove = window.confirm(
+    const shouldRemove = (await requestConfirmation(
       `Remove ${requirementName} from this student's credentials?`,
-    );
+      {
+        title: "Remove Credential",
+        confirmLabel: "Remove credential",
+        destructive: true,
+      },
+    ));
     if (!shouldRemove) {
       return;
     }
@@ -2503,7 +2510,7 @@ export default function AdminStudents({
     }
   };
 
-  const handleRemoveGradeRecords = ({
+  const handleRemoveGradeRecords = async ({
     branch,
     records,
     summaryLabel,
@@ -2520,11 +2527,16 @@ export default function AdminStudents({
       return;
     }
 
-    const shouldRemove = window.confirm(
+    const shouldRemove = (await requestConfirmation(
       `Remove ${records.length} saved grade${
         records.length === 1 ? "" : "s"
       } for ${summaryLabel}?\n\nThis action will update the student's academic standing if needed.`,
-    );
+      {
+        title: "Remove Saved Grades",
+        confirmLabel: "Remove grades",
+        destructive: true,
+      },
+    ));
 
     if (!shouldRemove) {
       return;
@@ -2696,9 +2708,13 @@ export default function AdminStudents({
       ineligibleCount > 0
         ? `\n\n${ineligibleCount} selected student${ineligibleCount === 1 ? "" : "s"} will be skipped because only Grade 12 SHS and 4th Year College students can be moved to alumni.`
         : "";
-    const shouldContinue = window.confirm(
+    const shouldContinue = (await requestConfirmation(
       `Move ${alumniEligibleSelectedStudents.length} selected student${alumniEligibleSelectedStudents.length === 1 ? "" : "s"} to alumni?${ineligibleNote}`,
-    );
+      {
+        title: "Move Students to Alumni",
+        confirmLabel: "Move to alumni",
+      },
+    ));
     if (!shouldContinue) {
       return;
     }
@@ -2717,9 +2733,13 @@ export default function AdminStudents({
       return;
     }
 
-    const shouldContinue = window.confirm(
+    const shouldContinue = (await requestConfirmation(
       `Move ${selectedStudents.length} selected student${selectedStudents.length === 1 ? "" : "s"} to archive?`,
-    );
+      {
+        title: "Archive Students",
+        confirmLabel: "Archive students",
+      },
+    ));
     if (!shouldContinue) {
       return;
     }
@@ -3248,9 +3268,14 @@ export default function AdminStudents({
       return;
     }
 
-    const shouldRemove = window.confirm(
+    const shouldRemove = (await requestConfirmation(
       "Remove this payment receipt from the student ledger?",
-    );
+      {
+        title: "Remove Payment Receipt",
+        confirmLabel: "Remove receipt",
+        destructive: true,
+      },
+    ));
 
     if (!shouldRemove) {
       return;

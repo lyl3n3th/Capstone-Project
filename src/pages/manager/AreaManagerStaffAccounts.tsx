@@ -1,3 +1,4 @@
+import { useConfirmation } from "../../hooks/useConfirmation";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   BsArrowCounterclockwise,
@@ -30,6 +31,7 @@ const getStaffStatusLabel = (status?: StaffMember["status"]) =>
   status === "inactive" ? "Disabled" : "Active";
 
 const AreaManagerStaffAccounts: React.FC = () => {
+  const requestConfirmation = useConfirmation();
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -244,9 +246,14 @@ const AreaManagerStaffAccounts: React.FC = () => {
 
   const handleDisableAccount = async (member: StaffMember) => {
     if (
-      !window.confirm(
+      !(await requestConfirmation(
         `Disable ${member.first_name} ${member.last_name}'s account?`,
-      )
+        {
+          title: "Disable Staff Account",
+          confirmLabel: "Disable account",
+          destructive: true,
+        },
+      ))
     ) {
       return;
     }
@@ -274,9 +281,13 @@ const AreaManagerStaffAccounts: React.FC = () => {
 
   const handleEnableAccount = async (member: StaffMember) => {
     if (
-      !window.confirm(
+      !(await requestConfirmation(
         `Enable ${member.first_name} ${member.last_name}'s account again?`,
-      )
+        {
+          title: "Enable Staff Account",
+          confirmLabel: "Enable account",
+        },
+      ))
     ) {
       return;
     }
@@ -304,9 +315,14 @@ const AreaManagerStaffAccounts: React.FC = () => {
 
   const handleDeleteDisabledAccount = async (member: StaffMember) => {
     if (
-      !window.confirm(
+      !(await requestConfirmation(
         `Delete ${member.first_name} ${member.last_name}'s disabled account?`,
-      )
+        {
+          title: "Delete Disabled Account",
+          confirmLabel: "Delete account",
+          destructive: true,
+        },
+      ))
     ) {
       return;
     }

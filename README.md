@@ -7,6 +7,9 @@ The frontend is prepared for Vercel deployment. Start with the project-specific
 environment variables, build settings, direct-link routing, and the Render CORS
 handoff.
 
+For permanent backup ZIP storage, Render settings, and recovery of older local
+archives, follow [the backup deployment guide](docs/BACKUP_DEPLOYMENT.md).
+
 ---
 
 # React + TypeScript + Vite

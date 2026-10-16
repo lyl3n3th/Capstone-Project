@@ -1,3 +1,4 @@
+import { useConfirmation } from "../../hooks/useConfirmation";
 import { useState, useEffect, useMemo } from "react";
 import {
   FaSearch,
@@ -173,6 +174,7 @@ export default function AdminAlumni({
   loggedInRole = "Admin",
   canAccessBackup = true,
 }: AlumniProps) {
+  const requestConfirmation = useConfirmation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedYear, setSelectedYear] = useState("");
@@ -657,9 +659,13 @@ export default function AdminAlumni({
   };
 
   const handleRestoreAlumni = async (alumniStudent: AlumniStudent) => {
-    const shouldContinue = window.confirm(
+    const shouldContinue = (await requestConfirmation(
       `Restore ${alumniStudent.fullName} back to Students?`,
-    );
+      {
+        title: "Restore Student",
+        confirmLabel: "Restore",
+      },
+    ));
     if (!shouldContinue) {
       return;
     }
