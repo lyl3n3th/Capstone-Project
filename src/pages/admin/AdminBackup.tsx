@@ -25,10 +25,10 @@ import {
   fetchBackupSnapshot,
   fetchBackupSettings,
   fetchBackupStatus,
-  restoreLocalBackupArchive,
   saveBackupSettings,
   startBackupRestore,
   type BackupHistoryRecord,
+  uploadBackupArchive,
 } from "../../services/backupApi";
 import "../../styles/admin/admin-backup.css";
 
@@ -350,24 +350,31 @@ export default function AdminBackup({
     }
   };
 
-  const handleRestoreLocalArchive = async () => {
+  const handleUploadAndRestore = async () => {
     if (!selectedUploadFile) {
-      addToast("Choose a backup ZIP file to restore.", "warning");
+      addToast("Choose a backup ZIP file to upload and restore.", "warning");
       return;
     }
 
     try {
       setIsUploadingBackup(true);
-      addToast(`Restore clicked for ${selectedUploadFile.name}. Reading ZIP...`, "info");
-      const snapshot = await restoreLocalBackupArchive(selectedUploadFile);
+      addToast(`Uploading ${selectedUploadFile.name}...`, "info");
+      const uploadedBackup = await uploadBackupArchive(selectedUploadFile);
+      const mappedBackup = mapBackupRecord(uploadedBackup);
+      setBackups((previousBackups) => [
+        mappedBackup,
+        ...previousBackups.filter((backup) => backup.id !== mappedBackup.id),
+      ]);
       clearSelectedUploadFile();
+      await loadBackupData({ showErrorToast: false, preserveDirtySettings: true });
       addToast(
-        `Restored ${snapshot.students.length} student${snapshot.students.length === 1 ? "" : "s"} and ${snapshot.alumni.length} alumni record${snapshot.alumni.length === 1 ? "" : "s"} from the selected ZIP.`,
-        "success",
+        `Uploaded ${uploadedBackup.backup_filename}. Starting restore...`,
+        "info",
       );
+      await handleRestore(uploadedBackup.id, uploadedBackup.backup_filename);
     } catch (error) {
       addToast(
-        error instanceof Error ? error.message : "Failed to restore backup ZIP.",
+        error instanceof Error ? error.message : "Failed to upload and restore backup ZIP.",
         "error",
       );
     } finally {
@@ -676,10 +683,10 @@ export default function AdminBackup({
                     <FaUndo />
                   </div>
                   <div className="summary-text upload-backup-text">
-                    <h4>Restore Backup ZIP</h4>
+                    <h4>Upload &amp; Restore Backup ZIP</h4>
                     <p>
-                      Restore student and alumni data directly from a local
-                      AICSync backup ZIP without adding it to backup history.
+                      Upload an AICSync backup ZIP to history, then restore its
+                      student and alumni data.
                     </p>
 
                     <div className="upload-backup-controls">
@@ -699,11 +706,11 @@ export default function AdminBackup({
                         <button
                           type="button"
                           className="upload-backup-btn"
-                          onClick={() => void handleRestoreLocalArchive()}
+                          onClick={() => void handleUploadAndRestore()}
                           disabled={!selectedUploadFile || isUploadingBackup}
                         >
                           <FaUndo />
-                          {isUploadingBackup ? "Restoring..." : "Restore"}
+                          {isUploadingBackup ? "Uploading..." : "Upload & Restore"}
                         </button>
                         {selectedUploadFile ? (
                           <button

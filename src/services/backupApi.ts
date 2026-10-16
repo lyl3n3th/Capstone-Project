@@ -1,4 +1,3 @@
-import { strFromU8, unzipSync } from "fflate";
 import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 import {
   getCurrentBranch,
@@ -481,88 +480,6 @@ export async function uploadBackupArchive(file: File) {
   });
 
   return parseJsonResponse<BackupHistoryRecord>(response);
-}
-
-const parseBackupArchiveJsonArray = <T>(
-  archiveEntries: Record<string, Uint8Array>,
-  memberName: string,
-) => {
-  const member = archiveEntries[memberName];
-
-  if (!member) {
-    throw new Error(`Backup ZIP is missing ${memberName}.`);
-  }
-
-  const parsedValue = JSON.parse(strFromU8(member)) as unknown;
-
-  if (!Array.isArray(parsedValue)) {
-    throw new Error(`Backup ZIP member ${memberName} must contain a JSON array.`);
-  }
-
-  return parsedValue as T[];
-};
-
-export async function restoreLocalBackupArchive(file: File) {
-  let archiveEntries: Record<string, Uint8Array>;
-
-  try {
-    archiveEntries = unzipSync(new Uint8Array(await file.arrayBuffer()));
-  } catch {
-    throw new Error("Upload a valid ZIP backup file.");
-  }
-
-  const manifestMember = archiveEntries["metadata/manifest.json"];
-
-  if (!manifestMember) {
-    throw new Error("Backup ZIP must include metadata/manifest.json.");
-  }
-
-  let manifest: Record<string, unknown>;
-
-  try {
-    const parsedManifest = JSON.parse(strFromU8(manifestMember)) as unknown;
-
-    if (
-      !parsedManifest ||
-      typeof parsedManifest !== "object" ||
-      Array.isArray(parsedManifest)
-    ) {
-      throw new Error("Backup ZIP manifest must be a JSON object.");
-    }
-
-    manifest = parsedManifest as Record<string, unknown>;
-  } catch {
-    throw new Error("Backup ZIP contains an invalid manifest file.");
-  }
-
-  const snapshotFormat = String(manifest.snapshot_format || "sql").toLowerCase();
-  if (snapshotFormat !== "json") {
-    throw new Error("Only JSON snapshot backup ZIPs can be restored locally.");
-  }
-
-  const currentBranch = getCurrentBranch();
-  const backupBranch = String(manifest.branch || currentBranch).trim();
-  if (backupBranch && backupBranch.toLowerCase() !== currentBranch.toLowerCase()) {
-    throw new Error(
-      `This backup belongs to branch "${backupBranch}", not "${currentBranch}".`,
-    );
-  }
-
-  const snapshot: BackupSnapshotPayload = {
-    branch: backupBranch || currentBranch,
-    snapshot_format: "json",
-    students: parseBackupArchiveJsonArray<StudentStorageRecord>(
-      archiveEntries,
-      "data/students.json",
-    ),
-    alumni: parseBackupArchiveJsonArray<AlumniBackupRecord>(
-      archiveEntries,
-      "data/alumni.json",
-    ),
-  };
-
-  applyBackupSnapshot(snapshot);
-  return snapshot;
 }
 
 export async function downloadBackupArchive(

@@ -1,5 +1,4 @@
 import io
-import hashlib
 import json
 import mimetypes
 import os
@@ -151,16 +150,6 @@ def download_backup_blob(*, object_path, storage_bucket=None):
     download_request = request.Request(download_url, headers=_build_headers(api_key))
     with _storage_request(download_request) as response:
         return response.read()
-
-
-def verify_backup_archive(*, object_path, storage_bucket, expected_payload):
-    """Read back this exact object, without falling back to another location."""
-    payload = download_backup_blob(object_path=object_path, storage_bucket=storage_bucket)
-    if hashlib.sha256(payload).digest() != hashlib.sha256(expected_payload).digest():
-        raise BackupStorageError(
-            "The saved backup failed verification. Create a new backup before relying on it.",
-            status_code=409,
-        )
 
 
 def download_backup_archive_blob(*, object_path, storage_bucket=None):

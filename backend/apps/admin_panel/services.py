@@ -26,7 +26,6 @@ from .storage import (
     guess_content_type,
     upload_backup_blob,
     upload_media_blob,
-    verify_backup_archive,
 )
 
 
@@ -471,11 +470,6 @@ def store_uploaded_backup_archive(*, branch_id, uploaded_file_name, payload, cre
         payload=payload,
         content_type="application/zip",
     )
-    verify_backup_archive(
-        object_path=stored_archive_path,
-        storage_bucket=bucket,
-        expected_payload=payload,
-    )
 
     history = create_backup_history(
         branch=branch_id,
@@ -622,11 +616,6 @@ def _create_branch_backup(*, branch_id, backup_type, created_by, history, snapsh
         object_path=sql_storage_path,
         payload=sql_payload,
         content_type="application/sql",
-    )
-    verify_backup_archive(
-        object_path=stored_archive_path,
-        storage_bucket=bucket,
-        expected_payload=archive_payload,
     )
 
     history_id = history.id

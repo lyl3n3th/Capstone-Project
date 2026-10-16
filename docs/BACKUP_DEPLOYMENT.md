@@ -3,8 +3,8 @@
 Backup history and backup ZIPs are separate. A history entry can exist even when
 its ZIP was stored only on another computer or lost after a Render redeploy.
 New production backups must use a private Supabase Storage bucket. The backend
-uploads the ZIP and reads the exact object back to verify its SHA-256 before
-marking the backup completed. Storage failure marks generated backups failed.
+marks the backup completed after the ZIP upload succeeds. Storage failures
+still mark generated backups failed.
 
 ## Configure the existing deployment
 
@@ -70,8 +70,8 @@ selected database are correct, apply it:
 python manage.py migrate_backup_storage --branch "Bacoor" --media-root "C:\path\to\surviving\media" --apply
 ```
 
-Apply uploads each ZIP to a new unique cloud path, verifies the downloaded
-bytes, then updates matching history entries. Separate SQL files are copied
+Apply uploads each ZIP to a new unique cloud path, then updates matching
+history entries. Separate SQL files are copied
 when present; when absent, the SQL export inside the ZIP remains available.
 Original local files are preserved, including on errors. Missing archives are
 reported and their history entries are left unchanged.

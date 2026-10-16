@@ -18,7 +18,7 @@ from apps.admin_panel.models import BackupHistory, BackupSnapshot
 from apps.admin_panel.repository import BackupSettingsRecord
 from apps.admin_panel.storage import (
     BackupStorageError, download_backup_archive_blob, download_backup_blob,
-    upload_backup_blob, verify_backup_archive,
+    upload_backup_blob,
 )
 from apps.admin_panel.services import create_branch_backup
 
@@ -248,22 +248,19 @@ class BackupArchiveApiTests(TestCase):
             "branches/bacoor/uploads/bacoor_backup.zip",
         )
 
-        with patch("apps.admin_panel.services.verify_backup_archive") as verify_mock:
-            response = self.client.post(
-                "/api/admin/backup/upload/",
-                {
-                    "archive": SimpleUploadedFile(
-                        "bacoor_backup.zip",
-                        self._build_snapshot_zip(),
-                        content_type="application/zip",
-                    )
-                },
-                format="multipart",
-                HTTP_X_USER_ROLE="admin",
-                HTTP_X_USER_BRANCH="Bacoor",
-            )
-
-        verify_mock.assert_called_once()
+        response = self.client.post(
+            "/api/admin/backup/upload/",
+            {
+                "archive": SimpleUploadedFile(
+                    "bacoor_backup.zip",
+                    self._build_snapshot_zip(),
+                    content_type="application/zip",
+                )
+            },
+            format="multipart",
+            HTTP_X_USER_ROLE="admin",
+            HTTP_X_USER_BRANCH="Bacoor",
+        )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["status"], "completed")
         self.assertEqual(response.data["backup_type"], "manual")
@@ -355,29 +352,56 @@ class BackupArchiveApiTests(TestCase):
             [{"id": "A-1", "becameAlumniOn": "2026-04-24"}],
         )
 
-    @patch("apps.admin_panel.services.verify_backup_archive")
+    @patch("apps.admin_panel.services.get_backup_archive_payload")
     @patch("apps.admin_panel.services.upload_backup_blob")
-    def test_unreadable_uploaded_archive_never_creates_completed_history(self, upload_mock, verify_mock):
-        upload_mock.return_value = ("branch-backups", "unreadable.zip")
-        verify_mock.side_effect = BackupStorageError("Saved backup could not be verified.")
-        response = self.client.post(
-            "/api/admin/backup/upload/",
-            {"archive": SimpleUploadedFile("backup.zip", self._build_snapshot_zip(), content_type="application/zip")},
-            format="multipart", HTTP_X_USER_ROLE="admin", HTTP_X_USER_BRANCH="Bacoor",
+    def test_uploaded_json_backup_can_be_restored(self, upload_blob_mock, archive_payload_mock):
+        upload_blob_mock.return_value = (
+            "branch-backups",
+            "branches/bacoor/uploads/uploaded-backup.zip",
         )
-        self.assertEqual(response.status_code, 503)
-        self.assertFalse(BackupHistory.objects.exists())
+        archive_payload_mock.return_value = self._build_snapshot_zip()
 
-    @patch("apps.admin_panel.services.verify_backup_archive")
+        upload_response = self.client.post(
+            "/api/admin/backup/upload/",
+            {
+                "archive": SimpleUploadedFile(
+                    "uploaded-backup.zip",
+                    self._build_snapshot_zip(),
+                    content_type="application/zip",
+                )
+            },
+            format="multipart",
+            HTTP_X_USER_ROLE="admin",
+            HTTP_X_USER_BRANCH="Bacoor",
+        )
+        self.assertEqual(upload_response.status_code, 201, upload_response.data)
+
+        restore_response = self.client.post(
+            "/api/admin/backup/restore/",
+            {"backup_history_id": upload_response.data["id"]},
+            format="json",
+            HTTP_X_USER_ROLE="admin",
+            HTTP_X_USER_BRANCH="Bacoor",
+        )
+        self.assertEqual(restore_response.status_code, 202, restore_response.data)
+        self.assertEqual(restore_response.data["status"], BackupHistory.STATUS_COMPLETED)
+        self.assertEqual(
+            BackupSnapshot.objects.get(branch="Bacoor").students,
+            [{"id": "S-1", "branch": "Bacoor"}],
+        )
+
     @patch("apps.admin_panel.services.upload_backup_blob")
-    def test_failed_readback_marks_generated_backup_failed(self, upload_mock, verify_mock):
+    def test_generated_backup_completes_after_upload(self, upload_mock):
         upload_mock.return_value = ("branch-backups", "backup.zip")
-        verify_mock.side_effect = BackupStorageError("Saved backup failed verification.", status_code=409)
-        with self.assertRaises(BackupStorageError):
-            create_branch_backup(branch_id="Bacoor", backup_type="manual", snapshot_data={"students": [], "alumni": []})
+        create_branch_backup(
+            branch_id="Bacoor",
+            backup_type="manual",
+            snapshot_data={"students": [], "alumni": []},
+        )
         history = BackupHistory.objects.get()
-        self.assertEqual(history.status, BackupHistory.STATUS_FAILED)
-        self.assertIn("verification", history.error_message)
+        self.assertEqual(history.status, BackupHistory.STATUS_COMPLETED)
+        self.assertEqual(history.progress, 100)
+        self.assertEqual(upload_mock.call_count, 2)
 
     @patch("apps.admin_panel.views.get_backup_archive_payload")
     def test_download_reports_storage_access_failure_without_calling_it_missing(self, payload_mock):
@@ -464,10 +488,9 @@ class BackupArchiveApiTests(TestCase):
             self.assertEqual(restore.data["status"], "completed")
             self.assertEqual(BackupSnapshot.objects.get(branch="Bacoor").students, [{"id": "S-1", "branch": "Bacoor"}])
 
-    @patch("apps.admin_panel.management.commands.migrate_backup_storage.verify_backup_archive")
     @patch("apps.admin_panel.management.commands.migrate_backup_storage.upload_backup_blob")
     @patch("apps.admin_panel.management.commands.migrate_backup_storage.get_storage_config")
-    def test_recovery_preserves_local_files_and_updates_history_only_after_verification(self, config_mock, upload_mock, verify_mock):
+    def test_recovery_preserves_local_files_and_updates_history_after_upload(self, config_mock, upload_mock):
         from pathlib import Path
         config_mock.return_value = ("https://project.supabase.co", "test-key", "branch-backups")
         upload_mock.return_value = ("branch-backups", "recovered/backup.zip")
@@ -483,12 +506,6 @@ class BackupArchiveApiTests(TestCase):
             upload_mock.assert_not_called()
             history.refresh_from_db()
             self.assertEqual(history.storage_bucket, "local-media")
-            verify_mock.side_effect = BackupStorageError("Verification failed.")
-            with self.assertRaises(BackupStorageError):
-                call_command("migrate_backup_storage", branch="Bacoor", media_root=media_root, apply=True, stdout=output)
-            history.refresh_from_db()
-            self.assertEqual(history.storage_bucket, "local-media")
-            verify_mock.side_effect = None
             call_command("migrate_backup_storage", branch="Bacoor", media_root=media_root, apply=True, stdout=output)
             history.refresh_from_db()
             self.assertEqual(history.storage_bucket, "branch-backups")
@@ -520,12 +537,6 @@ class BackupStorageSafetyTests(SimpleTestCase):
             download_backup_archive_blob(object_path="gone.zip", storage_bucket="local-media")
         self.assertEqual(raised.exception.status_code, 404)
         self.assertIn("original computer or server", str(raised.exception))
-
-    @patch("apps.admin_panel.storage.download_backup_blob", return_value=b"different-payload")
-    def test_readback_checks_the_exact_bytes_and_bucket(self, download_mock):
-        with self.assertRaisesMessage(BackupStorageError, "failed verification"):
-            verify_backup_archive(object_path="backup.zip", storage_bucket="branch-backups", expected_payload=b"original")
-        download_mock.assert_called_once_with(object_path="backup.zip", storage_bucket="branch-backups")
 
     @patch("apps.admin_panel.storage.get_storage_config", return_value=("https://project.supabase.co", "secret", "branch-backups"))
     @patch("apps.admin_panel.storage.request.urlopen")

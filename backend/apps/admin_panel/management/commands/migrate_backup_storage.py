@@ -11,7 +11,6 @@ from apps.admin_panel.storage import (
     LOCAL_BACKUP_STORAGE_BUCKET,
     get_storage_config,
     upload_backup_blob,
-    verify_backup_archive,
 )
 
 
@@ -21,7 +20,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--branch", required=True)
         parser.add_argument("--media-root", help="Directory containing the surviving backend/media files.")
-        parser.add_argument("--apply", action="store_true", help="Upload verified files and update matching history entries.")
+        parser.add_argument("--apply", action="store_true", help="Upload files and update matching history entries.")
 
     def handle(self, *args, **options):
         branch = options["branch"]
@@ -65,7 +64,6 @@ class Command(BaseCommand):
                     payload=payload,
                     content_type="application/zip",
                 )
-                verify_backup_archive(object_path=stored_path, storage_bucket=bucket, expected_payload=payload)
                 stored_sql_path = ""
                 if history.sql_file_path:
                     sql_path = self._safe_path(media_root, history.sql_file_path)
@@ -76,7 +74,7 @@ class Command(BaseCommand):
                             content_type="application/sql",
                         )
                     else:
-                        self.stdout.write(self.style.WARNING("Separate SQL file is missing; SQL inside the verified ZIP remains available."))
+                        self.stdout.write(self.style.WARNING("Separate SQL file is missing; SQL inside the ZIP remains available."))
                 recovered[history.file_path] = (bucket, stored_path, stored_sql_path)
 
             bucket, stored_path, stored_sql_path = recovered[history.file_path]
