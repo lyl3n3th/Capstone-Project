@@ -296,9 +296,22 @@ function AppRoutes() {
         <Route index element={<Navigate to="/admin/dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboard {...adminProps} />} />
         <Route path="students" element={<AdminStudents {...adminProps} />} />
-        <Route path="enrollees" element={<AdminEnrollees {...adminProps} />} />
+        <Route
+          path="enrollees"
+          element={<AdminEnrollees key="admin-enrollees" {...adminProps} />}
+        />
         <Route path="grades" element={<AdminGrades {...adminProps} />} />
         <Route path="alumni" element={<AdminAlumni {...adminProps} />} />
+        <Route
+          path="instructors"
+          element={
+            <AdminEnrollees
+              key="admin-instructors"
+              {...adminProps}
+              instructorManagementOnly
+            />
+          }
+        />
         <Route
           path="reports"
           element={

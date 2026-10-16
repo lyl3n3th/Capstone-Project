@@ -20,12 +20,16 @@ import {
 } from "../../services/studentGrades";
 import {
   fetchAndCacheGradeChangeRequestSettings,
+  fetchAndCacheInstructorGradeChangeErrorHistory,
   fetchAndCacheInstructorGradeChangeRequests,
   getGradeChangeRequestSettings,
+  getInstructorGradeChangeErrorHistory,
   getInstructorGradeChangeRequests,
+  saveInstructorGradeChangeErrorHistory,
   saveInstructorGradeChangeRequest,
   studentHasAssignedInstructorSubject,
   type InstructorGradeChangeRequest,
+  writeInstructorGradeChangeErrorHistory,
   writeInstructorGradeChangeRequests,
 } from "../../services/instructorPortal";
 
@@ -96,6 +100,8 @@ export default function InstructorGradeChanges() {
   const [gradeSearchTerm, setGradeSearchTerm] = useState("");
   const [viewingRequest, setViewingRequest] =
     useState<InstructorGradeChangeRequest | null>(null);
+  const [viewingErrorRequest, setViewingErrorRequest] =
+    useState<InstructorGradeChangeRequest | null>(null);
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedRequestIds, setSelectedRequestIds] = useState<string[]>([]);
 
@@ -106,6 +112,7 @@ export default function InstructorGradeChanges() {
 
     void Promise.all([
       fetchAndCacheInstructorGradeChangeRequests(currentUser.branch),
+      fetchAndCacheInstructorGradeChangeErrorHistory(currentUser.branch),
       fetchAndCacheGradeChangeRequestSettings(currentUser.branch),
       fetchAndCacheStudentGradeRecordsForBranch(currentUser.branch),
     ])
@@ -142,9 +149,19 @@ export default function InstructorGradeChanges() {
 
   const requests = useMemo<InstructorGradeChangeRequest[]>(() => {
     void requestsVersion;
-    return getInstructorGradeChangeRequests(currentUser?.branch).filter(
-      (request) => request.instructorId === currentUser?.id,
+    const requestById = new Map(
+      [
+        ...getInstructorGradeChangeRequests(currentUser?.branch),
+        ...getInstructorGradeChangeErrorHistory(currentUser?.branch),
+      ].map((request) => [request.id, request]),
     );
+
+    return Array.from(requestById.values())
+      .filter((request) => request.instructorId === currentUser?.id)
+      .sort(
+        (left, right) =>
+          Date.parse(right.submittedAt) - Date.parse(left.submittedAt),
+      );
   }, [currentUser?.branch, currentUser?.id, requestsVersion]);
 
   const gradeChangeSettings = useMemo(() => {
@@ -274,6 +291,7 @@ export default function InstructorGradeChanges() {
 
     setRequestedGrades({});
     setGradeSearchTerm("");
+    setMessage("");
     setIsRequestModalOpen(true);
   };
 
@@ -295,49 +313,80 @@ export default function InstructorGradeChanges() {
       }))
       .filter((entry) => entry.requestedGrade);
     const errors: string[] = [];
+    const errorRows: NonNullable<InstructorGradeChangeRequest["errorRows"]> = [];
     const changes: InstructorGradeChangeRequest["changes"] = [];
 
-    requestedRows.forEach(({ row, requestedGrade }) => {
+    requestedRows.forEach(({ row, requestedGrade }, index) => {
+      const rowErrors: string[] = [];
+
       if (!isRequestedGradeInAllowedRange(requestedGrade)) {
-        errors.push(
-          `${row.fullName} - ${row.subjectCode}: Requested grade must be 70-100.`,
-        );
-        return;
+        rowErrors.push("Requested grade must be 70-100.");
       }
 
-      const validationResult = validateAndNormalizeUploadedGradeRow({
-        studentId: row.studentId,
-        fullName: row.fullName,
-        subjectCode: row.subjectCode,
-        subjectTitle: row.subjectTitle,
-        grade: requestedGrade,
-        unit: row.units === null ? "" : String(row.units),
-        gradingPeriod: row.gradingPeriod,
-        programType: row.programType,
-        academicYear: row.academicYear,
-        semester: row.semester,
-        branch: currentUser.branch,
-      });
+      const validationResult =
+        rowErrors.length === 0
+          ? validateAndNormalizeUploadedGradeRow({
+              studentId: row.studentId,
+              fullName: row.fullName,
+              subjectCode: row.subjectCode,
+              subjectTitle: row.subjectTitle,
+              grade: requestedGrade,
+              unit: row.units === null ? "" : String(row.units),
+              gradingPeriod: row.gradingPeriod,
+              programType: row.programType,
+              academicYear: row.academicYear,
+              semester: row.semester,
+              branch: currentUser.branch,
+            })
+          : null;
 
-      if (validationResult.errorReason || !validationResult.normalizedRecord) {
-        errors.push(
-          `${row.fullName} - ${row.subjectCode}: ${
-            validationResult.errorReason || "Invalid requested grade."
-          }`,
+      if (
+        validationResult &&
+        (validationResult.errorReason || !validationResult.normalizedRecord)
+      ) {
+        rowErrors.push(
+          validationResult.errorReason || "Invalid requested grade.",
         );
-        return;
       }
 
       if (
-        validationResult.normalizedRecord.normalizedGrade === row.currentGrade
+        validationResult?.normalizedRecord?.normalizedGrade === row.currentGrade
       ) {
         return;
       }
 
       if (!row.currentRecord) {
+        rowErrors.push("No approved current grade exists for this row.");
+      }
+
+      if (rowErrors.length > 0) {
         errors.push(
-          `${row.fullName} - ${row.subjectCode}: No approved current grade exists for this row.`,
+          ...rowErrors.map(
+            (error) => `${row.fullName} - ${row.subjectCode}: ${error}`,
+          ),
         );
+        errorRows.push({
+          sheetName: row.section || "Change of Grades",
+          rowNumber: index + 1,
+          studentId: row.studentId,
+          fullName: row.fullName,
+          section: row.section,
+          subjectCode: row.subjectCode,
+          subjectTitle: row.subjectTitle,
+          units: row.units === null ? "" : String(row.units),
+          academicYear: row.academicYear,
+          semester: row.semester,
+          gradingPeriod: row.gradingPeriod,
+          programType: row.programType,
+          currentGrade: row.currentGrade,
+          requestedGrade,
+          instructorName: instructor.name,
+          errors: rowErrors,
+        });
+        return;
+      }
+
+      if (!validationResult?.normalizedRecord || !row.currentRecord) {
         return;
       }
 
@@ -366,7 +415,26 @@ export default function InstructorGradeChanges() {
     }
 
     if (errors.length > 0) {
-      setMessage(errors.join(" "));
+      const submittedAt = new Date();
+      saveInstructorGradeChangeErrorHistory(currentUser.branch, {
+        id: `grade-change-request-${Date.now()}`,
+        branch: currentUser.branch,
+        instructorId: instructor.id,
+        instructorName: instructor.name,
+        employeeId: instructor.employeeId,
+        fileName: `Grade change request - ${submittedAt.toLocaleString()}`,
+        submittedAt: submittedAt.toISOString(),
+        status: "Error",
+        changes,
+        errors,
+        errorRows,
+      });
+      setRequestsVersion((previousValue) => previousValue + 1);
+      setIsRequestModalOpen(false);
+      setRequestedGrades({});
+      setMessage(
+        `${changes.length} correct row(s) and ${errorRows.length} error row(s) were saved in history. Nothing was sent to the administrator.`,
+      );
       return;
     }
 
@@ -419,6 +487,12 @@ export default function InstructorGradeChanges() {
         (request) => !selectedIds.has(request.id),
       ),
     );
+    writeInstructorGradeChangeErrorHistory(
+      currentUser.branch,
+      getInstructorGradeChangeErrorHistory(currentUser.branch).filter(
+        (request) => !selectedIds.has(request.id),
+      ),
+    );
     setSelectedRequestIds([]);
     setIsDeleteMode(false);
     setRequestsVersion((previousValue) => previousValue + 1);
@@ -430,7 +504,7 @@ export default function InstructorGradeChanges() {
       <SkeletonPage
         className="instructor-panel"
         eyebrow="Grade corrections"
-        title="Grade Change Requests"
+        title="Change of Grades"
         variant="upload"
       />
     );
@@ -441,7 +515,7 @@ export default function InstructorGradeChanges() {
       <div className="instructor-page-header">
         <div>
           <span>Grade corrections</span>
-          <h1>Grade Change Requests</h1>
+          <h1>Change of Grades</h1>
         </div>
         <strong>{requests.length} request{requests.length === 1 ? "" : "s"}</strong>
       </div>
@@ -499,7 +573,8 @@ export default function InstructorGradeChanges() {
                 {isDeleteMode ? <th>Select</th> : null}
                 <th>Date</th>
                 <th>Request</th>
-                <th>Rows</th>
+                <th>Correct</th>
+                <th>Errors</th>
                 <th>Status</th>
                 <th className="instructor-table-actions-heading">Actions</th>
               </tr>
@@ -524,6 +599,7 @@ export default function InstructorGradeChanges() {
                     </span>
                   </td>
                   <td>{request.changes.length}</td>
+                  <td>{request.errorRows?.length ?? 0}</td>
                   <td>{request.status}</td>
                   <td className="instructor-table-actions-cell">
                     <div className="instructor-table-actions">
@@ -532,12 +608,12 @@ export default function InstructorGradeChanges() {
                         onClick={() => setViewingRequest(request)}
                         disabled={request.changes.length === 0}
                       >
-                        <FiCheckCircle /> Changes
+                        <FiCheckCircle /> Correct
                       </button>
                       <button
                         type="button"
-                        disabled
-                        title="New grade change requests are checked before sending."
+                        onClick={() => setViewingErrorRequest(request)}
+                        disabled={(request.errorRows?.length ?? 0) === 0}
                       >
                         <FiAlertTriangle /> Errors
                       </button>
@@ -547,7 +623,7 @@ export default function InstructorGradeChanges() {
               ))}
               {requests.length === 0 ? (
                 <tr>
-                  <td colSpan={isDeleteMode ? 6 : 5}>
+                  <td colSpan={isDeleteMode ? 7 : 6}>
                     No grade change requests yet.
                   </td>
                 </tr>
@@ -762,6 +838,86 @@ export default function InstructorGradeChanges() {
                       <td colSpan={11}>No grade changes were found.</td>
                     </tr>
                   ) : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {viewingErrorRequest ? (
+        <div
+          className="instructor-error-modal-overlay"
+          role="presentation"
+          onClick={() => setViewingErrorRequest(null)}
+        >
+          <section
+            className="instructor-error-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="instructor-change-errors-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="instructor-error-modal-header">
+              <div>
+                <span>Grade change request errors</span>
+                <h2 id="instructor-change-errors-modal-title">
+                  {viewingErrorRequest.fileName}
+                </h2>
+                <p>
+                  {(viewingErrorRequest.errorRows?.length ?? 0).toLocaleString()} row
+                  {(viewingErrorRequest.errorRows?.length ?? 0) === 1 ? "" : "s"}{" "}
+                  need correction.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="instructor-error-modal-close"
+                aria-label="Close grade change errors"
+                onClick={() => setViewingErrorRequest(null)}
+              >
+                <FiX />
+              </button>
+            </div>
+
+            <div className="instructor-error-table-wrap">
+              <table className="instructor-error-table instructor-grade-change-error-table">
+                <thead>
+                  <tr>
+                    <th>Student ID</th>
+                    <th>Full Name</th>
+                    <th>Section</th>
+                    <th>Subject</th>
+                    <th>Current Grade</th>
+                    <th>Requested Grade</th>
+                    <th>Errors</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(viewingErrorRequest.errorRows ?? []).map((row, index) => (
+                    <tr
+                      key={`${row.studentId}-${row.subjectCode}-${row.rowNumber}-${index}`}
+                      className="instructor-error-row"
+                    >
+                      <td>{row.studentId}</td>
+                      <td>{row.fullName}</td>
+                      <td>{row.section || "-"}</td>
+                      <td>
+                        <strong>{row.subjectCode}</strong>
+                        <br />
+                        {row.subjectTitle}
+                      </td>
+                      <td>{row.currentGrade || "-"}</td>
+                      <td>{row.requestedGrade || "-"}</td>
+                      <td>
+                        <ul className="instructor-error-problems">
+                          {row.errors.map((error) => (
+                            <li key={error}>{error}</li>
+                          ))}
+                        </ul>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

@@ -37,6 +37,8 @@ import {
 const INSTRUCTOR_GRADE_SUBMISSIONS_SCOPE = "instructor-grade-submissions";
 const INSTRUCTOR_GRADE_CHANGE_REQUESTS_SCOPE =
   "instructor-grade-change-requests";
+const INSTRUCTOR_GRADE_CHANGE_ERROR_HISTORY_SCOPE =
+  "instructor-grade-change-error-history";
 const GRADE_CHANGE_REQUEST_SETTINGS_SCOPE = "grade-change-request-settings";
 
 if (typeof window !== "undefined") {
@@ -416,6 +418,29 @@ export const saveInstructorGradeSubmission = (
   ]);
 };
 
+export const deleteInstructorGradeSubmissions = async ({
+  branch,
+  submissionIds,
+}: {
+  branch?: string | null;
+  submissionIds: string[];
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const results = await Promise.all(
+    submissionIds.map((submissionId) =>
+      supabase.rpc("delete_instructor_grade_submission", {
+        p_branch: resolvedBranch,
+        p_submission_id: submissionId,
+      }),
+    ),
+  );
+  const failedResult = results.find((result) => result.error);
+
+  if (failedResult?.error) {
+    throw new Error(getErrorMessage(failedResult.error));
+  }
+};
+
 const sortGradeChangeRequests = (requests: InstructorGradeChangeRequest[]) =>
   [...requests].sort(
     (left, right) =>
@@ -461,6 +486,52 @@ export const saveInstructorGradeChangeRequest = (
 ) => {
   const existing = getInstructorGradeChangeRequests(branch);
   return writeInstructorGradeChangeRequests(branch, [
+    request,
+    ...existing.filter((item) => item.id !== request.id),
+  ]);
+};
+
+export const getInstructorGradeChangeErrorHistory = (
+  branch?: string | null,
+) =>
+  sortGradeChangeRequests(
+    readBranchScopedData<InstructorGradeChangeRequest[]>(
+      INSTRUCTOR_GRADE_CHANGE_ERROR_HISTORY_SCOPE,
+      branch,
+    ) ?? [],
+  );
+
+export const fetchAndCacheInstructorGradeChangeErrorHistory = async (
+  branch?: string | null,
+) => {
+  const requests =
+    (await fetchAndCacheBranchScopedData<InstructorGradeChangeRequest[]>(
+      INSTRUCTOR_GRADE_CHANGE_ERROR_HISTORY_SCOPE,
+      branch,
+    )) ?? [];
+
+  return sortGradeChangeRequests(requests);
+};
+
+export const writeInstructorGradeChangeErrorHistory = (
+  branch: string | null | undefined,
+  requests: InstructorGradeChangeRequest[],
+) => {
+  const sortedRequests = sortGradeChangeRequests(requests);
+  writeBranchScopedData(
+    INSTRUCTOR_GRADE_CHANGE_ERROR_HISTORY_SCOPE,
+    branch,
+    sortedRequests,
+  );
+  return sortedRequests;
+};
+
+export const saveInstructorGradeChangeErrorHistory = (
+  branch: string | null | undefined,
+  request: InstructorGradeChangeRequest,
+) => {
+  const existing = getInstructorGradeChangeErrorHistory(branch);
+  return writeInstructorGradeChangeErrorHistory(branch, [
     request,
     ...existing.filter((item) => item.id !== request.id),
   ]);
@@ -787,17 +858,18 @@ const getAssignmentUnits = (
 };
 
 const buildInstructorTemplateRows = ({
-  assignments,
   programType,
   subjects,
-  students,
+  studentAssignments,
 }: {
-  assignments: AcademicSubjectAssignmentRecord[];
   programType: StudentGradeProgramType;
   subjects: InstructorTemplateSubject[];
-  students: StudentStorageRecord[];
+  studentAssignments: Array<{
+    student: StudentStorageRecord;
+    assignments: AcademicSubjectAssignmentRecord[];
+  }>;
 }) =>
-  students.flatMap((student) =>
+  studentAssignments.flatMap(({ student, assignments }) =>
     assignments.map((assignment) => {
       const units = getAssignmentUnits(assignment, subjects);
 
@@ -1028,9 +1100,6 @@ export const downloadInstructorGradeTemplate = ({
 
   sections.forEach((section) => {
     const programType = getProgramType(section);
-    const sectionStudents = students.filter((student) =>
-      studentMatchesSection(student, section),
-    );
     const sectionAssignments = assignments.filter(
       (assignment) =>
         assignment.sectionId === section.id || assignment.sectionCode === section.code,
@@ -1039,6 +1108,32 @@ export const downloadInstructorGradeTemplate = ({
     if (sectionAssignments.length === 0) {
       return;
     }
+
+    const sectionStudentAssignments = students
+      .map((student) => {
+        const scheduledAssignments = sectionAssignments.filter((assignment) =>
+          studentHasAssignedInstructorSubject(student, assignment),
+        );
+
+        return {
+          student,
+          assignments:
+            scheduledAssignments.length > 0
+              ? scheduledAssignments
+              : studentMatchesSection(student, section)
+                ? sectionAssignments
+                : [],
+        };
+      })
+      .filter(({ assignments: studentSubjectAssignments }) =>
+        studentSubjectAssignments.length > 0,
+      )
+      .sort(
+        (left, right) =>
+          left.student.name.localeCompare(right.student.name) ||
+          left.student.id.localeCompare(right.student.id),
+      );
+    const sectionStudents = sectionStudentAssignments.map(({ student }) => student);
 
     const usedSheetNames =
       usedSheetNamesByProgram.get(programType) ?? new Set<string>();
@@ -1051,13 +1146,9 @@ export const downloadInstructorGradeTemplate = ({
       headerOverrides:
         programType === "College" ? { F: "GRADE (50-100)" } : undefined,
       rows: buildInstructorTemplateRows({
-        assignments: sectionAssignments,
         programType,
         subjects,
-        students: sectionStudents.sort(
-          (left, right) =>
-            left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
-        ),
+        studentAssignments: sectionStudentAssignments,
       }),
       sectionCode: section.code,
       semester: sectionAssignments[0]?.semester || section.semester || "",

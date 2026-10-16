@@ -947,6 +947,15 @@ begin
     raise exception 'Branch "%" is not configured.', p_branch;
   end if;
 
+  if exists (
+    select 1
+    from public.student_profiles student
+    where student.branch_id = v_branch_id
+      and lower(trim(coalesce(student.status, 'active'))) = 'active'
+  ) then
+    raise exception 'This branch cannot be deleted because it has enrolled students.';
+  end if;
+
   update public.admission_branches
   set is_active = false
   where id = v_branch_id;

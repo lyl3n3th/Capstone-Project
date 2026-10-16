@@ -11,15 +11,17 @@ import {
   BACKUP_RESTORE_APPLIED_EVENT,
   forgetRememberedAlumniStudentStatus,
   getRememberedAlumniStudentStatus,
-  persistAlumniBackupCache,
-  readCachedAlumni,
+  persistAlumniBackupCacheForBranch,
+  readCachedAlumniForBranch,
   rememberAlumniStudentStatus,
 } from "../../services/backupApi";
 import {
   forgetDeletedStoredStudent,
+  getBranchFromStudentNumber,
   getCurrentBranch,
   getStudentCredentialOverview,
   readStoredStudents,
+  normalizeBranchName,
   writeStoredStudents,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
@@ -47,6 +49,7 @@ interface AlumniStudent {
   contact: string;
   email?: string;
   becameAlumniOn: string;
+  branch?: string;
   studentSnapshot?: StudentStorageRecord;
 }
 
@@ -60,6 +63,7 @@ interface StudentRecord {
   contact: string;
   email: string;
   status?: "Complete" | "Incomplete" | "Archived" | "Graduated";
+  branch?: string;
   studentSnapshot?: StudentStorageRecord;
 }
 
@@ -72,6 +76,7 @@ interface ApiAlumni {
   contact: string;
   email?: string | null;
   became_alumni_on: string;
+  branch?: string | null;
 }
 
 interface ApiStudent {
@@ -84,6 +89,7 @@ interface ApiStudent {
   contact?: string | null;
   email: string;
   status: string;
+  branch?: string | null;
 }
 
 interface ApiAlumniRecord {
@@ -95,6 +101,7 @@ interface ApiAlumniRecord {
   contact?: string | null;
   email?: string | null;
   became_alumni_on?: string | null;
+  branch?: string | null;
 }
 
 interface Toast {
@@ -133,13 +140,17 @@ const formatStoredDate = (value?: string | null) => {
   return parsedDate.toLocaleDateString();
 };
 
-const buildLocalAlumniRecord = (student: StudentRecord): ApiAlumniRecord => ({
+const buildLocalAlumniRecord = (
+  student: StudentRecord,
+  branch: string,
+): ApiAlumniRecord => ({
   student_id: student.id,
   full_name: student.name,
   program: student.strandOrCourse || student.program,
   year_graduated: getCurrentGraduationYear(),
   contact: student.contact || "",
   became_alumni_on: new Date().toISOString(),
+  branch,
 });
 
 const mapStoredStudentToUi = (student: StudentStorageRecord): StudentRecord => ({
@@ -152,6 +163,7 @@ const mapStoredStudentToUi = (student: StudentStorageRecord): StudentRecord => (
   contact: student.contact || "",
   email: student.email,
   status: student.status,
+  branch: student.branch,
   studentSnapshot: { ...student },
 });
 
@@ -175,6 +187,15 @@ export default function AdminAlumni({
   const [students, setStudents] = useState<StudentRecord[]>([]);
   const [alumni, setAlumni] = useState<AlumniStudent[]>([]);
   const [restoringAlumniId, setRestoringAlumniId] = useState<string | null>(null);
+  const currentBranch = getCurrentBranch();
+
+  const belongsToCurrentBranch = (id: string, branch?: string | null) => {
+    const resolvedRecordBranch = branch
+      ? normalizeBranchName(branch)
+      : getBranchFromStudentNumber(id);
+
+    return resolvedRecordBranch === currentBranch;
+  };
 
   // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {
@@ -198,6 +219,7 @@ export default function AdminAlumni({
     contact: apiAlumni.contact || "",
     email: apiAlumni.email || undefined,
     becameAlumniOn: apiAlumni.became_alumni_on || "",
+    branch: apiAlumni.branch || undefined,
   });
 
   const mapApiStudentToUi = (apiStudent: ApiStudent): StudentRecord => ({
@@ -209,6 +231,7 @@ export default function AdminAlumni({
     strandOrCourse: apiStudent.strand_or_course || "",
     contact: apiStudent.contact || "",
     email: apiStudent.email,
+    branch: apiStudent.branch || undefined,
     status:
       apiStudent.status === "Inactive"
         ? "Archived"
@@ -227,6 +250,8 @@ export default function AdminAlumni({
     contact: apiAlumni?.contact || student.contact || "",
     email: apiAlumni?.email || student.email || undefined,
     becameAlumniOn: apiAlumni?.became_alumni_on || "",
+    branch:
+      apiAlumni?.branch || student.branch || student.studentSnapshot?.branch || currentBranch,
     studentSnapshot:
       "studentSnapshot" in student
         ? (student as StudentRecord & { studentSnapshot?: StudentStorageRecord })
@@ -376,8 +401,15 @@ export default function AdminAlumni({
     setIsLoading(true);
 
     try {
-      const localStudents = readStoredStudents().map(mapStoredStudentToUi);
-      const localAlumni = addMissingAlumniEmails(readCachedAlumni(), localStudents);
+      const localStudents = readStoredStudents()
+        .filter(
+          (student) => normalizeBranchName(student.branch) === currentBranch,
+        )
+        .map(mapStoredStudentToUi);
+      const localAlumni = addMissingAlumniEmails(
+        readCachedAlumniForBranch(currentBranch),
+        localStudents,
+      );
 
       setStudents(localStudents);
       setAlumni(localAlumni);
@@ -392,23 +424,41 @@ export default function AdminAlumni({
       ]);
 
       const mappedStudents = apiStudents
-        ? apiStudents.map(mapApiStudentToUi)
+        ? apiStudents
+            .filter((student) =>
+              belongsToCurrentBranch(student.student_id, student.branch),
+            )
+            .map(mapApiStudentToUi)
         : localStudents;
       const mappedAlumni = apiAlumni
-        ? addMissingAlumniEmails(apiAlumni.map(mapApiAlumniToUi), mappedStudents)
+        ? addMissingAlumniEmails(
+            apiAlumni
+              .filter((record) =>
+                belongsToCurrentBranch(record.student_id, record.branch),
+              )
+              .map(mapApiAlumniToUi),
+            mappedStudents,
+          )
         : localAlumni;
 
       setAlumni(mappedAlumni);
       setStudents(mappedStudents);
 
       if (apiAlumni) {
-        persistAlumniBackupCache(mappedAlumni);
+        persistAlumniBackupCacheForBranch(mappedAlumni, currentBranch);
       }
     } catch (error) {
       console.error("Failed to load alumni data", error);
-      const storedStudents = readStoredStudents();
+      const storedStudents = readStoredStudents().filter(
+        (student) => normalizeBranchName(student.branch) === currentBranch,
+      );
       const localStudents = storedStudents.map(mapStoredStudentToUi);
-      setAlumni(addMissingAlumniEmails(readCachedAlumni(), localStudents));
+      setAlumni(
+        addMissingAlumniEmails(
+          readCachedAlumniForBranch(currentBranch),
+          localStudents,
+        ),
+      );
       setStudents(localStudents);
     } finally {
       setIsLoading(false);
@@ -566,7 +616,7 @@ export default function AdminAlumni({
           "Unable to create alumni record in backend. Saving locally instead.",
           error,
         );
-        createdAlumni = buildLocalAlumniRecord(student);
+        createdAlumni = buildLocalAlumniRecord(student, currentBranch);
         savedLocallyOnly = true;
       }
 
@@ -586,7 +636,7 @@ export default function AdminAlumni({
         );
       }
       const nextAlumni = [...alumni.filter((record) => record.id !== student.id), nextAlumniRecord];
-      persistAlumniBackupCache(nextAlumni);
+      persistAlumniBackupCacheForBranch(nextAlumni, currentBranch);
       setAlumni(nextAlumni);
       setStudents((prev) => prev.filter((record) => record.id !== student.id));
       removeStoredStudent(student.id);
@@ -651,7 +701,7 @@ export default function AdminAlumni({
       }
 
       const nextAlumni = alumni.filter((record) => record.id !== alumniStudent.id);
-      persistAlumniBackupCache(nextAlumni);
+      persistAlumniBackupCacheForBranch(nextAlumni, currentBranch);
       setAlumni(nextAlumni);
       setStudents((prev) =>
         prev.some((student) => student.id === alumniStudent.id)

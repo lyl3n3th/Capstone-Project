@@ -2,7 +2,12 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BsCardList } from "react-icons/bs";
 import { MdDashboard } from "react-icons/md";
-import { FaDatabase, FaGraduationCap, FaUserCheck } from "react-icons/fa";
+import {
+  FaChalkboardTeacher,
+  FaDatabase,
+  FaGraduationCap,
+  FaUserCheck,
+} from "react-icons/fa";
 import { FiLogOut } from "react-icons/fi";
 import { IoPeopleSharp } from "react-icons/io5";
 import {
@@ -139,6 +144,11 @@ export default function AdminSidebar({
       icon: <FaGraduationCap />,
       label: "Alumni",
       path: "/admin/alumni",
+    },
+    {
+      icon: <FaChalkboardTeacher />,
+      label: "Instructors",
+      path: "/admin/instructors",
     },
 
     {

@@ -6584,6 +6584,140 @@
   gap: 10px;
 }
 
+/* Mirrors the instructor management page while its data is loading. */
+.instructor-management-skeleton {
+  width: 100%;
+  min-width: 0;
+}
+
+.instructor-skeleton-block {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #e8edf5 25%, #f5f8fc 37%, #e8edf5 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.25s ease-in-out infinite;
+}
+
+.instructor-skeleton-page-header {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 52px;
+}
+
+.instructor-skeleton-page-header .page-title {
+  width: min(310px, 75%);
+  height: 35px;
+}
+
+.instructor-skeleton-page-header .page-subtitle {
+  width: min(390px, 90%);
+  height: 15px;
+}
+
+.instructor-skeleton-section {
+  min-width: 0;
+  padding: 0 24px;
+}
+
+.instructor-skeleton-section .section-title {
+  width: min(245px, 70%);
+  height: 26px;
+  margin-bottom: 18px;
+}
+
+.instructor-skeleton-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.instructor-skeleton-toolbar .search {
+  width: min(520px, 100%);
+  height: 40px;
+  flex: 1 1 520px;
+}
+
+.instructor-skeleton-toolbar-actions {
+  display: flex;
+  gap: 16px;
+  flex: 0 0 auto;
+}
+
+.instructor-skeleton-toolbar .add-button {
+  width: 134px;
+  height: 40px;
+}
+
+.instructor-skeleton-toolbar .department-button {
+  width: 162px;
+  height: 40px;
+}
+
+.instructor-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 20px;
+}
+
+.instructor-skeleton-card {
+  min-width: 0;
+  min-height: 126px;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr) 112px;
+  align-items: start;
+  gap: 16px;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+}
+
+.instructor-skeleton-card .avatar {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+}
+
+.instructor-skeleton-details {
+  display: grid;
+  gap: 7px;
+  padding-top: 3px;
+  min-width: 0;
+}
+
+.instructor-skeleton-details .name {
+  width: 70%;
+  height: 14px;
+}
+
+.instructor-skeleton-details .id {
+  width: 46%;
+  height: 11px;
+}
+
+.instructor-skeleton-details .department {
+  width: 42%;
+  height: 11px;
+}
+
+.instructor-skeleton-details .email {
+  width: 88%;
+  height: 11px;
+}
+
+.instructor-skeleton-card-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.instructor-skeleton-card-actions .card-button {
+  width: 112px;
+  height: 36px;
+}
+
 @media (max-width: 640px) {
   .enrollees-content .management-section {
     padding: 16px 12px;
@@ -6726,6 +6860,63 @@
   .enrollees-content .instructor-actions .action-btn {
     width: 100%;
     min-width: 0;
+  }
+
+  .instructor-skeleton-page-header {
+    margin-bottom: 36px;
+  }
+
+  .instructor-skeleton-section {
+    padding: 0 12px;
+  }
+
+  .instructor-skeleton-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .instructor-skeleton-toolbar .search {
+    width: 100%;
+    flex: none;
+  }
+
+  .instructor-skeleton-toolbar-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .instructor-skeleton-toolbar .add-button,
+  .instructor-skeleton-toolbar .department-button {
+    width: 100%;
+  }
+
+  .instructor-skeleton-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .instructor-skeleton-card {
+    min-height: 0;
+    padding: 14px;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .instructor-skeleton-card .avatar {
+    width: 48px;
+    height: 48px;
+  }
+
+  .instructor-skeleton-card-actions {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .instructor-skeleton-card-actions .card-button {
+    width: 100%;
   }
 }
 

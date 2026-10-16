@@ -30,6 +30,7 @@ import {
 } from "react-icons/fa";
 import { MdArchive } from "react-icons/md";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import SystemAlertModal from "../../components/common/SystemAlertModal";
 import { ToastContainer } from "../../components/common/Toast";
 import { useAuth } from "../../hooks/useAuth";
 import {
@@ -38,6 +39,7 @@ import {
   fetchInstructorEvaluationSubmissions,
   fetchSupabaseAdmissionApplicants,
   getStudentSectionChoices,
+  getStudentPortalSubjects,
   getStudentsForBranch,
   INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
   normalizeBranchName,
@@ -123,6 +125,7 @@ interface EnrolleesProps {
   loggedInUsername: string;
   loggedInRole?: "Admin" | "Registrar";
   canAccessBackup?: boolean;
+  instructorManagementOnly?: boolean;
 }
 
 interface Attachment {
@@ -1403,22 +1406,70 @@ const buildProgressedBlockSectionCode = ({
   return `${prefix}${requestedYearCode}-${blockLabel}`;
 };
 
+const InstructorManagementSkeleton = () => (
+  <div
+    className="instructor-management-skeleton"
+    aria-busy="true"
+    aria-label="Loading instructors"
+  >
+    <header className="instructor-skeleton-page-header">
+      <span className="instructor-skeleton-block page-title" />
+      <span className="instructor-skeleton-block page-subtitle" />
+    </header>
+
+    <section className="instructor-skeleton-section">
+      <span className="instructor-skeleton-block section-title" />
+
+      <div className="instructor-skeleton-toolbar">
+        <span className="instructor-skeleton-block search" />
+        <div className="instructor-skeleton-toolbar-actions">
+          <span className="instructor-skeleton-block add-button" />
+          <span className="instructor-skeleton-block department-button" />
+        </div>
+      </div>
+
+      <div className="instructor-skeleton-grid">
+        {Array.from({ length: 6 }, (_, index) => (
+          <article className="instructor-skeleton-card" key={index}>
+            <span className="instructor-skeleton-block avatar" />
+            <div className="instructor-skeleton-details">
+              <span className="instructor-skeleton-block name" />
+              <span className="instructor-skeleton-block id" />
+              <span className="instructor-skeleton-block department" />
+              <span className="instructor-skeleton-block email" />
+            </div>
+            <div className="instructor-skeleton-card-actions">
+              <span className="instructor-skeleton-block card-button" />
+              <span className="instructor-skeleton-block card-button" />
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  </div>
+);
+
 export default function AdminEnrollees({
   onLogout,
   loggedInUsername,
   loggedInRole = "Admin",
   canAccessBackup = true,
+  instructorManagementOnly = false,
 }: EnrolleesProps) {
   const { currentUser } = useAuth();
   const currentBranch = normalizeBranchName(currentUser?.branch);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "admissions" | "transferees" | "enrollments" | "academic"
-  >("admissions");
+  >(instructorManagementOnly ? "academic" : "admissions");
   const [selectedRequest, setSelectedRequest] = useState<
     EnrollmentRequest | Enrollee | null
   >(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [systemAlert, setSystemAlert] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"All" | Enrollee["status"]>(
     "All",
@@ -1427,7 +1478,7 @@ export default function AdminEnrollees({
   const [enrollmentStatusFilter, setEnrollmentStatusFilter] = useState<
     "All" | "Pending" | "Approved" | "Rejected"
   >("All");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [enrollmentRequests, setEnrollmentRequests] = useState<
     EnrollmentRequest[]
   >([]);
@@ -1540,7 +1591,7 @@ export default function AdminEnrollees({
   // Academic Management States
   const [activeManagementTab, setActiveManagementTab] = useState<
     "subjects" | "instructors" | "assignments" | "evaluation"
-  >("subjects");
+  >(instructorManagementOnly ? "instructors" : "subjects");
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [subjectAssignments, setSubjectAssignments] = useState<
@@ -3293,8 +3344,37 @@ export default function AdminEnrollees({
   };
 
   const handleDeleteInstructor = async (instructor: Instructor) => {
+    const normalizedInstructorId = instructor.id.trim().toLowerCase();
+    const hasAssignedSchedule = subjectAssignments.some(
+      (assignment) =>
+        assignment.instructorId.trim().toLowerCase() === normalizedInstructorId,
+    );
+    const hasAssignedStudents = getStudentsForBranch(currentBranch).some(
+      (student) =>
+        student.status !== "Archived" &&
+        getStudentPortalSubjects(student).some(
+          (subject) =>
+            subject.instructorId?.trim().toLowerCase() === normalizedInstructorId,
+        ),
+    );
+
+    if (hasAssignedStudents || hasAssignedSchedule) {
+      const assignedRecords = [
+        hasAssignedStudents ? "- assigned students" : "",
+        hasAssignedSchedule ? "- assigned schedules" : "",
+      ].filter(Boolean);
+
+      setSystemAlert({
+        title: "Instructor cannot be deleted",
+        message: `Instructor cannot be deleted because the instructor has:\n${assignedRecords.join(
+          "\n",
+        )}\n\nRemove or reassign the related records first.`,
+      });
+      return;
+    }
+
     const confirmed = window.confirm(
-      `Delete ${instructor.name}? Existing assignments will keep their schedule but lose the linked instructor reference.`,
+      `Delete ${instructor.name}? This action cannot be undone.`,
     );
 
     if (!confirmed) {
@@ -3306,17 +3386,6 @@ export default function AdminEnrollees({
 
       setInstructors((prev) =>
         prev.filter((item) => item.id !== instructor.id),
-      );
-      setSubjectAssignments((prev) =>
-        prev.map((assignment) =>
-          assignment.instructorId === instructor.id
-            ? {
-                ...assignment,
-                instructorId: "",
-                instructorName: "To be assigned",
-              }
-            : assignment,
-        ),
       );
 
       if (editingInstructor?.id === instructor.id) {
@@ -4531,6 +4600,15 @@ export default function AdminEnrollees({
       return;
     }
 
+    if (recordsToArchive.some((record) => record.status === "Pending")) {
+      setSystemAlert({
+        title: "Request cannot be archived",
+        message:
+          "Pending admission requests cannot be archived. Approve or reject them first.",
+      });
+      return;
+    }
+
     const archivedAt = new Date().toISOString();
     const archivedIds = new Set(recordsToArchive.map((enrollee) => enrollee.id));
 
@@ -4569,6 +4647,15 @@ export default function AdminEnrollees({
   };
 
   const handleArchiveEnrollee = (enrollee: Enrollee) => {
+    if (enrollee.status === "Pending") {
+      setSystemAlert({
+        title: "Request cannot be archived",
+        message:
+          "Pending admission requests cannot be archived. Approve or reject them first.",
+      });
+      return;
+    }
+
     const confirmed = window.confirm(
       `Archive ${enrollee.fullName}? You can restore this record from Archive later.`,
     );
@@ -4586,6 +4673,15 @@ export default function AdminEnrollees({
       return;
     }
 
+    if (recordsToArchive.some((record) => record.status === "Pending")) {
+      setSystemAlert({
+        title: "Request cannot be archived",
+        message:
+          "Pending admission requests cannot be archived. Approve or reject them first.",
+      });
+      return;
+    }
+
     const confirmed = window.confirm(
       `Archive ${recordsToArchive.length} selected ${activeTab === "transferees" ? "transferee" : "admission"} record${recordsToArchive.length === 1 ? "" : "s"}? You can restore them from Archive later.`,
     );
@@ -4600,6 +4696,19 @@ export default function AdminEnrollees({
   const archiveEnrollmentRequests = (requestsToArchive: EnrollmentRequest[]) => {
     if (requestsToArchive.length === 0) {
       addToast("Select at least one enrollment request to archive.", "info");
+      return;
+    }
+
+    if (
+      requestsToArchive.some(
+        (request) => request.enrollmentStatus === "Pending",
+      )
+    ) {
+      setSystemAlert({
+        title: "Request cannot be archived",
+        message:
+          "Pending enrollment requests cannot be archived. Approve or reject them first.",
+      });
       return;
     }
 
@@ -4650,6 +4759,19 @@ export default function AdminEnrollees({
   ) => {
     if (requestsToArchive.length === 0) {
       addToast("Select at least one enrollment request to archive.", "info");
+      return;
+    }
+
+    if (
+      requestsToArchive.some(
+        (request) => request.enrollmentStatus === "Pending",
+      )
+    ) {
+      setSystemAlert({
+        title: "Request cannot be archived",
+        message:
+          "Pending enrollment requests cannot be archived. Approve or reject them first.",
+      });
       return;
     }
 
@@ -8695,16 +8817,27 @@ export default function AdminEnrollees({
       </button>
 
       <main className="enrollees-content">
+        {instructorManagementOnly && isLoading ? (
+          <InstructorManagementSkeleton />
+        ) : (
+          <>
         <header className="page-header">
-          <h1>Enrollment Management</h1>
+          <h1>
+            {instructorManagementOnly
+              ? "Instructor Management"
+              : "Enrollment Management"}
+          </h1>
           <p>
             {isLoading
               ? "Loading data..."
-              : "Manage new admissions, transferee evaluations, student enrollment requests, and academic assignments"}
+              : instructorManagementOnly
+                ? "Manage instructor profiles, departments, and account access"
+                : "Manage new admissions, transferee evaluations, student enrollment requests, and academic assignments"}
           </p>
         </header>
 
-        <div className="enrollment-tabs">
+        {!instructorManagementOnly ? (
+          <div className="enrollment-tabs">
           <button
             className={`tab-btn ${activeTab === "admissions" ? "active" : ""}`}
             onClick={() => setActiveTab("admissions")}
@@ -8738,9 +8871,11 @@ export default function AdminEnrollees({
           >
             <FaBook /> Academic Management
           </button>
-        </div>
+          </div>
+        ) : null}
 
-        <div
+        {!instructorManagementOnly ? (
+          <div
           className={`stats-cards ${
             activeTab === "academic" || activeTab === "transferees"
               ? "academic-stats"
@@ -8806,7 +8941,8 @@ export default function AdminEnrollees({
               </div>
             </>
           )}
-        </div>
+          </div>
+        ) : null}
 
         {/* Admissions and Transferee Tabs */}
         {(activeTab === "admissions" || activeTab === "transferees") && (
@@ -9303,18 +9439,13 @@ export default function AdminEnrollees({
         {/* Academic Management Tab */}
         {activeTab === "academic" && (
           <div className="academic-management-container">
-            <div className="academic-subtabs">
+            {!instructorManagementOnly ? (
+              <div className="academic-subtabs">
               <button
                 className={`subtab-btn ${activeManagementTab === "subjects" ? "active" : ""}`}
                 onClick={() => setActiveManagementTab("subjects")}
               >
                 <FaBook /> Subjects
-              </button>
-              <button
-                className={`subtab-btn ${activeManagementTab === "instructors" ? "active" : ""}`}
-                onClick={() => setActiveManagementTab("instructors")}
-              >
-                <FaChalkboardTeacher /> Instructors
               </button>
               <button
                 className={`subtab-btn ${activeManagementTab === "assignments" ? "active" : ""}`}
@@ -9328,7 +9459,8 @@ export default function AdminEnrollees({
               >
                 <FaStar /> Evaluation
               </button>
-            </div>
+              </div>
+            ) : null}
 
             {/* Subjects Management - Table View with Enhanced Filters */}
             {activeManagementTab === "subjects" && (
@@ -10176,6 +10308,8 @@ export default function AdminEnrollees({
               </div>
             )}
           </div>
+        )}
+          </>
         )}
       </main>
 
@@ -14001,6 +14135,13 @@ export default function AdminEnrollees({
           </div>
         </div>
       )}
+
+      <SystemAlertModal
+        isOpen={Boolean(systemAlert)}
+        title={systemAlert?.title || ""}
+        message={systemAlert?.message || ""}
+        onClose={() => setSystemAlert(null)}
+      />
     </div>
   );
 }

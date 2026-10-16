@@ -24,7 +24,7 @@ export default function InstructorLayout() {
     { path: "/instructor/grades", label: "Grades Upload", icon: <FiUpload /> },
     {
       path: "/instructor/grade-changes",
-      label: "Grade Changes",
+      label: "Change of Grades",
       icon: <FiEdit3 />,
     },
   ];

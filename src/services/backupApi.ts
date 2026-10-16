@@ -2,6 +2,7 @@ import { strFromU8, unzipSync } from "fflate";
 import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 import {
   getCurrentBranch,
+  getBranchFromStudentNumber,
   dedupeStoredStudents,
   forgetDeletedStoredStudent,
   normalizeBranchName,
@@ -60,6 +61,7 @@ export interface AlumniBackupRecord {
   contact: string;
   email?: string;
   becameAlumniOn: string;
+  branch?: string;
   studentSnapshot?: StudentStorageRecord;
 }
 
@@ -167,6 +169,30 @@ export const readCachedAlumni = (): AlumniBackupRecord[] => {
   }
 };
 
+const getAlumniRecordBranch = (record: AlumniBackupRecord) => {
+  const explicitBranch = record.branch || record.studentSnapshot?.branch;
+  if (explicitBranch) {
+    return normalizeBranchName(explicitBranch);
+  }
+
+  const studentBranch = readStoredStudents().find(
+    (student) => student.id === record.id,
+  )?.branch;
+
+  return studentBranch
+    ? normalizeBranchName(studentBranch)
+    : getBranchFromStudentNumber(record.id);
+};
+
+export const readCachedAlumniForBranch = (
+  branch?: string | null,
+): AlumniBackupRecord[] => {
+  const resolvedBranch = normalizeBranchName(branch);
+  return readCachedAlumni().filter(
+    (record) => getAlumniRecordBranch(record) === resolvedBranch,
+  );
+};
+
 export const isCachedAlumniStudent = ({
   studentNumber,
   trackingNumber,
@@ -187,11 +213,9 @@ export const isCachedAlumniStudent = ({
   }
 
   return readCachedAlumni().some((record) => {
-    const recordBranch = record.studentSnapshot?.branch
-      ? normalizeBranchName(record.studentSnapshot.branch)
-      : undefined;
+    const recordBranch = getAlumniRecordBranch(record) || undefined;
     const branchMatches =
-      !resolvedBranch || !recordBranch || recordBranch === resolvedBranch;
+      !resolvedBranch || recordBranch === resolvedBranch;
     const recordStudentNumber =
       normalizeStudentNumberInput(record.id, recordBranch || resolvedBranch) ||
       normalizeStudentNumberInput(record.id);
@@ -214,6 +238,25 @@ export const persistAlumniBackupCache = (records: AlumniBackupRecord[]) => {
   }
 
   localStorage.setItem(ALUMNI_BACKUP_CACHE_KEY, JSON.stringify(records));
+};
+
+export const persistAlumniBackupCacheForBranch = (
+  records: AlumniBackupRecord[],
+  branch?: string | null,
+) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const otherBranchRecords = readCachedAlumni().filter(
+    (record) => getAlumniRecordBranch(record) !== resolvedBranch,
+  );
+  const branchRecords = records.map((record) => ({
+    ...record,
+    branch: resolvedBranch,
+    studentSnapshot: record.studentSnapshot
+      ? { ...record.studentSnapshot, branch: resolvedBranch }
+      : undefined,
+  }));
+
+  persistAlumniBackupCache([...otherBranchRecords, ...branchRecords]);
 };
 
 export const readBackupRestoreMarker = (): BackupRestoreMarker | null => {
@@ -353,7 +396,10 @@ const buildBackupSnapshot = () => {
     const status = (student.status || "").toLowerCase();
     return status !== "archived";
   });
-  const alumni = mergeAlumniBackupRecords(readCachedAlumni(), []);
+  const alumni = mergeAlumniBackupRecords(
+    readCachedAlumniForBranch(branch),
+    [],
+  );
 
   return { students, alumni };
 };
@@ -635,7 +681,7 @@ export function applyBackupSnapshot(snapshot: BackupSnapshotPayload) {
   });
 
   writeStoredStudents([...otherBranchStudents, ...restoredStudents]);
-  persistAlumniBackupCache(snapshot.alumni || []);
+  persistAlumniBackupCacheForBranch(snapshot.alumni || [], currentBranch);
   rememberBackupRestoreApplied({
     branch: normalizeBranchName(snapshot.branch || currentBranch),
     appliedAt: new Date().toISOString(),

@@ -921,6 +921,15 @@
   border-collapse: collapse;
 }
 
+.instructor-grade-change-error-table {
+  min-width: 980px;
+}
+
+.instructor-grade-change-error-table th:last-child,
+.instructor-grade-change-error-table td:last-child {
+  min-width: 280px;
+}
+
 .instructor-error-table th,
 .instructor-error-table td,
 .instructor-file-table th,
