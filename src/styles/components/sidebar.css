@@ -44,7 +44,7 @@
 .s-sidebar-user-info h3 {
   margin: 0;
   color: #ffffff;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.2;
 }
@@ -52,11 +52,11 @@
 .s-sidebar-user-role {
   margin: 4px 0 0;
   color: rgba(255, 255, 255, 0.8);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .s-branch-name {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
   opacity: 0.8;
 }
@@ -86,7 +86,7 @@
   padding: 16px 20px;
   color: #ffffff;
   text-decoration: none;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 400;
   opacity: 0.9;
   transition: all 0.3s ease;
@@ -130,7 +130,7 @@
   border: none;
   border-radius: 8px;
   color: #ffffff;
-  font-size: 13px;
+  font-size: 16px;
   cursor: pointer;
   opacity: 0.9;
   transition: all 0.3s ease;
@@ -226,7 +226,7 @@
 
   .s-sidebar-nav a {
     padding: 14px 18px;
-    font-size: 13px;
+    font-size: 15px;
     gap: 14px;
   }
 
