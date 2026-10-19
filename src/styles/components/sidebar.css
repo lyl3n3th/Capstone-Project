@@ -1,6 +1,6 @@
-/* Student navigation follows the staff sidebar's sizing and breakpoints. */
+/* Student navigation uses the same sidebar width as the staff portals. */
 .s-sidebar {
-  width: 224px;
+  width: 280px;
   background: #1a3d5c;
   color: #ffffff;
   display: flex;
@@ -203,8 +203,8 @@
 
 @media (max-width: 1023px) {
   .s-sidebar {
-    width: min(82vw, 224px);
-    max-width: 224px;
+    width: min(82vw, 280px);
+    max-width: 280px;
     transform: translateX(-100%);
     visibility: hidden;
     transition: transform 0.3s ease, visibility 0.3s;

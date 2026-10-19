@@ -350,7 +350,7 @@
 .s-main.s-mm {
   overflow-y: auto;
   height: 100vh;
-  margin-left: 224px;
+  margin-left: 280px;
   background: #f5f7fa;
 }
 
@@ -362,7 +362,7 @@
 .s-grd .s-header {
   position: fixed;
   top: 0;
-  left: 224px;
+  left: 280px;
   right: 0;
   z-index: 100;
   background: #ffffff;
