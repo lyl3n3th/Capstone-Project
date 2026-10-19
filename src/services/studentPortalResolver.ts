@@ -12,6 +12,7 @@ import {
 } from "./adminStorage";
 import { getLatestApprovedEnrollmentRequestForStudent } from "./enrollmentRequests";
 import type { EnrollmentRequestedLoadRecord } from "./enrollmentLoadPlanner";
+import { applyImportedScheduleDefaults } from "./importedStudentScheduling";
 import {
   getStudentGradeRecords,
   hasCompletePassingShsSemesterGrades,
@@ -26,6 +27,7 @@ export interface StudentPortalCurrentTerm {
     | "own_schedule"
     | "subject_load"
     | "shs_auto_progression"
+    | "import"
     | "fallback";
 }
 
@@ -133,6 +135,7 @@ const getDeferredOwnScheduleSubjects = ({
     yearLevel: resolvedStudentRecord.yearLevel,
     strandOrCourse: resolvedStudentRecord.strandOrCourse,
     academicYear: nextAcademicYear,
+    requireCourseMatch: Boolean(resolvedStudentRecord.importAcademicYear),
     semester,
   }).filter((subject) => {
     const subjectKeys = [
@@ -217,6 +220,7 @@ const getApprovedOwnScheduleSubjects = ({
       strandOrCourse: resolvedStudentRecord.strandOrCourse,
       academicYear,
       semester,
+      requireCourseMatch: Boolean(resolvedStudentRecord.importAcademicYear),
     });
   }
 
@@ -520,8 +524,9 @@ const getShsAutoProgressedContext = ({
 };
 
 export const resolveStudentPortalContext = (
-  storedStudent: StudentStorageRecord,
+  student: StudentStorageRecord,
 ): ResolvedStudentPortalContext => {
+  const storedStudent = applyImportedScheduleDefaults(student);
   const approvedEnrollmentRequest = getLatestApprovedEnrollmentRequestForStudent({
     branch: storedStudent.branch,
     studentNumber: storedStudent.id,
@@ -663,6 +668,24 @@ export const resolveStudentPortalContext = (
           storedStudent.ownScheduleSemester,
         ),
       ),
+    };
+  }
+
+  if (storedStudent.importAcademicYear && storedStudent.importSemester) {
+    return {
+      resolvedStudentRecord,
+      currentTerm: { yearLevel: resolvedStudentRecord.yearLevel, academicYear: storedStudent.importAcademicYear,
+        semester: storedStudent.importSemester, source: "import" },
+      subjects: getStudentPortalSubjectsForSectionTerm({
+        branch: resolvedStudentRecord.branch,
+        program: resolvedStudentRecord.program,
+        yearLevel: resolvedStudentRecord.yearLevel,
+        strandOrCourse: resolvedStudentRecord.strandOrCourse,
+        sectionCode: resolvedStudentRecord.section,
+        academicYear: storedStudent.importAcademicYear,
+        semester: storedStudent.importSemester,
+        requireCourseMatch: true,
+      }),
     };
   }
 

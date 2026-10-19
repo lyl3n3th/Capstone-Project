@@ -10,7 +10,6 @@ import {
 import SkeletonPage from "../../components/common/SkeletonPage";
 import { useInstructorPortal } from "../../hooks/useInstructorPortal";
 import type { AcademicClassSectionRecord } from "../../services/academicData";
-import type { StudentStorageRecord } from "../../services/adminStorage";
 import {
   fetchAndCacheStudentGradeRecordsForBranch,
   readStudentGradeRecordsForBranch,
@@ -28,6 +27,7 @@ import {
   saveInstructorGradeChangeErrorHistory,
   saveInstructorGradeChangeRequest,
   studentHasAssignedInstructorSubject,
+  studentMatchesSection,
   type InstructorGradeChangeRequest,
   writeInstructorGradeChangeErrorHistory,
   writeInstructorGradeChangeRequests,
@@ -51,17 +51,6 @@ type GradeChangeDraftRow = {
 
 const getCompactFileName = (fileName: string) =>
   fileName.length > 26 ? `${fileName.slice(0, 23)}...` : fileName;
-
-const normalizeValue = (value?: string | null) =>
-  (value || "").trim().toLowerCase();
-
-const studentMatchesSection = (
-  student: StudentStorageRecord,
-  section: AcademicClassSectionRecord,
-) =>
-  section.enrolleeIds.includes(student.id) ||
-  normalizeValue(student.section) === normalizeValue(section.code) ||
-  normalizeValue(student.section) === normalizeValue(section.section);
 
 const getProgramType = (
   section?: AcademicClassSectionRecord,
@@ -337,7 +326,7 @@ export default function InstructorGradeChanges() {
               academicYear: row.academicYear,
               semester: row.semester,
               branch: currentUser.branch,
-            })
+            }, undefined, { preserveStudentNumber: row.currentRecord?.studentNumberIsOriginal })
           : null;
 
       if (
@@ -405,7 +394,7 @@ export default function InstructorGradeChanges() {
         currentGrade: row.currentGrade,
         requestedGrade: validationResult.normalizedRecord.normalizedGrade,
         currentRecord: row.currentRecord,
-        requestedRecord: validationResult.normalizedRecord,
+        requestedRecord: { ...row.currentRecord, ...validationResult.normalizedRecord },
       });
     });
 

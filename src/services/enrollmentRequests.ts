@@ -8,6 +8,8 @@ import {
 import { supabase } from "../lib/supabase";
 import type { EnrollmentRequestedLoadRecord } from "./enrollmentLoadPlanner";
 import { stripLegacyMockEnrollmentRequestRecords } from "./legacyMockData";
+import { verifyStudentEnrollmentBalance, type StudentBillingContext } from "./studentBilling";
+import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 
 export type EnrollmentRequestStatus = "Pending" | "Approved" | "Rejected";
 
@@ -250,6 +252,11 @@ const matchesStudentRequest = (
   if (!studentNumber || !request.studentNumber) {
     return false;
   }
+
+  if (request.studentNumber.trim().toUpperCase() === studentNumber.trim().toUpperCase()) return true;
+  // Legacy import IDs may contain letters or share digits with another ID.
+  // Only generated school IDs and numeric shorthand use prefix normalization.
+  if (![studentNumber, request.studentNumber].every(value => /^(?:[A-Z]{3}-?)?\d{1,6}$/i.test(value.trim()))) return false;
 
   const requestStudentNumber =
     normalizeStudentNumberInput(request.studentNumber, request.branch) ||
@@ -679,7 +686,37 @@ export const hasLatestApprovedIrregularEnrollmentRequestForStudent = ({
     }),
   );
 
-export const saveEnrollmentRequest = async (request: EnrollmentRequestRecord) => {
+export const saveEnrollmentRequest = async (
+  request: EnrollmentRequestRecord,
+  options: { allowLocalFallback?: boolean; studentBalance?: StudentBillingContext } = {},
+) => {
+  let studentBalance = options.studentBalance;
+  let isStudentRequest = Boolean(studentBalance);
+  if (typeof window !== "undefined") {
+    const rawSession = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    const session = rawSession ? JSON.parse(rawSession) as AuthSession : null;
+    if (session?.user.role === "student") {
+      isStudentRequest = true;
+      if (!studentBalance) {
+        const { studentApi } = await import("./studentApi");
+        const portal = await studentApi.getStudentPortalData();
+        studentBalance = {
+          student: portal.student,
+          subjects: portal.subjects,
+          academicYear: portal.currentTerm.academicYear,
+          semester: portal.currentTerm.semester,
+        };
+      }
+    }
+  }
+  if (studentBalance) {
+    if (normalizeBranchName(request.branch) !== normalizeBranchName(studentBalance.student.branch) ||
+      normalizeStudentNumberInput(request.studentNumber, request.branch) !==
+      normalizeStudentNumberInput(studentBalance.student.studentNumber, studentBalance.student.branch)) {
+      throw new Error("The enrollment request does not match the current student.");
+    }
+    await verifyStudentEnrollmentBalance(studentBalance);
+  }
   const saveLocalEnrollmentRequest = (localRequest: EnrollmentRequestRecord) => {
     const resolvedBranch = normalizeBranchName(localRequest.branch);
     const existingRequests = readEnrollmentRequestsForBranch(resolvedBranch);
@@ -702,6 +739,7 @@ export const saveEnrollmentRequest = async (request: EnrollmentRequestRecord) =>
   try {
     savedRequest = await upsertEnrollmentRequestToSupabase(request);
   } catch (error) {
+    if (isStudentRequest || options.allowLocalFallback === false) throw error;
     console.warn(
       "Unable to sync enrollment request to Supabase; saving locally instead.",
       error,

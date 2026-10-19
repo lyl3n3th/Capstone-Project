@@ -1,13 +1,14 @@
-import { IoPersonSharp } from "react-icons/io5";
-import { FaCalendarAlt, FaEye } from "react-icons/fa";
-import { MdFormatListBulleted } from "react-icons/md";
-import { useState, useEffect, useRef } from "react";
+import { FaEye } from "react-icons/fa";
+import { useState, useEffect, useRef, type ChangeEvent } from "react";
 import { IoDocumentText } from "react-icons/io5";
-import { MdFileUpload, MdRefresh } from "react-icons/md";
+import { MdCameraAlt, MdFileUpload, MdRefresh } from "react-icons/md";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
 import StudentLoadingShell from "../../components/common/StudentLoadingShell";
+import StudentHomeSkeleton from "../../components/common/StudentHomeSkeleton";
 import { useStudent } from "../../hooks/useStudent";
+import { useAuth } from "../../hooks/useAuth";
+import { useStoredProfileImage } from "../../hooks/useStoredProfileImage";
 import {
   getStudentCredentialOverview,
   syncStudentCredentialUpload,
@@ -20,9 +21,9 @@ import {
 } from "../../services/admission";
 import {
   buildStudentBalanceSummary,
-  getStudentPayments,
   STUDENT_PAYMENTS_UPDATED_EVENT,
 } from "../../services/studentPayments";
+import { getStudentBillingSummary } from "../../services/studentBilling";
 import "../../styles/main.css";
 import { ToastContainer } from "../../components/common/Toast";
 
@@ -64,6 +65,14 @@ type SelectedCredentialFile = {
 };
 
 function StudentHome() {
+  const { currentUser } = useAuth();
+  const { profileImage, updateProfileImage } = useStoredProfileImage(currentUser);
+  const profileImageInputRef = useRef<HTMLInputElement>(null);
+  const profilePictureRef = useRef<HTMLDivElement>(null);
+  const profilePictureButtonRef = useRef<HTMLButtonElement>(null);
+  const changePictureButtonRef = useRef<HTMLButtonElement>(null);
+  const [showPictureMenu, setShowPictureMenu] = useState(false);
+  const [isUpdatingPicture, setIsUpdatingPicture] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const {
@@ -71,11 +80,55 @@ function StudentHome() {
     subjects,
     currentTerm,
     credentialItems,
-    credentialSummary,
     isLoading,
     refreshStudent,
   } = useStudent();
   const { toasts, addToast, removeToast } = useToast();
+
+  useEffect(() => {
+    if (!showPictureMenu) return;
+
+    changePictureButtonRef.current?.focus();
+    const handleOutside = (event: Event) => {
+      if (!profilePictureRef.current?.contains(event.target as Node)) {
+        setShowPictureMenu(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowPictureMenu(false);
+        profilePictureButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("focusin", handleOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("focusin", handleOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [showPictureMenu]);
+
+  const handleProfileImageChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    setIsUpdatingPicture(true);
+    try {
+      await updateProfileImage(file);
+      addToast("Profile picture updated.", "success");
+    } catch (error) {
+      addToast(
+        error instanceof Error ? error.message : "Unable to update profile picture.",
+        "error",
+      );
+    } finally {
+      setIsUpdatingPicture(false);
+      input.value = "";
+    }
+  };
   const [selectedCredentialFiles, setSelectedCredentialFiles] = useState<
     Record<string, SelectedCredentialFile>
   >({});
@@ -244,7 +297,7 @@ function StudentHome() {
 
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth > 768 && sidebarOpen) {
+      if (window.innerWidth >= 1024 && sidebarOpen) {
         setSidebarOpen(false);
       }
     };
@@ -252,22 +305,6 @@ function StudentHome() {
     window.addEventListener("resize", handleResize);
     return () => {
       window.removeEventListener("resize", handleResize);
-    };
-  }, [sidebarOpen]);
-
-  useEffect(() => {
-    if (window.innerWidth > 768) {
-      return undefined;
-    }
-
-    const originalOverflow = document.body.style.overflow;
-
-    if (sidebarOpen) {
-      document.body.style.overflow = "hidden";
-    }
-
-    return () => {
-      document.body.style.overflow = originalOverflow;
     };
   }, [sidebarOpen]);
 
@@ -308,6 +345,10 @@ function StudentHome() {
     id: student?.studentNumber || "",
     progrm: student?.programType || "",
   };
+  const courseName = student?.program.replace(
+    /^[A-Za-z][A-Za-z0-9]*(?=\s*[-–—])/,
+    (acronym) => acronym.toUpperCase(),
+  );
 
   const currentAcademicYear =
     currentTerm?.academicYear ||
@@ -341,10 +382,6 @@ function StudentHome() {
         item.reviewStatus === "Approved",
       ),
   );
-  const totalUnits = currentTermSubjects.reduce(
-    (sum, subject) => sum + (subject.units || 0),
-    0,
-  );
   const tuitionPerUnit = 600;
   const balanceFormatter = new Intl.NumberFormat("en-PH", {
     style: "currency",
@@ -375,25 +412,10 @@ function StudentHome() {
         credentialOverview?.applicantRecord.scholarshipExamScore ?? null,
     }),
   );
-  const estimatedBalance = totalUnits * tuitionPerUnit;
-  const discountedBalance =
-    effectiveDiscountPercentage > 0
-      ? estimatedBalance * (1 - effectiveDiscountPercentage / 100)
-      : estimatedBalance;
-  const studentTuitionAssessment =
-    student?.programType !== "SHS" && totalUnits > 0 ? discountedBalance : 0;
-  const studentPayments = student
-    ? getStudentPayments({
-        branch: student.branch,
-        studentNumber: student.studentNumber,
-        trackingNumber: student.trackingNumber,
-      })
-    : [];
   void paymentRecordsVersion;
-  const studentBalanceSummary = buildStudentBalanceSummary({
-    totalAssessment: studentTuitionAssessment,
-    payments: studentPayments,
-  });
+  const studentBalanceSummary = student
+    ? getStudentBillingSummary({ student, subjects, academicYear: currentAcademicYear, semester: currentSemester })
+    : { ...buildStudentBalanceSummary({ totalAssessment: 0, payments: [] }), totalUnits: 0 };
 
   const getStatusClass = (status: string) => {
     switch (status) {
@@ -427,6 +449,7 @@ function StudentHome() {
     return (
       <StudentLoadingShell
         activePage="home"
+        portalClassName="s-home"
         currentDate={currentDate}
         headerTitle="Dashboard"
         onLogout={handleLogout}
@@ -436,7 +459,9 @@ function StudentHome() {
         studentData={studentData}
         variant="dashboard"
         sidebarOpen={sidebarOpen}
-      />
+      >
+        <StudentHomeSkeleton />
+      </StudentLoadingShell>
     );
   }
 
@@ -461,73 +486,200 @@ function StudentHome() {
       <div className="s-main">
         <Header
           title="Dashboard"
+          showTitle
           onMenuClick={handleMenuClick}
           studentData={studentData}
           currentDate={currentDate}
         />
 
         <main className="s-content">
-          <div className="s-welcome-banner">
-            <h1>Dashboard</h1>
-          </div>
-
-          <div className="s-dashboard-grid">
-            <div className="s-groupc">
-              <div className="s-card">
-                <div className="s-card-header">
-                  <div className="s-box-icon">
-                    <FaCalendarAlt />
-                  </div>
-                  <h3>Current Academic Year</h3>
+          {student && (
+            <div className="s-profile-header-card">
+              <div className="s-home-picture-wrapper" ref={profilePictureRef}>
+              <button
+                type="button"
+                className="s-profile-avatar-large s-profile-picture-button"
+                ref={profilePictureButtonRef}
+                onClick={() => setShowPictureMenu((previous) => !previous)}
+                aria-label="Change profile picture"
+                aria-expanded={showPictureMenu}
+                aria-controls={showPictureMenu ? "home-picture-menu" : undefined}
+                disabled={isUpdatingPicture}
+              >
+                {profileImage ? (
+                  <img src={profileImage} alt={`${student.firstName} ${student.lastName}`} />
+                ) : (
+                  `${student.firstName?.charAt(0) || ""}${student.lastName?.charAt(0) || ""}`
+                )}
+              </button>
+              {showPictureMenu && (
+                <div id="home-picture-menu" className="s-profile-menu s-home-picture-menu">
+                  <button
+                    type="button"
+                    className="s-profile-action"
+                    ref={changePictureButtonRef}
+                    onClick={() => {
+                      setShowPictureMenu(false);
+                      profilePictureButtonRef.current?.focus();
+                      profileImageInputRef.current?.click();
+                    }}
+                  >
+                    <MdCameraAlt size={18} /> Change Picture
+                  </button>
                 </div>
-                <div className="s-card-value">{currentAcademicYear}</div>
+              )}
+              <input
+                type="file"
+                hidden
+                ref={profileImageInputRef}
+                accept="image/*"
+                onChange={handleProfileImageChange}
+              />
               </div>
-
-              <div className="s-card g2">
-                <div className="s-card-header">
-                  <div className="s-box-icon">
-                    <MdFormatListBulleted />
-                  </div>
-                  <h3>Current Semester</h3>
+              <div className="s-profile-header-info">
+                <div className="s-profile-name-row">
+                  <h1>{student.firstName} {student.lastName}</h1>
                 </div>
-                <div className="s-card-value">{currentSemester}</div>
-              </div>
-
-              <div className="s-card g2">
-                <div className="s-card-header">
-                  <div className="s-box-icon">
-                    <IoPersonSharp />
-                  </div>
-                  <h3>Credential Status</h3>
+                <div className="s-profile-badges">
+                  <span className="s-badge">{student.studentNumber}</span>
+                  <span className="s-badge">{student.yearLevel}</span>
+                  <span className="s-badge s-badge-success">{student.status}</span>
                 </div>
-                <div className="s-card-value">
-                  {credentialSummary?.overallStatus || "Pending Documents"}
-                </div>
+                <p className="s-profile-track">{courseName}</p>
+                <p className="s-profile-grade"><strong>Academic Year:</strong> {currentAcademicYear}</p>
+                <p className="s-profile-grade"><strong>Semester:</strong> {currentSemester}</p>
               </div>
             </div>
+          )}
 
-            <div className="s-card">
-              <div className="s-card-header1">
-                <h3>
-                  {student
-                    ? `${student.firstName} ${student.lastName}`
-                    : "Student"}
-                </h3>
-                <span className="s-str-p">{student?.program || "Program TBA"}</span>
+          <div className="s-dashboard-grid s-home-overview-grid">
+            <section className="s-home-credentials" aria-label="Credential uploading">
+              <div className="s-credential-header">
+                <div className="s-icon-ac">
+                  <div className="s-co">
+                    <IoDocumentText />
+                  </div>
+                  <h2 className="s-section-title">Credential Status</h2>
+                </div>
+                <div className="s-credential-header-actions">
+                  <button
+                    className="s-submit-docs-btn"
+                    onClick={() => void handleRefreshCredentials()}
+                  >
+                    <MdRefresh /> Refresh Status
+                  </button>
+                  <button
+                    className="s-submit-docs-btn"
+                    onClick={() => void handleSubmitCredentials()}
+                    disabled={isSubmittingCredentials || pendingUploadCount === 0}
+                  >
+                    <MdFileUpload />{" "}
+                    {isSubmittingCredentials ? "Submitting..." : "Submit Credentials"}
+                  </button>
+                </div>
               </div>
-              <div className="s-card-value1">Student Number:</div>
-              <div className="s-card-label1">
-                {student?.studentNumber || ""}
-              </div>
-              <div className="s-card-value1">Section:</div>
-              <div className="s-card-label1">{student?.section || "TBA"}</div>
-              <div className="s-card-value1">Email:</div>
-              <div className="s-card-label1">
-                {student?.email || "student@aics.edu.ph"}
-              </div>
-            </div>
 
-            <div className="s-card">
+              <div className="s-activity-list">
+                {credentialItems.length > 0 ? (
+                  credentialItems.map((item) => (
+                    <div className="s-activity-item" key={item.code}>
+                      <div className="s-activity-icon">
+                        <IoDocumentText />
+                      </div>
+                      <div className="s-activity-details">
+                        <div className="s-activity-title">{item.name}</div>
+                        <div className="s-uploaded-file-info">
+                          {selectedCredentialFiles[item.code] ? (
+                            <span className="s-file-name">
+                              Ready to submit:{" "}
+                              {selectedCredentialFiles[item.code].file.name}
+                            </span>
+                          ) : item.url ? (
+                            <span className="s-file-name">Document is ready to view</span>
+                          ) : (
+                            <span className="s-file-name">
+                              {item.isSubmitted
+                                ? "Submitted record is on file"
+                                : "No uploaded file yet"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {(canUploadCredential(item.statusLabel) ||
+                        selectedCredentialFiles[item.code]?.previewUrl ||
+                        item.url) && (
+                        <div className="s-activity-actions">
+                          {canUploadCredential(item.statusLabel) && (
+                            <button
+                              type="button"
+                              className="s-activity-action-btn"
+                              onClick={() => handleSelectCredentialFile(item.code)}
+                              disabled={
+                                isSubmittingCredentials ||
+                                selectingCredentialCode === item.code
+                              }
+                              title={
+                                item.statusLabel === "Needs Reupload"
+                                  ? "Replace file"
+                                  : "Choose file"
+                              }
+                              aria-label={
+                                item.statusLabel === "Needs Reupload"
+                                  ? `Replace ${item.name}`
+                                  : `Choose file for ${item.name}`
+                              }
+                            >
+                              {selectingCredentialCode === item.code ? (
+                                <span className="s-upload-spinner">
+                                  <MdRefresh />
+                                </span>
+                              ) : (
+                                <MdFileUpload />
+                              )}
+                            </button>
+                          )}
+                          {(selectedCredentialFiles[item.code]?.previewUrl || item.url) && (
+                            <a
+                              className="s-activity-action-btn s-activity-action-link"
+                              href={selectedCredentialFiles[item.code]?.previewUrl || item.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={`View ${item.name}`}
+                              aria-label={`View ${item.name}`}
+                            >
+                              <FaEye />
+                            </a>
+                          )}
+                        </div>
+                      )}
+                      <span
+                        className={`s-activity-status ${getStatusClass(getCredentialVisualStatus(item.statusLabel))}`}
+                      >
+                        {item.statusLabel}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="s-activity-item">
+                    <div className="s-activity-icon">
+                      <IoDocumentText />
+                    </div>
+                    <div className="s-activity-details">
+                      <div className="s-activity-title">No linked credential record</div>
+                      <div className="s-uploaded-file-info">
+                        <span className="s-file-name">
+                          Admissions requirement progress will appear here after approval.
+                        </span>
+                      </div>
+                    </div>
+                    <span className={`s-activity-status ${getStatusClass("pending")}`}>
+                      Not Available
+                    </span>
+                  </div>
+                )}
+              </div>
+            </section>
+            <div className="s-card s-home-balance">
               <div className="s-card-header1">
                 <h3>Balance Overview</h3>
               </div>
@@ -550,7 +702,7 @@ function StudentHome() {
                       of {balanceFormatter.format(studentBalanceSummary.totalAssessment)}
                     </p>
                     <p>
-                      {totalUnits} unit(s) at{" "}
+                      {studentBalanceSummary.totalUnits} unit(s) at{" "}
                       {balanceFormatter.format(tuitionPerUnit)} per unit
                     </p>
                     {effectiveDiscountPercentage > 0 ? (
@@ -568,152 +720,6 @@ function StudentHome() {
                 )}
               </div>
             </div>
-          </div>
-
-          <div className="s-credential-header">
-            <div className="s-icon-ac">
-              <div className="s-co">
-                <IoDocumentText />
-              </div>
-              <h2 className="s-section-title">Credential Status</h2>
-            </div>
-            <button
-              className="s-submit-docs-btn"
-              onClick={() => void handleRefreshCredentials()}
-            >
-              <MdRefresh /> Refresh Status
-            </button>
-          </div>
-
-          {credentialSummary && (
-            <div className="s-note-card">
-              <div className="s-note-content">
-                <p>
-                  {credentialSummary.submitted}/{credentialSummary.total} admission
-                  credentials submitted. {credentialSummary.pending} still pending.
-                </p>
-                {pendingUploadCount > 0 && (
-                  <p>{pendingUploadCount} credential file(s) ready to submit.</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              marginBottom: "16px",
-            }}
-          >
-            <button
-              className="s-submit-docs-btn"
-              onClick={() => void handleSubmitCredentials()}
-              disabled={isSubmittingCredentials || pendingUploadCount === 0}
-            >
-              <MdFileUpload />{" "}
-              {isSubmittingCredentials ? "Submitting..." : "Submit Credentials"}
-            </button>
-          </div>
-
-          <div className="s-activity-list">
-            {credentialItems.length > 0 ? (
-              credentialItems.map((item) => (
-                <div className="s-activity-item" key={item.code}>
-                  <div className="s-activity-icon">
-                    <IoDocumentText />
-                  </div>
-                  <div className="s-activity-details">
-                    <div className="s-activity-title">{item.name}</div>
-                    <div className="s-uploaded-file-info">
-                      {selectedCredentialFiles[item.code] ? (
-                        <span className="s-file-name">
-                          Ready to submit:{" "}
-                          {selectedCredentialFiles[item.code].file.name}
-                        </span>
-                      ) : item.url ? (
-                        <span className="s-file-name">Document is ready to view</span>
-                      ) : (
-                        <span className="s-file-name">
-                          {item.isSubmitted
-                            ? "Submitted record is on file"
-                            : "No uploaded file yet"}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {(canUploadCredential(item.statusLabel) ||
-                    selectedCredentialFiles[item.code]?.previewUrl ||
-                    item.url) && (
-                    <div className="s-activity-actions">
-                      {canUploadCredential(item.statusLabel) && (
-                        <button
-                          type="button"
-                          className="s-activity-action-btn"
-                          onClick={() => handleSelectCredentialFile(item.code)}
-                          disabled={
-                            isSubmittingCredentials ||
-                            selectingCredentialCode === item.code
-                          }
-                          title={
-                            item.statusLabel === "Needs Reupload"
-                              ? "Replace file"
-                              : "Choose file"
-                          }
-                          aria-label={
-                            item.statusLabel === "Needs Reupload"
-                              ? `Replace ${item.name}`
-                              : `Choose file for ${item.name}`
-                          }
-                        >
-                          {selectingCredentialCode === item.code ? (
-                            <span className="s-upload-spinner">
-                              <MdRefresh />
-                            </span>
-                          ) : (
-                            <MdFileUpload />
-                          )}
-                        </button>
-                      )}
-                      {(selectedCredentialFiles[item.code]?.previewUrl || item.url) && (
-                        <a
-                          className="s-activity-action-btn s-activity-action-link"
-                          href={selectedCredentialFiles[item.code]?.previewUrl || item.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={`View ${item.name}`}
-                          aria-label={`View ${item.name}`}
-                        >
-                          <FaEye />
-                        </a>
-                      )}
-                    </div>
-                  )}
-                  <span
-                    className={`s-activity-status ${getStatusClass(getCredentialVisualStatus(item.statusLabel))}`}
-                  >
-                    {item.statusLabel}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="s-activity-item">
-                <div className="s-activity-icon">
-                  <IoDocumentText />
-                </div>
-                <div className="s-activity-details">
-                  <div className="s-activity-title">No linked credential record</div>
-                  <div className="s-uploaded-file-info">
-                    <span className="s-file-name">
-                      Admissions requirement progress will appear here after approval.
-                    </span>
-                  </div>
-                </div>
-                <span className={`s-activity-status ${getStatusClass("pending")}`}>
-                  Not Available
-                </span>
-              </div>
-            )}
           </div>
         </main>
       </div>

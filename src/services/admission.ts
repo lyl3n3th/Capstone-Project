@@ -6,7 +6,6 @@ import type {
   AdmissionDiscountSource,
   AdmissionDraft,
   AdmissionProgramLevel,
-  AdmissionProgramName,
   AdmissionRequirementDefinition,
   AdmissionRequirementUploadInput,
   AdmissionRequirementUploadResult,
@@ -125,17 +124,6 @@ export const honorOptions = [
   "High Honor (60%)",
   "Highest Honor (80%)",
 ] as const;
-
-const programTracksByProgram: Record<AdmissionProgramName, string[]> = {
-  College: ["BSE - Bachelor of Entrepreneurship"],
-  "Senior High School": [
-    "ABM - Accountancy, Business, and Management",
-    "HUMSS - Humanities and Social Sciences",
-    "GAS - General Academic Strand",
-    "ICT - Information and Communications Technology",
-    "IA - Industrial Arts",
-  ],
-};
 
 export const getAdmissionYearLevelOptions = (programName: string) =>
   programName === "Senior High School"
@@ -533,34 +521,6 @@ export const getAdmissionBranchName = (branchCode: string) => {
       ?.name ?? branchCode
   );
 };
-
-export const getAvailablePrograms = (
-  branchCode: string,
-  studentStatus: string,
-): AdmissionProgramName[] => {
-  const normalizedBranch = normalizeBranchCode(branchCode);
-
-  if (studentStatus === "Junior High Completer") {
-    return ["Senior High School"];
-  }
-
-  if (studentStatus === "Senior High Graduate") {
-    return normalizedBranch === "bacoor" ? ["College"] : [];
-  }
-
-  if (studentStatus === "Transferee") {
-    return normalizedBranch === "bacoor"
-      ? ["College", "Senior High School"]
-      : ["Senior High School"];
-  }
-
-  return normalizedBranch === "bacoor"
-    ? ["College", "Senior High School"]
-    : ["Senior High School"];
-};
-
-export const getTrackOptions = (programName: string) =>
-  programTracksByProgram[programName as AdmissionProgramName] ?? [];
 
 export const getProgramLevel = (programName: string): AdmissionProgramLevel =>
   programName === "College" ? "college" : "senior_high_school";

@@ -65,7 +65,7 @@ const cacheManagerProfile = (account: ManagerAccount) => {
   }
 };
 
-const getManagerSessionToken = () =>
+export const getManagerSessionToken = () =>
   typeof window === "undefined"
     ? ""
     : sessionStorage.getItem(MANAGER_SESSION_TOKEN_KEY) || "";

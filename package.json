@@ -10,7 +10,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "test:student-import": "node scripts/test-student-import.mjs",
+    "preview": "vite preview",
+    "test:historical-grades": "node scripts/test-student-historical-grades.mjs",
+    "test:grade-instructors": "node scripts/test-student-grade-instructors.mjs",
+    "test:imported-subjects": "node scripts/test-imported-student-subjects.mjs",
+    "test:imported-scheduling": "node scripts/test-imported-student-scheduling.mjs"
   },
   "dependencies": {
     "@emailjs/browser": "^4.4.1",

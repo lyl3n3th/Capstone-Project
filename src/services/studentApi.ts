@@ -99,6 +99,9 @@ const studentNumbersMatch = (
     return false;
   }
 
+  if (leftValue.trim().toUpperCase() === rightValue.trim().toUpperCase()) return true;
+  if (![leftValue, rightValue].every(value => /^(?:[A-Z]{3}-?)?\d{1,6}$/i.test(value.trim()))) return false;
+
   const normalizedLeft =
     normalizeStudentNumberInput(leftValue, branch) ||
     normalizeStudentNumberInput(leftValue);
@@ -416,6 +419,7 @@ const getPortalStudentStatus = (
 
   if (
     hasIrregularScheduleFlag ||
+    storedStudent.importAcademicStanding === "Irregular" ||
     hasApprovedIrregularEnrollmentRequest ||
     gradeStanding === "Irregular"
   ) {
@@ -433,15 +437,15 @@ const mapStoredStudentToPortalStudent = (
   storedStudent: StudentStorageRecord,
 ): Student => {
   const fullNameParts = storedStudent.name.trim().split(/\s+/).filter(Boolean);
-  const firstName = toNameCapitalization(fullNameParts[0]) || "Student";
+  const firstName = toNameCapitalization(storedStudent.firstName || fullNameParts[0]) || "Student";
   const lastName =
-    fullNameParts.length > 1
+    storedStudent.lastName || (fullNameParts.length > 1
       ? toNameCapitalization(fullNameParts[fullNameParts.length - 1])
-      : "";
+      : "");
   const middleName =
-    fullNameParts.length > 2
+    storedStudent.middleName ?? (fullNameParts.length > 2
       ? toNameCapitalization(fullNameParts.slice(1, -1).join(" "))
-      : undefined;
+      : undefined);
 
   return {
     id: storedStudent.id,

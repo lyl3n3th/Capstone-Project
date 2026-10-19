@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useInstructorPortal } from "../../hooks/useInstructorPortal";
-import { getStudentPortalSubjects } from "../../services/adminStorage";
+import { studentHasAssignedInstructorSubject } from "../../services/instructorPortal";
 import SkeletonPage from "../../components/common/SkeletonPage";
 
 export default function InstructorStudents() {
@@ -39,41 +39,21 @@ export default function InstructorStudents() {
   );
 
   const rows = useMemo(() => {
-    const assignmentIds = new Set(assignments.map((assignment) => assignment.id));
     const assignmentSubjectCodes = new Set(
       assignments.map((assignment) => assignment.subjectCode),
-    );
-    const assignmentBySectionAndSubject = new Set(
-      assignments.map(
-        (assignment) =>
-          `${assignment.sectionCode.trim().toLowerCase()}::${assignment.subjectCode}`,
-      ),
     );
 
     return students
       .map((student) => {
-        const enrolledSubjects = getStudentPortalSubjects(student).filter(
-          (subject) =>
-            assignmentIds.has(subject.id) ||
-            assignments.some(
-              (assignment) =>
-                subject.instructorId === assignment.instructorId &&
-                subject.code === assignment.subjectCode,
-            ) ||
-            assignmentBySectionAndSubject.has(
-              `${(subject.section || student.section || "")
-                .trim()
-                .toLowerCase()}::${subject.code}`,
-            ),
-        );
+        const enrolledSubjects = assignments.filter((assignment) => studentHasAssignedInstructorSubject(student, assignment));
         const assignedSubjects =
           enrolledSubjects.length > 0
-            ? enrolledSubjects.map((subject) => subject.code)
+            ? enrolledSubjects.map((subject) => subject.subjectCode)
             : assignments
                 .filter(
-                  (assignment) =>
+                  (assignment) => !student.importAcademicYear && (
                     assignment.sectionCode === student.section ||
-                    assignment.sectionId === student.section,
+                    assignment.sectionId === student.section),
                 )
                 .map((assignment) => assignment.subjectCode);
         const uniqueAssignedSubjects = Array.from(

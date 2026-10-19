@@ -80,7 +80,7 @@
   align-items: center;
   gap: 10px;
   margin-bottom: 18px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .students-search-input {
@@ -2869,4 +2869,14 @@
     width: 28px;
     height: 28px;
   }
+}
+
+/* Give import and export separate positions in the compact toolbar. */
+@media (max-width: 1023px) {
+  .students-controls { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .students-controls .students-search-input { grid-column: 1 / -1; grid-row: 1; }
+  .students-controls .students-notification-btn { grid-column: 1; grid-row: 2; }
+  .students-controls .students-schedule-notification-btn { grid-column: 2; grid-row: 2; }
+  .students-controls .students-export-btn { grid-column: 2; grid-row: 3; width: 100%; min-width: 0; justify-self: stretch; }
+  .students-controls .students-import-btn { grid-column: 1; grid-row: 3; }
 }

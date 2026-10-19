@@ -47,6 +47,34 @@
   display: block;
 }
 
+.s-profile-picture-button {
+  position: relative;
+  padding: 0;
+  box-sizing: content-box;
+  cursor: pointer;
+}
+
+.s-home-picture-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.s-home-picture-menu {
+  left: 50%;
+  transform: translateX(-50%);
+  background: #f8fafc;
+}
+
+.s-profile-picture-button:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 4px;
+}
+
+.s-profile-picture-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .s-profile-header-info {
   flex: 1 1 320px;
   min-width: 0;
@@ -117,6 +145,29 @@
 
 .s-section-title-with-icon svg {
   color: #066287;
+}
+
+.s-profile-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.s-profile-section-heading .s-section-title-with-icon {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.s-profile-section-heading .s-edit-btn {
+  width: auto;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* Profile Grid - Desktop: 2 columns */

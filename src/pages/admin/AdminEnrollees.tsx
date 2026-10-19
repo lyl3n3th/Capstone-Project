@@ -70,6 +70,7 @@ import type {
   StudentSubjectPlanRecord,
 } from "../../services/adminStorage";
 import { fetchAdminStudents, saveAdminStudent } from "../../services/adminStudentsApi";
+import { fetchBranchOfferings, type BranchOffering } from "../../services/branchOfferings";
 import {
   deleteAcademicInstructor,
   deleteAcademicClassSection,
@@ -81,7 +82,6 @@ import {
   saveAcademicClassSection,
   saveAcademicSubject,
   saveAcademicSubjectAssignment,
-  seedAcademicSnapshot,
   type AcademicSnapshot,
 } from "../../services/academicData";
 import { resetInstructorTemporaryPassword } from "../../services/instructorPortal";
@@ -347,7 +347,7 @@ const getCourseStrandDisplay = ({
   program: string;
   strandOrCourse?: string | null;
 }) =>
-  program === "College" ? DEFAULT_COLLEGE_COURSE : strandOrCourse || program;
+  strandOrCourse || (program === "College" ? DEFAULT_COLLEGE_COURSE : program);
 
 const getDecisionNotificationFeedback = (
   notificationResult: AdmissionDecisionNotificationResponse,
@@ -502,6 +502,11 @@ const getAdmissionPersonalInfoItems = (
       label: "Last School Attended",
       value: info.lastSchoolAttended,
       isWide: true,
+    },
+    {
+      label: "Year Completion",
+      value: info.yearCompletion,
+      spanClassName: "personal-info-item-span-3",
     },
   ];
 
@@ -1237,11 +1242,20 @@ const getSectionYearCode = (yearLevel: string) => {
   return yearMatch?.[1] || "1";
 };
 
+const getCollegeSectionPrefix = (course?: string) => {
+  const name = course?.trim() || DEFAULT_COLLEGE_COURSE;
+  const explicitCode = name.match(/^([A-Z][A-Z0-9]*)\s+-\s+/i)?.[1];
+  return explicitCode?.toUpperCase() || name.split(/\s+/)
+    .filter((word) => !/^(of|in|and|the)$/i.test(word))
+    .map((word) => /^[A-Z]{2,6}$/.test(word) ? word : word.charAt(0))
+    .join("").replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 12) || "COL";
+};
+
 const getAutoSectionPrefix = (
   enrollee: Pick<Enrollee, "program" | "strandOrCourse">,
 ) => {
   if (enrollee.program === "College") {
-    return "BSE";
+    return getCollegeSectionPrefix(enrollee.strandOrCourse);
   }
 
   const descriptor = normalizeAcademicDescriptor(enrollee.strandOrCourse);
@@ -1379,7 +1393,7 @@ const buildSectionCode = ({
     return `${existingCode.slice(0, existingCode.length - normalizedPreviousSection.length)}${normalizedSection}`;
   }
 
-  const prefix = program === "SHS" ? (strand || "SHS").trim() : "BSE";
+  const prefix = program === "SHS" ? (strand || "SHS").trim() : getCollegeSectionPrefix(strand);
   return `${prefix}${getSectionYearCode(yearLevel)}-${normalizedSection}`;
 };
 
@@ -1460,6 +1474,23 @@ export default function AdminEnrollees({
   const requestConfirmation = useConfirmation();
   const { currentUser } = useAuth();
   const currentBranch = normalizeBranchName(currentUser?.branch);
+  const [offeringDirectory, setOfferingDirectory] = useState<{ branch: string; items: BranchOffering[] } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchBranchOfferings(currentBranch)
+      .then((items) => { if (!cancelled) setOfferingDirectory({ branch: currentBranch, items }); })
+      .catch((error) => console.warn("Unable to load branch courses and strands.", error));
+    return () => { cancelled = true; };
+  }, [currentBranch]);
+
+  const branchOfferings = offeringDirectory?.branch === currentBranch ? offeringDirectory.items : [];
+  const hasCollegeOfferings = branchOfferings.some((item) => item.program_name === "College");
+  const hasShsOfferings = branchOfferings.some((item) => item.program_name === "Senior High School");
+  const getBranchTrackOptions = (program: string) => Array.from(new Set(
+    branchOfferings.filter((item) => item.program_name === (program === "SHS" ? "Senior High School" : "College"))
+      .map((item) => program === "SHS" ? item.track_name.split(/\s+-\s+/)[0] : item.track_name),
+  ));
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "admissions" | "transferees" | "enrollments" | "academic"
@@ -1766,18 +1797,6 @@ export default function AdminEnrollees({
     enrollee: Pick<Enrollee, "ownScheduleSemester">,
   ) => normalizeSectionSemester(enrollee.ownScheduleSemester || DEFAULT_SECTION_SEMESTER);
 
-  const hasAcademicSnapshotData = (snapshot?: Partial<AcademicSnapshot> | null) =>
-    Boolean(
-      snapshot &&
-        (
-          (snapshot.subjects?.length ?? 0) > 0 ||
-          (snapshot.instructors?.length ?? 0) > 0 ||
-          (snapshot.classSections?.length ?? 0) > 0 ||
-          (snapshot.subjectAssignments?.length ?? 0) > 0 ||
-          (snapshot.assignmentRooms?.length ?? 0) > 0
-        ),
-    );
-
   const mergeBranchStudentsIntoLocalCache = (students: StudentStorageRecord[]) => {
     if (students.length === 0) {
       return;
@@ -1919,7 +1938,7 @@ export default function AdminEnrollees({
       ]),
     );
 
-    if (remoteSections && remoteSections.length > 0) {
+    if (remoteSections != null) {
       const normalizedRemoteSections = sortClassSections(
         remoteSections.map((section) => {
           const normalizedCode = normalizeSectionCodeValue(section.code);
@@ -2053,1064 +2072,25 @@ export default function AdminEnrollees({
     return nextSections;
   };
 
-  // Load subjects - Updated with full SHS and College structure (Semester-based for SHS)
+  // A successful empty response is authoritative; use the cache only offline.
   const loadSubjects = async (
     remoteSubjects?: Subject[] | null,
   ): Promise<Subject[]> => {
-    if (remoteSubjects && remoteSubjects.length > 0) {
-      const normalizedRemoteSubjects = normalizeSubjectCatalog(remoteSubjects);
-      setSubjects(normalizedRemoteSubjects);
-      return normalizedRemoteSubjects;
-    }
-
-    const storedSubjects = readBranchScopedData<Subject[]>(
-      storageScopes.subjects,
-      currentBranch,
+    const loadedSubjects = normalizeSubjectCatalog(
+      remoteSubjects ??
+        readBranchScopedData<Subject[]>(storageScopes.subjects, currentBranch) ?? [],
     );
-
-    if (storedSubjects?.length) {
-      const normalizedStoredSubjects = normalizeSubjectCatalog(storedSubjects);
-      setSubjects(normalizedStoredSubjects);
-      return normalizedStoredSubjects;
-    }
-
-    const mockSubjects: Subject[] = [
-      // ========== SHS - GRADE 11 - 1st Semester ==========
-      {
-        id: "1",
-        code: "MIN101",
-        name: "Oral Communication",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "2",
-        code: "MIN102",
-        name: "Reading and Writing",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "3",
-        code: "MIN103",
-        name: "Komunikasyon at Pananaliksik",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "4",
-        code: "MIN104",
-        name: "Earth and Life Science",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "5",
-        code: "MIN105",
-        name: "Mathematics in the Modern World",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "6",
-        code: "MAJ101",
-        name: "Computer Systems Servicing",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "ICT",
-        isMinor: false,
-      },
-      {
-        id: "7",
-        code: "MAJ102",
-        name: "Introduction to Humanities",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "GAS",
-        isMinor: false,
-      },
-      {
-        id: "8",
-        code: "MAJ103",
-        name: "Introduction to World Religions",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "HUMSS",
-        isMinor: false,
-      },
-      {
-        id: "9",
-        code: "MAJ104",
-        name: "Fundamentals of Accounting",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "ABM",
-        isMinor: false,
-      },
-      {
-        id: "10",
-        code: "MAJ105",
-        name: "Pre-Calculus",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "STEM",
-        isMinor: false,
-      },
-      // Minor Subjects Grade 11 1st Sem
-      {
-        id: "11",
-        code: "MIN106",
-        name: "Physical Education 1",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "12",
-        code: "MIN107",
-        name: "Health Education",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-
-      // ========== SHS - GRADE 11 - 2nd Semester ==========
-      {
-        id: "13",
-        code: "MIN108",
-        name: "21st Century Literature",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "14",
-        code: "MIN109",
-        name: "Contemporary Philippine Arts",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "15",
-        code: "MIN110",
-        name: "Understanding Culture, Society and Politics",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "16",
-        code: "MIN111",
-        name: "Physical Science",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "17",
-        code: "MIN112",
-        name: "Statistics and Probability",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "18",
-        code: "MAJ106",
-        name: "Programming (Java)",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "ICT",
-        isMinor: false,
-      },
-      {
-        id: "19",
-        code: "MAJ107",
-        name: "Disciplines and Ideas in Social Sciences",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "GAS",
-        isMinor: false,
-      },
-      {
-        id: "20",
-        code: "MAJ108",
-        name: "Creative Writing",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "HUMSS",
-        isMinor: false,
-      },
-      {
-        id: "21",
-        code: "MAJ109",
-        name: "Business Mathematics",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "ABM",
-        isMinor: false,
-      },
-      {
-        id: "22",
-        code: "MAJ110",
-        name: "Basic Calculus",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "STEM",
-        isMinor: false,
-      },
-      // Minor Subjects Grade 11 2nd Sem
-      {
-        id: "23",
-        code: "MIN113",
-        name: "Physical Education 2",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "24",
-        code: "MIN114",
-        name: "Values Education",
-        program: "SHS",
-        yearLevel: "Grade 11",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-
-      // ========== SHS - GRADE 12 - 1st Semester ==========
-      {
-        id: "25",
-        code: "MIN115",
-        name: "English for Academic Purposes",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "26",
-        code: "MIN116",
-        name: "Filipino sa Piling Larangan",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "27",
-        code: "MIN117",
-        name: "Practical Research 2",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "28",
-        code: "MIN118",
-        name: "Inquiries and Investigation",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "29",
-        code: "MAJ111",
-        name: "Database Management",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "ICT",
-        isMinor: false,
-      },
-      {
-        id: "30",
-        code: "MAJ112",
-        name: "Applied Economics",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "GAS",
-        isMinor: false,
-      },
-      {
-        id: "31",
-        code: "MAJ113",
-        name: "Creative Writing/Malikhaing Pagsulat",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "HUMSS",
-        isMinor: false,
-      },
-      {
-        id: "32",
-        code: "MAJ114",
-        name: "Business Ethics",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "ABM",
-        isMinor: false,
-      },
-      {
-        id: "33",
-        code: "MAJ115",
-        name: "General Biology 2",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "STEM",
-        isMinor: false,
-      },
-      // Minor Subjects Grade 12 1st Sem
-      {
-        id: "34",
-        code: "MIN119",
-        name: "Physical Education 3",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "35",
-        code: "MIN120",
-        name: "Career Guidance",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "1st Semester",
-        strand: "All",
-        isMinor: true,
-      },
-
-      // ========== SHS - GRADE 12 - 2nd Semester ==========
-      {
-        id: "36",
-        code: "MIN121",
-        name: "Entrepreneurship",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "37",
-        code: "MIN122",
-        name: "Research Project",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "38",
-        code: "MAJ116",
-        name: "System Analysis and Design",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "2nd Semester",
-        strand: "ICT",
-        isMinor: false,
-      },
-      {
-        id: "39",
-        code: "MAJ117",
-        name: "Community Engagement",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "2nd Semester",
-        strand: "GAS",
-        isMinor: false,
-      },
-      {
-        id: "40",
-        code: "MAJ118",
-        name: "Social Sciences and Philosophy",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "2nd Semester",
-        strand: "HUMSS",
-        isMinor: false,
-      },
-      {
-        id: "41",
-        code: "MAJ119",
-        name: "Business Finance",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "2nd Semester",
-        strand: "ABM",
-        isMinor: false,
-      },
-      {
-        id: "42",
-        code: "MAJ120",
-        name: "General Physics 1",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "2nd Semester",
-        strand: "STEM",
-        isMinor: false,
-      },
-      {
-        id: "43",
-        code: "MIN123",
-        name: "Work Immersion",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      // Minor Subjects Grade 12 2nd Sem
-      {
-        id: "44",
-        code: "MIN124",
-        name: "Physical Education 4",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-      {
-        id: "45",
-        code: "MIN125",
-        name: "Community Service",
-        program: "SHS",
-        yearLevel: "Grade 12",
-        semester: "2nd Semester",
-        strand: "All",
-        isMinor: true,
-      },
-
-      // ========== COLLEGE - 1st Year ==========
-      {
-        id: "46",
-        code: "MIN126",
-        name: "Understanding the Self",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "47",
-        code: "MIN127",
-        name: "Readings in Philippine History",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "48",
-        code: "MIN128",
-        name: "Purposive Communication",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "49",
-        code: "MIN129",
-        name: "Mathematics in the Modern World",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "50",
-        code: "MAJ121",
-        name: "Introduction to Computing",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "51",
-        code: "MAJ122",
-        name: "Computer Programming 1",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "52",
-        code: "MIN130",
-        name: "Physical Education 1",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "1st Semester",
-        units: 2,
-        isMinor: true,
-      },
-      {
-        id: "53",
-        code: "MIN131",
-        name: "NSTP 1",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "54",
-        code: "MIN132",
-        name: "The Contemporary World",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "55",
-        code: "MIN133",
-        name: "Ethics",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "56",
-        code: "MIN134",
-        name: "Art Appreciation",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "57",
-        code: "MAJ123",
-        name: "Data Structures and Algorithms",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "58",
-        code: "MAJ124",
-        name: "Object-Oriented Programming",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "59",
-        code: "MIN135",
-        name: "Physical Education 2",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "2nd Semester",
-        units: 2,
-        isMinor: true,
-      },
-      {
-        id: "60",
-        code: "MIN136",
-        name: "NSTP 2",
-        program: "College",
-        yearLevel: "1st Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: true,
-      },
-
-      // ========== COLLEGE - 2nd Year ==========
-      {
-        id: "61",
-        code: "MIN137",
-        name: "Science, Technology and Society",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "62",
-        code: "MAJ125",
-        name: "Database Management System",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "63",
-        code: "MAJ126",
-        name: "Web Development",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "64",
-        code: "MAJ127",
-        name: "Operating Systems",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "65",
-        code: "MAJ128",
-        name: "Discrete Mathematics",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "66",
-        code: "MIN138",
-        name: "Physical Education 3",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "1st Semester",
-        units: 2,
-        isMinor: true,
-      },
-      {
-        id: "67",
-        code: "MIN139",
-        name: "Life and Works of Rizal",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "68",
-        code: "MAJ129",
-        name: "Software Engineering",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "69",
-        code: "MAJ130",
-        name: "Networking and Communication",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "70",
-        code: "MAJ131",
-        name: "Human-Computer Interaction",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "71",
-        code: "MAJ132",
-        name: "Information Management",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "72",
-        code: "MIN140",
-        name: "Physical Education 4",
-        program: "College",
-        yearLevel: "2nd Year",
-        semester: "2nd Semester",
-        units: 2,
-        isMinor: true,
-      },
-
-      // ========== COLLEGE - 3rd Year ==========
-      {
-        id: "73",
-        code: "MAJ133",
-        name: "Advanced Database Systems",
-        program: "College",
-        yearLevel: "3rd Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "74",
-        code: "MAJ134",
-        name: "Mobile Application Development",
-        program: "College",
-        yearLevel: "3rd Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "75",
-        code: "MAJ135",
-        name: "System Analysis and Design",
-        program: "College",
-        yearLevel: "3rd Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "76",
-        code: "MAJ136",
-        name: "Automata Theory",
-        program: "College",
-        yearLevel: "3rd Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "77",
-        code: "MIN141",
-        name: "Elective 1",
-        program: "College",
-        yearLevel: "3rd Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "78",
-        code: "MAJ137",
-        name: "Artificial Intelligence",
-        program: "College",
-        yearLevel: "3rd Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "79",
-        code: "MAJ138",
-        name: "Cloud Computing",
-        program: "College",
-        yearLevel: "3rd Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "80",
-        code: "MAJ139",
-        name: "Information Assurance",
-        program: "College",
-        yearLevel: "3rd Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "81",
-        code: "MAJ140",
-        name: "Technopreneurship",
-        program: "College",
-        yearLevel: "3rd Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "82",
-        code: "MIN142",
-        name: "Elective 2",
-        program: "College",
-        yearLevel: "3rd Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: true,
-      },
-
-      // ========== COLLEGE - 4th Year ==========
-      {
-        id: "83",
-        code: "MAJ141",
-        name: "Capstone Project 1",
-        program: "College",
-        yearLevel: "4th Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "84",
-        code: "MAJ142",
-        name: "Data Analytics",
-        program: "College",
-        yearLevel: "4th Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "85",
-        code: "MAJ143",
-        name: "IT Project Management",
-        program: "College",
-        yearLevel: "4th Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "86",
-        code: "MAJ144",
-        name: "Emerging Technologies",
-        program: "College",
-        yearLevel: "4th Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "87",
-        code: "MIN143",
-        name: "Elective 3",
-        program: "College",
-        yearLevel: "4th Year",
-        semester: "1st Semester",
-        units: 3,
-        isMinor: true,
-      },
-      {
-        id: "88",
-        code: "MAJ145",
-        name: "Capstone Project 2",
-        program: "College",
-        yearLevel: "4th Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-      {
-        id: "89",
-        code: "MAJ146",
-        name: "Internship/Practicum",
-        program: "College",
-        yearLevel: "4th Year",
-        semester: "2nd Semester",
-        units: 6,
-        isMinor: false,
-      },
-      {
-        id: "90",
-        code: "MAJ147",
-        name: "Professional Ethics",
-        program: "College",
-        yearLevel: "4th Year",
-        semester: "2nd Semester",
-        units: 3,
-        isMinor: false,
-      },
-    ];
-    const normalizedMockSubjects = normalizeSubjectCatalog(mockSubjects);
-    setSubjects(normalizedMockSubjects);
-    return normalizedMockSubjects;
+    setSubjects(loadedSubjects);
+    return loadedSubjects;
   };
 
-  // Load instructors with updated names
   const loadInstructors = async (
     remoteInstructors?: Instructor[] | null,
   ): Promise<Instructor[]> => {
-    if (remoteInstructors && remoteInstructors.length > 0) {
-      setInstructors(remoteInstructors);
-      return remoteInstructors;
-    }
-
-    const storedInstructors = readBranchScopedData<Instructor[]>(
-      storageScopes.instructors,
-      currentBranch,
-    );
-
-    if (storedInstructors?.length) {
-      setInstructors(storedInstructors);
-      return storedInstructors;
-    }
-
-    const mockInstructors: Instructor[] = [
-      {
-        id: "1",
-        name: "Kenneth Lyle Sohot",
-        employeeId: "TCH001",
-        department: "Computer Science",
-        email: "kenneth.sohot@university.edu",
-        contactNumber: "09123456789",
-      },
-      {
-        id: "2",
-        name: "Neil John Velasco",
-        employeeId: "TCH002",
-        department: "Mathematics",
-        email: "neil.velasco@university.edu",
-        contactNumber: "09123456790",
-      },
-      {
-        id: "3",
-        name: "Hener Verdida",
-        employeeId: "TCH003",
-        department: "English",
-        email: "hener.verdida@university.edu",
-        contactNumber: "09123456791",
-      },
-      {
-        id: "4",
-        name: "Queenie Mier Senantes",
-        employeeId: "TCH004",
-        department: "Humanities",
-        email: "queenie.senantes@university.edu",
-        contactNumber: "09123456792",
-      },
-      {
-        id: "5",
-        name: "Dean Paul Quioyo",
-        employeeId: "TCH005",
-        department: "Physics",
-        email: "dean.quioyo@university.edu",
-        contactNumber: "09123456793",
-      },
-      {
-        id: "6",
-        name: "Don Rich Ulanday",
-        employeeId: "TCH006",
-        department: "Physical Education",
-        email: "don.ulanday@university.edu",
-        contactNumber: "09123456794",
-      },
-      {
-        id: "7",
-        name: "Mark Kervin Toledo",
-        employeeId: "TCH007",
-        department: "Information Technology",
-        email: "mark.toledo@university.edu",
-        contactNumber: "09123456795",
-      },
-      {
-        id: "8",
-        name: "Elijah Bulotano",
-        employeeId: "TCH008",
-        department: "Social Sciences",
-        email: "elijah.bulotano@university.edu",
-        contactNumber: "09123456796",
-      },
-      {
-        id: "9",
-        name: "Christian Dave Vargas",
-        employeeId: "TCH009",
-        department: "Business",
-        email: "christian.vargas@university.edu",
-        contactNumber: "09123456797",
-      },
-      {
-        id: "10",
-        name: "Jay Iverson Dela Cruz",
-        employeeId: "TCH010",
-        department: "Arts",
-        email: "jay.delacruz@university.edu",
-        contactNumber: "09123456798",
-      },
-      {
-        id: "11",
-        name: "Gilbert Torres",
-        employeeId: "TCH011",
-        department: "Research",
-        email: "gilbert.torres@university.edu",
-        contactNumber: "09123456799",
-      },
-    ];
-    setInstructors(mockInstructors);
-    return mockInstructors;
+    const loadedInstructors = remoteInstructors ??
+      readBranchScopedData<Instructor[]>(storageScopes.instructors, currentBranch) ?? [];
+    setInstructors(loadedInstructors);
+    return loadedInstructors;
   };
 
   const instructorDepartmentOptions = getUniqueTrimmedValues([
@@ -3469,89 +2449,18 @@ export default function AdminEnrollees({
     }
   };
 
-  // Load subject assignments
   const loadSubjectAssignments = async (
     remoteAssignments?: SubjectAssignment[] | null,
   ): Promise<SubjectAssignment[]> => {
-    if (remoteAssignments && remoteAssignments.length > 0) {
-      const normalizedRemoteAssignments = remoteAssignments.map((assignment) => ({
-        ...assignment,
-        semester: normalizeSectionSemester(assignment.semester),
-      }));
-      setSubjectAssignments(normalizedRemoteAssignments);
-      return normalizedRemoteAssignments;
-    }
-
-    const storedAssignments = readBranchScopedData<SubjectAssignment[]>(
-      storageScopes.subjectAssignments,
-      currentBranch,
-    );
-
-    if (storedAssignments?.length) {
-      const normalizedStoredAssignments = storedAssignments.map((assignment) => ({
-        ...assignment,
-        semester: normalizeSectionSemester(assignment.semester),
-      }));
-      setSubjectAssignments(normalizedStoredAssignments);
-      return normalizedStoredAssignments;
-    }
-
-    const mockAssignments: SubjectAssignment[] = [
-      {
-        id: "1",
-        subjectId: "1",
-        subjectCode: "MIN101",
-        subjectName: "Oral Communication",
-        instructorId: "1",
-        instructorName: "Kenneth Lyle Sohot",
-        sectionId: "1",
-        sectionCode: "IC1DA",
-        schedule: [
-          {
-            day: "Monday",
-            startTime: "08:00",
-            endTime: "10:00",
-            room: "RM101",
-          },
-          {
-            day: "Wednesday",
-            startTime: "08:00",
-            endTime: "10:00",
-            room: "RM101",
-          },
-        ],
-        academicYear: "2026-2027",
-        semester: "1st Semester",
-      },
-      {
-        id: "2",
-        subjectId: "6",
-        subjectCode: "MAJ101",
-        subjectName: "Computer Systems Servicing",
-        instructorId: "7",
-        instructorName: "Mark Kervin Toledo",
-        sectionId: "1",
-        sectionCode: "IC1DA",
-        schedule: [
-          {
-            day: "Tuesday",
-            startTime: "10:00",
-            endTime: "12:00",
-            room: "RM205",
-          },
-          {
-            day: "Thursday",
-            startTime: "10:00",
-            endTime: "12:00",
-            room: "RM205",
-          },
-        ],
-        academicYear: "2026-2027",
-        semester: "1st Semester",
-      },
-    ];
-    setSubjectAssignments(mockAssignments);
-    return mockAssignments;
+    const loadedAssignments = (
+      remoteAssignments ??
+      readBranchScopedData<SubjectAssignment[]>(storageScopes.subjectAssignments, currentBranch) ?? []
+    ).map((assignment) => ({
+      ...assignment,
+      semester: normalizeSectionSemester(assignment.semester),
+    }));
+    setSubjectAssignments(loadedAssignments);
+    return loadedAssignments;
   };
 
   const getSubjectFormPrerequisiteOptions = (
@@ -3565,7 +2474,7 @@ export default function AdminEnrollees({
       program: draft.program,
       yearLevel: draft.yearLevel,
       semester: normalizeSectionSemester(draft.semester),
-      strand: draft.program === "College" ? DEFAULT_COLLEGE_COURSE : draft.strand,
+      strand: draft.strand,
       subjectType: normalizeSubjectTypeForProgram({
         program: draft.program,
         type: draft.type,
@@ -3592,8 +2501,7 @@ export default function AdminEnrollees({
       ? draft.yearLevel
       : yearLevelOptions[0];
     const normalizedSemester = normalizeSectionSemester(draft.semester);
-    const normalizedStrand =
-      program === "College" ? DEFAULT_COLLEGE_COURSE : draft.strand || "All";
+    const normalizedStrand = draft.strand || (program === "SHS" ? "All" : getBranchTrackOptions(program)[0] || "");
     const prerequisiteOptions = new Set(
       getSubjectFormPrerequisiteOptions(
         {
@@ -3631,8 +2539,15 @@ export default function AdminEnrollees({
   };
 
   const openCreateSubjectModal = () => {
+    if (branchOfferings.length === 0) {
+      addToast("Ask the Area Manager to configure this branch's courses and strands first.", "warning");
+      return;
+    }
+    const program = getBranchTrackOptions("College").length > 0 ? "College" : "SHS";
     setEditingSubject(null);
-    setSubjectForm(createDefaultSubjectForm());
+    setSubjectForm({ ...createDefaultSubjectForm(), program,
+      yearLevel: program === "College" ? "1st Year" : "Grade 11",
+      strand: program === "SHS" ? "All" : getBranchTrackOptions(program)[0] });
     setShowSubjectModal(true);
   };
 
@@ -3649,10 +2564,7 @@ export default function AdminEnrollees({
           typeof subject.units === "number" && Number.isFinite(subject.units)
             ? String(subject.units)
             : "3",
-        strand:
-          subject.program === "College"
-            ? DEFAULT_COLLEGE_COURSE
-            : subject.strand || "All",
+        strand: subject.strand || (subject.program === "College" ? DEFAULT_COLLEGE_COURSE : "All"),
         type: getResolvedSubjectType(subject),
         prerequisiteSubjectIds: normalizeStringList(
           subject.prerequisiteSubjectIds,
@@ -3678,6 +2590,14 @@ export default function AdminEnrollees({
   };
 
   const handleSaveSubject = async () => {
+    const unchangedTrack = editingSubject?.program === subjectForm.program &&
+      (editingSubject.strand || (editingSubject.program === "College" ? DEFAULT_COLLEGE_COURSE : "All")) === subjectForm.strand;
+    const configuredTrack = getBranchTrackOptions(subjectForm.program).includes(subjectForm.strand) ||
+      (subjectForm.program === "SHS" && subjectForm.strand === "All" && getBranchTrackOptions("SHS").length > 0);
+    if (!unchangedTrack && !configuredTrack) {
+      addToast("Choose a course or strand offered by this branch.", "warning");
+      return;
+    }
     const normalizedCode = subjectForm.code.trim().toUpperCase();
     const normalizedName = subjectForm.name.trim();
     const normalizedSemester = normalizeSectionSemester(subjectForm.semester);
@@ -3708,10 +2628,7 @@ export default function AdminEnrollees({
       subjectType: normalizeSubjectTypeForProgram({
         program: subjectForm.program,
         type: subjectForm.type,
-        strand:
-          subjectForm.program === "College"
-            ? DEFAULT_COLLEGE_COURSE
-            : subjectForm.strand || "All",
+        strand: subjectForm.strand,
       }),
       id:
         editingSubject?.id ||
@@ -3722,10 +2639,7 @@ export default function AdminEnrollees({
       program: subjectForm.program,
       yearLevel: subjectForm.yearLevel,
       semester: normalizedSemester,
-      strand:
-        subjectForm.program === "College"
-          ? DEFAULT_COLLEGE_COURSE
-          : subjectForm.strand || "All",
+      strand: subjectForm.strand,
       isMinor:
         subjectForm.program === "College"
           ? subjectForm.type === "minor"
@@ -4910,8 +3824,11 @@ export default function AdminEnrollees({
   };
 
   const resetSectionForm = () => {
+    const program = getBranchTrackOptions("College").length > 0 ? "College" : "SHS";
     setEditingSection(null);
-    setNewSection(createDefaultSectionForm());
+    setNewSection({ ...createDefaultSectionForm(), program,
+      yearLevel: program === "College" ? "1st Year" : "Grade 11",
+      strand: getBranchTrackOptions(program)[0] || "" });
   };
 
   const getTransfereeEvaluation = (enrollee: Enrollee) =>
@@ -5778,6 +4695,10 @@ export default function AdminEnrollees({
   };
 
   const handleSaveSection = async () => {
+    if (!editingSection && !getBranchTrackOptions(newSection.program).includes(newSection.strand)) {
+      addToast("Choose a course or strand offered by this branch.", "warning");
+      return;
+    }
     const normalizedSection = normalizeSectionLabel(newSection.section);
     const nextCapacity = Number(newSection.maxCapacity);
 
@@ -6639,7 +5560,7 @@ export default function AdminEnrollees({
         remoteAcademicSnapshot?.assignmentRooms ?? [],
       );
       const resolvedRoomOptions =
-        remoteRooms.length > 0 ? remoteRooms : fallbackRooms;
+        remoteAcademicSnapshot ? remoteRooms : fallbackRooms;
       setCustomAssignmentRooms(resolvedRoomOptions);
 
       await loadEnrollmentRequests();
@@ -6647,7 +5568,7 @@ export default function AdminEnrollees({
       const loadedSections = await loadClassSections(
         remoteAcademicSnapshot?.classSections,
       );
-      const loadedSubjects = await loadSubjects(remoteAcademicSnapshot?.subjects);
+      await loadSubjects(remoteAcademicSnapshot?.subjects);
       const loadedInstructors = await loadInstructors(
         remoteAcademicSnapshot?.instructors,
       );
@@ -6657,7 +5578,7 @@ export default function AdminEnrollees({
           ...loadedInstructors.map((instructor) => instructor.department),
         ]),
       );
-      const loadedAssignments = await loadSubjectAssignments(
+      await loadSubjectAssignments(
         remoteAcademicSnapshot?.subjectAssignments,
       );
 
@@ -6672,37 +5593,6 @@ export default function AdminEnrollees({
             ? storedSectionAssignments
             : [];
       setSectionAssignments(derivedSectionAssignments);
-
-      if (remoteAcademicSnapshot) {
-        const snapshotToSeed: Partial<AcademicSnapshot> = {
-          subjects:
-            remoteAcademicSnapshot.subjects.length === 0 ? loadedSubjects : [],
-          instructors:
-            remoteAcademicSnapshot.instructors.length === 0
-              ? loadedInstructors
-              : [],
-          classSections:
-            remoteAcademicSnapshot.classSections.length === 0
-              ? loadedSections
-              : [],
-          subjectAssignments:
-            remoteAcademicSnapshot.subjectAssignments.length === 0
-              ? loadedAssignments
-              : [],
-          assignmentRooms:
-            remoteAcademicSnapshot.assignmentRooms.length === 0
-              ? resolvedRoomOptions
-              : [],
-        };
-
-        if (hasAcademicSnapshotData(snapshotToSeed)) {
-          try {
-            await seedAcademicSnapshot(currentBranch, snapshotToSeed);
-          } catch (error) {
-            console.warn("Unable to seed shared academic data in Supabase.", error);
-          }
-        }
-      }
 
       setHasInitializedBranchData(true);
     };
@@ -7740,31 +6630,32 @@ export default function AdminEnrollees({
     isTransfereeAdmission(selectedAdmissionActionRecord)
       ? getTransfereeEvaluation(selectedAdmissionActionRecord)
       : null;
-  const subjectYearLevelOptions =
-    subjectFilter.program === "College"
-      ? ["1st Year", "2nd Year", "3rd Year", "4th Year"]
-      : subjectFilter.program === "SHS"
-        ? ["Grade 11", "Grade 12"]
-        : [
-            "1st Year",
-            "2nd Year",
-            "3rd Year",
-            "4th Year",
-            "Grade 11",
-            "Grade 12",
-          ];
+  const subjectProgramFilter =
+    (subjectFilter.program === "College" && !hasCollegeOfferings) ||
+    (subjectFilter.program === "SHS" && !hasShsOfferings)
+      ? "All" : subjectFilter.program;
+  const subjectYearLevelOptions = [
+    ...(hasCollegeOfferings && subjectProgramFilter !== "SHS"
+      ? ["1st Year", "2nd Year", "3rd Year", "4th Year"] : []),
+    ...(hasShsOfferings && subjectProgramFilter !== "College"
+      ? ["Grade 11", "Grade 12"] : []),
+  ];
+  const subjectYearLevelFilter = subjectYearLevelOptions.includes(subjectFilter.yearLevel)
+    ? subjectFilter.yearLevel : "All";
   const subjectStrandCourseOptions = Array.from(
     new Set(
       subjects
         .filter(
           (subject) =>
-            subjectFilter.program === "All" ||
-            subject.program === subjectFilter.program,
+            (subject.program === "College" ? hasCollegeOfferings : hasShsOfferings) &&
+            (subjectProgramFilter === "All" || subject.program === subjectProgramFilter),
         )
         .map(resolveSubjectStrandOrCourse)
         .filter((value) => value && value !== "All"),
     ),
   ).sort((left, right) => left.localeCompare(right));
+  const subjectCourseFilter = subjectStrandCourseOptions.includes(subjectFilter.strandOrCourse)
+    ? subjectFilter.strandOrCourse : "All";
   const filteredInstructors = instructors.filter(
     (instructor) =>
       instructor.name.toLowerCase().includes(instructorSearch.toLowerCase()) ||
@@ -7777,9 +6668,7 @@ export default function AdminEnrollees({
   );
 
   const getAssignmentSectionCourseStrand = (section: ClassSection) =>
-    section.program === "College"
-      ? DEFAULT_COLLEGE_COURSE
-      : section.strand || "All";
+    section.strand || (section.program === "College" ? DEFAULT_COLLEGE_COURSE : "All");
   const assignmentProgramSections = classSections.filter((section) =>
     assignmentFilter.program === "All"
       ? true
@@ -8747,16 +7636,17 @@ export default function AdminEnrollees({
   // Filter subjects based on filters
   const getFilteredSubjects = () => {
     return subjects.filter((subject) => {
+      if (subject.program === "College" ? !hasCollegeOfferings : !hasShsOfferings) return false;
       const subjectDescriptor = resolveSubjectStrandOrCourse(subject);
 
       if (
-        subjectFilter.program !== "All" &&
-        subject.program !== subjectFilter.program
+        subjectProgramFilter !== "All" &&
+        subject.program !== subjectProgramFilter
       )
         return false;
       if (
-        subjectFilter.yearLevel !== "All" &&
-        subject.yearLevel !== subjectFilter.yearLevel
+        subjectYearLevelFilter !== "All" &&
+        subject.yearLevel !== subjectYearLevelFilter
       )
         return false;
       if (
@@ -8764,11 +7654,11 @@ export default function AdminEnrollees({
         !matchesAcademicDescriptor(subjectDescriptor, subjectFilter.strand)
       )
         return false;
-      if (subjectFilter.strandOrCourse !== "All") {
+      if (subjectCourseFilter !== "All") {
         if (
           !matchesAcademicDescriptor(
             subjectDescriptor,
-            subjectFilter.strandOrCourse,
+            subjectCourseFilter,
           )
         ) {
           return false;
@@ -9519,7 +8409,7 @@ export default function AdminEnrollees({
                     <FaFilter className="filter-icon" />
                     <select
                       className="filter-select"
-                      value={subjectFilter.program}
+                      value={subjectProgramFilter}
                       onChange={(e) =>
                         setSubjectFilter({
                           ...subjectFilter,
@@ -9531,13 +8421,13 @@ export default function AdminEnrollees({
                       }
                     >
                       <option value="All">All Programs</option>
-                      <option value="College">College</option>
-                      <option value="SHS">SHS</option>
+                      {hasCollegeOfferings && <option value="College">College</option>}
+                      {hasShsOfferings && <option value="SHS">SHS</option>}
                     </select>
                   </div>
                   <select
                     className="filter-select"
-                    value={subjectFilter.yearLevel}
+                    value={subjectYearLevelFilter}
                     onChange={(e) =>
                       setSubjectFilter({
                         ...subjectFilter,
@@ -9555,7 +8445,7 @@ export default function AdminEnrollees({
 
                   <select
                     className="filter-select"
-                    value={subjectFilter.strandOrCourse}
+                    value={subjectCourseFilter}
                     onChange={(e) =>
                       setSubjectFilter({
                         ...subjectFilter,
@@ -9572,7 +8462,7 @@ export default function AdminEnrollees({
                       </option>
                     ))}
                   </select>
-                  {subjectFilter.program !== "SHS" ? (
+                  {hasCollegeOfferings && subjectProgramFilter !== "SHS" ? (
                     <label className="filter-checkbox">
                       <input
                         type="checkbox"
@@ -9592,6 +8482,7 @@ export default function AdminEnrollees({
                 {/* Subjects Table View */}
                 <div className="subjects-table-view">
                   {/* SHS Section */}
+                  {hasShsOfferings && subjectProgramFilter !== "College" && (
                   <div className="program-section">
                     <div className="program-section-header">
                       <FaUniversity className="program-icon" />
@@ -9783,7 +8674,9 @@ export default function AdminEnrollees({
                     </div>
                   </div>
 
+                  )}
                   {/* College Section */}
+                  {hasCollegeOfferings && subjectProgramFilter !== "SHS" && (
                   <div className="program-section">
                     <div className="program-section-header">
                       <FaUniversity className="program-icon" />
@@ -9889,6 +8782,7 @@ export default function AdminEnrollees({
                       ),
                     )}
                   </div>
+                  )}
                 </div>
               </div>
             )}
@@ -9924,6 +8818,28 @@ export default function AdminEnrollees({
                   </button>
                 </div>
                 <div className="instructors-grid">
+                  {filteredInstructors.length === 0 && (
+                    <div className="instructor-empty-state" role="status">
+                      <div className="instructor-empty-icon" aria-hidden="true">
+                        {instructors.length === 0 ? <FaChalkboardTeacher /> : <FaSearch />}
+                      </div>
+                      <h4>{instructors.length === 0 ? "No instructors yet" : "No matching instructors"}</h4>
+                      <p>
+                        {instructors.length === 0
+                          ? `Add the first instructor for ${currentBranch} to start managing their profile, department, and account access.`
+                          : "Try a different name, employee ID, or department, or clear your search to see all instructors."}
+                      </p>
+                      {instructors.length === 0 ? (
+                        <button type="button" className="action-btn add" onClick={openCreateInstructorModal}>
+                          <FaPlus aria-hidden="true" /> Add Instructor
+                        </button>
+                      ) : (
+                        <button type="button" className="action-btn secondary" onClick={() => setInstructorSearch("")}>
+                          Clear Search
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {filteredInstructors.map((instructor) => (
                     <div key={instructor.id} className="instructor-card">
                       <div className="instructor-avatar">
@@ -12426,13 +11342,12 @@ export default function AdminEnrollees({
                         ...newSection,
                         program,
                         yearLevel: program === "SHS" ? "Grade 11" : "1st Year",
-                        strand:
-                          program === "SHS" ? "ICT" : DEFAULT_COLLEGE_COURSE,
+                        strand: getBranchTrackOptions(program)[0] || "",
                       });
                     }}
                   >
-                    <option value="College">College</option>
-                    <option value="SHS">SHS</option>
+                    <option value="College" disabled={!editingSection && getBranchTrackOptions("College").length === 0}>College</option>
+                    <option value="SHS" disabled={!editingSection && getBranchTrackOptions("SHS").length === 0}>SHS</option>
                   </select>
                   <select
                     value={newSection.yearLevel}
@@ -12478,28 +11393,24 @@ export default function AdminEnrollees({
                     />
                   ) : newSection.program === "SHS" ? (
                     <select
-                      value={newSection.strand}
+                      value={getBranchTrackOptions("SHS").includes(newSection.strand) ? newSection.strand : ""}
                       onChange={(e) =>
                         setNewSection({ ...newSection, strand: e.target.value })
                       }
                     >
-                      <option value="ICT">ICT</option>
-                      <option value="GAS">GAS</option>
-                      <option value="HUMSS">HUMSS</option>
-                      <option value="ABM">ABM</option>
-                      <option value="STEM">STEM</option>
+                      <option value="" disabled>Select strand</option>
+                      {getBranchTrackOptions("SHS").map((option) => <option key={option} value={option}>{option}</option>)}
                     </select>
                   ) : null}
                   {!editingSection && newSection.program === "College" && (
                     <select
-                      value={newSection.strand}
+                      value={getBranchTrackOptions("College").includes(newSection.strand) ? newSection.strand : ""}
                       onChange={(e) =>
                         setNewSection({ ...newSection, strand: e.target.value })
                       }
                     >
-                      <option value={DEFAULT_COLLEGE_COURSE}>
-                        BS Entrepreneurship
-                      </option>
+                      <option value="" disabled>Select course</option>
+                      {getBranchTrackOptions("College").map((option) => <option key={option} value={option}>{option}</option>)}
                     </select>
                   )}
                   <input
@@ -12576,9 +11487,7 @@ export default function AdminEnrollees({
                         <strong>
                           {section.program === "College" ? "Course" : "Strand"}:
                         </strong>{" "}
-                        {section.program === "College"
-                          ? DEFAULT_COLLEGE_COURSE
-                          : section.strand || "All"}
+                        {section.strand || (section.program === "College" ? DEFAULT_COLLEGE_COURSE : "All")}
                       </p>
                       <p>
                         <strong>Section:</strong> {section.section}
@@ -13112,13 +12021,13 @@ export default function AdminEnrollees({
                         strand:
                           event.target.value === "SHS"
                             ? "All"
-                            : DEFAULT_COLLEGE_COURSE,
+                            : getBranchTrackOptions("College")[0] || "",
                         prerequisiteSubjectIds: [],
                       })
                     }
                   >
-                    <option value="College">College</option>
-                    <option value="SHS">SHS</option>
+                    {hasCollegeOfferings && <option value="College">College</option>}
+                    {hasShsOfferings && <option value="SHS">SHS</option>}
                   </select>
                 </div>
                 <div className="form-group">
@@ -13172,33 +12081,21 @@ export default function AdminEnrollees({
                 <div className="form-group">
                   <label>{subjectForm.program === "SHS" ? "Strand" : "Course"}</label>
                   <select
-                    value={
-                      subjectForm.program === "SHS"
-                        ? subjectForm.strand
-                        : DEFAULT_COLLEGE_COURSE
-                    }
+                    value={subjectForm.strand}
                     onChange={(event) =>
                       updateSubjectForm({
                         strand: event.target.value,
                         prerequisiteSubjectIds: [],
                       })
                     }
-                    disabled={subjectForm.program !== "SHS"}
                   >
-                    {subjectForm.program === "SHS" ? (
-                      <>
-                        <option value="All">All</option>
-                        <option value="ICT">ICT</option>
-                        <option value="GAS">GAS</option>
-                        <option value="HUMSS">HUMSS</option>
-                        <option value="ABM">ABM</option>
-                        <option value="STEM">STEM</option>
-                      </>
-                    ) : (
-                      <option value={DEFAULT_COLLEGE_COURSE}>
-                        {DEFAULT_COLLEGE_COURSE}
-                      </option>
+                    {subjectForm.program === "SHS" && <option value="All">All</option>}
+                    {subjectForm.program === "College" && !subjectForm.strand && <option value="">Select course</option>}
+                    {editingSubject?.strand && !getBranchTrackOptions(subjectForm.program).includes(editingSubject.strand) &&
+                      subjectForm.program === editingSubject.program && editingSubject.strand !== "All" && (
+                      <option value={editingSubject.strand}>{editingSubject.strand} (existing)</option>
                     )}
+                    {getBranchTrackOptions(subjectForm.program).map((option) => <option key={option} value={option}>{option}</option>)}
                   </select>
                 </div>
                 <div className="form-group">

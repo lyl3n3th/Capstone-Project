@@ -36,6 +36,9 @@ interface EvaluationCard {
   subjects: StudentPortalSubject[];
 }
 
+const getEvaluationSubjectTitle = (card: EvaluationCard) =>
+  card.subjects.map((subject) => `${subject.code} - ${subject.title}`).join(", ");
+
 const evaluationStateSortOrder: Record<EvaluationCardState, number> = {
   open: 0,
   closed: 1,
@@ -207,7 +210,7 @@ function StudentEvaluation() {
 
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth > 768 && sidebarOpen) {
+      if (window.innerWidth >= 1024 && sidebarOpen) {
         setSidebarOpen(false);
       }
     };
@@ -538,7 +541,7 @@ function StudentEvaluation() {
                       </button>
                       <div className="s-evaluation-detail-title">
                         <span>Instructor Evaluation</span>
-                        <h1>{card.instructorName}</h1>
+                        <h1>{getEvaluationSubjectTitle(card)}</h1>
                         <p>
                           {currentAcademicYear} - {currentSemester}
                         </p>
@@ -547,14 +550,9 @@ function StudentEvaluation() {
 
                     <div className="s-evaluation-detail-meta">
                       <div className="s-evaluation-subject-list">
-                        {card.subjects.map((subject) => (
-                          <span
-                            key={`${card.key}-${subject.id}`}
-                            className="s-evaluation-subject-chip"
-                          >
-                            {subject.code} - {subject.title}
-                          </span>
-                        ))}
+                        <span className="s-evaluation-subject-chip">
+                          {card.instructorName}
+                        </span>
                       </div>
                       <div className="s-evaluation-progress">
                         <div className="s-evaluation-progress-head">
@@ -758,7 +756,7 @@ function StudentEvaluation() {
                             <FaChalkboardTeacher />
                           </div>
                           <div className="s-evaluation-card-copy">
-                            <h3>{card.instructorName}</h3>
+                            <h3>{getEvaluationSubjectTitle(card)}</h3>
                           </div>
                           <span
                             className={`s-evaluation-state s-evaluation-state-${card.state}`}
@@ -773,14 +771,9 @@ function StudentEvaluation() {
                         </div>
 
                         <div className="s-evaluation-subject-list">
-                          {card.subjects.map((subject) => (
-                            <span
-                              key={`${card.key}-${subject.id}`}
-                              className="s-evaluation-subject-chip"
-                            >
-                              {subject.code} - {subject.title}
-                            </span>
-                          ))}
+                          <span className="s-evaluation-subject-chip">
+                            {card.instructorName}
+                          </span>
                         </div>
 
                         <p className="s-evaluation-card-note">

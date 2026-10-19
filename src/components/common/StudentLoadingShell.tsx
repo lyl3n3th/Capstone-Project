@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Header from "./Header";
 import Sidebar from "./Sidebar";
 import SkeletonPage from "./SkeletonPage";
@@ -5,6 +6,7 @@ import SkeletonPage from "./SkeletonPage";
 type SkeletonPageVariant = "dashboard" | "table" | "form" | "upload";
 
 interface StudentLoadingShellProps {
+  children?: ReactNode;
   activePage: string;
   currentDate: string;
   headerTitle: string;
@@ -23,6 +25,7 @@ interface StudentLoadingShellProps {
 }
 
 export default function StudentLoadingShell({
+  children,
   activePage,
   currentDate,
   headerTitle,
@@ -49,16 +52,19 @@ export default function StudentLoadingShell({
       <div className="s-main">
         <Header
           title={headerTitle}
+          showTitle={activePage === "home"}
           onMenuClick={onMenuClick}
           studentData={studentData}
           currentDate={currentDate}
         />
         <main className="s-content">
-          <SkeletonPage
-            eyebrow="Student Portal"
-            title={skeletonTitle}
-            variant={variant}
-          />
+          {children ?? (
+            <SkeletonPage
+              eyebrow="Student Portal"
+              title={skeletonTitle}
+              variant={variant}
+            />
+          )}
         </main>
       </div>
     </div>

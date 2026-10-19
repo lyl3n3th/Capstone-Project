@@ -1,5 +1,7 @@
 import { supabase } from "../lib/supabase";
 import type { StaffRole as AppStaffRole } from "../types/user";
+import { getManagerSessionToken } from "./mockStaffAuth";
+import { getBranchStorageKey } from "./adminStorage";
 
 export type StaffBranch = string;
 export type StaffDirectoryRole = "Registrar" | "Branch Administrator";
@@ -88,7 +90,7 @@ const mapStaffRecord = (record: StaffApiRecord): StaffMember => ({
   first_name: record.first_name,
   last_name: record.last_name,
   role: mapApiRoleToDirectoryRole(record.role),
-  branch: record.branch,
+  branch: record.branch || "",
   email: record.email,
   contact_number: record.contact_number,
   address: record.address,
@@ -194,12 +196,19 @@ export async function syncManagedBranches(branchNames: string[]) {
 }
 
 export async function removeManagedBranch(branchName: string) {
-  const { error } = await supabase.rpc("deactivate_area_manager_branch", {
+  const token = getManagerSessionToken();
+  if (!token) throw new Error("Your Area Manager session has expired. Please sign in again.");
+  const { error } = await supabase.rpc("delete_area_manager_branch", {
+    p_session_token: token,
     p_branch: branchName,
   });
 
   if (error) {
     throw new Error(getErrorMessage(error));
+  }
+
+  for (const scope of ["subjects", "instructors", "subject-assignments", "instructor-departments"]) {
+    localStorage.removeItem(getBranchStorageKey(scope, branchName));
   }
 }
 

@@ -16,6 +16,7 @@ interface HeaderProps {
     progrm: string;
   };
   currentDate?: string;
+  showTitle?: boolean;
 }
 
 function Header({
@@ -27,9 +28,10 @@ function Header({
     progrm: "",
   },
   currentDate,
+  showTitle = false,
 }: HeaderProps) {
   const { currentUser } = useAuth();
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const desktopMenuRef = useRef<HTMLDivElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
@@ -42,7 +44,7 @@ function Header({
 
   useEffect(() => {
     const handleResize = () => {
-      setIsMobile(window.innerWidth <= 768);
+      setIsMobile(window.innerWidth < 1024);
     };
 
     window.addEventListener("resize", handleResize);
@@ -140,12 +142,14 @@ function Header({
     <>
     <header className="s-header" aria-label={title}>
       <div className="s-header-left">
-        <button className="s-menu-toggle" onClick={onMenuClick}>
+        <button type="button" className="s-menu-toggle" onClick={onMenuClick} aria-label="Toggle student menu" aria-controls="student-sidebar">
           <IoMenu size={24} />
         </button>
 
+        {showTitle && <h1 className="s-header-title">{title}</h1>}
+
         {/* Desktop User Profile (visible on desktop only) */}
-        {!isMobile && (
+        {!showTitle && !isMobile && (
           <div className="s-user-profile" ref={desktopMenuRef}>
             <div className="s-profile-avatar-wrapper">{renderAvatarButton()}</div>
             <div className="s-user-details">
@@ -165,7 +169,7 @@ function Header({
         {!isMobile && <div className="s-header-date">{currentDate}</div>}
 
         {/* Mobile User Profile (visible on mobile only) */}
-        {isMobile && (
+        {!showTitle && isMobile && (
           <div className="s-user-profile-mobile" ref={mobileMenuRef}>
             {renderAvatarButton()}
             {renderProfileMenu("s-profile-menu-mobile")}

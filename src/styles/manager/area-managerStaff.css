@@ -767,6 +767,96 @@
   gap: 10px;
 }
 
+.stf-branch-actions,
+.stf-offerings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.stf-offerings-editor h4 {
+  margin: 0 0 8px;
+  color: #1a3d5c;
+  font-size: 18px;
+}
+
+.stf-offerings-editor p {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.stf-offerings-options {
+  border: 0;
+  padding: 0;
+  margin: 16px 0;
+}
+
+.stf-offerings-group h5 {
+  margin: 16px 0 8px;
+  font-size: 14px;
+}
+
+.stf-offering-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  margin: 6px 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.stf-offering-choice {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+}
+
+.stf-offering-usage {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+}
+
+.stf-offering-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.stf-offering-choice input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  accent-color: #066287;
+}
+
+.stf-offerings-new {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  margin: 16px 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.stf-offerings-new label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.stf-branch-success {
+  padding: 12px;
+  border-radius: 8px;
+  background: #ecfdf5;
+  color: #166534;
+}
+
 .stf-branch-item {
   display: flex;
   justify-content: space-between;

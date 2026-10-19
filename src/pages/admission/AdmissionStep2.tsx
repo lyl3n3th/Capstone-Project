@@ -9,9 +9,7 @@ import {
   getAdmissionDraft,
   getAdmissionYearLevelOptions,
   getAdmissionProgress,
-  getAvailablePrograms,
   normalizeAdmissionYearLevel,
-  getTrackOptions,
   honorOptions,
   saveAdmissionApplication,
   sexOptions,
@@ -20,6 +18,7 @@ import {
   getDefaultAdmissionAcademicYear,
   getAdmissionPortalStatus,
 } from "../../services/admissionPortal";
+import { fetchBranchOfferings, getProgramsForOfferings, type BranchOffering } from "../../services/branchOfferings";
 
 const EDUCATIONAL_LEVEL_PLACEHOLDER = "Educational Level";
 const TRACK_SELECTION_PLACEHOLDER = "Strand / Program";
@@ -125,6 +124,20 @@ function AdmissionStep2() {
   const selectedBranch = getQueryParam("branch") || "";
   const studentStatus = getQueryParam("status") || "";
   const fromRequirements = getQueryParam("from") === "requirements";
+  const [branchOfferings, setBranchOfferings] = useState<BranchOffering[]>([]);
+  const [offeringsLoading, setOfferingsLoading] = useState(true);
+  const [offeringsError, setOfferingsError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchBranchOfferings(selectedBranch)
+      .then((items) => { if (!cancelled) setBranchOfferings(items); })
+      .catch((error: unknown) => {
+        if (!cancelled) setOfferingsError(error instanceof Error ? error.message : "Unable to load branch offerings.");
+      })
+      .finally(() => { if (!cancelled) setOfferingsLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedBranch]);
 
   const addToast = (message: string, type: Toast["type"]) => {
     const id = Date.now().toString();
@@ -135,8 +148,8 @@ function AdmissionStep2() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  const availablePrograms = getAvailablePrograms(selectedBranch, studentStatus);
-  const trackOptions = getTrackOptions(program);
+  const availablePrograms = getProgramsForOfferings(branchOfferings, studentStatus);
+  const trackOptions = branchOfferings.filter((item) => item.program_name === program).map((item) => item.track_name);
   const isTransferee = studentStatus === "Transferee";
   const yearLevelOptions = getAdmissionYearLevelOptions(program);
   const needsRequestedYearLevel = isTransferee && yearLevelOptions.length > 0;
@@ -168,13 +181,13 @@ function AdmissionStep2() {
 
   const getFieldError = (fieldId: FormFieldId): string => {
     if (fieldId === "program") {
-      return isEducationalLevelPlaceholder(program)
+      return isEducationalLevelPlaceholder(program) || !availablePrograms.some((item) => item === program)
         ? "Educational level is required."
         : "";
     }
 
     if (fieldId === "program1") {
-      return isTrackSelectionPlaceholder(program1)
+      return isTrackSelectionPlaceholder(program1) || !trackOptions.includes(program1)
         ? `${trackSelectionLabel} is required.`
         : "";
     }
@@ -670,7 +683,7 @@ function AdmissionStep2() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  if (isLoadingDraft) {
+  if (isLoadingDraft || offeringsLoading) {
     return (
       <div className="container admission-step2-page">
         <SkeletonPage eyebrow="Admission" title="Saved Data" variant="form" />
@@ -964,6 +977,7 @@ function AdmissionStep2() {
             )}
 
             {/* Program & Strand */}
+            {offeringsError && <p role="alert">Unable to load available courses and strands. Please refresh and try again.</p>}
             <div className="form-row dropdown-row">
               <div className="dropdown" ref={wrapperRef}>
                 <label>
@@ -987,6 +1001,7 @@ function AdmissionStep2() {
                         key={opt}
                         onClick={() => {
                           setProgram(opt);
+                          setProgram1(TRACK_SELECTION_PLACEHOLDER);
                           markFieldTouched("program");
                           setIsMenuOpen(false);
                         }}
@@ -1087,7 +1102,7 @@ function AdmissionStep2() {
                 type="button"
                 className={`btn4 ${isSubmitting ? "disabled" : ""}`}
                 onClick={handleContinue}
-                disabled={isSubmitting}
+                disabled={isSubmitting || Boolean(offeringsError) || availablePrograms.length === 0}
               >
                 {isSubmitting ? "Saving..." : "Continue"}
               </button>

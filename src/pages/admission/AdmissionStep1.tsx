@@ -14,14 +14,7 @@ import {
   type AdmissionBranchOption,
 } from "../../services/admission";
 import { formatAdmissionCloseDate } from "../../services/admissionPortal";
-
-const isBranchAllowedForStatus = (status: string, branchCode: string) => {
-  if (status === "Senior High Graduate") {
-    return branchCode === "bacoor";
-  }
-
-  return ["Junior High Completer", "Transferee"].includes(status);
-};
+import { fetchBranchOfferings, getProgramsForOfferings, type BranchOffering } from "../../services/branchOfferings";
 
 interface Toast {
   id: string;
@@ -80,19 +73,29 @@ function AdmissionStep1() {
     AdmissionBranchOption[]
   >([...admissionBranches]);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [offerings, setOfferings] = useState<BranchOffering[]>([]);
+  const [offeringsLoading, setOfferingsLoading] = useState(true);
+  const [offeringsError, setOfferingsError] = useState("");
   const { branches: branchStatuses } = useAdmissionPortalOverview();
 
   useEffect(() => {
+    let cancelled = false;
     const loadBranches = async () => {
       try {
-        const branches = await fetchAdmissionBranches();
+        const [branches, available] = await Promise.all([fetchAdmissionBranches(), fetchBranchOfferings()]);
+        if (cancelled) return;
         setBranchOptions(branches);
+        setOfferings(available);
       } catch (error) {
         console.error("Unable to load admission branches", error);
+        if (!cancelled) setOfferingsError("Unable to load branch offerings. Please refresh and try again.");
+      } finally {
+        if (!cancelled) setOfferingsLoading(false);
       }
     };
 
     void loadBranches();
+    return () => { cancelled = true; };
   }, []);
 
   const addToast = (message: string, type: Toast["type"]) => {
@@ -111,11 +114,11 @@ function AdmissionStep1() {
     !(getBranchStatus(branchCode)?.isOpen ?? true);
 
   const isBranchDisabled = (branchCode: string) => {
-    if (status === "Select Status") {
+    if (status === "Select Status" || offeringsLoading || offeringsError) {
       return true;
     }
 
-    if (!isBranchAllowedForStatus(status, branchCode)) {
+    if (getProgramsForOfferings(offerings.filter((item) => item.branch_code === branchCode), status).length === 0) {
       return true;
     }
 
@@ -123,6 +126,11 @@ function AdmissionStep1() {
   };
 
   const getBranchHelperText = (branchCode: string, branchName: string) => {
+    if (offeringsLoading) return "Loading available courses and strands...";
+    if (offeringsError) return "Branch offerings are currently unavailable.";
+    if (status !== "Select Status" && getProgramsForOfferings(
+      offerings.filter((item) => item.branch_code === branchCode), status,
+    ).length === 0) return "No courses or strands available for your student status.";
     const branchStatus = getBranchStatus(branchCode);
     const formattedCloseDate = formatAdmissionCloseDate(
       branchStatus?.closeOnDate ?? "",
@@ -267,6 +275,8 @@ function AdmissionStep1() {
             Select Your Branch
             <p>Choose the branch you wish to enroll in</p>
           </div>
+
+          {offeringsError && <p role="alert">{offeringsError}</p>}
 
           {branchOptions.map((branch) => (
             <BranchCard

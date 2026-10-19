@@ -598,7 +598,7 @@ const buildCollegeRows = (
   const rows = new Map<string, DisplayGradeRow>();
   const displayedGrades = new Map<
     string,
-    { grade: string; priority: number }
+    { grade: string; priority: number; instructor?: string }
   >();
   const finalEvaluations = new Map<
     string,
@@ -659,6 +659,7 @@ const buildCollegeRows = (
       displayedGrades.set(key, {
         grade: record.normalizedGrade,
         priority: nextDisplayedGradePriority,
+        instructor: record.instructorName,
       });
     }
 
@@ -693,6 +694,7 @@ const buildCollegeRows = (
       return {
         ...row,
         grade: displayedGrade?.grade ?? row.grade,
+        instructor: displayedGrade?.instructor?.trim() || row.instructor,
         remarks: finalEvaluation?.evaluation ?? "Partially Posted",
         status: finalEvaluation?.evaluation ?? "Partially Posted",
       };

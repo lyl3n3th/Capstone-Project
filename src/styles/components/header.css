@@ -25,6 +25,14 @@
   flex: 1 1 auto;
 }
 
+.s-header-title {
+  margin: 0;
+  color: #333333;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .s-user-profile {
   display: flex;
   align-items: center;
@@ -222,7 +230,11 @@
 }
 
 /* Responsive Header Styles */
-@media (max-width: 768px) {
+@media (max-width: 1023px) {
+  .s-header-title {
+    font-size: 20px;
+  }
+
   .s-header {
     padding: 12px 20px;
   }

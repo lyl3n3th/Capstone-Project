@@ -30,6 +30,18 @@ export interface StudentBalanceSummary {
   status: "Unpaid" | "Partial" | "Fully Paid";
 }
 
+export const getStudentTuitionAssessment = ({
+  programType,
+  totalUnits,
+  discountPercentage,
+}: {
+  programType?: string;
+  totalUnits: number;
+  discountPercentage: number;
+}) => programType === "SHS"
+  ? 0
+  : Math.round(totalUnits * 600 * (1 - discountPercentage / 100));
+
 type StudentPaymentRow = {
   id: string;
   branch: string;
@@ -268,17 +280,19 @@ export const buildStudentBalanceSummary = ({
   totalAssessment: number;
   payments: StudentPaymentRecord[];
 }): StudentBalanceSummary => {
-  const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
-  const currentBalance = Math.max(totalAssessment - totalPaid, 0);
+  // Keep the payable amount consistent with the whole-peso payment input.
+  const roundedAssessment = Math.round(totalAssessment);
+  const totalPaid = Math.round(payments.reduce((sum, payment) => sum + payment.amount, 0) * 100) / 100;
+  const currentBalance = Math.max(Math.round(roundedAssessment - totalPaid), 0);
   const status =
-    totalAssessment <= 0 || currentBalance <= 0
+    roundedAssessment <= 0 || currentBalance <= 0
       ? "Fully Paid"
       : totalPaid <= 0
         ? "Unpaid"
         : "Partial";
 
   return {
-    totalAssessment,
+    totalAssessment: roundedAssessment,
     totalPaid,
     currentBalance,
     status,

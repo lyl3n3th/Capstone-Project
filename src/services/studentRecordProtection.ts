@@ -54,10 +54,13 @@ export const getStudentRecordProtection = async ({
     studentNumber,
     trackingNumber,
   });
-  const credentialCount = Math.max(
-    requirementSnapshot?.applicantRecord.documentsSubmitted ?? 0,
-    requirementSnapshot?.applicantRecord.attachments?.length ?? 0,
-  );
+  // Required-document placeholders are not uploaded credentials. Use file
+  // references instead of row counts or a possibly stale submitted total.
+  const credentialCount = (requirementSnapshot?.applicantRecord.attachments ?? [])
+    .filter((attachment) => {
+      const url = attachment.url?.trim();
+      return Boolean(attachment.storagePath?.trim() || (url && url !== "#"));
+    }).length;
   const paymentCount = getStudentPayments({
     branch: resolvedBranch,
     studentNumber,

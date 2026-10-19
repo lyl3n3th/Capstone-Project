@@ -25,7 +25,7 @@ import {
   saveStudentPlanningState,
   saveStudentScheduleRequest,
 } from "../../services/studentPlanningApi";
-import { getStudentGradeRecords } from "../../services/studentGrades";
+import { getStudentGradeRecords, fetchAndCacheStudentGradeRecordsForBranch } from "../../services/studentGrades";
 import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
 
@@ -932,6 +932,9 @@ function StudentSubjects() {
   const [selectedAcademicYear, setSelectedAcademicYear] = useState("");
   const [selectedSemester, setSelectedSemester] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
+  const scheduleDraftTermRef = useRef("");
+  const scheduleDraftEditedRef = useRef(false);
   const [scheduleChoiceGroups, setScheduleChoiceGroups] = useState<
     StudentScheduleChoiceGroup[]
   >([]);
@@ -1002,8 +1005,9 @@ function StudentSubjects() {
       ? "No official subjects are posted yet for your current term."
       : "No subjects found for the selected academic year and semester.";
   const studentGradeRecords = useMemo(
-    () =>
-      student?.studentNumber
+    () => {
+      void gradeRecordsVersion;
+      return student?.studentNumber
         ? getStudentGradeRecords({
             branch: student.branch,
             studentId: student.studentNumber,
@@ -1012,9 +1016,19 @@ function StudentSubjects() {
               record.programType ===
               (student.programType === "SHS" ? "SHS" : "College"),
           )
-        : [],
-    [student?.branch, student?.programType, student?.studentNumber],
+        : [];
+    },
+    [gradeRecordsVersion, student?.branch, student?.programType, student?.studentNumber],
   );
+
+  useEffect(() => {
+    if (!student?.branch || !supportsOwnSchedule) return;
+    let active = true;
+    void fetchAndCacheStudentGradeRecordsForBranch(student.branch)
+      .then(() => { if (active) setGradeRecordsVersion(version => version + 1); })
+      .catch(error => console.warn("Unable to load grades for schedule eligibility.", error));
+    return () => { active = false; };
+  }, [student?.branch, supportsOwnSchedule]);
 
   useEffect(() => {
     if (!student || !supportsOwnSchedule) {
@@ -1064,6 +1078,7 @@ function StudentSubjects() {
         semester: nextSemester,
         academicYear: nextAcademicYear,
         gradeRecords: studentGradeRecords,
+        strictScope: true,
       });
 
       if (isCancelled) {
@@ -1072,7 +1087,12 @@ function StudentSubjects() {
 
       setScheduleRequest(nextScheduleRequest);
       setScheduleChoiceGroups(nextChoiceGroups);
-      setSelectedAssignmentsBySubject(
+      const termKey = `${student.branch}:${student.studentNumber}:${nextAcademicYear}:${nextSemester}`;
+      if (scheduleDraftTermRef.current !== termKey) {
+        scheduleDraftTermRef.current = termKey;
+        scheduleDraftEditedRef.current = false;
+      }
+      if (!scheduleDraftEditedRef.current) setSelectedAssignmentsBySubject(
         Object.fromEntries(
           (nextScheduleRequest?.selections ?? []).map((selection) => [
             selection.subjectId,
@@ -1146,6 +1166,8 @@ function StudentSubjects() {
     return sortSemesters(Array.from(semesters));
   }, [
     allSubjects,
+    currentTerm?.academicYear,
+    currentTerm?.semester,
     effectiveAcademicYear,
     ownScheduleAcademicYear,
     ownScheduleSemester,
@@ -1275,6 +1297,7 @@ function StudentSubjects() {
     subjectId: string,
     assignmentId: string,
   ) => {
+    scheduleDraftEditedRef.current = true;
     setSelectedAssignmentsBySubject((prev) => ({
       ...prev,
       [subjectId]: assignmentId,
@@ -1282,6 +1305,7 @@ function StudentSubjects() {
   };
 
   const handleResetOwnScheduleSelections = () => {
+    scheduleDraftEditedRef.current = true;
     setSelectedAssignmentsBySubject({});
     addToast("Schedule selections cleared.", "info");
   };
@@ -1335,6 +1359,7 @@ function StudentSubjects() {
         ownScheduleSelectionStatus: "Pending Approval",
       });
       setScheduleRequest(savedRequest);
+      scheduleDraftEditedRef.current = false;
       await refreshStudent();
       addToast("Schedule request submitted for approval.", "success");
     } catch (error) {
@@ -1402,7 +1427,7 @@ function StudentSubjects() {
 
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth > 768 && sidebarOpen) {
+      if (window.innerWidth >= 1024 && sidebarOpen) {
         setSidebarOpen(false);
       }
     };

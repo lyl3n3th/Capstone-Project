@@ -1,7 +1,6 @@
 import { supabase } from "../lib/supabase";
 import {
   normalizeBranchName,
-  normalizeStudentNumberInput,
   readBranchScopedData,
   readStoredStudents,
   writeBranchScopedData,
@@ -180,10 +179,7 @@ const writeStudentScheduleRequestToLocalCache = (
   request: StudentScheduleSelectionRequestRecord,
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
-  const normalizedRequestStudentNumber = normalizeStudentNumberInput(
-    request.studentNumber,
-    resolvedBranch,
-  );
+  const normalizedRequestStudentNumber = request.studentNumber.trim().toUpperCase();
   const existingRequests =
     readBranchScopedData<StudentScheduleSelectionRequestRecord[]>(
       STUDENT_SCHEDULE_REQUEST_SCOPE,
@@ -192,7 +188,7 @@ const writeStudentScheduleRequestToLocalCache = (
   const existingIndex = existingRequests.findIndex(
     (candidate) =>
       candidate.id === request.id ||
-      (normalizeStudentNumberInput(candidate.studentNumber, resolvedBranch) ===
+      (candidate.studentNumber.trim().toUpperCase() ===
         normalizedRequestStudentNumber &&
         candidate.academicYear === request.academicYear &&
         candidate.semester === request.semester),
@@ -222,8 +218,8 @@ const mergeStudentScheduleRequests = (
     const existingIndex = mergedRequests.findIndex(
       (remoteRequest) =>
         remoteRequest.id === localRequest.id ||
-        (normalizeStudentNumberInput(remoteRequest.studentNumber, remoteRequest.branch) ===
-          normalizeStudentNumberInput(localRequest.studentNumber, localRequest.branch) &&
+        (remoteRequest.studentNumber.trim().toUpperCase() ===
+          localRequest.studentNumber.trim().toUpperCase() &&
           remoteRequest.academicYear === localRequest.academicYear &&
           remoteRequest.semester === localRequest.semester),
     );
@@ -571,10 +567,6 @@ export const saveStudentScheduleRequest = async (
   request: StudentScheduleSelectionRequestRecord,
 ) => {
   const resolvedBranch = normalizeBranchName(request.branch);
-  const optimisticRequest = writeStudentScheduleRequestToLocalCache(
-    resolvedBranch,
-    request,
-  );
   const { data, error } = await supabase
     .rpc("upsert_student_schedule_request", {
       p_payload: {
@@ -585,19 +577,12 @@ export const saveStudentScheduleRequest = async (
     .returns<StudentScheduleRequestRow[]>();
 
   if (error) {
-    console.warn(
-      "Unable to sync student schedule request to Supabase; using local cache.",
-      error,
-    );
-    return optimisticRequest;
+    throw new Error(getErrorMessage(error));
   }
 
   const row = getSingleRow<StudentScheduleRequestRow>(data);
   if (!row) {
-    console.warn(
-      "Supabase did not return the saved schedule request; using local cache.",
-    );
-    return optimisticRequest;
+    throw new Error("The server did not confirm the schedule request. Please refresh and try again.");
   }
 
   const nextRequest = mapStudentScheduleRequest(row);

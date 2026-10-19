@@ -4,6 +4,8 @@ import { MdArchive } from "react-icons/md";
 import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import SystemAlertModal from "../../components/common/SystemAlertModal";
+import StudentImportModal from "../../components/admin/StudentImportModal";
+import StudentHistoricalGrades from "../../components/admin/StudentHistoricalGrades";
 import { useAuth } from "../../hooks/useAuth";
 import {
   BACKUP_RESTORE_APPLIED_EVENT,
@@ -17,6 +19,7 @@ import {
 import {
   getNextStudentNumber,
   getStudentRequirementSnapshot,
+  fetchSupabaseAdmissionApplicants,
   updateStoredStudentOwnScheduleState,
   getStudentsForBranch,
   forgetDeletedStoredStudent,
@@ -98,6 +101,11 @@ interface StudentsProps {
 }
 
 interface Student {
+  importAcademicYear?: string;
+  importSemester?: string;
+  importAcademicStanding?: "Regular" | "Irregular";
+  lastSchoolAttended?: string;
+  yearCompletion?: string;
   recordId?: number;
   id: string;
   name: string;
@@ -139,9 +147,7 @@ const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
 const getStudentCourseDisplay = (
   student: Pick<Student, "program" | "strandOrCourse">,
 ) =>
-  student.program === "College"
-    ? DEFAULT_COLLEGE_COURSE
-    : student.strandOrCourse || student.program;
+  student.strandOrCourse || (student.program === "College" ? DEFAULT_COLLEGE_COURSE : student.program);
 
 interface ApiAlumniRecord {
   id?: number;
@@ -506,13 +512,14 @@ const getDisplayedAcademicStandingLabel = (
   student:
     | Pick<
         Student,
-        "id" | "branch" | "trackingNumber" | "requestedOwnSchedule" | "ownScheduleRequestStatus"
+        "id" | "branch" | "trackingNumber" | "requestedOwnSchedule" | "ownScheduleRequestStatus" | "importAcademicStanding"
       >
     | null
     | undefined,
   fallbackLabel?: string | null,
 ): "Regular" | "Irregular" =>
   hasRequestedOwnSchedule(student) ||
+  student?.importAcademicStanding === "Irregular" ||
   Boolean(
     student &&
       getLatestApprovedIrregularEnrollmentRequestForStudent({
@@ -726,6 +733,8 @@ const getEditableShsQuarterLabels = (semester: string): ShsQuarterLabel[] => {
 };
 
 const buildGradeClearIdentityFromRecord = (record: StoredStudentGradeRecord) => ({
+  source: record.source,
+  studentNumberIsOriginal: record.studentNumberIsOriginal,
   studentId: record.studentId,
   subjectCode: record.subjectCode,
   academicYear: record.academicYear,
@@ -971,6 +980,7 @@ export default function AdminStudents({
   const requestConfirmation = useConfirmation();
   const { currentUser } = useAuth();
   const currentBranch = normalizeBranchName(currentUser?.branch);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -1110,6 +1120,18 @@ export default function AdminStudents({
 
         if (!isCurrentLoad()) {
           return;
+        }
+
+        try {
+          const applicants = await fetchSupabaseAdmissionApplicants(currentBranch);
+          if (!isCurrentLoad()) {
+            return;
+          }
+          if (!hasFreshRestoreSnapshotForBranch(currentBranch)) {
+            writeBranchScopedData(ENROLLEE_STORAGE_SCOPE, currentBranch, applicants);
+          }
+        } catch (error) {
+          console.warn("Unable to fetch linked admission records.", error);
         }
 
         fetchedBranchStudents = fetchedBranchStudents.map(
@@ -2258,7 +2280,8 @@ export default function AdminStudents({
     input.click();
   };
 
-  const handleAdminCredentialRemove = async (requirementName: string) => {
+  const handleAdminCredentialRemove = async (requirement: { code: string; name: string }) => {
+    const requirementName = requirement.name;
     if (!viewingStudent || !viewingStudentApplicantRecord?.trackingNumber) {
       setCredentialActionFeedback({
         type: "error",
@@ -2283,27 +2306,31 @@ export default function AdminStudents({
     setCredentialActionKey(actionKey);
     setCredentialActionFeedback(null);
 
-    const updatedRecord = removeStudentCredentialUpload({
-      branch: viewingStudent.branch || currentBranch,
-      trackingNumber: viewingStudentApplicantRecord.trackingNumber,
-      studentNumber: viewingStudent.id,
-      requirementName,
-    });
-
-    if (!updatedRecord) {
-      setCredentialActionFeedback({
-        type: "error",
-        message: "Unable to remove the credential from this student.",
+    try {
+      const updatedRecord = await removeStudentCredentialUpload({
+        branch: viewingStudent.branch || currentBranch,
+        trackingNumber: viewingStudentApplicantRecord.trackingNumber,
+        studentNumber: viewingStudent.id,
+        requirementName,
+        requirementCode: requirement.code,
       });
-    } else {
+      if (!updatedRecord) {
+        throw new Error("The credential was removed, but the student record could not be refreshed. Please reload the page.");
+      }
       setStudents((prev) => [...prev]);
       setCredentialActionFeedback({
         type: "success",
         message: `${requirementName} removed successfully.`,
       });
+    } catch (error) {
+      console.error("Failed to remove student credential", error);
+      setCredentialActionFeedback({
+        type: "error",
+        message: error instanceof Error ? error.message : "Unable to remove the credential right now.",
+      });
+    } finally {
+      setCredentialActionKey(null);
     }
-
-    setCredentialActionKey(null);
   };
 
   const handleCloseGradeEditor = () => {
@@ -2454,7 +2481,7 @@ export default function AdminStudents({
             branch: gradeEditState.branch,
           },
           updatedAt,
-          { allowBlankGradeClear: true },
+          { allowBlankGradeClear: true, preserveStudentNumber: field.existingRecord?.studentNumberIsOriginal },
         );
 
         if (validationResult.errorReason) {
@@ -2469,7 +2496,7 @@ export default function AdminStudents({
         if (validationResult.normalizedRecord) {
           operations.push({
             type: "upsert",
-            record: validationResult.normalizedRecord,
+            record: { ...field.existingRecord, ...validationResult.normalizedRecord },
           });
         } else if (validationResult.clearRecordIdentity) {
           operations.push({
@@ -3135,8 +3162,9 @@ export default function AdminStudents({
           const student =
             students.find(
               (record) =>
-                normalizeStudentNumberInput(record.id, currentBranch) ===
-                  normalizedRequestStudentNumber ||
+                record.id.trim().toUpperCase() === request.studentNumber.trim().toUpperCase() ||
+                (!record.importAcademicYear && normalizeStudentNumberInput(record.id, currentBranch) ===
+                  normalizedRequestStudentNumber) ||
                 (request.trackingNumber &&
                   record.trackingNumber === request.trackingNumber),
             ) ?? null;
@@ -3755,6 +3783,9 @@ export default function AdminStudents({
               {pendingScheduleNotificationCount}
             </span>
           </button>
+          <button type="button" className="students-export-btn students-import-btn" onClick={() => setIsImportModalOpen(true)} disabled={isLoading || isAnyBulkActionPending}>
+            Import Students
+          </button>
           <button
             type="button"
             className="students-export-btn"
@@ -3994,6 +4025,16 @@ export default function AdminStudents({
             </tbody>
           </table>
         </div>
+
+        {isImportModalOpen && <StudentImportModal key={currentBranch} branch={currentBranch}
+          onClose={() => setIsImportModalOpen(false)}
+          onImported={async () => {
+            invalidateStudentDataLoad();
+            const importedStudents = await fetchAdminStudents(currentBranch);
+            const refreshed = importedStudents.map(resolveStudentWithApprovedEnrollment);
+            writeStoredStudents([...readStoredStudents().filter((student) => normalizeBranchName(student.branch) !== currentBranch), ...refreshed]);
+            setStudents(removeHiddenStudentsFromAdminList(refreshed));
+          }} />}
 
         {/* Add/Edit Modal - Keep same modal structure but update class names */}
         {isAddEditModalOpen && (
@@ -4466,6 +4507,30 @@ export default function AdminStudents({
                       {viewingStudent.section || "N/A"}
                     </div>
                   </div>
+                  {viewingStudent.importAcademicYear && <>
+                    <div className="students-profile-field">
+                      <label>Imported Academic Year</label>
+                      <div className="students-profile-value">{viewingStudent.importAcademicYear}</div>
+                    </div>
+                    <div className="students-profile-field">
+                      <label>Imported Semester</label>
+                      <div className="students-profile-value">{viewingStudent.importSemester}</div>
+                    </div>
+                  </>}
+                  <div className="students-profile-field">
+                    <label>Last School Attended</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.lastSchoolAttended || viewingStudentApplicantRecord?.personalInfo.lastSchoolAttended ||
+                        "Not provided"}
+                    </div>
+                  </div>
+                  <div className="students-profile-field">
+                    <label>Year Completion</label>
+                    <div className="students-profile-value">
+                      {viewingStudent.yearCompletion || viewingStudentApplicantRecord?.personalInfo.yearCompletion ||
+                        "Not provided"}
+                    </div>
+                  </div>
                   <div className="students-profile-field">
                     <label>Submitted Date</label>
                     <div className="students-profile-value">
@@ -4861,7 +4926,7 @@ export default function AdminStudents({
                                       className="students-credential-action-btn danger"
                                       onClick={() =>
                                         handleAdminCredentialRemove(
-                                          credential.name,
+                                          credential,
                                         )
                                       }
                                       disabled={credentialActionKey !== null}
@@ -4958,7 +5023,9 @@ export default function AdminStudents({
                     <div className="students-profile-value students-profile-list-box">
                       <div className="students-profile-note">
                         <p>
-                          {viewingStudentAcademicStanding?.reason ||
+                          {viewingStudent.importAcademicStanding
+                            ? `Imported as ${viewingStudent.importAcademicStanding.toLowerCase()} for ${viewingStudent.importAcademicYear}, ${viewingStudent.importSemester}.`
+                            : viewingStudentAcademicStanding?.reason ||
                             viewingStudentOwnScheduleReason ||
                             "No academic standing details available yet."}
                         </p>
@@ -4978,6 +5045,10 @@ export default function AdminStudents({
                     </div>
                   </div>
                   <div className="students-profile-field students-profile-field-full">
+                    {viewingStudent.importAcademicYear && viewingStudent.importSemester && (
+                      <StudentHistoricalGrades key={`${viewingStudent.id}-${viewingStudent.branch}`} student={viewingStudent}
+                        branch={viewingStudent.branch || currentBranch} recordedBy={currentUser?.displayName || loggedInUsername} />
+                    )}
                     <label>
                       {isViewingCollegeStudent
                         ? "Uploaded Grades by Semester"
@@ -5199,7 +5270,8 @@ export default function AdminStudents({
                                                         record,
                                                       )
                                                     }
-                                                    disabled={isAnyBulkActionPending}
+                                                    disabled={isAnyBulkActionPending || record.source === "historical"}
+                                                    title={record.source === "historical" ? "Edit this grade in Previous Years and Semesters above." : undefined}
                                                   >
                                                     Edit
                                                   </button>
@@ -5316,7 +5388,8 @@ export default function AdminStudents({
                                                         records: rowRecords,
                                                       })
                                                     }
-                                                    disabled={isAnyBulkActionPending}
+                                                    disabled={isAnyBulkActionPending || rowRecords.some(record => record.source === "historical")}
+                                                    title={rowRecords.some(record => record.source === "historical") ? "Edit these grades in Previous Years and Semesters above." : undefined}
                                                   >
                                                     Edit
                                                   </button>

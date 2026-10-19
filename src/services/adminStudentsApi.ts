@@ -1,4 +1,6 @@
 import { supabase } from "../lib/supabase";
+import { fetchStudentImportDetails } from "./studentImport";
+import { applyImportedScheduleDefaults } from "./importedStudentScheduling";
 import {
   forgetDeletedStoredStudent,
   isStoredStudentDeleted,
@@ -155,6 +157,9 @@ const toIsoDateInput = (value?: string | null) => {
 const mapAdminStudentRow = (
   row: AdminStudentApiRecord,
 ): StudentStorageRecord => ({
+  firstName: row.first_name,
+  middleName: row.middle_name || "",
+  lastName: row.last_name,
   id: row.student_number,
   name: toNameCapitalization(row.full_name),
   program: toDisplayCapitalization(row.program),
@@ -188,7 +193,10 @@ const mapAdminStudentRow = (
 const buildStudentPayload = (
   student: StudentStorageRecord,
 ): AdminStudentMutationPayload => {
-  const { firstName, middleName, lastName } = splitFullName(student.name);
+  const structuredName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ");
+  const { firstName, middleName, lastName } = structuredName.trim().toLowerCase() === student.name.trim().toLowerCase()
+    ? { firstName: student.firstName || "", middleName: student.middleName || "", lastName: student.lastName || "" }
+    : splitFullName(student.name);
 
   return {
     student_number: student.id,
@@ -232,14 +240,31 @@ export async function fetchAdminStudents(branch?: string | null) {
     .filter((student) => !isStoredStudentDeleted(student));
 
   try {
+    const imported = await fetchStudentImportDetails(branch || undefined);
+    const byNumber = new Map(imported.map((item) => [item.student_number, item]));
+    students.forEach((student) => {
+      const detail = byNumber.get(student.id);
+      if (detail) {
+        student.importAcademicYear = detail.academic_year;
+        student.importSemester = detail.semester;
+        student.importAcademicStanding = detail.academic_standing;
+        student.lastSchoolAttended = detail.last_school_attended || "";
+        student.yearCompletion = detail.year_completion == null ? "" : String(detail.year_completion);
+      }
+    });
+  } catch (error) {
+    console.warn("Unable to load imported-student enrollment details.", error);
+  }
+
+  try {
     const planningStates = await fetchStudentPlanningStates(branch);
-    return mergeStudentPlanningStatesIntoStudents(students, planningStates);
+    return mergeStudentPlanningStatesIntoStudents(students, planningStates).map(applyImportedScheduleDefaults);
   } catch (planningError) {
     console.warn(
       "Unable to fetch shared student planning states. Falling back to base student records.",
       planningError,
     );
-    return students;
+    return students.map(applyImportedScheduleDefaults);
   }
 }
 
@@ -309,6 +334,11 @@ export async function saveAdminStudent(student: StudentStorageRecord) {
 
   return {
     ...savedStudent,
+    importAcademicYear: student.importAcademicYear,
+    importSemester: student.importSemester,
+    importAcademicStanding: student.importAcademicStanding,
+    lastSchoolAttended: student.lastSchoolAttended,
+    yearCompletion: student.yearCompletion,
     requestedOwnSchedule: hasOwnPlanningField(student, "requestedOwnSchedule")
       ? student.requestedOwnSchedule
       : savedStudent.requestedOwnSchedule,

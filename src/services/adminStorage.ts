@@ -93,6 +93,14 @@ export interface AdminEnrolleeRecord {
 }
 
 export interface StudentStorageRecord {
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  importAcademicYear?: string;
+  importSemester?: string;
+  importAcademicStanding?: "Regular" | "Irregular";
+  lastSchoolAttended?: string;
+  yearCompletion?: string;
   recordId?: number;
   id: string;
   name: string;
@@ -1784,7 +1792,7 @@ const normalizeAcademicDescriptor = (value?: string | null) => {
     return normalized;
   }
 
-  if (normalized.includes("entrepreneur")) {
+  if (normalized === "bse" || normalized.includes("entrepreneur")) {
     return "entrepreneurship";
   }
 
@@ -2681,6 +2689,12 @@ const mergeAttachmentLists = (
     const key = getAttachmentKey(attachment);
     const existingAttachment = mergedAttachments.get(key);
 
+    // The server's pending placeholder means the upload was removed. A stale
+    // browser cache must not restore its old file or review status.
+    if (existingAttachment?.type === "pending" && !hasRealAttachmentUrl(existingAttachment)) {
+      return;
+    }
+
     mergedAttachments.set(key, {
       ...existingAttachment,
       ...attachment,
@@ -2981,6 +2995,8 @@ export const syncStudentCredentialUpload = async ({
       name: requirementName,
       type: mimeType || "file",
       url: signedUrl,
+      storagePath,
+      storageBucket,
       reviewStatus,
     };
 
@@ -3020,18 +3036,34 @@ export const syncStudentCredentialUpload = async ({
   return nextEnrollees;
 };
 
-export const removeStudentCredentialUpload = ({
+export const removeStudentCredentialUpload = async ({
   branch,
   trackingNumber,
   studentNumber,
   requirementName,
+  requirementCode,
 }: {
   branch?: string | null;
   trackingNumber?: string | null;
   studentNumber?: string | null;
   requirementName: string;
+  requirementCode: string;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
+  if (!trackingNumber?.trim() || !requirementCode.trim()) {
+    throw new Error("A linked admission record and credential code are required.");
+  }
+
+  const { error } = await supabase.rpc("remove_admission_requirement_file", {
+    p_branch: resolvedBranch,
+    p_tracking_number: trackingNumber.trim().toUpperCase(),
+    p_requirement_code: requirementCode.trim(),
+  });
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  // Change the browser cache only after the shared record is removed.
   const storedEnrollees =
     readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ?? [];
   const requirementKey = requirementName.trim().toLowerCase();
@@ -3051,7 +3083,7 @@ export const removeStudentCredentialUpload = ({
     );
     const submittedAttachmentCount = getEffectiveSubmittedAttachments(
       nextAttachments,
-      nextAttachments.length,
+      0,
     ).length;
     const tuitionEstimate = getEstimatedCollegeTuition({
       honorLabel: record.honorLabel,
@@ -3430,6 +3462,7 @@ export const getStudentPortalSubjectsForTerm = ({
   strandOrCourse,
   semester,
   academicYear,
+  requireCourseMatch = false,
 }: {
   branch?: string | null;
   program: string;
@@ -3437,6 +3470,7 @@ export const getStudentPortalSubjectsForTerm = ({
   strandOrCourse?: string;
   semester: string;
   academicYear?: string;
+  requireCourseMatch?: boolean;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
   const storedSubjects =
@@ -3461,7 +3495,7 @@ export const getStudentPortalSubjectsForTerm = ({
       ),
   );
   const termSubjects =
-    exactTermSubjects.length > 0
+    exactTermSubjects.length > 0 || requireCourseMatch
       ? exactTermSubjects
       : storedSubjects.filter(
           (subject) =>
@@ -3481,6 +3515,7 @@ export const getStudentPortalSubjectsForSectionTerm = ({
   sectionCode,
   semester,
   academicYear,
+  requireCourseMatch = false,
 }: {
   branch?: string | null;
   program: string;
@@ -3489,6 +3524,7 @@ export const getStudentPortalSubjectsForSectionTerm = ({
   sectionCode?: string | null;
   semester: string;
   academicYear?: string;
+  requireCourseMatch?: boolean;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
   const storedSubjects =
@@ -3523,7 +3559,7 @@ export const getStudentPortalSubjectsForSectionTerm = ({
       ),
   );
   const semesterScopedSubjects =
-    exactSemesterScopedSubjects.length > 0
+    exactSemesterScopedSubjects.length > 0 || requireCourseMatch
       ? exactSemesterScopedSubjects
       : storedSubjects.filter(
           (subject) =>
@@ -3543,7 +3579,8 @@ export const getStudentPortalSubjectsForSectionTerm = ({
     (assignment) =>
       assignment.academicYear === resolvedAcademicYear &&
       normalizeStoredSectionCode(assignment.sectionCode) === normalizedSectionCode &&
-      assignment.semester === normalizedSemester,
+      assignment.semester === normalizedSemester &&
+      (!requireCourseMatch || semesterScopedSubjects.some((subject) => storedSubjectMatchesAssignment(subject, assignment))),
   );
 
   if (sectionAssignments.length === 0) {
@@ -4017,6 +4054,7 @@ export const getStudentScheduleChoiceGroups = ({
   semester,
   academicYear,
   gradeRecords,
+  strictScope = false,
 }: {
   branch?: string | null;
   program: string;
@@ -4025,6 +4063,7 @@ export const getStudentScheduleChoiceGroups = ({
   semester: string;
   academicYear?: string;
   gradeRecords?: StoredStudentGradeRecord[];
+  strictScope?: boolean;
 }): StudentScheduleChoiceGroup[] => {
   const resolvedBranch = normalizeBranchName(branch);
   const storedSubjects =
@@ -4053,7 +4092,7 @@ export const getStudentScheduleChoiceGroups = ({
       assignment.semester === normalizedSemester,
   );
   const semesterFallbackAssignments =
-    matchingTermAssignments.length > 0
+    matchingTermAssignments.length > 0 || strictScope
       ? matchingTermAssignments
       : storedAssignments.filter(
           (assignment) => assignment.semester === normalizedSemester,
@@ -4075,7 +4114,7 @@ export const getStudentScheduleChoiceGroups = ({
       ),
   );
   const matchedSubjects =
-    exactSubjectMatches.length > 0
+    exactSubjectMatches.length > 0 || strictScope
       ? exactSubjectMatches
       : storedSubjects.filter(
           (subject) =>
@@ -4098,6 +4137,7 @@ export const getStudentScheduleChoiceGroups = ({
       )
     : matchedSubjects;
 
+  if (matchedSubjects.length === 0 && strictScope) return [];
   if (matchedSubjects.length === 0) {
     const assignmentGroups = new Map<string, StudentScheduleChoiceGroup>();
 
@@ -4205,7 +4245,7 @@ export const getStudentScheduleSelectionRequest = ({
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
   const normalizedStudentNumber = studentNumber
-    ? normalizeStudentNumberInput(studentNumber, resolvedBranch)
+    ? studentNumber.trim().toUpperCase()
     : "";
   const normalizedSemester = semester ? normalizeStoredSemester(semester) : "";
   const normalizedAcademicYear = academicYear?.trim() || "";
@@ -4234,7 +4274,7 @@ export const getStudentScheduleSelectionRequest = ({
 
       return (
         Boolean(normalizedStudentNumber && request.studentNumber) &&
-        normalizeStudentNumberInput(request.studentNumber, resolvedBranch) ===
+        request.studentNumber.trim().toUpperCase() ===
           normalizedStudentNumber &&
         matchesTerm
       );
@@ -4251,14 +4291,11 @@ export const saveStudentScheduleSelectionRequest = (
       "student-schedule-requests",
       resolvedBranch,
     ) ?? [];
-  const normalizedRequestStudentNumber = normalizeStudentNumberInput(
-    request.studentNumber,
-    resolvedBranch,
-  );
+  const normalizedRequestStudentNumber = request.studentNumber.trim().toUpperCase();
   const existingIndex = existingRequests.findIndex(
     (record) =>
       record.id === request.id ||
-      (normalizeStudentNumberInput(record.studentNumber, resolvedBranch) ===
+      (record.studentNumber.trim().toUpperCase() ===
         normalizedRequestStudentNumber &&
         record.semester === request.semester &&
         record.academicYear === request.academicYear),
@@ -4402,6 +4439,9 @@ const mapSupabaseApplicantToAdminRecord = async (
           uploadedFile.storage_path,
           uploadedFile.storage_bucket || REQUIREMENTS_BUCKET,
         ),
+        storagePath: uploadedFile.storage_path,
+        storageBucket: uploadedFile.storage_bucket || REQUIREMENTS_BUCKET,
+        uploadedAt: uploadedFile.uploaded_at,
         reviewStatus: "Pending" as const,
       };
     }),

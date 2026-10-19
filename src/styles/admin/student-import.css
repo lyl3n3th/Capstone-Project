@@ -1,0 +1,40 @@
+.student-import-overlay { position: fixed; inset: 0; z-index: 11000; padding: 24px; background: rgba(15, 23, 42, .5); display: flex; align-items: center; justify-content: center; }
+.student-import-modal { width: min(1400px, 100%); max-height: 94vh; display: flex; flex-direction: column; background: #fff; border-radius: 16px; box-shadow: 0 24px 70px #0f172a40; color: #1e293b; }
+.student-import-modal * { box-sizing: border-box; }
+.student-import-header, .student-import-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 24px; }
+.student-import-header { border-bottom: 1px solid #e2e8f0; }
+.student-import-header h2 { margin: 0; font-size: 23px; color: #1a3d5c; }
+.student-import-header p { margin: 5px 0 0; color: #64748b; font-size: 13px; }
+.student-import-header > button { font-size: 24px; }
+.student-import-body { overflow: auto; padding: 20px 24px; }
+.student-import-modal button { border: 1px solid #cbd5e1; background: #f8fafc; color: #1a3d5c; border-radius: 7px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
+.student-import-modal button:disabled, .student-import-modal input:disabled { cursor: not-allowed; opacity: .6; }
+.student-import-modal button:focus-visible, .student-import-modal input:focus-visible { outline: 2px solid #0284c7; outline-offset: 2px; }
+.student-import-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.student-import-steps > div { border: 1px solid #dbe7f0; border-radius: 10px; background: #f8fbfd; padding: 16px; }
+.student-import-steps p, .student-import-hint { font-size: 13px; line-height: 1.6; color: #64748b; }
+.student-import-file-label { display: grid; gap: 8px; font-size: 13px; }
+.student-import-file-label input { max-width: 100%; }
+.student-import-alert, .student-import-errors { border: 1px solid #fecaca; border-radius: 8px; background: #fff5f5; padding: 12px 16px; color: #991b1b; font-size: 13px; overflow-wrap: anywhere; }
+.student-import-success { padding: 14px; border-radius: 8px; background: #ecfdf5; color: #166534; }
+.student-import-filename { color: #64748b; font-size: 13px; overflow-wrap: anywhere; }
+.student-import-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 18px 0; font-size: 14px; }
+.student-import-summary label { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.student-import-errors ul { max-height: 150px; overflow: auto; padding-left: 24px; }
+.student-import-errors li { margin: 4px 0; }
+.student-import-errors li button { padding: 1px 5px; color: #991b1b; text-decoration: underline; }
+.student-import-table-wrap { width: 100%; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; max-height: 44vh; }
+.student-import-table { border-collapse: separate; border-spacing: 0; width: max-content; font-size: 12px; }
+.student-import-table th, .student-import-table td { border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; padding: 8px; vertical-align: top; text-align: left; }
+.student-import-table thead th { position: sticky; top: 0; z-index: 1; background: #edf4fa; color: #1a3d5c; }
+.student-import-table th:first-child { position: sticky; left: 0; z-index: 2; background: #edf4fa; min-width: 75px; }
+.student-import-table thead th:first-child { z-index: 3; }
+.student-import-table input { width: 185px; min-height: 34px; padding: 7px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; }
+.student-import-table .student-import-invalid { background: #fff1f2; }
+.student-import-invalid input { border: 2px solid #dc2626; }
+.student-import-invalid small { display: block; width: 185px; margin-top: 5px; color: #b91c1c; line-height: 1.5; }
+.student-import-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 12px 0; font-size: 13px; }
+.student-import-footer { border-top: 1px solid #e2e8f0; }
+.student-import-footer > span { margin-right: auto; font-size: 12px; color: #64748b; }
+.student-import-modal .student-import-confirm { background: #066287; color: white; border-color: #066287; }
+@media (max-width: 640px) { .student-import-overlay { padding: 8px; } .student-import-header, .student-import-body, .student-import-footer { padding: 14px; } .student-import-steps { grid-template-columns: 1fr; } .student-import-header h2 { font-size: 19px; } .student-import-footer { flex-wrap: wrap; } .student-import-footer > span { width: 100%; } .student-import-summary label { margin-left: 0; } }

@@ -1,0 +1,13 @@
+.student-history { padding: 18px; border: 1px solid #dbe7f0; border-radius: 10px; background: #f8fbfd; }
+.student-history h3 { margin: 0 0 10px; color: #1a3d5c; }
+.student-history p { font-size: 13px; line-height: 1.6; }
+.student-history-term { margin-top: 14px; padding: 12px; background: white; border: 1px solid #dbe7f0; border-radius: 8px; }
+.student-history-term summary { cursor: pointer; font-weight: 600; color: #1a3d5c; margin-bottom: 12px; }
+.student-history button { border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 10px; color: #1a3d5c; background: white; cursor: pointer; }
+.student-history button:disabled { cursor: not-allowed; opacity: .6; }
+.student-history-blank { color: #64748b; font-style: italic; }
+.student-history-editor { border: 1px solid #bae6fd; background: #eff6ff; border-radius: 8px; padding: 16px; }
+.student-history-editor label { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; font-size: 13px; }
+.student-history-editor input, .student-history-editor select { padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; max-width: 480px; background: white; }
+.student-history-editor button + button { margin-left: 10px; background: #066287; color: white; }
+.student-history .student-history-error { color: #b91c1c; }

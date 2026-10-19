@@ -97,7 +97,8 @@ textarea {
 .skeleton-line,
 .skeleton-pill,
 .skeleton-icon,
-.skeleton-chart {
+.skeleton-chart,
+.s-home-skeleton-block {
   display: block;
   border-radius: 8px;
   background:

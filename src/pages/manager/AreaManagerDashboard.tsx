@@ -18,10 +18,8 @@ import {
 } from "react-icons/md";
 import {
   getDefaultBranchEnrollees,
-  getKnownAdminBranches,
   getStudentsForBranch,
   normalizeBranchName,
-  readStoredStudents,
   readBranchScopedData,
   type AdminBranchName,
   type AdminEnrolleeRecord,
@@ -30,8 +28,6 @@ import {
 import { fetchInboxReports, type ReportRecord } from "../../services/reportApi";
 import {
   fetchManagedBranches,
-  fetchStaffMembers,
-  syncManagedBranches,
 } from "../../services/staffApi";
 import ChartNote from "../../components/common/ChartNote";
 import SkeletonPage from "../../components/common/SkeletonPage";
@@ -84,7 +80,6 @@ type PopulationRecord = {
   academicLevel: "SHS" | "College" | "Other";
 };
 
-const DEFAULT_MANAGER_BRANCHES: AdminBranchName[] = ["Bacoor", "Taytay", "GMA"];
 const chartColors = ["#0052cc", "#4c8bf5", "#97bcff", "#c2d6ff", "#e2e8f0"];
 
 const getAcademicLevel = (program?: string) => {
@@ -183,20 +178,6 @@ const getUniqueSortedBranches = (branches: string[]) =>
     ),
   ).sort((left, right) => left.localeCompare(right));
 
-const buildDashboardBranches = (
-  reports: ReportRecord[],
-  managedBranches: string[] = [],
-  staffBranches: string[] = [],
-) =>
-  getUniqueSortedBranches([
-    ...DEFAULT_MANAGER_BRANCHES,
-    ...getKnownAdminBranches(),
-    ...managedBranches,
-    ...staffBranches,
-    ...reports.map((report) => report.branch_name),
-    ...readStoredStudents().map((student) => student.branch),
-  ]);
-
 const buildPendingReportCounts = (
   reports: ReportRecord[],
   branches: AdminBranchName[],
@@ -233,13 +214,8 @@ const buildPendingReportCounts = (
 const buildLocalDashboardState = (
   reports: ReportRecord[] = [],
   managedBranches: string[] = [],
-  staffBranches: string[] = [],
 ): DashboardState => {
-  const dashboardBranches = buildDashboardBranches(
-    reports,
-    managedBranches,
-    staffBranches,
-  );
+  const dashboardBranches = getUniqueSortedBranches(managedBranches);
   const pendingReportCounts = buildPendingReportCounts(
     reports,
     dashboardBranches,
@@ -309,36 +285,14 @@ const AreaManagerDashboard = ({
 
   const fetchAllData = async () => {
     try {
-      const [inboxReports, managedBranches, staffMembers] = await Promise.all([
+      const [inboxReports, managedBranches] = await Promise.all([
         fetchInboxReports(),
-        fetchManagedBranches().catch((error) => {
-          console.error("Failed to load managed branches:", error);
-          return [];
-        }),
-        fetchStaffMembers().catch((error) => {
-          console.error("Failed to load staff branches:", error);
-          return [];
-        }),
+        fetchManagedBranches(),
       ]);
-      const managedBranchNames = managedBranches.map((branch) => branch.name);
-      const staffBranchNames = staffMembers.map((staffMember) => staffMember.branch);
-      const dashboardBranches = buildDashboardBranches(
+      applyDashboardState(buildLocalDashboardState(
         inboxReports,
-        managedBranchNames,
-        staffBranchNames,
-      );
-
-      void syncManagedBranches(dashboardBranches).catch((error) => {
-        console.error("Failed to sync dashboard branches to Supabase:", error);
-      });
-
-      applyDashboardState(
-        buildLocalDashboardState(
-          inboxReports,
-          dashboardBranches,
-          staffBranchNames,
-        ),
-      );
+        managedBranches.map((branch) => branch.name),
+      ));
     } catch (error) {
       console.error("Failed to load manager dashboard reports:", error);
       applyDashboardState(buildLocalDashboardState());

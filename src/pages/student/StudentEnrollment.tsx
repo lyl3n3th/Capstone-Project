@@ -49,6 +49,12 @@ import {
   type StoredStudentGradeRecord,
 } from "../../services/studentGrades";
 import { getCurrentTermEvaluationLockStatus } from "../../services/studentEvaluationLock";
+import {
+  buildStudentBalanceSummary,
+  fetchAndCacheStudentPaymentsForBranch,
+  STUDENT_PAYMENTS_UPDATED_EVENT,
+} from "../../services/studentPayments";
+import { EnrollmentBalanceError, getStudentBillingSummary } from "../../services/studentBilling";
 import type { Student } from "../../types/student";
 import "../../styles/main.css";
 
@@ -625,7 +631,8 @@ const formatCurrency = (amount: number) =>
   new Intl.NumberFormat("en-PH", {
     style: "currency",
     currency: "PHP",
-    minimumFractionDigits: 2,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   }).format(amount);
 
 const getEnrollmentGradePostingSummary = ({
@@ -748,6 +755,12 @@ function StudentEnrollment() {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
   const [enrollmentRequestsVersion, setEnrollmentRequestsVersion] = useState(0);
+  const [paymentRecordsVersion, setPaymentRecordsVersion] = useState(0);
+  const [balanceVerification, setBalanceVerification] = useState<{
+    studentKey: string;
+    status: "checking" | "verified" | "error";
+  }>({ studentKey: "", status: "checking" });
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
   const [evaluationSubmissions, setEvaluationSubmissions] = useState<
     InstructorEvaluationSubmissionRecord[]
   >([]);
@@ -1058,12 +1071,66 @@ function StudentEnrollment() {
   const isRequestLocked =
     activeEnrollmentRequest?.enrollmentStatus === "Pending" ||
     activeEnrollmentRequest?.enrollmentStatus === "Approved";
+  const balanceStudentKey = student
+    ? `${student.branch}:${student.studentNumber}:${student.trackingNumber || ""}`
+    : "";
+  const balanceVerificationStatus = !isCollegeStudent
+    ? "verified"
+    : balanceVerification.studentKey === balanceStudentKey
+      ? balanceVerification.status
+      : "checking";
+  const studentBillingContext = student ? {
+    student,
+    subjects,
+    academicYear: currentAcademicYear,
+    semester: currentTerm?.semester || subjects[0]?.semester || currentSemester,
+  } : undefined;
+  void paymentRecordsVersion;
+  const currentBalanceSummary = studentBillingContext
+    ? getStudentBillingSummary(studentBillingContext)
+    : { ...buildStudentBalanceSummary({ totalAssessment: 0, payments: [] }), assessmentAvailable: false };
+  const hasOutstandingBalance = isCollegeStudent && currentBalanceSummary.currentBalance > 0;
+  const balanceHoldMessage = `You have an unpaid student balance of ${formatCurrency(currentBalanceSummary.currentBalance)}. Please pay your balance before enrolling for the next semester or academic year. You cannot submit an enrollment request until your balance is fully paid.`;
+  const assessmentUnavailableMessage = "Your student balance assessment is unavailable. Please contact the cashier or registrar to verify your balance before enrolling for the next term.";
+
+  useEffect(() => {
+    if (!student || !isCollegeStudent) return;
+    let cancelled = false;
+    const verifyPayments = async () => {
+      setBalanceVerification({ studentKey: balanceStudentKey, status: "checking" });
+      try {
+        await fetchAndCacheStudentPaymentsForBranch(student.branch);
+        if (!cancelled) setBalanceVerification({ studentKey: balanceStudentKey, status: "verified" });
+      } catch {
+        if (!cancelled) setBalanceVerification({ studentKey: balanceStudentKey, status: "error" });
+      }
+    };
+    const updatePayments = () => setPaymentRecordsVersion((version) => version + 1);
+    const handleStorage = (event: StorageEvent) => {
+      if (!event.key || event.key.includes("student-payments")) void verifyPayments();
+    };
+    void verifyPayments();
+    window.addEventListener("focus", verifyPayments);
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener(STUDENT_PAYMENTS_UPDATED_EVENT, updatePayments);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", verifyPayments);
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener(STUDENT_PAYMENTS_UPDATED_EVENT, updatePayments);
+    };
+  }, [balanceStudentKey, isCollegeStudent, student]);
+
   const isEligibleForEnrollment =
     Boolean(
       student &&
         gradePostingSummary.isComplete &&
         !hasBlockingShsCurrentFailures &&
         !evaluationLockStatus.isLocked &&
+        !hasOutstandingBalance &&
+        currentBalanceSummary.assessmentAvailable &&
+        balanceVerificationStatus === "verified" &&
+        !isSubmittingRequest &&
         nextPlacement.hasNextTerm &&
         (isRegularFlowStudent
           ? hasCollegeRetakePlanner || assignedSubjects.length > 0
@@ -1072,10 +1139,18 @@ function StudentEnrollment() {
     !isRequestLocked;
   const eligibilityStatusLabel = !student
     ? "Loading"
+    : hasOutstandingBalance
+      ? "Unpaid Balance"
+    : isCollegeStudent && !currentBalanceSummary.assessmentAvailable
+      ? "Assessment Unavailable"
     : activeEnrollmentRequest?.enrollmentStatus === "Approved"
       ? "Approved for Enrollment"
       : activeEnrollmentRequest?.enrollmentStatus === "Pending"
         ? "Request Pending"
+      : balanceVerificationStatus === "checking"
+        ? "Checking Payment Balance"
+      : balanceVerificationStatus === "error"
+        ? "Balance Verification Unavailable"
       : activeEnrollmentRequest?.enrollmentStatus === "Rejected"
           ? "Needs Resubmission"
           : hasBlockingShsCurrentFailures
@@ -1095,10 +1170,18 @@ function StudentEnrollment() {
             : "Not Yet Eligible";
   const eligibilityMessage = !student
     ? "Student record is still loading."
+    : hasOutstandingBalance
+      ? balanceHoldMessage
+    : isCollegeStudent && !currentBalanceSummary.assessmentAvailable
+      ? assessmentUnavailableMessage
     : activeEnrollmentRequest?.enrollmentStatus === "Approved"
       ? "Your request for the upcoming term is already approved."
       : activeEnrollmentRequest?.enrollmentStatus === "Pending"
         ? "Your request is already waiting for admin or registrar review."
+        : balanceVerificationStatus === "checking"
+          ? "Checking your recorded payments before enrollment."
+        : balanceVerificationStatus === "error"
+          ? "Unable to verify your payment balance. Refresh the page and try again before enrolling."
         : activeEnrollmentRequest?.enrollmentStatus === "Rejected"
           ? "Your last request was rejected. Reupload the required files and submit again."
           : !hasSupportedEnrollmentFlow
@@ -1268,7 +1351,7 @@ function StudentEnrollment() {
             ...activeEnrollmentRequest,
             attachments: nextAttachments,
             updatedAt: new Date().toISOString(),
-          });
+          }, { allowLocalFallback: false, studentBalance: studentBillingContext });
           setEnrollmentRequestsVersion((previousValue) => previousValue + 1);
           addToast(
             `${requirement.label} resent successfully. Waiting for review.`,
@@ -1317,6 +1400,7 @@ function StudentEnrollment() {
   };
 
   const handleEnroll = async () => {
+    if (isSubmittingRequest) return;
     if (!student) {
       addToast("Student record is still loading.", "warning");
       return;
@@ -1324,6 +1408,19 @@ function StudentEnrollment() {
 
     if (uploadingId) {
       addToast("Wait for the current file upload to finish first.", "info");
+      return;
+    }
+
+    if (balanceVerificationStatus !== "verified") {
+      addToast("Your payment balance must be verified before enrolling. Refresh the page and try again.", "warning");
+      return;
+    }
+    if (hasOutstandingBalance) {
+      addToast(balanceHoldMessage, "warning");
+      return;
+    }
+    if (!currentBalanceSummary.assessmentAvailable) {
+      addToast(assessmentUnavailableMessage, "warning");
       return;
     }
 
@@ -1499,8 +1596,12 @@ function StudentEnrollment() {
       irregularRequest,
     };
 
+    setIsSubmittingRequest(true);
     try {
-      await saveEnrollmentRequest(nextRequest);
+      await saveEnrollmentRequest(nextRequest, {
+        allowLocalFallback: false,
+        studentBalance: studentBillingContext,
+      });
       setEnrollmentRequestsVersion((previousValue) => previousValue + 1);
       setIsRetakePlanModalOpen(false);
       addToast(
@@ -1509,7 +1610,12 @@ function StudentEnrollment() {
       );
     } catch (error) {
       console.error("Failed to save enrollment request", error);
-      addToast("Unable to submit the enrollment request right now.", "error");
+      if (error instanceof EnrollmentBalanceError && error.reason === "verification") {
+        setBalanceVerification({ studentKey: balanceStudentKey, status: "error" });
+      }
+      addToast(error instanceof EnrollmentBalanceError ? error.message : "Unable to submit the enrollment request right now.", "error");
+    } finally {
+      setIsSubmittingRequest(false);
     }
   };
 
@@ -1682,7 +1788,7 @@ function StudentEnrollment() {
 
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth > 768 && sidebarOpen) {
+      if (window.innerWidth >= 1024 && sidebarOpen) {
         setSidebarOpen(false);
       }
     };
@@ -1738,6 +1844,17 @@ function StudentEnrollment() {
             <h1>Enrollment</h1>
           </div>
 
+          {isCollegeStudent && (hasOutstandingBalance || !currentBalanceSummary.assessmentAvailable || balanceVerificationStatus === "error") && (
+            <div className="s-enrollment-balance-hold" role="alert">
+              <strong>{hasOutstandingBalance ? "Enrollment blocked: Unpaid student balance"
+                : !currentBalanceSummary.assessmentAvailable ? "Enrollment blocked: Balance assessment unavailable"
+                : "Enrollment blocked: Balance verification required"}</strong>
+              <p>{hasOutstandingBalance ? balanceHoldMessage
+                : !currentBalanceSummary.assessmentAvailable ? assessmentUnavailableMessage
+                : "Unable to verify your payments. Please refresh and try again. You cannot submit enrollment until your balance is verified."}</p>
+            </div>
+          )}
+
           <div className="s-enrollment-row">
             <div className="s-enrollment-card s-eligibility-card">
               <h3>Enrollment Eligibility</h3>
@@ -1771,6 +1888,17 @@ function StudentEnrollment() {
                       : "Unlocked"}
                 </span>
               </div>
+              {isCollegeStudent && (
+                <div className="s-eligibility-item">
+                  <span className="s-eligibility-label">Outstanding Balance:</span>
+                  <span className="s-eligibility-value">
+                    {balanceVerificationStatus === "checking" ? "Checking..."
+                      : balanceVerificationStatus === "error" ? "Unable to verify"
+                      : !currentBalanceSummary.assessmentAvailable ? "Assessment unavailable"
+                      : formatCurrency(currentBalanceSummary.currentBalance)}
+                  </span>
+                </div>
+              )}
               <div className="s-eligibility-item">
                 <span className="s-eligibility-label">Semester Grades:</span>
                 <span className="s-eligibility-value">
@@ -2231,7 +2359,10 @@ function StudentEnrollment() {
               onClick={handleEnroll}
               disabled={!isEligibleForEnrollment}
             >
-              {enrollButtonLabel}
+              {isSubmittingRequest ? "Verifying and Submitting..."
+                : hasOutstandingBalance ? "Pay Balance Before Enrolling"
+                : isCollegeStudent && !currentBalanceSummary.assessmentAvailable ? "Balance Verification Required"
+                : enrollButtonLabel}
             </button>
           </div>
         </main>

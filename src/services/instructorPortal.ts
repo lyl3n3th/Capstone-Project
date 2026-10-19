@@ -8,6 +8,8 @@ import {
   readBranchScopedData,
   readInstructorEvaluationSubmissions,
   writeBranchScopedData,
+  readStoredStudents,
+  writeStoredStudents,
   type StudentStorageRecord,
 } from "./adminStorage";
 import {
@@ -17,7 +19,9 @@ import {
   type AcademicSubjectAssignmentRecord,
 } from "./academicData";
 import { fetchAdminStudents } from "./adminStudentsApi";
-import { fetchStudentSubjectPlans } from "./studentPlanningApi";
+import { fetchStudentSubjectPlans, fetchStudentScheduleRequests } from "./studentPlanningApi";
+import { resolveStudentPortalContext } from "./studentPortalResolver";
+import { isImportedIrregularStudent } from "./importedStudentScheduling";
 import {
   fetchAndCacheStudentGradeRecordsForBranch,
   findApprovedStudentGradeConflict,
@@ -673,13 +677,13 @@ export const downloadInstructorSubmissionErrorFile = (
 const normalizeValue = (value?: string | null) =>
   (value || "").trim().toLowerCase();
 
-const studentMatchesSection = (
+export const studentMatchesSection = (
   student: StudentStorageRecord,
   section: AcademicClassSectionRecord,
 ) =>
-  section.enrolleeIds.includes(student.id) ||
+  !isImportedIrregularStudent(student) && (section.enrolleeIds.includes(student.id) ||
   normalizeValue(student.section) === normalizeValue(section.code) ||
-  normalizeValue(student.section) === normalizeValue(section.section);
+  normalizeValue(student.section) === normalizeValue(section.section));
 
 export const studentHasAssignedInstructorSubject = (
   student: StudentStorageRecord,
@@ -689,10 +693,13 @@ export const studentHasAssignedInstructorSubject = (
   const assignmentInstructorId = normalizeValue(assignment.instructorId);
   const assignmentSubjectCode = normalizeValue(assignment.subjectCode);
 
-  return getStudentPortalSubjects(student).some((subject) => {
+  const subjects = student.importAcademicYear ? resolveStudentPortalContext(student).subjects : getStudentPortalSubjects(student);
+  return subjects.some((subject) => {
+    if (student.importAcademicYear && (subject.academicYear !== assignment.academicYear || subject.semester !== assignment.semester)) return false;
     if (normalizeValue(subject.id) === assignmentId) {
       return true;
     }
+    if (isImportedIrregularStudent(student)) return false;
 
     return (
       Boolean(subject.instructorId) &&
@@ -722,13 +729,18 @@ export const getInstructorScopedData = async ({
   ]);
 
   try {
-    await fetchStudentSubjectPlans(resolvedBranch);
+    await Promise.all([fetchStudentSubjectPlans(resolvedBranch), fetchStudentScheduleRequests(resolvedBranch)]);
   } catch (error) {
     console.warn(
       "Unable to load approved individual schedules from Supabase; using cached schedules.",
       error,
     );
   }
+
+  writeStoredStudents([
+    ...readStoredStudents().filter((student) => normalizeBranchName(student.branch) !== resolvedBranch),
+    ...remoteStudentsResult,
+  ]);
 
   const assignments = snapshot.subjectAssignments.filter(
     (assignment) => assignment.instructorId === instructorId,
@@ -1012,7 +1024,8 @@ const getInstructorRowValidationErrors = ({
   );
   const matchedAssignment = allowedAssignments.find(
     (assignment) =>
-      normalizeErrorCheckValue(assignment.subjectCode) === normalizedSubjectCode,
+      normalizeErrorCheckValue(assignment.subjectCode) === normalizedSubjectCode &&
+      (!matchedStudent?.importAcademicYear || (assignment.academicYear === row.academicYear && assignment.semester === row.semester && studentHasAssignedInstructorSubject(matchedStudent, assignment))),
   );
   const matchedSubject = subjects.find(
     (subject) => normalizeErrorCheckValue(subject.code) === normalizedSubjectCode,
@@ -1419,9 +1432,7 @@ export const parseInstructorGradeChangeWorkbook = async ({
   const workbook = XLSX.read(buffer, { type: "array" });
   const resolvedBranch = normalizeBranchName(branch);
   const gradeRecords = await getGradeRecordsForChangeRequests(resolvedBranch);
-  const branchStudents = getStudentsForBranch(resolvedBranch).filter(
-    (student) => student.status !== "Archived",
-  );
+  const branchStudents = (await getInstructorScopedData({ branch: resolvedBranch, instructorId: instructor.id })).students;
   const changes: InstructorGradeChangeRequestRow[] = [];
   const errors: string[] = [];
   const errorRows: InstructorGradeChangeRequestErrorRow[] = [];
@@ -1539,6 +1550,7 @@ export const parseInstructorGradeChangeWorkbook = async ({
         const matchedAssignment = allowedAssignments.find(
           (assignment) =>
             valuesMatch(assignment.subjectCode, subjectCode) &&
+            (!matchedStudent?.importAcademicYear || (assignment.academicYear === academicYear && assignment.semester === semester && studentHasAssignedInstructorSubject(matchedStudent, assignment))) &&
             (!resolvedSection ||
               valuesMatch(assignment.sectionCode, resolvedSection)),
         );
@@ -1554,7 +1566,7 @@ export const parseInstructorGradeChangeWorkbook = async ({
           academicYear,
           semester,
           branch: resolvedBranch,
-        });
+        }, undefined, { preserveStudentNumber: Boolean(matchedStudent?.importAcademicYear) });
 
         if (!matchedStudent) {
           rowErrors.push(`No student found with Student ID ${studentId}.`);
@@ -1632,7 +1644,7 @@ export const parseInstructorGradeChangeWorkbook = async ({
             currentGrade: currentRecord.normalizedGrade,
             requestedGrade: requestedRecord.normalizedGrade,
             currentRecord,
-            requestedRecord,
+            requestedRecord: { ...currentRecord, ...requestedRecord },
           });
           return;
         }
@@ -1681,9 +1693,7 @@ export const parseInstructorGradeWorkbook = async ({
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array" });
   const resolvedBranch = normalizeBranchName(branch);
-  const branchStudents = getStudentsForBranch(resolvedBranch).filter(
-    (student) => student.status !== "Archived",
-  );
+  const branchStudents = (await getInstructorScopedData({ branch: resolvedBranch, instructorId: instructor.id })).students;
   const subjects =
     readBranchScopedData<InstructorTemplateSubject[]>(
       "subjects",
@@ -1794,6 +1804,7 @@ export const parseInstructorGradeWorkbook = async ({
         programType: normalizedProgramType,
         errors: [],
       };
+      const matchedStudent = branchStudents.find(student => valuesMatch(student.id, errorRow.studentId));
       const result = validateAndNormalizeUploadedGradeRow({
         studentId: errorRow.studentId,
         fullName: errorRow.fullName,
@@ -1806,7 +1817,7 @@ export const parseInstructorGradeWorkbook = async ({
         academicYear: errorRow.academicYear,
         semester,
         branch,
-      });
+      }, undefined, { preserveStudentNumber: Boolean(matchedStudent?.importAcademicYear) });
       const rowErrors = getInstructorRowValidationErrors({
         allowedAssignments,
         branchStudents,
@@ -1830,7 +1841,10 @@ export const parseInstructorGradeWorkbook = async ({
       }
 
       if (result.normalizedRecord && rowErrors.length === 0) {
-        records.push(result.normalizedRecord);
+        const assignment = allowedAssignments.find(item =>
+          valuesMatch(item.subjectCode, subjectCode) && item.academicYear === errorRow.academicYear && item.semester === semester &&
+          matchedStudent && studentHasAssignedInstructorSubject(matchedStudent, item));
+        records.push({ ...result.normalizedRecord, instructorId: assignment?.instructorId || instructor.id, instructorName: assignment?.instructorName || instructor.name, instructorEmployeeId: instructor.employeeId });
         return;
       }
 

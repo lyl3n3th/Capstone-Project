@@ -14,6 +14,7 @@ import AdmissionPortalAccessCard from "../../components/common/AdmissionPortalAc
 import ChartNote from "../../components/common/ChartNote";
 import { useAuth } from "../../hooks/useAuth";
 import { getStudentsForBranch, normalizeBranchName } from "../../services/adminStorage";
+import { fetchAdminStudents } from "../../services/adminStudentsApi";
 import "../../styles/admin/admin-dashboard.css";
 
 interface ProgramData {
@@ -29,14 +30,6 @@ interface StudentRecord {
   shsTrackType?: string;
   branch?: string;
 }
-
-const FALLBACK_PROGRAM_DATA: ProgramData[] = [
-  { name: "STEM", value: 85, academicLevel: "SHS" },
-  { name: "ICT", value: 62, academicLevel: "SHS" },
-  { name: "ABM", value: 48, academicLevel: "SHS" },
-  { name: "HUMSS", value: 35, academicLevel: "SHS" },
-  { name: "BS Entrepreneurship", value: 20, academicLevel: "College" },
-];
 
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8"];
 
@@ -64,30 +57,34 @@ export default function AdminDashboard({
   const { currentUser } = useAuth();
   const currentBranch = normalizeBranchName(currentUser?.branch);
 
-  const students = useMemo<StudentRecord[]>(() => {
-    return getStudentsForBranch(currentBranch);
+  const [studentDirectory, setStudentDirectory] = useState<{
+    branch: string;
+    students: StudentRecord[];
+  }>(() => ({ branch: currentBranch, students: getStudentsForBranch(currentBranch) }));
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAdminStudents(currentBranch)
+      .then((students) => {
+        if (!cancelled) setStudentDirectory({ branch: currentBranch, students });
+      })
+      .catch((error) => console.warn("Unable to load dashboard students.", error));
+    return () => { cancelled = true; };
   }, [currentBranch]);
 
-  const hasStudentData = students.length > 0;
-
-  const activeStudents = hasStudentData
-    ? students.filter(
+  const activeStudents = useMemo(
+    () => (studentDirectory.branch === currentBranch ? studentDirectory.students : []).filter(
         (student) =>
           student.status !== "Archived" && student.status !== "Graduated",
-      )
-    : [];
+      ),
+    [currentBranch, studentDirectory],
+  );
 
-  const totalStudents = hasStudentData ? activeStudents.length : 250;
-  const completeRequirements = hasStudentData
-    ? activeStudents.filter((student) => student.status === "Complete").length
-    : 150;
-  const incompleteRequirements = hasStudentData
-    ? activeStudents.filter((student) => student.status === "Incomplete").length
-    : 20;
+  const totalStudents = activeStudents.length;
+  const completeRequirements = activeStudents.filter((student) => student.status === "Complete").length;
+  const incompleteRequirements = activeStudents.filter((student) => student.status === "Incomplete").length;
 
   const programData = useMemo<ProgramData[]>(() => {
-    if (!hasStudentData) return FALLBACK_PROGRAM_DATA;
-
     const counts = new Map<
       string,
       { count: number; academicLevel: ProgramData["academicLevel"] }
@@ -125,7 +122,7 @@ export default function AdminDashboard({
         academicLevel: data.academicLevel,
       }))
       .sort((left, right) => right.value - left.value);
-  }, [activeStudents, hasStudentData]);
+  }, [activeStudents]);
 
   const shsPrograms = programData.filter(
     (item) => item.academicLevel === "SHS",
@@ -248,6 +245,13 @@ export default function AdminDashboard({
               the branch-wide summary.
             </ChartNote>
             <div className="pie-container">
+              {totalStudents === 0 ? (
+                <div className="dashboard-empty-distribution" role="status">
+                  <strong className="pie-center-value">0</strong>
+                  <span>Active Students</span>
+                  <p>No students enrolled in this branch yet.</p>
+                </div>
+              ) : (
               <ResponsiveContainer
                 width="100%"
                 height="100%"
@@ -315,6 +319,7 @@ export default function AdminDashboard({
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
+              )}
             </div>
             <div
               className="dashboard-program-legend"
@@ -367,7 +372,7 @@ export default function AdminDashboard({
                     </li>
                   ))
                 ) : (
-                  <li>No SHS records found</li>
+                  <li>0 Students</li>
                 )}
               </ul>
             </div>
@@ -390,7 +395,7 @@ export default function AdminDashboard({
                     </li>
                   ))
                 ) : (
-                  <li>No College records found</li>
+                  <li>0 Students</li>
                 )}
               </ul>
             </div>

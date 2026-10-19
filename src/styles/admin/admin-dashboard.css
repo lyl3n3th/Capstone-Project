@@ -190,6 +190,21 @@
   max-height: 360px;
 }
 
+.dashboard-empty-distribution {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #64748b;
+  text-align: center;
+}
+
+.dashboard-empty-distribution p {
+  margin: 0;
+}
+
 .dashboard-program-legend {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

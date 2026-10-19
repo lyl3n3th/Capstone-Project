@@ -1,7 +1,7 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { FiCheckCircle, FiClock, FiUsers } from "react-icons/fi";
 import { useInstructorPortal } from "../../hooks/useInstructorPortal";
-import { getInstructorEvaluationProgress } from "../../services/instructorPortal";
+import { getInstructorEvaluationProgress, studentHasAssignedInstructorSubject } from "../../services/instructorPortal";
 import type { AcademicClassSectionRecord } from "../../services/academicData";
 import SkeletonPage from "../../components/common/SkeletonPage";
 
@@ -51,7 +51,7 @@ export default function InstructorHome() {
           sectionById.get(assignment.sectionId) ||
           sectionByCode.get(normalizeText(assignment.sectionCode));
         const studentCount = students.filter((student) =>
-          studentMatchesSection(student, section),
+          student.importAcademicYear ? studentHasAssignedInstructorSubject(student, assignment) : studentMatchesSection(student, section),
         ).length;
 
         existingGroup.sections.push({

@@ -10,8 +10,6 @@ import { IoPersonSharp } from "react-icons/io5";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
 import StudentLoadingShell from "../../components/common/StudentLoadingShell";
-import { useAuth } from "../../hooks/useAuth";
-import { useStoredProfileImage } from "../../hooks/useStoredProfileImage";
 import { useStudent } from "../../hooks/useStudent";
 import type { Student } from "../../types/student";
 import "../../styles/main.css";
@@ -51,9 +49,7 @@ const useToast = () => {
 
 function StudentProfile() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { currentUser } = useAuth();
   const { student, isLoading, error, updateStudent } = useStudent();
-  const { profileImage } = useStoredProfileImage(currentUser);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Student>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -63,7 +59,7 @@ function StudentProfile() {
   // Handle resize
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth > 768 && sidebarOpen) {
+      if (window.innerWidth >= 1024 && sidebarOpen) {
         setSidebarOpen(false);
       }
     };
@@ -129,11 +125,6 @@ function StudentProfile() {
 
   const handleInputChange = (field: string, value: string) => {
     setEditForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const getInitials = () => {
-    if (!student) return "";
-    return `${student.firstName?.charAt(0) || ""}${student.lastName?.charAt(0) || ""}`;
   };
 
   // Get current date for header
@@ -219,38 +210,6 @@ function StudentProfile() {
         />
 
         <main className="s-profile-content">
-          {/* Profile Header Card */}
-          <div className="s-profile-header-card">
-            <div className="s-profile-avatar-large">
-              {profileImage ? (
-                <img src={profileImage} alt={`${student.firstName} ${student.lastName}`} />
-              ) : (
-                getInitials()
-              )}
-            </div>
-            <div className="s-profile-header-info">
-              <div className="s-profile-name-row">
-                <h1>
-                  {student.firstName} {student.lastName}
-                </h1>
-                {!editing && (
-                  <button className="s-edit-btn" onClick={handleEdit}>
-                    <FaEdit /> Edit Profile
-                  </button>
-                )}
-              </div>
-              <div className="s-profile-badges">
-                <span className="s-badge">{student.studentNumber}</span>
-                <span className="s-badge">{student.yearLevel}</span>
-                <span className="s-badge s-badge-success">
-                  {student.status}
-                </span>
-              </div>
-              <p className="s-profile-track">{student.program}</p>
-              <p className="s-profile-grade">{student.yearLevel}</p>
-            </div>
-          </div>
-
           {/* Edit Mode Controls */}
           {editing && (
             <div className="s-edit-actions">
@@ -269,9 +228,16 @@ function StudentProfile() {
 
           {/* Personal Information Section */}
           <div className="s-profile-section">
-            <h2 className="s-section-title-with-icon">
-              <IoPersonSharp /> Personal Information
-            </h2>
+            <div className="s-profile-section-heading">
+              <h2 className="s-section-title-with-icon">
+                <IoPersonSharp /> Personal Information
+              </h2>
+              {!editing && (
+                <button type="button" className="s-edit-btn" onClick={handleEdit}>
+                  <FaEdit /> Edit Profile
+                </button>
+              )}
+            </div>
             <div className="s-profile-grid">
               <div className="s-profile-field">
                 <label>First Name:</label>

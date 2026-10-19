@@ -6,6 +6,8 @@ import { MdOutlineNoteAlt } from "react-icons/md";
 import { FiLogOut } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
+import { useEffect } from "react";
+import aicsLogo from "../../assets/images/AICS_Logo.png";
 
 import "../../styles/components/sidebar.css";
 
@@ -24,6 +26,31 @@ function Sidebar({
 }: SidebarProps) {
   const navigate = useNavigate();
   const { currentUser, logout } = useAuth();
+  const studentName = [currentUser?.firstName, currentUser?.lastName]
+    .map((name) => name?.trim())
+    .filter(Boolean)
+    .join(" ") || "Student";
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) onClose();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    const originalOverflow = document.body.style.overflow;
+    if (window.innerWidth < 1024) document.body.style.overflow = "hidden";
+
+    window.addEventListener("resize", handleResize);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("resize", handleResize);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   const menuItems = [
     {
@@ -81,11 +108,17 @@ function Sidebar({
   };
 
   return (
-    <div className={`s-sidebar ${isOpen ? "s-open" : ""}`}>
+    <aside id="student-sidebar" aria-label="Student portal" className={`s-sidebar ${isOpen ? "s-open" : ""}`}>
       <div className="s-sidebar-header">
-        <div className="s-school-name">Asian Institute of Computer Studies</div>
-        <div className="s-branch-name">
-          {currentUser?.branch || "Bacoor"} Branch
+        <div className="s-sidebar-user-card">
+          <img src={aicsLogo} alt="AICS logo" className="s-sidebar-logo" />
+          <div className="s-sidebar-user-info">
+            <h3>{studentName}</h3>
+            <p className="s-sidebar-user-role">Student</p>
+            <div className="s-branch-name">
+              {currentUser?.branch || "Bacoor"} Branch
+            </div>
+          </div>
         </div>
       </div>
 
@@ -97,13 +130,15 @@ function Sidebar({
               className={activePage === item.id ? "s-active" : ""}
             >
               <a
-                href="#"
+                href={item.path}
+                aria-current={activePage === item.id ? "page" : undefined}
                 onClick={(e) => {
                   e.preventDefault();
                   handleItemClick(item.path);
                 }}
               >
-                {item.icon} {item.label}
+                <span className="s-sidebar-nav-icon">{item.icon}</span>
+                <span>{item.label}</span>
               </a>
             </li>
           ))}
@@ -115,7 +150,7 @@ function Sidebar({
           <FiLogOut /> Logout
         </button>
       </div>
-    </div>
+    </aside>
   );
 }
 

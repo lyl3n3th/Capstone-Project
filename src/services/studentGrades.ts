@@ -26,6 +26,8 @@ export interface UploadedStudentGradeRow {
 }
 
 export interface StudentGradeRecordIdentity {
+  studentNumberIsOriginal?: boolean;
+  source?: "historical";
   studentId: string;
   subjectCode: string;
   academicYear: string;
@@ -35,6 +37,13 @@ export interface StudentGradeRecordIdentity {
 }
 
 export interface StoredStudentGradeRecord {
+  studentNumberIsOriginal?: boolean;
+  source?: "historical";
+  yearLevel?: string;
+  instructorId?: string;
+  instructorName?: string;
+  instructorEmployeeId?: string;
+  recordedBy?: string;
   id: string;
   studentId: string;
   fullName: string;
@@ -60,6 +69,7 @@ export interface UploadedStudentGradeValidationResult {
 
 export interface UploadedStudentGradeValidationOptions {
   allowBlankGradeClear?: boolean;
+  preserveStudentNumber?: boolean;
 }
 
 export type StudentGradeUploadOperation =
@@ -585,7 +595,9 @@ const buildGradeRecordLookupKey = (
   record: StudentGradeRecordIdentity,
   branch?: string | null,
 ) =>
-  buildGradeRecordId({
+  record.source === "historical" || record.studentNumberIsOriginal
+    ? [record.studentId, record.subjectCode, record.academicYear, record.semester, record.gradingPeriod].map(value => value.trim().toUpperCase()).join("::")
+    : buildGradeRecordId({
     studentId: normalizeGradeStudentId(record.studentId, branch),
     subjectCode: record.subjectCode,
     academicYear: normalizeAcademicYear(record.academicYear),
@@ -611,7 +623,10 @@ export const findApprovedStudentGradeConflict = ({
 
   return (existingRecords ?? readStudentGradeRecordsForBranch(resolvedBranch)).find(
     (existingRecord) =>
-      buildGradeRecordLookupKey(existingRecord, resolvedBranch) === targetKey,
+      buildGradeRecordLookupKey(existingRecord, resolvedBranch) === (
+        existingRecord.source === "historical" || existingRecord.studentNumberIsOriginal
+          ? buildGradeRecordLookupKey({ ...record, studentNumberIsOriginal: true }, resolvedBranch)
+          : targetKey),
   );
 };
 
@@ -773,7 +788,7 @@ export const validateAndNormalizeUploadedGradeRow = (
   options: UploadedStudentGradeValidationOptions = {},
 ): UploadedStudentGradeValidationResult => {
   const reasons: string[] = [];
-  const studentId = normalizeGradeStudentId(row.studentId, row.branch);
+  const studentId = options.preserveStudentNumber ? row.studentId.trim() : normalizeGradeStudentId(row.studentId, row.branch);
   const fullName = row.fullName.trim();
   const subjectCode = row.subjectCode.trim();
   const subjectTitle = row.subjectTitle.trim();
@@ -808,6 +823,7 @@ export const validateAndNormalizeUploadedGradeRow = (
   if (shouldClearBlankGrade) {
     return {
       clearRecordIdentity: {
+        studentNumberIsOriginal: options.preserveStudentNumber || undefined,
         studentId,
         subjectCode,
         academicYear,
@@ -819,7 +835,10 @@ export const validateAndNormalizeUploadedGradeRow = (
   }
 
   const normalizedRecord: StoredStudentGradeRecord = {
-    id: buildGradeRecordId({
+    studentNumberIsOriginal: options.preserveStudentNumber || undefined,
+    id: options.preserveStudentNumber
+      ? [studentId, subjectCode, academicYear, semester, gradingPeriod].map(value => value.trim().toUpperCase()).join("::")
+      : buildGradeRecordId({
       studentId,
       subjectCode,
       academicYear,
@@ -960,7 +979,9 @@ export const getStudentGradeRecords = ({
 
   return readStudentGradeRecordsForBranch(branch).filter(
     (record) =>
-      normalizeGradeStudentId(record.studentId, branch) === normalizedStudentId,
+      record.source === "historical" || record.studentNumberIsOriginal
+        ? record.studentId.trim().toUpperCase() === studentId.trim().toUpperCase()
+        : normalizeGradeStudentId(record.studentId, branch) === normalizedStudentId,
   );
 };
 
