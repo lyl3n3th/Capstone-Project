@@ -870,6 +870,7 @@ as $$
 declare
   v_code text;
   v_name text;
+  v_student_number_prefix text;
 begin
   v_name := trim(coalesce(p_name, ''));
   v_code := lower(trim(coalesce(p_code, '')));
@@ -889,10 +890,31 @@ begin
     raise exception 'Branch code could not be generated.';
   end if;
 
-  insert into public.admission_branches (code, name, is_active)
-  values (v_code, v_name, true)
+  select branch.student_number_prefix
+  into v_student_number_prefix
+  from public.admission_branches branch
+  where branch.code = v_code;
+
+  if v_student_number_prefix is null then
+    v_student_number_prefix := public.allocate_branch_student_number_prefix(
+      v_name,
+      v_code
+    );
+  end if;
+
+  insert into public.admission_branches (
+    code,
+    name,
+    student_number_prefix,
+    is_active
+  )
+  values (v_code, v_name, v_student_number_prefix, true)
   on conflict on constraint admission_branches_code_key do update
   set name = excluded.name,
+      student_number_prefix = coalesce(
+        public.admission_branches.student_number_prefix,
+        excluded.student_number_prefix
+      ),
       is_active = true;
 
   return query

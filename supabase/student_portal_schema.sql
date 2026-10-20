@@ -313,12 +313,10 @@ language sql
 stable
 set search_path = public
 as $$
-  select case lower(branch.code)
-    when 'bacoor' then 'BAC'
-    when 'taytay' then 'TAY'
-    when 'gma' then 'GMA'
-    else null
-  end
+  select coalesce(
+    nullif(branch.student_number_prefix, ''),
+    public.derive_branch_student_number_prefix(branch.name, branch.code)
+  )
   from public.admission_branches branch
   where branch.id = p_branch_id
   limit 1;

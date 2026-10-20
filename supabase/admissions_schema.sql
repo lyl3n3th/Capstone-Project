@@ -5,10 +5,116 @@ create table if not exists public.admission_branches (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
   name text not null unique,
+  student_number_prefix text,
   is_active boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
-  constraint admission_branches_code_format check (code = lower(code))
+  constraint admission_branches_code_format check (code = lower(code)),
+  constraint admission_branches_student_number_prefix_format
+    check (student_number_prefix is null or student_number_prefix ~ '^[A-Z]{3}$')
 );
+
+alter table public.admission_branches
+  add column if not exists student_number_prefix text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'admission_branches_student_number_prefix_format'
+      and conrelid = 'public.admission_branches'::regclass
+  ) then
+    alter table public.admission_branches
+      add constraint admission_branches_student_number_prefix_format
+      check (student_number_prefix is null or student_number_prefix ~ '^[A-Z]{3}$');
+  end if;
+end;
+$$;
+
+create unique index if not exists admission_branches_student_number_prefix_key
+  on public.admission_branches (student_number_prefix)
+  where student_number_prefix is not null;
+
+create or replace function public.derive_branch_student_number_prefix(
+  p_branch_name text,
+  p_branch_code text
+)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+  select rpad(
+    left(
+      coalesce(
+        nullif(regexp_replace(upper(trim(coalesce(p_branch_name, ''))), '[^A-Z]', '', 'g'), ''),
+        nullif(regexp_replace(upper(trim(coalesce(p_branch_code, ''))), '[^A-Z]', '', 'g'), ''),
+        'STD'
+      ),
+      3
+    ),
+    3,
+    'X'
+  );
+$$;
+
+create or replace function public.allocate_branch_student_number_prefix(
+  p_branch_name text,
+  p_branch_code text
+)
+returns text
+language plpgsql
+stable
+set search_path = public
+as $$
+declare
+  v_base text;
+  v_candidate text;
+  v_first integer;
+  v_second integer;
+begin
+  v_base := public.derive_branch_student_number_prefix(p_branch_name, p_branch_code);
+
+  if not exists (
+    select 1
+    from public.admission_branches branch
+    where branch.student_number_prefix = v_base
+      and branch.code <> lower(trim(coalesce(p_branch_code, '')))
+  ) then
+    return v_base;
+  end if;
+
+  for v_first in 0..25 loop
+    v_candidate := left(v_base, 2) || chr(ascii('A') + v_first);
+
+    if not exists (
+      select 1
+      from public.admission_branches branch
+      where branch.student_number_prefix = v_candidate
+        and branch.code <> lower(trim(coalesce(p_branch_code, '')))
+    ) then
+      return v_candidate;
+    end if;
+  end loop;
+
+  for v_first in 0..25 loop
+    for v_second in 0..25 loop
+      v_candidate := left(v_base, 1) || chr(ascii('A') + v_first) || chr(ascii('A') + v_second);
+
+      if not exists (
+        select 1
+        from public.admission_branches branch
+        where branch.student_number_prefix = v_candidate
+          and branch.code <> lower(trim(coalesce(p_branch_code, '')))
+      ) then
+        return v_candidate;
+      end if;
+    end loop;
+  end loop;
+
+  raise exception 'No unique 3-letter student-number prefix is available for branch "%".', p_branch_name;
+end;
+$$;
 
 create table if not exists public.admission_student_statuses (
   id uuid primary key default gen_random_uuid(),
@@ -208,13 +314,17 @@ create unique index if not exists admission_applications_active_contact_unique_i
   on public.admission_applications (email, phone_number)
   where application_status <> 'cancelled';
 
-insert into public.admission_branches (code, name)
+insert into public.admission_branches (code, name, student_number_prefix)
 values
-  ('bacoor', 'Bacoor'),
-  ('taytay', 'Taytay'),
-  ('gma', 'GMA')
+  ('bacoor', 'Bacoor', 'BAC'),
+  ('taytay', 'Taytay', 'TAY'),
+  ('gma', 'GMA', 'GMA')
 on conflict (code) do update
 set name = excluded.name,
+    student_number_prefix = coalesce(
+      public.admission_branches.student_number_prefix,
+      excluded.student_number_prefix
+    ),
     is_active = true;
 
 insert into public.admission_student_statuses (code, label)
