@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Chart as ChartJS,
   ArcElement,
@@ -17,18 +17,12 @@ import {
   MdAccountBalance,
 } from "react-icons/md";
 import {
-  getDefaultBranchEnrollees,
-  getStudentsForBranch,
   normalizeBranchName,
-  readBranchScopedData,
   type AdminBranchName,
-  type AdminEnrolleeRecord,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
 import { fetchInboxReports, type ReportRecord } from "../../services/reportApi";
-import {
-  fetchManagedBranches,
-} from "../../services/staffApi";
+import { useManagedStudents } from "../../hooks/useManagedStudents";
 import ChartNote from "../../components/common/ChartNote";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import "../../styles/manager/area-managerDashboard.css";
@@ -151,23 +145,10 @@ const buildBarChartData = (branches: DashboardBranchData[]) => ({
 
 const buildPopulationRecordsFromStudents = (students: StudentStorageRecord[]) =>
   students
-    .filter((student) => student.status !== "Archived")
     .map((student) => ({
       label: getAcademicLabel(student.program, student.strandOrCourse),
       academicLevel: getAcademicLevel(student.program),
     }));
-
-const buildPopulationRecordsFromEnrollees = (
-  enrollees: AdminEnrolleeRecord[],
-) =>
-  enrollees.map((enrollee) => ({
-    label: getAcademicLabel(enrollee.program, enrollee.strandOrCourse),
-    academicLevel: getAcademicLevel(enrollee.program),
-  }));
-
-const getBranchEnrollees = (branch: AdminBranchName) =>
-  readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", branch) ??
-  getDefaultBranchEnrollees(branch);
 
 const getUniqueSortedBranches = (branches: string[]) =>
   Array.from(
@@ -211,9 +192,10 @@ const buildPendingReportCounts = (
   };
 };
 
-const buildLocalDashboardState = (
+const buildDashboardState = (
   reports: ReportRecord[] = [],
   managedBranches: string[] = [],
+  studentRecords: StudentStorageRecord[] = [],
 ): DashboardState => {
   const dashboardBranches = getUniqueSortedBranches(managedBranches);
   const pendingReportCounts = buildPendingReportCounts(
@@ -221,18 +203,13 @@ const buildLocalDashboardState = (
     dashboardBranches,
   );
   const branches = dashboardBranches.map((branch) => {
-    const students = getStudentsForBranch(branch);
-    const enrollees = getBranchEnrollees(branch);
-    const studentPopulation = buildPopulationRecordsFromStudents(students);
-    const effectivePopulation =
-      studentPopulation.length > 0
-        ? studentPopulation
-        : buildPopulationRecordsFromEnrollees(enrollees);
-    const shsEnrollees = enrollees.filter(
-      (enrollee) => enrollee.program === "SHS",
+    const students = studentRecords.filter((student) => normalizeBranchName(student.branch) === branch);
+    const effectivePopulation = buildPopulationRecordsFromStudents(students);
+    const shsEnrollees = students.filter(
+      (student) => student.program === "SHS",
     ).length;
-    const collegeEnrollees = enrollees.filter(
-      (enrollee) => enrollee.program === "College",
+    const collegeEnrollees = students.filter(
+      (student) => student.program === "College",
     ).length;
     const pendingReports = pendingReportCounts.countsByBranch.get(branch) || 0;
 
@@ -263,50 +240,35 @@ const buildLocalDashboardState = (
 const AreaManagerDashboard = ({
   loggedInUsername = "Area Manager",
 }: AreaManagerDashboardProps) => {
-  const [dashboardData, setDashboardData] = useState<DashboardBranchData[]>([]);
-  const [barData, setBarData] = useState<ChartData<
-    "bar",
-    number[],
-    string
-  > | null>(null);
-  const [reportsCount, setReportsCount] = useState(0);
-  const [enrollmentStats, setEnrollmentStats] = useState({
-    shs: 0,
-    college: 0,
-  });
-  const [loading, setLoading] = useState(true);
-
-  const applyDashboardState = (dashboardState: DashboardState) => {
-    setDashboardData(dashboardState.branches);
-    setBarData(dashboardState.barData);
-    setReportsCount(dashboardState.reportsCount);
-    setEnrollmentStats(dashboardState.enrollmentStats);
-  };
-
-  const fetchAllData = async () => {
-    try {
-      const [inboxReports, managedBranches] = await Promise.all([
-        fetchInboxReports(),
-        fetchManagedBranches(),
-      ]);
-      applyDashboardState(buildLocalDashboardState(
-        inboxReports,
-        managedBranches.map((branch) => branch.name),
-      ));
-    } catch (error) {
-      console.error("Failed to load manager dashboard reports:", error);
-      applyDashboardState(buildLocalDashboardState());
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { students, branches, isLoading: loading, hasLoaded,
+    error: studentLoadError, retry } = useManagedStudents();
+  const [reports, setReports] = useState<ReportRecord[]>([]);
+  const [reportLoadError, setReportLoadError] = useState("");
+  const { branches: dashboardData, barData, reportsCount, enrollmentStats } = useMemo(
+    () => buildDashboardState(reports, branches, students), [reports, branches, students],
+  );
 
   useEffect(() => {
-    void fetchAllData();
-
-    window.addEventListener("focus", fetchAllData);
+    let active = true;
+    let request = 0;
+    const loadReports = async () => {
+      const currentRequest = ++request;
+      try {
+        const latest = await fetchInboxReports();
+        if (active && currentRequest === request) {
+          setReports(latest);
+          setReportLoadError("");
+        }
+      } catch {
+        if (active && currentRequest === request) setReportLoadError("Unable to refresh reports.");
+      }
+    };
+    const sync = () => { void loadReports(); };
+    sync();
+    window.addEventListener("focus", sync);
     return () => {
-      window.removeEventListener("focus", fetchAllData);
+      active = false;
+      window.removeEventListener("focus", sync);
     };
   }, []);
 
@@ -328,9 +290,22 @@ const AreaManagerDashboard = ({
     );
   }
 
+  if (studentLoadError && !hasLoaded) {
+    return <div className="manager-dashboard-container" role="alert">
+      <h1>Dashboard</h1>
+      <p>Unable to load current student records. {studentLoadError}</p>
+      <button type="button" onClick={retry}>Try Again</button>
+    </div>;
+  }
+
   return (
     <div className="manager-dashboard-container">
       <div className="dashboard-inner-flat">
+        {studentLoadError && <p role="alert">
+          Unable to refresh student records. Showing the last loaded records. {studentLoadError}{" "}
+          <button type="button" onClick={retry}>Try Again</button>
+        </p>}
+        {reportLoadError && <p role="alert">{reportLoadError}</p>}
         <div className="welcome-header">
           <h1>Dashboard</h1>
           <p>

@@ -1,14 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { BsSearch, BsCaretDownFill, BsCaretUpFill } from "react-icons/bs";
 import {
   getStudentCredentialOverview,
   normalizeBranchName,
-  readStoredStudents,
-  STORED_STUDENTS_UPDATED_EVENT,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
 import { hasLatestApprovedIrregularEnrollmentRequestForStudent } from "../../services/enrollmentRequests";
-import { fetchManagedBranches } from "../../services/staffApi";
+import { useManagedStudents } from "../../hooks/useManagedStudents";
+import { isVisibleManagerStudentRecord } from "../../services/managerStudents";
 import {
   getStudentAcademicStanding,
   type StudentAcademicStandingLabel,
@@ -65,22 +64,6 @@ const splitStoredStudentName = (fullName: string) => {
     firstName: parts[0],
     lastName: parts[parts.length - 1],
   };
-};
-
-const getNormalizedStudentRecordStatus = (status?: string | null) =>
-  (status || "").trim().toLowerCase();
-
-const isVisibleManagerStudentRecord = (
-  student: Pick<StudentStorageRecord, "status">,
-) => {
-  const normalizedStatus = getNormalizedStudentRecordStatus(student.status);
-
-  return ![
-    "archived",
-    "deleted",
-    "inactive",
-    "removed",
-  ].includes(normalizedStatus);
 };
 
 const getCredentialStatusLabel = (student: StudentStorageRecord) => {
@@ -174,14 +157,10 @@ const getManagerBranchLabel = (branch: string) =>
   `${normalizeBranchName(branch)} Branch`;
 
 const AreaManagerStudents: React.FC = () => {
-  const [students, setStudents] = useState<Student[]>([]);
-  const [managedBranches, setManagedBranches] = useState<string[]>([
-    "Bacoor",
-    "Taytay",
-    "GMA",
-  ]);
+  const { students: studentRecords, branches: managedBranches,
+    isLoading: loading, hasLoaded, error: studentLoadError, retry } = useManagedStudents();
+  const students = useMemo(() => studentRecords.map(mapStoredStudentToDirectoryRow), [studentRecords]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [loading, setLoading] = useState(true);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
   const [filterCourse, setFilterCourse] = useState("");
@@ -196,55 +175,8 @@ const AreaManagerStudents: React.FC = () => {
     direction: "asc" | "desc";
   } | null>(null);
 
-  const [currentPage, setCurrentPage] = useState(1);
+  const [requestedPage, setCurrentPage] = useState(1);
   const studentsPerPage = 10;
-
-  useEffect(() => {
-    const loadStudents = () => {
-      setLoading(true);
-
-      try {
-        const storedStudents = readStoredStudents()
-          .filter(isVisibleManagerStudentRecord)
-          .map(mapStoredStudentToDirectoryRow);
-
-        setStudents(storedStudents);
-      } catch (error) {
-        console.error("Error loading stored students:", error);
-        setStudents([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadStudents();
-
-    window.addEventListener("storage", loadStudents);
-    window.addEventListener(STORED_STUDENTS_UPDATED_EVENT, loadStudents);
-    window.addEventListener("focus", loadStudents);
-
-    return () => {
-      window.removeEventListener("storage", loadStudents);
-      window.removeEventListener(STORED_STUDENTS_UPDATED_EVENT, loadStudents);
-      window.removeEventListener("focus", loadStudents);
-    };
-  }, []);
-
-  useEffect(() => {
-    const loadManagedBranches = async () => {
-      try {
-        const branches = await fetchManagedBranches();
-        const branchNames = branches.map((branch) => branch.name).filter(Boolean);
-        if (branchNames.length > 0) {
-          setManagedBranches(branchNames.sort());
-        }
-      } catch (error) {
-        console.error("Error loading managed branches:", error);
-      }
-    };
-
-    void loadManagedBranches();
-  }, []);
 
   const uniqueCourses = Array.from(
     new Set(students.map((s) => s.course)),
@@ -390,13 +322,14 @@ const AreaManagerStudents: React.FC = () => {
     }
   };
 
+  const totalPages = Math.ceil(processedStudents.length / studentsPerPage);
+  const currentPage = Math.min(requestedPage, Math.max(1, totalPages));
   const indexOfLastStudent = currentPage * studentsPerPage;
   const indexOfFirstStudent = indexOfLastStudent - studentsPerPage;
   const currentStudents = processedStudents.slice(
     indexOfFirstStudent,
     indexOfLastStudent,
   );
-  const totalPages = Math.ceil(processedStudents.length / studentsPerPage);
 
   const paginate = (pageNumber: number) => {
     setCurrentPage(pageNumber);
@@ -414,8 +347,20 @@ const AreaManagerStudents: React.FC = () => {
     );
   }
 
+  if (studentLoadError && !hasLoaded) {
+    return <div className="am-students-root" role="alert">
+      <h1>Student Management</h1>
+      <p>Unable to load current student records. {studentLoadError}</p>
+      <button type="button" onClick={retry}>Try Again</button>
+    </div>;
+  }
+
   return (
     <div className="am-students-root">
+      {studentLoadError && <p role="alert">
+        Unable to refresh student records. Showing the last loaded records. {studentLoadError}{" "}
+        <button type="button" onClick={retry}>Try Again</button>
+      </p>}
       <div className="am-students-page-header">
         <div className="am-students-header-title-group">
           <h1 className="am-students-page-title">Student Management</h1>
@@ -538,7 +483,7 @@ const AreaManagerStudents: React.FC = () => {
                 setCurrentPage(1);
               }}
             >
-              <option value="">All Gender</option>
+              <option value="">All Sex</option>
               <option value="Female">Female</option>
               <option value="Male">Male</option>
             </select>

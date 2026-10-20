@@ -36,7 +36,6 @@ import { ToastContainer } from "../../components/common/Toast";
 import { useAuth } from "../../hooks/useAuth";
 import {
   fetchEvaluationQuestionnaire,
-  fetchInstructorEvaluationStatuses,
   fetchInstructorEvaluationSubmissions,
   fetchSupabaseAdmissionApplicants,
   getStudentSectionChoices,
@@ -48,11 +47,8 @@ import {
   readBranchScopedData,
   readEvaluationQuestionnaire,
   readInstructorEvaluationSubmissions,
-  readInstructorEvaluationStatuses,
   readStoredStudents,
   saveEvaluationQuestionnaireToBackend,
-  saveInstructorEvaluationStatusToBackend,
-  setInstructorEvaluationStatus,
   updateStoredStudentSection,
   updateStoredStudentOwnScheduleState,
   writeBranchScopedData,
@@ -60,7 +56,6 @@ import {
   writeStoredStudents,
   type EvaluationQuestionCategoryRecord,
   type InstructorEvaluationSubmissionRecord,
-  type InstructorEvaluationStatusMap,
 } from "../../services/adminStorage";
 import type {
   StudentStorageRecord,
@@ -85,6 +80,9 @@ import {
   type AcademicSnapshot,
 } from "../../services/academicData";
 import { resetInstructorTemporaryPassword } from "../../services/instructorPortal";
+import { getClassAssignmentScheduleError } from "../../services/classAssignmentSchedule";
+import { useEvaluationPeriod } from "../../hooks/useEvaluationPeriod";
+import { saveEvaluationPeriod, toLocalDateTimeInput } from "../../services/evaluationPeriod";
 import {
   getEstimatedCollegeTuition,
   getAdmissionRequirements,
@@ -1703,10 +1701,16 @@ export default function AdminEnrollees({
     strandOrCourse: "All",
     semester: "All",
   });
-  const [evaluationStatuses, setEvaluationStatuses] =
-    useState<InstructorEvaluationStatusMap>(() =>
-      readInstructorEvaluationStatuses(currentBranch),
-    );
+  const {
+    period: evaluationPeriod, setPeriod: setEvaluationPeriod,
+    isOpen: evaluationsOpen, isLoading: evaluationPeriodLoading,
+    error: evaluationPeriodError,
+  } = useEvaluationPeriod(currentBranch);
+  const [evaluationClosesAt, setEvaluationClosesAt] = useState("");
+  const [savingEvaluationPeriod, setSavingEvaluationPeriod] = useState(false);
+  useEffect(() => {
+    setEvaluationClosesAt(toLocalDateTimeInput(evaluationPeriod?.closesAt ?? null));
+  }, [currentBranch, evaluationPeriod?.closesAt]);
   const [evaluationQuestionnaire, setEvaluationQuestionnaire] = useState<
     EvaluationQuestionCategoryRecord[]
   >(() => readEvaluationQuestionnaire(currentBranch));
@@ -3151,6 +3155,25 @@ export default function AdminEnrollees({
         "Every schedule row needs a day, start time, and end time.",
         "warning",
       );
+      return;
+    }
+
+    const scheduleError = getClassAssignmentScheduleError(
+      {
+        id: editingAssignment?.id || "",
+        sectionId: section.id,
+        subjectCode: selectedSubjects[0].code,
+        academicYear: assignmentForm.academicYear.trim() || "2026-2027",
+        semester: normalizeSectionSemester(assignmentForm.semester),
+        schedule,
+      },
+      subjectAssignments.map((assignment) => ({
+        ...assignment,
+        semester: normalizeSectionSemester(assignment.semester),
+      })),
+    );
+    if (scheduleError) {
+      addToast(scheduleError, "warning");
       return;
     }
 
@@ -6743,7 +6766,7 @@ export default function AdminEnrollees({
         submissions,
         isOpen:
           instructorAssignments.length > 0 &&
-          Boolean(evaluationStatuses[instructor.id]?.isOpen),
+          evaluationsOpen,
       };
     })
     .sort((left, right) => left.instructor.name.localeCompare(right.instructor.name));
@@ -6891,33 +6914,22 @@ export default function AdminEnrollees({
     (assignment) => pendingAssignmentDeleteIds.includes(assignment.id),
   );
 
-  const toggleInstructorEvaluation = (instructorId: string, isOpen: boolean) => {
-    const hasAssignedClass = subjectAssignments.some(
-      (assignment) => assignment.instructorId === instructorId,
-    );
-    const nextIsOpen = hasAssignedClass ? isOpen : false;
-    const nextStatuses = setInstructorEvaluationStatus({
-      branch: currentBranch,
-      instructorId,
-      isOpen: nextIsOpen,
-    });
-
-    setEvaluationStatuses(nextStatuses);
-    void saveInstructorEvaluationStatusToBackend({
-      branch: currentBranch,
-      instructorId,
-      isOpen: nextIsOpen,
-    }).catch((error) => {
-      console.warn("Failed to sync instructor evaluation status.", error);
-    });
-    addToast(
-      nextIsOpen
-        ? "Instructor evaluation opened for students."
-        : hasAssignedClass
-          ? "Instructor evaluation closed for students."
-          : "Instructor must have an assigned class before opening evaluation.",
-      hasAssignedClass ? "success" : "warning",
-    );
+  const handleSaveEvaluationPeriod = async (isOpen: boolean) => {
+    if (savingEvaluationPeriod) return;
+    setSavingEvaluationPeriod(true);
+    try {
+      const closesAt = isOpen && evaluationClosesAt
+        ? new Date(evaluationClosesAt).toISOString() : null;
+      const savedPeriod = await saveEvaluationPeriod(currentBranch, isOpen, closesAt);
+      setEvaluationPeriod(savedPeriod);
+      addToast(isOpen
+        ? "Evaluations are open for all assigned instructors in this branch."
+        : "All instructor evaluations are closed.", "success");
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "Unable to save evaluation access.", "error");
+    } finally {
+      setSavingEvaluationPeriod(false);
+    }
   };
 
   const openEvaluationDetails = (
@@ -7303,13 +7315,11 @@ export default function AdminEnrollees({
   };
 
   useEffect(() => {
-    setEvaluationStatuses(readInstructorEvaluationStatuses(currentBranch));
     const nextQuestionnaire = readEvaluationQuestionnaire(currentBranch);
     setEvaluationQuestionnaire(nextQuestionnaire);
     setEvaluationSubmissions(readInstructorEvaluationSubmissions(currentBranch));
     setSelectedQuestionnaireCategoryId(nextQuestionnaire[0]?.id || "");
     void Promise.all([
-      fetchInstructorEvaluationStatuses(currentBranch).then(setEvaluationStatuses),
       fetchEvaluationQuestionnaire(currentBranch).then((questionnaire) => {
         setEvaluationQuestionnaire(questionnaire);
         setSelectedQuestionnaireCategoryId(questionnaire[0]?.id || "");
@@ -7321,33 +7331,6 @@ export default function AdminEnrollees({
       console.warn("Failed to sync instructor evaluations from Supabase.", error);
     });
   }, [currentBranch]);
-
-  useEffect(() => {
-    const assignedInstructorIds = new Set(
-      subjectAssignments
-        .map((assignment) => assignment.instructorId.trim())
-        .filter(Boolean),
-    );
-    let nextStatuses = evaluationStatuses;
-    let didCloseStaleStatus = false;
-
-    Object.values(evaluationStatuses).forEach((status) => {
-      const instructorId = status.instructorId.trim();
-
-      if (status.isOpen && !assignedInstructorIds.has(instructorId)) {
-        nextStatuses = setInstructorEvaluationStatus({
-          branch: currentBranch,
-          instructorId,
-          isOpen: false,
-        });
-        didCloseStaleStatus = true;
-      }
-    });
-
-    if (didCloseStaleStatus) {
-      setEvaluationStatuses(nextStatuses);
-    }
-  }, [currentBranch, evaluationStatuses, subjectAssignments]);
 
   useEffect(() => {
     const syncEvaluationSubmissions = () => {
@@ -9165,6 +9148,42 @@ export default function AdminEnrollees({
                   </button>
                 </div>
 
+                <div className="evaluation-period-controls" aria-busy={savingEvaluationPeriod}>
+                  <div>
+                    <h4>Instructor evaluations: {evaluationPeriodLoading ? "Loading…" : evaluationsOpen ? "Open" : "Closed"}</h4>
+                    <p>Control evaluations for all assigned instructors in this branch.</p>
+                    <p>{evaluationsOpen
+                      ? evaluationPeriod?.closesAt
+                        ? `Closes ${new Date(evaluationPeriod.closesAt).toLocaleString()}.`
+                        : "Open until you close it manually."
+                      : "Students cannot submit evaluations while closed."}</p>
+                  </div>
+                  <div className="evaluation-period-actions">
+                    <label htmlFor="evaluation-closes-at">
+                      Closing date and time (optional, local time)
+                      <input id="evaluation-closes-at" type="datetime-local"
+                        value={evaluationClosesAt}
+                        onChange={(event) => setEvaluationClosesAt(event.target.value)}
+                        disabled={savingEvaluationPeriod || evaluationPeriodLoading} />
+                    </label>
+                    <button type="button"
+                      className={`evaluation-toggle-btn ${evaluationsOpen ? "close" : "open"}`}
+                      disabled={savingEvaluationPeriod || evaluationPeriodLoading || Boolean(evaluationPeriodError)}
+                      onClick={() => void handleSaveEvaluationPeriod(!evaluationsOpen)}>
+                      {evaluationsOpen ? <FaToggleOn /> : <FaToggleOff />}
+                      {savingEvaluationPeriod ? "Saving…" : evaluationsOpen ? "Close All Evaluations" : "Open All Evaluations"}
+                    </button>
+                    {evaluationsOpen && (
+                      <button type="button" className="evaluation-toggle-btn details"
+                        disabled={savingEvaluationPeriod}
+                        onClick={() => void handleSaveEvaluationPeriod(true)}>
+                        Save Closing Time
+                      </button>
+                    )}
+                  </div>
+                  {evaluationPeriodError && <p role="alert">Unable to load evaluation access: {evaluationPeriodError}</p>}
+                </div>
+
                 <div className="evaluation-admin-summary">
                   <div className="evaluation-admin-stat">
                     <span>Open Evaluations</span>
@@ -9232,24 +9251,6 @@ export default function AdminEnrollees({
                               View Details
                             </button>
                           )}
-                          <button
-                            type="button"
-                            className={`evaluation-toggle-btn ${
-                              summary.isOpen ? "close" : "open"
-                            }`}
-                            onClick={() =>
-                              toggleInstructorEvaluation(
-                                summary.instructor.id,
-                                !summary.isOpen,
-                              )
-                            }
-                            disabled={summary.assignments.length === 0}
-                          >
-                            {summary.isOpen ? <FaToggleOn /> : <FaToggleOff />}
-                            {summary.isOpen
-                              ? "Close Evaluation"
-                              : "Open Evaluation"}
-                          </button>
                         </div>
                       </article>
                     ))

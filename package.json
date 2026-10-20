@@ -7,6 +7,9 @@
     "node": "24.x"
   },
   "scripts": {
+    "test:manager-students": "node scripts/test-manager-students.mjs",
+    "test:evaluation-period": "node scripts/test-evaluation-period.mjs",
+    "test:class-assignment-schedule": "node scripts/test-class-assignment-schedule.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

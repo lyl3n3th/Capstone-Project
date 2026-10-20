@@ -4964,6 +4964,40 @@
   gap: 14px;
 }
 
+.evaluation-period-controls {
+  border: 1px solid #dbe5ef;
+  border-radius: 12px;
+  padding: 18px;
+  background: #f8fafc;
+}
+
+.evaluation-period-controls h4 { margin: 0 0 8px; }
+.evaluation-period-controls p { color: #64748b; margin: 6px 0; }
+.evaluation-period-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-top: 14px;
+}
+.evaluation-period-actions label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  min-width: 0;
+}
+.evaluation-period-actions input {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px;
+  min-width: 0;
+  max-width: 100%;
+  background: white;
+  color: #0f172a;
+  font: inherit;
+}
+
 .evaluation-questionnaire-btn {
   min-height: 42px;
   white-space: nowrap;

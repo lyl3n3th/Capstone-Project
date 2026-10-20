@@ -1144,6 +1144,9 @@ declare
   v_assignment_row_id uuid;
   v_conflicting_assignment_id text;
   v_semester text;
+  v_schedule jsonb;
+  v_slot jsonb;
+  v_schedule_conflict record;
 begin
   if trim(coalesce(p_payload->>'branch', '')) = ''
     or trim(coalesce(p_payload->>'subject_id', '')) = ''
@@ -1214,6 +1217,48 @@ begin
     raise exception 'Schedule must be provided as an array.';
   end if;
 
+  v_schedule := coalesce(nullif(p_payload->'schedule', 'null'::jsonb), '[]'::jsonb);
+  for v_slot in select value from jsonb_array_elements(v_schedule)
+  loop
+    if trim(coalesce(v_slot->>'day', '')) = ''
+      or coalesce(v_slot->>'startTime', '') !~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+      or coalesce(v_slot->>'endTime', '') !~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+      or (v_slot->>'startTime') >= (v_slot->>'endTime') then
+      raise exception 'Every schedule row needs a day and valid start and end times, with the end time after the start time.';
+    end if;
+  end loop;
+
+  -- Serialize saves for the section so simultaneous requests cannot both pass.
+  perform 1 from public.branch_class_sections section
+  where section.id = v_section_row_id
+  for update;
+
+  select subject.code as subject_code, slot.day, slot.start_time, slot.end_time
+  into v_schedule_conflict
+  from public.branch_subject_assignments assignment
+  join public.branch_subject_assignment_slots slot on slot.assignment_id = assignment.id
+  join public.branch_academic_subjects subject on subject.id = assignment.subject_row_id
+  cross join jsonb_array_elements(v_schedule) as incoming(value)
+  where assignment.branch_id = v_branch_id
+    and assignment.section_row_id = v_section_row_id
+    and assignment.academic_year = trim(p_payload->>'academic_year')
+    and assignment.semester = v_semester
+    and assignment.is_active
+    and assignment.external_id <> v_external_id
+    and lower(trim(slot.day)) = lower(trim(incoming.value->>'day'))
+    and slot.start_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+    and slot.end_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+    and (incoming.value->>'startTime') < slot.end_time
+    and slot.start_time < (incoming.value->>'endTime')
+  order by subject.code, slot.sort_order
+  limit 1;
+
+  if found then
+    raise exception 'Cannot save: schedule overlaps with % on % (%-%), in this section.',
+      v_schedule_conflict.subject_code, v_schedule_conflict.day,
+      v_schedule_conflict.start_time, v_schedule_conflict.end_time;
+  end if;
+
   select assignment.external_id
   into v_conflicting_assignment_id
   from public.branch_subject_assignments assignment
@@ -1277,7 +1322,7 @@ begin
     trim(coalesce(slot.value->>'startTime', '')),
     trim(coalesce(slot.value->>'endTime', '')),
     coalesce(nullif(trim(coalesce(slot.value->>'room', '')), ''), 'TBA')
-  from jsonb_array_elements(coalesce(p_payload->'schedule', '[]'::jsonb))
+  from jsonb_array_elements(v_schedule)
     with ordinality as slot(value, ordinality)
   where trim(coalesce(slot.value->>'day', '')) <> ''
     and trim(coalesce(slot.value->>'startTime', '')) <> ''

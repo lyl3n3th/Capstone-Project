@@ -13,17 +13,16 @@ import StudentLoadingShell from "../../components/common/StudentLoadingShell";
 import { useStudent } from "../../hooks/useStudent";
 import {
   fetchEvaluationQuestionnaire,
-  fetchInstructorEvaluationStatuses,
   fetchInstructorEvaluationSubmissions,
   readInstructorEvaluationSubmissions,
   saveInstructorEvaluationSubmission,
   saveInstructorEvaluationSubmissionToBackend,
   readEvaluationQuestionnaire,
-  readInstructorEvaluationStatuses,
   type EvaluationQuestionCategoryRecord,
-  type InstructorEvaluationStatusMap,
   type StudentPortalSubject,
 } from "../../services/adminStorage";
+import { useEvaluationPeriod } from "../../hooks/useEvaluationPeriod";
+import { fetchEvaluationPeriod, isEvaluationPeriodOpen } from "../../services/evaluationPeriod";
 import "../../styles/main.css";
 
 type EvaluationCardState = "open" | "closed" | "unavailable";
@@ -57,7 +56,7 @@ const getResolvedInstructorName = (subject: StudentPortalSubject) => {
 
 const getEvaluationCardState = (
   subject: StudentPortalSubject,
-  evaluationStatuses: InstructorEvaluationStatusMap,
+  evaluationsOpen: boolean,
 ): EvaluationCardState => {
   const instructorId = subject.instructorId?.trim();
   const hasResolvedInstructor =
@@ -67,7 +66,7 @@ const getEvaluationCardState = (
     return "unavailable";
   }
 
-  return evaluationStatuses[instructorId]?.isOpen ? "open" : "closed";
+  return evaluationsOpen ? "open" : "closed";
 };
 
 const getEvaluationStateLabel = (state: EvaluationCardState) => {
@@ -88,7 +87,7 @@ const getEvaluationStateCopy = (state: EvaluationCardState) => {
   }
 
   if (state === "closed") {
-    return "Academic Management has not opened this instructor evaluation yet.";
+    return "Instructor evaluations are currently closed by Academic Management.";
   }
 
   return "This subject still needs a linked instructor assignment before the evaluation can appear here.";
@@ -115,8 +114,8 @@ function StudentEvaluation() {
   const [evaluationResponses, setEvaluationResponses] = useState<
     Record<string, Record<string, number | string>>
   >({});
-  const [evaluationStatuses, setEvaluationStatuses] =
-    useState<InstructorEvaluationStatusMap>({});
+  const [submissionError, setSubmissionError] = useState("");
+  const [submittingEvaluation, setSubmittingEvaluation] = useState(false);
   const [evaluationQuestionnaire, setEvaluationQuestionnaire] = useState<
     EvaluationQuestionCategoryRecord[]
   >([]);
@@ -125,10 +124,13 @@ function StudentEvaluation() {
   );
   const sidebarRef = useRef<HTMLDivElement>(null);
   const { student, subjects, currentTerm, isLoading } = useStudent();
+  const {
+    period: evaluationPeriod, isOpen: evaluationsOpen,
+    setPeriod: setEvaluationPeriod, error: evaluationPeriodError,
+  } = useEvaluationPeriod(student?.branch);
 
   useEffect(() => {
     const syncEvaluationStatuses = () => {
-      setEvaluationStatuses(readInstructorEvaluationStatuses(student?.branch));
       setEvaluationQuestionnaire(readEvaluationQuestionnaire(student?.branch));
       const localSubmissions = readInstructorEvaluationSubmissions(student?.branch);
       setSubmittedEvaluationIds(
@@ -142,9 +144,6 @@ function StudentEvaluation() {
         ),
       );
       void Promise.all([
-        fetchInstructorEvaluationStatuses(student?.branch).then(
-          setEvaluationStatuses,
-        ),
         fetchEvaluationQuestionnaire(student?.branch).then(
           setEvaluationQuestionnaire,
         ),
@@ -241,7 +240,7 @@ function StudentEvaluation() {
         ? `name:${instructorName.toLowerCase()}:${subjectKey}`
         : `subject:${subjectKey}`;
     const cardKey = instructorId ? `id:${instructorId}:${subjectKey}` : fallbackKey;
-    const nextState = getEvaluationCardState(subject, evaluationStatuses);
+    const nextState = getEvaluationCardState(subject, evaluationsOpen);
     const existingCard = evaluationCardMap.get(cardKey);
 
     if (existingCard) {
@@ -408,8 +407,8 @@ function StudentEvaluation() {
     }));
   };
 
-  const handleSubmitEvaluation = (card: EvaluationCard) => {
-    if (!student) {
+  const handleSubmitEvaluation = async (card: EvaluationCard) => {
+    if (!student || submittingEvaluation) {
       return;
     }
 
@@ -436,19 +435,23 @@ function StudentEvaluation() {
       submittedAt: new Date().toISOString(),
     };
 
-    saveInstructorEvaluationSubmission(student.branch, submission);
-    setSubmittedEvaluationIds((currentIds) => {
-      const nextIds = new Set(currentIds);
-      nextIds.add(submissionId);
-      return nextIds;
-    });
-    setActiveEvaluationKey(null);
-    void saveInstructorEvaluationSubmissionToBackend(
-      student.branch,
-      submission,
-    ).catch((error) => {
-      console.warn("Failed to sync evaluation submission to Supabase.", error);
-    });
+    setSubmittingEvaluation(true);
+    setSubmissionError("");
+    try {
+      const latestPeriod = await fetchEvaluationPeriod(student.branch);
+      setEvaluationPeriod(latestPeriod);
+      if (!isEvaluationPeriodOpen(latestPeriod)) {
+        throw new Error("Instructor evaluations are closed. Your response was not submitted.");
+      }
+      await saveInstructorEvaluationSubmissionToBackend(student.branch, submission);
+      saveInstructorEvaluationSubmission(student.branch, submission);
+      setSubmittedEvaluationIds((currentIds) => new Set([...currentIds, submissionId]));
+      setActiveEvaluationKey(null);
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : "Unable to submit your evaluation. Please try again.");
+    } finally {
+      setSubmittingEvaluation(false);
+    }
   };
 
   const getCardProgress = (cardKey: string) => {
@@ -519,6 +522,12 @@ function StudentEvaluation() {
         />
 
         <main className="s-content s-evaluation-page">
+          {(submissionError || evaluationPeriodError) && (
+            <p role="alert">{submissionError || "Unable to load evaluation access. Please refresh and try again."}</p>
+          )}
+          {evaluationsOpen && evaluationPeriod?.closesAt && (
+            <p>Instructor evaluations close on {new Date(evaluationPeriod.closesAt).toLocaleString()}.</p>
+          )}
           {activeEvaluationCard ? (
             <section className="s-evaluation-detail-page">
               {(() => {
@@ -687,11 +696,12 @@ function StudentEvaluation() {
                           onClick={() => handleSubmitEvaluation(card)}
                           disabled={
                             isSubmitted ||
+                            submittingEvaluation ||
                             requiredQuestionnaireItems === 0 ||
                             cardProgress.percentage < 100
                           }
                         >
-                          {isSubmitted ? "Submitted" : "Submit Evaluation"}
+                          {isSubmitted ? "Submitted" : submittingEvaluation ? "Submitting…" : "Submit Evaluation"}
                         </button>
                       </div>
                     </div>
