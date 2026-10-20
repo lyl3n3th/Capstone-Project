@@ -37,14 +37,6 @@ interface StudentRecord {
   branch?: string;
 }
 
-const FALLBACK_PROGRAM_DATA: ProgramData[] = [
-  { name: "STEM", value: 85, academicLevel: "SHS" },
-  { name: "ICT", value: 62, academicLevel: "SHS" },
-  { name: "ABM", value: 48, academicLevel: "SHS" },
-  { name: "HUMSS", value: 35, academicLevel: "SHS" },
-  { name: "BS Entrepreneurship", value: 20, academicLevel: "College" },
-];
-
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8"];
 
 const formatProgramLabel = (name: string) => {
@@ -107,26 +99,20 @@ export default function RegistrarDashboard({
     };
   }, [currentBranch]);
 
-  const hasStudentData = students.length > 0;
+  const activeStudents = students.filter(
+    (student) =>
+      student.status !== "Archived" && student.status !== "Graduated",
+  );
 
-  const activeStudents = hasStudentData
-    ? students.filter(
-        (student) =>
-          student.status !== "Archived" && student.status !== "Graduated",
-      )
-    : [];
-
-  const totalStudents = hasStudentData ? activeStudents.length : 250;
-  const completeRequirements = hasStudentData
-    ? activeStudents.filter((student) => student.status === "Complete").length
-    : 150;
-  const incompleteRequirements = hasStudentData
-    ? activeStudents.filter((student) => student.status === "Incomplete").length
-    : 20;
+  const totalStudents = activeStudents.length;
+  const completeRequirements = activeStudents.filter(
+    (student) => student.status === "Complete",
+  ).length;
+  const incompleteRequirements = activeStudents.filter(
+    (student) => student.status === "Incomplete",
+  ).length;
 
   const programData = useMemo<ProgramData[]>(() => {
-    if (!hasStudentData) return FALLBACK_PROGRAM_DATA;
-
     const counts = new Map<
       string,
       { count: number; academicLevel: ProgramData["academicLevel"] }
@@ -164,7 +150,7 @@ export default function RegistrarDashboard({
         academicLevel: data.academicLevel,
       }))
       .sort((left, right) => right.value - left.value);
-  }, [activeStudents, hasStudentData]);
+  }, [activeStudents]);
 
   const shsPrograms = programData.filter(
     (item) => item.academicLevel === "SHS",
@@ -287,80 +273,88 @@ export default function RegistrarDashboard({
               the branch-wide summary.
             </ChartNote>
             <div className="pie-container">
-              <ResponsiveContainer
-                width="100%"
-                height="100%"
-                minWidth={1}
-                minHeight={280}
-                initialDimension={{ width: 360, height: 360 }}
-              >
-                <PieChart>
-                  <Pie
-                    data={programData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius="38%"
-                    outerRadius="70%"
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    <Label
-                      content={({ viewBox }) => {
-                        const pieViewBox = viewBox as
-                          | { cx?: number; cy?: number }
-                          | undefined;
-                        const centerX = pieViewBox?.cx;
-                        const centerY = pieViewBox?.cy;
+              {totalStudents === 0 ? (
+                <div className="dashboard-empty-distribution" role="status">
+                  <strong className="pie-center-value">0</strong>
+                  <span>Active Students</span>
+                  <p>No students enrolled in this branch yet.</p>
+                </div>
+              ) : (
+                <ResponsiveContainer
+                  width="100%"
+                  height="100%"
+                  minWidth={1}
+                  minHeight={280}
+                  initialDimension={{ width: 360, height: 360 }}
+                >
+                  <PieChart>
+                    <Pie
+                      data={programData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius="38%"
+                      outerRadius="70%"
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      <Label
+                        content={({ viewBox }) => {
+                          const pieViewBox = viewBox as
+                            | { cx?: number; cy?: number }
+                            | undefined;
+                          const centerX = pieViewBox?.cx;
+                          const centerY = pieViewBox?.cy;
 
-                        if (
-                          typeof centerX !== "number" ||
-                          typeof centerY !== "number"
-                        ) {
-                          return null;
-                        }
+                          if (
+                            typeof centerX !== "number" ||
+                            typeof centerY !== "number"
+                          ) {
+                            return null;
+                          }
 
-                        return (
-                          <text
-                            x={centerX}
-                            y={centerY}
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                          >
-                            <tspan
+                          return (
+                            <text
                               x={centerX}
-                              y={centerY - 6}
-                              className="pie-center-value"
+                              y={centerY}
+                              textAnchor="middle"
+                              dominantBaseline="middle"
                             >
-                              {totalStudents.toLocaleString()}
-                            </tspan>
-                            <tspan
-                              x={centerX}
-                              y={centerY + 18}
-                              className="pie-center-label"
-                            >
-                              Active Students
-                            </tspan>
-                          </text>
-                        );
-                      }}
-                    />
-                    {programData.map((_entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={COLORS[index % COLORS.length]}
+                              <tspan
+                                x={centerX}
+                                y={centerY - 6}
+                                className="pie-center-value"
+                              >
+                                {totalStudents.toLocaleString()}
+                              </tspan>
+                              <tspan
+                                x={centerX}
+                                y={centerY + 18}
+                                className="pie-center-label"
+                              >
+                                Active Students
+                              </tspan>
+                            </text>
+                          );
+                        }}
                       />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend
-                    verticalAlign="bottom"
-                    align="center"
-                    formatter={(value: string | number) =>
-                      formatProgramLabel(String(value))
-                    }
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+                      {programData.map((_entry, index) => (
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={COLORS[index % COLORS.length]}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend
+                      verticalAlign="bottom"
+                      align="center"
+                      formatter={(value: string | number) =>
+                        formatProgramLabel(String(value))
+                      }
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
