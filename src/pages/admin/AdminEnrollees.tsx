@@ -1624,7 +1624,26 @@ export default function AdminEnrollees({
     "subjects" | "instructors" | "assignments" | "evaluation"
   >(instructorManagementOnly ? "instructors" : "subjects");
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [instructors, setInstructors] = useState<Instructor[]>([]);
+  const [instructorsByBranch, setInstructorsByBranch] = useState<
+    Record<string, Instructor[]>
+  >({});
+  const instructors = instructorsByBranch[currentBranch] ?? [];
+  const setInstructors = (
+    nextInstructors:
+      | Instructor[]
+      | ((currentInstructors: Instructor[]) => Instructor[]),
+  ) => {
+    setInstructorsByBranch((currentByBranch) => {
+      const currentBranchInstructors = currentByBranch[currentBranch] ?? [];
+      return {
+        ...currentByBranch,
+        [currentBranch]:
+          typeof nextInstructors === "function"
+            ? nextInstructors(currentBranchInstructors)
+            : nextInstructors,
+      };
+    });
+  };
   const [subjectAssignments, setSubjectAssignments] = useState<
     SubjectAssignment[]
   >([]);
