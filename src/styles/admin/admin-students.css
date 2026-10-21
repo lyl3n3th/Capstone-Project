@@ -662,6 +662,55 @@
   font-style: italic;
 }
 
+.students-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 4px 4px;
+  color: #536274;
+  font-size: 13px;
+}
+
+.students-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.students-pagination-button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #d5dee7;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1a3d5c;
+  font: inherit;
+  cursor: pointer;
+}
+
+.students-pagination-button:hover:not(:disabled) {
+  border-color: #066287;
+  background: #f3f9fc;
+}
+
+.students-pagination-button:disabled {
+  color: #9aa6b2;
+  cursor: not-allowed;
+}
+
+@media (max-width: 560px) {
+  .students-pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .students-pagination-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 /* Modals */
 .students-modal-overlay {
   position: fixed;

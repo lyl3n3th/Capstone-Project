@@ -1,5 +1,5 @@
 import { useConfirmation } from "../../hooks/useConfirmation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MdArchive } from "react-icons/md";
 import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
@@ -991,6 +991,8 @@ export default function AdminStudents({
     "Undergraduate";
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterAcademicStanding, setFilterAcademicStanding] = useState("All");
+  const [requestedStudentPage, setRequestedStudentPage] = useState(1);
+  const studentsPerPage = 25;
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
@@ -1097,6 +1099,7 @@ export default function AdminStudents({
       !isCancelled && studentDataRevisionRef.current === loadRevision;
 
     const loadStudentsForBranch = async () => {
+      setRequestedStudentPage(1);
       setIsLoading(true);
       setStudentRecoveryMessage(null);
 
@@ -1402,71 +1405,103 @@ export default function AdminStudents({
       ),
     [students, currentBranch, gradeRecordsVersion],
   );
-  const getStudentAcademicStandingLabel = (student: Student) =>
-    getDisplayedAcademicStandingLabel(
-      student,
-      studentAcademicStandingById[student.id]?.label,
-    );
+  const getStudentAcademicStandingLabel = useCallback(
+    (student: Student) =>
+      getDisplayedAcademicStandingLabel(
+        student,
+        studentAcademicStandingById[student.id]?.label,
+      ),
+    [studentAcademicStandingById],
+  );
 
-  const filteredStudents = students.filter((student) => {
-    const search = searchTerm.toLowerCase();
-    const academicStanding = getStudentAcademicStandingLabel(student);
-    const lifecycleStatus = getStudentLifecycleStatus(student);
-    const matchesSearch =
-      student.name.toLowerCase().includes(search) ||
-      student.id.toLowerCase().includes(search) ||
-      student.program.toLowerCase().includes(search) ||
-      student.email.toLowerCase().includes(search) ||
-      student.contact.toLowerCase().includes(search) ||
-      (student.section || "").toLowerCase().includes(search) ||
-      getAdmissionTypeLabel(student.studentStatus).toLowerCase().includes(search) ||
-      academicStanding.toLowerCase().includes(search);
+  const filteredStudents = useMemo(
+    () =>
+      students.filter((student) => {
+        const search = searchTerm.toLowerCase();
+        const academicStanding = getStudentAcademicStandingLabel(student);
+        const lifecycleStatus = getStudentLifecycleStatus(student);
+        const matchesSearch =
+          student.name.toLowerCase().includes(search) ||
+          student.id.toLowerCase().includes(search) ||
+          student.program.toLowerCase().includes(search) ||
+          student.email.toLowerCase().includes(search) ||
+          student.contact.toLowerCase().includes(search) ||
+          (student.section || "").toLowerCase().includes(search) ||
+          getAdmissionTypeLabel(student.studentStatus).toLowerCase().includes(search) ||
+          academicStanding.toLowerCase().includes(search);
 
-    const matchesProgram =
-      filterProgram === "All Programs" || student.program === filterProgram;
-    const matchesYearLevel =
-      filterYearLevel === "" || student.yearLevel === filterYearLevel;
-    const matchesSection =
-      filterSection === "" || (student.section || "") === filterSection;
-    const matchesStudentLifecycleStatus =
-      lifecycleStatus === filterStudentLifecycleStatus;
-    const matchesStatus =
-      (filterStatus === "All" || student.status === filterStatus);
-    const matchesAcademicStanding =
-      filterAcademicStanding === "All" ||
-      academicStanding === filterAcademicStanding;
+        const matchesProgram =
+          filterProgram === "All Programs" || student.program === filterProgram;
+        const matchesYearLevel =
+          filterYearLevel === "" || student.yearLevel === filterYearLevel;
+        const matchesSection =
+          filterSection === "" || (student.section || "") === filterSection;
+        const matchesStudentLifecycleStatus =
+          lifecycleStatus === filterStudentLifecycleStatus;
+        const matchesStatus =
+          filterStatus === "All" || student.status === filterStatus;
+        const matchesAcademicStanding =
+          filterAcademicStanding === "All" ||
+          academicStanding === filterAcademicStanding;
 
-    return (
-      matchesSearch &&
-      matchesProgram &&
-      matchesYearLevel &&
-      matchesSection &&
-      matchesStudentLifecycleStatus &&
-      matchesStatus &&
-      matchesAcademicStanding
-    );
-  });
+        return (
+          matchesSearch &&
+          matchesProgram &&
+          matchesYearLevel &&
+          matchesSection &&
+          matchesStudentLifecycleStatus &&
+          matchesStatus &&
+          matchesAcademicStanding
+        );
+      }),
+    [
+      students,
+      searchTerm,
+      filterProgram,
+      filterYearLevel,
+      filterSection,
+      filterStudentLifecycleStatus,
+      filterStatus,
+      filterAcademicStanding,
+      getStudentAcademicStandingLabel,
+    ],
+  );
 
-  const sortedStudents = [...filteredStudents].sort((left, right) => {
-    const leftValue = String(left[sortField] ?? "").toLowerCase();
-    const rightValue = String(right[sortField] ?? "").toLowerCase();
+  const sortedStudents = useMemo(
+    () =>
+      [...filteredStudents].sort((left, right) => {
+        const leftValue = String(left[sortField] ?? "").toLowerCase();
+        const rightValue = String(right[sortField] ?? "").toLowerCase();
 
-    if (sortField === "id") {
-      const leftNumber = Number(left.id);
-      const rightNumber = Number(right.id);
-      if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
-        return sortDirection === "asc"
-          ? leftNumber - rightNumber
-          : rightNumber - leftNumber;
+        if (sortField === "id") {
+          const leftNumber = Number(left.id);
+          const rightNumber = Number(right.id);
+          if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+            return sortDirection === "asc"
+              ? leftNumber - rightNumber
+              : rightNumber - leftNumber;
+          }
       }
-    }
 
-    if (leftValue < rightValue) return sortDirection === "asc" ? -1 : 1;
-    if (leftValue > rightValue) return sortDirection === "asc" ? 1 : -1;
-    return 0;
-  });
+        if (leftValue < rightValue) return sortDirection === "asc" ? -1 : 1;
+        if (leftValue > rightValue) return sortDirection === "asc" ? 1 : -1;
+        return 0;
+      }),
+    [filteredStudents, sortField, sortDirection],
+  );
+
+  const totalStudentPages = Math.max(
+    1,
+    Math.ceil(sortedStudents.length / studentsPerPage),
+  );
+  const currentStudentPage = Math.min(requestedStudentPage, totalStudentPages);
+  const currentPageStudents = sortedStudents.slice(
+    (currentStudentPage - 1) * studentsPerPage,
+    currentStudentPage * studentsPerPage,
+  );
 
   const toggleSort = (field: "id") => {
+    setRequestedStudentPage(1);
     if (sortField === field) {
       setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
       return;
@@ -1524,7 +1559,7 @@ export default function AdminStudents({
     isStudentEligibleForAlumniTransfer,
   );
   const isAnyBulkActionPending = isBulkMovingToAlumni || isBulkArchiving;
-  const visibleStudentIds = sortedStudents
+  const visibleStudentIds = currentPageStudents
     .filter(isStudentSelectableForBulkActions)
     .map((student) => student.id);
   const areAllVisibleStudentsSelected =
@@ -3760,7 +3795,10 @@ export default function AdminStudents({
             type="text"
             placeholder="Search by Name, ID, Email..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setRequestedStudentPage(1);
+              setSearchTerm(e.target.value);
+            }}
             className="students-search-input"
           />
           <button
@@ -3844,7 +3882,10 @@ export default function AdminStudents({
             <label>Academic Level</label>
             <select
               value={filterProgram}
-              onChange={(e) => setFilterProgram(e.target.value)}
+              onChange={(e) => {
+                setRequestedStudentPage(1);
+                setFilterProgram(e.target.value);
+              }}
             >
               <option>All Programs</option>
               <option>SHS</option>
@@ -3855,7 +3896,10 @@ export default function AdminStudents({
             <label>Year Level</label>
             <select
               value={filterYearLevel}
-              onChange={(e) => setFilterYearLevel(e.target.value)}
+              onChange={(e) => {
+                setRequestedStudentPage(1);
+                setFilterYearLevel(e.target.value);
+              }}
             >
               <option value="">All Year Levels</option>
               {yearLevelOptions.map((yearLevelOption) => (
@@ -3869,7 +3913,10 @@ export default function AdminStudents({
             <label>Section</label>
             <select
               value={filterSection}
-              onChange={(e) => setFilterSection(e.target.value)}
+              onChange={(e) => {
+                setRequestedStudentPage(1);
+                setFilterSection(e.target.value);
+              }}
             >
               <option value="">All Sections</option>
               {sectionOptions.map((sectionOption) => (
@@ -3883,7 +3930,10 @@ export default function AdminStudents({
             <label>Requirement Status</label>
             <select
               value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
+              onChange={(e) => {
+                setRequestedStudentPage(1);
+                setFilterStatus(e.target.value);
+              }}
             >
               <option>All</option>
               <option>Complete</option>
@@ -3894,7 +3944,10 @@ export default function AdminStudents({
             <label>Academic Standing</label>
             <select
               value={filterAcademicStanding}
-              onChange={(e) => setFilterAcademicStanding(e.target.value)}
+              onChange={(e) => {
+                setRequestedStudentPage(1);
+                setFilterAcademicStanding(e.target.value);
+              }}
             >
               <option>All</option>
               <option>Regular</option>
@@ -3936,8 +3989,8 @@ export default function AdminStudents({
               </tr>
             </thead>
             <tbody>
-              {!isLoading && sortedStudents.length > 0 ? (
-                sortedStudents.map((student) => (
+              {!isLoading && currentPageStudents.length > 0 ? (
+                currentPageStudents.map((student) => (
                   <tr
                     key={student.id}
                     className={
@@ -4025,6 +4078,43 @@ export default function AdminStudents({
             </tbody>
           </table>
         </div>
+
+        {sortedStudents.length > 0 && totalStudentPages > 1 ? (
+          <nav className="students-pagination" aria-label="Student list pages">
+            <span className="students-pagination-summary">
+              Showing {(currentStudentPage - 1) * studentsPerPage + 1}–
+              {Math.min(currentStudentPage * studentsPerPage, sortedStudents.length)}
+              {" of "}{sortedStudents.length} students
+            </span>
+            <div className="students-pagination-controls">
+              <button
+                type="button"
+                className="students-pagination-button"
+                onClick={() => setRequestedStudentPage((page) => Math.max(1, page - 1))}
+                disabled={currentStudentPage === 1}
+                aria-label="Previous student page"
+              >
+                ← Previous
+              </button>
+              <span aria-live="polite">
+                Page {currentStudentPage} of {totalStudentPages}
+              </span>
+              <button
+                type="button"
+                className="students-pagination-button"
+                onClick={() =>
+                  setRequestedStudentPage((page) =>
+                    Math.min(totalStudentPages, page + 1),
+                  )
+                }
+                disabled={currentStudentPage === totalStudentPages}
+                aria-label="Next student page"
+              >
+                Next →
+              </button>
+            </div>
+          </nav>
+        ) : null}
 
         {isImportModalOpen && <StudentImportModal key={currentBranch} branch={currentBranch}
           onClose={() => setIsImportModalOpen(false)}
