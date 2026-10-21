@@ -630,17 +630,6 @@ function AdmissionStep2() {
     }, 300);
   };
 
-  // Reset if non-bacoor
-  useEffect(() => {
-    if (program === "College" && selectedBranch.toLowerCase() !== "bacoor") {
-      setProgram(EDUCATIONAL_LEVEL_PLACEHOLDER);
-      addToast(
-        "College programs are only available at Bacoor branch.",
-        "warning",
-      );
-    }
-  }, [program, selectedBranch]);
-
   useEffect(() => {
     setProgram1(TRACK_SELECTION_PLACEHOLDER);
     setRequestedYearLevel(
