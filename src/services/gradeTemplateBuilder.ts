@@ -5,6 +5,9 @@ export type GradeTemplateSheet = {
   academicYear: string;
   descriptor: string;
   headerOverrides?: Partial<Record<"A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J", string>>;
+  metadataOverrides?: Record<string, string>;
+  additionalMerges?: string[];
+  columnWidths?: number[];
   rows: string[][];
   sectionCode: string;
   semester: string;
@@ -233,6 +236,7 @@ const populateStyledTemplateMetadata = ({
     ["D5", sheet.sectionCode],
     ["E5", "YEAR LEVEL:"],
     ["F5", sheet.yearLevel],
+    ...Object.entries(sheet.metadataOverrides ?? {}),
   ].forEach(([address, value]) => {
     const cell = getCellByAddress(sheetData, address);
 
@@ -342,6 +346,32 @@ const buildStyledWorksheetXml = ({
   });
   populateStyledTemplateHeaderOverrides(sheetData, sheet);
   updateWorksheetSelection(worksheetDocument, isPrimarySheet);
+
+  if (sheet.additionalMerges?.length) {
+    const merges = worksheetDocument.getElementsByTagNameNS(XML_MAIN_NS, "mergeCells")[0];
+    if (merges) {
+      for (const ref of sheet.additionalMerges) {
+        const merge = worksheetDocument.createElementNS(XML_MAIN_NS, "mergeCell");
+        merge.setAttribute("ref", ref);
+        merges.appendChild(merge);
+      }
+      merges.setAttribute("count", String(merges.getElementsByTagNameNS(XML_MAIN_NS, "mergeCell").length));
+    }
+  }
+  if (sheet.columnWidths) {
+    const columns = worksheetDocument.getElementsByTagNameNS(XML_MAIN_NS, "cols")[0];
+    if (columns) {
+      while (columns.firstChild) columns.removeChild(columns.firstChild);
+      sheet.columnWidths.forEach((width, index) => {
+        const column = worksheetDocument.createElementNS(XML_MAIN_NS, "col");
+        column.setAttribute("min", String(index + 1));
+        column.setAttribute("max", String(index + 1));
+        column.setAttribute("width", String(width));
+        column.setAttribute("customWidth", "1");
+        columns.appendChild(column);
+      });
+    }
+  }
 
   if (sheet.rows.length === 0) {
     return serializeXml(worksheetDocument);

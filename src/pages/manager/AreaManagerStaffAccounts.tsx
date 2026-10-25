@@ -9,19 +9,20 @@ import {
   BsPersonPlusFill,
   BsSearch,
 } from "react-icons/bs";
-import { MdBlock, MdDelete } from "react-icons/md";
+import { MdArchive, MdBlock, MdDelete } from "react-icons/md";
 import {
   addManagedBranch,
   buildEmployeeIdPreview,
   createStaffMember,
   fetchManagedBranches,
+  fetchArchivedManagedBranches,
   fetchStaffMembers,
   moveStaffMemberToTrash,
   removeManagedBranch,
+  setManagedBranchArchived,
   updateStaffMember,
   type StaffMember,
 } from "../../services/staffApi";
-import { fetchAdminStudents } from "../../services/adminStudentsApi";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import BranchOfferingsEditor from "../../components/manager/BranchOfferingsEditor";
 import "../../styles/manager/area-managerStaff.css";
@@ -44,6 +45,11 @@ const AreaManagerStaffAccounts: React.FC = () => {
   const [branchPendingRemoval, setBranchPendingRemoval] = useState<string | null>(
     null,
   );
+  const [branchView, setBranchView] = useState<"active" | "archived">("active");
+  const [archivedBranches, setArchivedBranches] = useState<string[]>([]);
+  const [archivedBranchesLoading, setArchivedBranchesLoading] = useState(false);
+  const [archivedBranchesError, setArchivedBranchesError] = useState("");
+  const [branchActionPending, setBranchActionPending] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -124,6 +130,19 @@ const AreaManagerStaffAccounts: React.FC = () => {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadArchivedBranches = async () => {
+    setArchivedBranchesLoading(true);
+    setArchivedBranchesError("");
+    try {
+      const branches = await fetchArchivedManagedBranches();
+      setArchivedBranches(branches.map((branch) => branch.name));
+    } catch (err) {
+      setArchivedBranchesError(err instanceof Error ? err.message : "Unable to load archived branches.");
+    } finally {
+      setArchivedBranchesLoading(false);
     }
   };
 
@@ -359,6 +378,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
   };
 
   const handleAddBranch = async () => {
+    if (branchActionPending) return;
     const normalizedBranch = newBranchName.trim();
 
     if (!normalizedBranch) {
@@ -375,6 +395,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
       return;
     }
 
+    setBranchActionPending(true);
     try {
       const savedBranch = await addManagedBranch(normalizedBranch);
       await loadManagedBranches();
@@ -390,6 +411,8 @@ const AreaManagerStaffAccounts: React.FC = () => {
       setBranchError(
         err instanceof Error ? err.message : "Failed to add this branch.",
       );
+    } finally {
+      setBranchActionPending(false);
     }
   };
 
@@ -399,27 +422,14 @@ const AreaManagerStaffAccounts: React.FC = () => {
   };
 
   const handleConfirmRemoveBranch = async () => {
-    if (!branchPendingRemoval) {
+    if (!branchPendingRemoval || branchActionPending) {
       return;
     }
 
     const branchName = branchPendingRemoval;
+    setBranchActionPending(true);
     try {
-      const branchStudents = await fetchAdminStudents(branchName);
-      const enrolledStudentCount = branchStudents.filter(
-        (student) =>
-          student.status === "Complete" || student.status === "Incomplete",
-      ).length;
-
-      if (enrolledStudentCount > 0) {
-        setBranchError(
-          `${branchName} cannot be deleted because it has enrolled students.`,
-        );
-        setBranchPendingRemoval(null);
-        return;
-      }
-
-      await removeManagedBranch(branchName);
+      await setManagedBranchArchived(branchName, true);
       const remainingBranches = managedBranches.filter(
         (branch) => branch !== branchName,
       );
@@ -434,13 +444,53 @@ const AreaManagerStaffAccounts: React.FC = () => {
       }));
       setBranchPendingRemoval(null);
       setBranchError("");
-      setBranchSuccess(`${branchName} removed. Its staff accounts are disabled and ready for reassignment.`);
+      setBranchSuccess(`${branchName} archived. You can restore it from Archived Branches.`);
       await loadStaffDirectory();
     } catch (err) {
       setBranchError(
-        err instanceof Error ? err.message : "Failed to remove this branch.",
+        err instanceof Error ? err.message : "Failed to archive this branch.",
       );
       setBranchPendingRemoval(null);
+    } finally {
+      setBranchActionPending(false);
+    }
+  };
+
+  const handleRestoreBranch = async (branchName: string) => {
+    if (branchActionPending) return;
+    setBranchActionPending(true);
+    setBranchError("");
+    setBranchSuccess("");
+    try {
+      await setManagedBranchArchived(branchName, false);
+      setArchivedBranches((current) => current.filter((branch) => branch !== branchName));
+      setManagedBranches((current) => [...new Set([...current, branchName])].sort());
+      setBranchSuccess(`${branchName} restored. Enable its staff accounts when ready.`);
+    } catch (err) {
+      setBranchError(err instanceof Error ? err.message : "Failed to restore this branch.");
+    } finally {
+      setBranchActionPending(false);
+    }
+  };
+
+  const handlePermanentlyDeleteBranch = async (branchName: string) => {
+    if (branchActionPending) return;
+    if (!(await requestConfirmation(
+      `Permanently delete ${branchName}? Its subjects, instructors, and branch settings will be deleted. Staff accounts will remain disabled and lose their branch assignment. This cannot be undone. Branches with student, admission, or payment records cannot be permanently deleted.`,
+      { title: "Permanently Delete Branch", confirmLabel: "Permanently delete", destructive: true },
+    ))) return;
+    setBranchActionPending(true);
+    setBranchError("");
+    setBranchSuccess("");
+    try {
+      await removeManagedBranch(branchName);
+      setArchivedBranches((current) => current.filter((branch) => branch !== branchName));
+      setBranchSuccess(`${branchName} permanently deleted.`);
+      await loadStaffDirectory();
+    } catch (err) {
+      setBranchError(err instanceof Error ? err.message : "Failed to permanently delete this branch.");
+    } finally {
+      setBranchActionPending(false);
     }
   };
 
@@ -688,6 +738,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
               className="stf-branches-btn"
               onClick={() => {
                 setShowBranchesModal(true);
+                setBranchView("active");
                 setOfferingsBranch(null);
                 setBranchSuccess("");
                 setBranchError("");
@@ -1207,14 +1258,16 @@ const AreaManagerStaffAccounts: React.FC = () => {
       {showBranchesModal ? (
         <div
           className="stf-modal-overlay"
-          onClick={() => setShowBranchesModal(false)}
+          onClick={() => { if (!branchActionPending) setShowBranchesModal(false); }}
         >
-          <div className="stf-branches-card" onClick={(event) => event.stopPropagation()}>
+          <div className="stf-branches-card" role="dialog" aria-modal="true" aria-labelledby="manage-branches-title" onClick={(event) => event.stopPropagation()}>
             <div className="stf-modal-header">
-              <h3 className="stf-modal-title">Manage Branches</h3>
+              <h3 className="stf-modal-title" id="manage-branches-title">Manage Branches</h3>
               <button
                 className="stf-modal-close"
                 onClick={() => setShowBranchesModal(false)}
+                disabled={branchActionPending}
+                aria-label="Close Manage Branches"
               >
                 &times;
               </button>
@@ -1223,7 +1276,6 @@ const AreaManagerStaffAccounts: React.FC = () => {
               {branchError ? (
                 <div className="stf-error-msg">{branchError}</div>
               ) : null}
-              {branchSuccess && <p className="stf-branch-success" role="status">{branchSuccess}</p>}
               {offeringsBranch ? (
                 <BranchOfferingsEditor key={offeringsBranch} branch={offeringsBranch}
                   onCancel={() => setOfferingsBranch(null)}
@@ -1232,6 +1284,19 @@ const AreaManagerStaffAccounts: React.FC = () => {
                     setOfferingsBranch(null);
                   }} />
               ) : <>
+              <div className="stf-branch-tabs" role="group" aria-label="Branch status">
+                <button type="button" className="stf-branch-tab" aria-pressed={branchView === "active"}
+                  disabled={branchActionPending} onClick={() => {
+                    setBranchView("active"); setBranchError(""); setBranchSuccess("");
+                  }}>Active Branches ({managedBranches.length})</button>
+                <button type="button" className="stf-branch-tab" aria-pressed={branchView === "archived"}
+                  disabled={branchActionPending} onClick={() => {
+                    setBranchView("archived"); setBranchError(""); setBranchSuccess("");
+                    void loadArchivedBranches();
+                  }}>Archived Branches</button>
+              </div>
+              {branchSuccess && <p className="stf-branch-success" role="status">{branchSuccess}</p>}
+              {branchView === "active" ? <>
               <div className="stf-branch-add-row">
                 <input
                   type="text"
@@ -1245,8 +1310,9 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   }}
                   placeholder="Branch name"
                   className="stf-input"
+                  disabled={branchActionPending}
                 />
-                <button className="stf-action-btn stf-save-btn" onClick={handleAddBranch}>
+                <button className="stf-action-btn stf-save-btn" onClick={handleAddBranch} disabled={branchActionPending}>
                   Add Branch
                 </button>
               </div>
@@ -1266,17 +1332,18 @@ const AreaManagerStaffAccounts: React.FC = () => {
                           <span>{assignedStaffCount} staff account(s)</span>
                         </div>
                         <div className="stf-branch-actions">
-                        <button className="stf-action-btn stf-cancel-btn" onClick={() => {
+                        <button className="stf-action-btn stf-cancel-btn" disabled={branchActionPending} onClick={() => {
                           setBranchSuccess("");
                           setBranchError("");
                           setOfferingsBranch(branch);
                         }}>Courses / Strands</button>
                         <button
-                          className="stf-btn-delete-perm"
+                          className="stf-action-btn stf-cancel-btn"
+                          disabled={branchActionPending}
                           onClick={() => handleRemoveBranch(branch)}
-                          title={`Remove ${branch}`}
+                          title={`Archive ${branch}`}
                         >
-                          <MdDelete size={14} /> Delete
+                          <MdArchive size={14} /> Archive
                         </button>
                         </div>
                       </div>
@@ -1284,6 +1351,23 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   })
                 )}
               </div>
+              </> : <div className="stf-branch-list" aria-busy={archivedBranchesLoading}>
+                {archivedBranchesLoading ? <p role="status">Loading archived branches...</p>
+                  : archivedBranchesError ? <div className="stf-error-msg" role="alert">
+                    {archivedBranchesError}
+                    <button type="button" className="stf-action-btn stf-cancel-btn" onClick={() => void loadArchivedBranches()}>Retry</button>
+                  </div>
+                  : archivedBranches.length === 0 ? <div className="stf-empty-state">No archived branches.</div>
+                  : archivedBranches.map((branch) => <div className="stf-branch-item" key={branch}>
+                    <div><strong>{branch}</strong><span>Archived</span></div>
+                    <div className="stf-branch-actions">
+                      <button type="button" className="stf-btn-restore" disabled={branchActionPending}
+                        onClick={() => void handleRestoreBranch(branch)}><BsArrowCounterclockwise /> Restore</button>
+                      <button type="button" className="stf-btn-delete-perm" disabled={branchActionPending}
+                        onClick={() => void handlePermanentlyDeleteBranch(branch)}><MdDelete size={14} /> Permanently Delete</button>
+                    </div>
+                  </div>)}
+              </div>}
               </>}
             </div>
           </div>
@@ -1293,13 +1377,14 @@ const AreaManagerStaffAccounts: React.FC = () => {
       {branchPendingRemoval ? (
         <div
           className="stf-modal-overlay"
-          onClick={() => setBranchPendingRemoval(null)}
+          onClick={() => { if (!branchActionPending) setBranchPendingRemoval(null); }}
         >
           <div className="stf-confirm-card" onClick={(event) => event.stopPropagation()}>
             <div className="stf-modal-header">
-              <h3 className="stf-modal-title">Remove Branch?</h3>
+              <h3 className="stf-modal-title">Archive Branch?</h3>
               <button
                 className="stf-modal-close"
+                disabled={branchActionPending}
                 onClick={() => setBranchPendingRemoval(null)}
               >
                 &times;
@@ -1307,15 +1392,16 @@ const AreaManagerStaffAccounts: React.FC = () => {
             </div>
             <div className="stf-modal-body">
               <p className="stf-confirm-copy">
-                Are you sure you want to remove <strong>{branchPendingRemoval}</strong> from the branches handled by the area manager?
+                Archive <strong>{branchPendingRemoval}</strong>? It will move to Archived Branches, where you can restore or permanently delete it.
               </p>
               <p className="stf-confirm-note">
-                Its subjects and instructors will be permanently deleted. Staff accounts will move to Disabled Accounts with no assigned branch. Restoring them requires selecting a new active branch.
+                Subjects, instructors, and branch settings will be kept. Staff accounts will be disabled and keep their branch assignment. Branches with enrolled students cannot be archived.
               </p>
             </div>
             <div className="stf-modal-footer">
               <button
                 className="stf-action-btn stf-cancel-btn"
+                disabled={branchActionPending}
                 onClick={() => setBranchPendingRemoval(null)}
               >
                 Cancel
@@ -1323,8 +1409,9 @@ const AreaManagerStaffAccounts: React.FC = () => {
               <button
                 className="stf-action-btn stf-remove-btn"
                 onClick={handleConfirmRemoveBranch}
+                disabled={branchActionPending}
               >
-                Remove Branch
+                {branchActionPending ? "Archiving..." : "Archive Branch"}
               </button>
             </div>
           </div>

@@ -861,11 +861,12 @@ export const writeBranchScopedData = (
   scope: string,
   branch: string | null | undefined,
   value: unknown,
+  options: { skipSupabaseSync?: boolean } = {},
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
   writeStorageItem(getBranchStorageKey(scope, resolvedBranch), value);
 
-  if (!SUPABASE_MIRRORED_BRANCH_SCOPES.has(scope)) {
+  if (options.skipSupabaseSync || !SUPABASE_MIRRORED_BRANCH_SCOPES.has(scope)) {
     return;
   }
 
@@ -1270,18 +1271,15 @@ const writeDeletedStoredStudentMarkers = (
     const trackingNumber = normalizeDeletedStudentMarkerValue(
       marker.trackingNumber,
     );
-    const name = normalizeDeletedStudentMarkerValue(marker.name);
-
-    if (!studentNumber && !trackingNumber && !name) {
+    if (!studentNumber && !trackingNumber) {
       return;
     }
 
-    const key = [branch, studentNumber, trackingNumber, name].join("::");
+    const key = [branch, studentNumber, trackingNumber].join("::");
     markerMap.set(key, {
       branch,
       studentNumber: studentNumber || undefined,
       trackingNumber: trackingNumber || undefined,
-      name: name || undefined,
       deletedAt: marker.deletedAt || new Date().toISOString(),
     });
   });
@@ -1299,8 +1297,8 @@ export const isStoredStudentDeleted = (
   const branch = normalizeBranchName(student.branch);
   const studentNumber = normalizeDeletedStudentMarkerValue(student.id);
   const trackingNumber = normalizeDeletedStudentMarkerValue(student.trackingNumber);
-  const name = normalizeDeletedStudentMarkerValue(student.name);
 
+  // Names are not unique. Ignore name matches in both new and legacy markers.
   return readDeletedStoredStudentMarkers().some((marker) => {
     if (normalizeBranchName(marker.branch) !== branch) {
       return false;
@@ -1312,12 +1310,9 @@ export const isStoredStudentDeleted = (
     const markerTrackingNumber = normalizeDeletedStudentMarkerValue(
       marker.trackingNumber,
     );
-    const markerName = normalizeDeletedStudentMarkerValue(marker.name);
-
     return Boolean(
       (studentNumber && markerStudentNumber === studentNumber) ||
-        (trackingNumber && markerTrackingNumber === trackingNumber) ||
-        (name && markerName === name),
+        (trackingNumber && markerTrackingNumber === trackingNumber),
     );
   });
 };
@@ -1331,7 +1326,6 @@ export const rememberDeletedStoredStudent = (
       branch: normalizeBranchName(student.branch),
       studentNumber: student.id,
       trackingNumber: student.trackingNumber,
-      name: student.name,
       deletedAt: new Date().toISOString(),
     },
   ]);
@@ -1339,33 +1333,32 @@ export const rememberDeletedStoredStudent = (
 
 export const forgetDeletedStoredStudent = (
   student: Pick<StudentStorageRecord, "branch" | "id" | "trackingNumber" | "name">,
+) => forgetDeletedStoredStudents([student]);
+
+// A record returned by the shared database may be a newly imported student
+// reusing a deleted student's number. Browser markers only protect cached data.
+export const forgetDeletedStoredStudents = (
+  students: Pick<StudentStorageRecord, "branch" | "id" | "trackingNumber" | "name">[],
 ) => {
-  const branch = normalizeBranchName(student.branch);
-  const studentNumber = normalizeDeletedStudentMarkerValue(student.id);
-  const trackingNumber = normalizeDeletedStudentMarkerValue(student.trackingNumber);
-  const name = normalizeDeletedStudentMarkerValue(student.name);
-
-  writeDeletedStoredStudentMarkers(
-    readDeletedStoredStudentMarkers().filter((marker) => {
-      if (normalizeBranchName(marker.branch) !== branch) {
-        return true;
-      }
-
-      const markerStudentNumber = normalizeDeletedStudentMarkerValue(
-        marker.studentNumber,
-      );
-      const markerTrackingNumber = normalizeDeletedStudentMarkerValue(
-        marker.trackingNumber,
-      );
-      const markerName = normalizeDeletedStudentMarkerValue(marker.name);
-
-      return !(
-        (studentNumber && markerStudentNumber === studentNumber) ||
-        (trackingNumber && markerTrackingNumber === trackingNumber) ||
-        (name && markerName === name)
-      );
-    }),
-  );
+  if (!students.length) return;
+  const identities = new Set<string>();
+  for (const student of students) {
+    const branch = normalizeBranchName(student.branch);
+    const studentNumber = normalizeDeletedStudentMarkerValue(student.id);
+    const trackingNumber = normalizeDeletedStudentMarkerValue(student.trackingNumber);
+    if (studentNumber) identities.add(`${branch}::student::${studentNumber}`);
+    if (trackingNumber) identities.add(`${branch}::tracking::${trackingNumber}`);
+  }
+  const markers = readDeletedStoredStudentMarkers();
+  const remaining = markers.filter((marker) => {
+    const branch = normalizeBranchName(marker.branch);
+    const studentNumber = normalizeDeletedStudentMarkerValue(marker.studentNumber);
+    const trackingNumber = normalizeDeletedStudentMarkerValue(marker.trackingNumber);
+    return Boolean(studentNumber || trackingNumber) &&
+      !identities.has(`${branch}::student::${studentNumber}`) &&
+      !identities.has(`${branch}::tracking::${trackingNumber}`);
+  });
+  if (remaining.length !== markers.length) writeDeletedStoredStudentMarkers(remaining);
 };
 
 const normalizeStoredStudentCapitalization = (

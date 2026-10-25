@@ -33,6 +33,11 @@
 .student-import-table .student-import-invalid { background: #fff1f2; }
 .student-import-invalid input { border: 2px solid #dc2626; }
 .student-import-invalid small { display: block; width: 185px; margin-top: 5px; color: #b91c1c; line-height: 1.5; }
+.student-import-table .student-import-corrected { background: #ecfdf5; }
+.student-import-corrected input { border: 2px solid #16a34a; background: #f0fdf4; }
+.student-import-corrected small { display: block; width: 185px; margin-top: 5px; color: #166534; line-height: 1.5; }
+.student-import-corrected-count, .student-import-errors .student-import-corrected-item, .student-import-errors .student-import-corrected-item button { color: #166534; }
+.student-import-review-complete { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
 .student-import-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 12px 0; font-size: 13px; }
 .student-import-footer { border-top: 1px solid #e2e8f0; }
 .student-import-footer > span { margin-right: auto; font-size: 12px; color: #64748b; }

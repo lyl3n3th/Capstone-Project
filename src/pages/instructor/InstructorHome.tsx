@@ -1,29 +1,11 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { FiCheckCircle, FiClock, FiUsers } from "react-icons/fi";
 import { useInstructorPortal } from "../../hooks/useInstructorPortal";
-import { getInstructorEvaluationProgress, studentHasAssignedInstructorSubject } from "../../services/instructorPortal";
-import type { AcademicClassSectionRecord } from "../../services/academicData";
+import { getInstructorEvaluationProgress } from "../../services/instructorPortal";
+import { buildInstructorSubjectChartGroups } from "../../services/instructorSubjectCharts";
 import SkeletonPage from "../../components/common/SkeletonPage";
 
 const chartColors = ["#066287", "#21a67a", "#f2b84b", "#d95f59", "#7b61ff"];
-
-const normalizeText = (value?: string | null) =>
-  value?.trim().toLowerCase() || "";
-
-const studentMatchesSection = (
-  student: { id: string; section?: string | null },
-  section?: AcademicClassSectionRecord,
-) => {
-  if (!section) {
-    return false;
-  }
-
-  return (
-    section.enrolleeIds.includes(student.id) ||
-    normalizeText(student.section) === normalizeText(section.code) ||
-    normalizeText(student.section) === normalizeText(section.section)
-  );
-};
 
 export default function InstructorHome() {
   const { currentUser, assignments, sections, students, isLoading } =
@@ -32,42 +14,9 @@ export default function InstructorHome() {
     branch: currentUser?.branch,
     instructorId: currentUser?.id || "",
     students,
+    assignments,
   });
-  const sectionById = new Map(sections.map((section) => [section.id, section]));
-  const sectionByCode = new Map(
-    sections.map((section) => [normalizeText(section.code), section]),
-  );
-  const subjectChartGroups = Array.from(
-    assignments
-      .reduce((subjectMap, assignment) => {
-        const subjectKey = assignment.subjectId || assignment.subjectCode;
-        const existingGroup = subjectMap.get(subjectKey) ?? {
-          subjectKey,
-          subjectCode: assignment.subjectCode,
-          subjectName: assignment.subjectName,
-          sections: [] as Array<{ name: string; value: number }>,
-        };
-        const section =
-          sectionById.get(assignment.sectionId) ||
-          sectionByCode.get(normalizeText(assignment.sectionCode));
-        const studentCount = students.filter((student) =>
-          student.importAcademicYear ? studentHasAssignedInstructorSubject(student, assignment) : studentMatchesSection(student, section),
-        ).length;
-
-        existingGroup.sections.push({
-          name: assignment.sectionCode || section?.code || "Unassigned",
-          value: studentCount,
-        });
-        subjectMap.set(subjectKey, existingGroup);
-        return subjectMap;
-      }, new Map<string, {
-        subjectKey: string;
-        subjectCode: string;
-        subjectName: string;
-        sections: Array<{ name: string; value: number }>;
-      }>())
-      .values(),
-  );
+  const subjectChartGroups = buildInstructorSubjectChartGroups({ assignments, sections, students });
 
   if (isLoading) {
     return (

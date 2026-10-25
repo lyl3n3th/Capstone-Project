@@ -767,6 +767,35 @@
   gap: 10px;
 }
 
+.stf-branch-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.stf-branch-tab {
+  padding: 10px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  cursor: pointer;
+}
+
+.stf-branch-tab[aria-pressed="true"] {
+  border-color: #1a3d5c;
+  background: #1a3d5c;
+  color: #fff;
+}
+
+.stf-branches-card button:disabled,
+.stf-confirm-card button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .stf-branch-actions,
 .stf-offerings-actions {
   display: flex;

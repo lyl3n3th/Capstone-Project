@@ -27,7 +27,7 @@ const overrides={
  './enrollmentLoadPlanner':{buildEnrollmentSubjectKey:(...values)=>values.join(':')},
  './legacyMockData':{stripLegacyMockStudentRecords:values=>values},
  '../types/user':{AUTH_STORAGE_KEY:'test-auth'},
- './enrollmentRequests':{getLatestApprovedEnrollmentRequestForStudent:()=>null},
+ './enrollmentRequests':{getLatestApprovedEnrollmentRequestForStudent:()=>null,fetchEnrollmentRequests:async()=>[]},
  './academicData':{fetchAndCacheAcademicSnapshot:async()=>{cache.set(scopes('subjects'),snapshot.subjects);cache.set(scopes('subject-assignments'),snapshot.subjectAssignments);return snapshot;}},
  './adminStudentsApi':{fetchAdminStudents:async()=>[load('importedStudentScheduling').applyImportedScheduleDefaults(remoteStudent)]},
  './studentPlanningApi':{fetchStudentSubjectPlans:async()=>{cache.set(scopes('student-subject-plans'),remotePlan?{[base.id]:remotePlan}:{});},fetchStudentScheduleRequests:async()=>{cache.set(scopes('student-schedule-requests'),remoteRequest?[remoteRequest]:[]);}},
@@ -59,6 +59,9 @@ remoteRequest.status='Approved';remoteStudent.ownScheduleSelectionStatus='Approv
 remotePlan={id:base.id,studentNumber:base.id,academicYear:'2026-2027',semester:'2nd Semester',source:'student_schedule_request',assignedSubjects:[{subjectId:subject.id,subjectCode:subject.code,subjectName:subject.name,units:3}],creditedSubjects:[],scheduledAssignments:[selection]};
 scoped=await portal.getInstructorScopedData({branch:'Bacoor',instructorId:teacher.id});assert.equal(scoped.students.length,1);assert.equal(localStudents[0].id,base.id);
 assert(portal.studentHasAssignedInstructorSubject(scoped.students[0],assignment));assert.equal(portal.studentHasAssignedInstructorSubject(scoped.students[0],unselected),false);assert.equal(portal.studentHasAssignedInstructorSubject(scoped.students[0],{...assignment,academicYear:'2025-2026'}),false);
+const charts=load('instructorSubjectCharts').buildInstructorSubjectChartGroups({assignments:scoped.assignments,sections:scoped.sections,students:scoped.students});
+assert.equal(charts.find(chart=>chart.subjectCode===subject.code).sections[0].value,1,'Approved individual schedule must count in the chosen subject section without a home section');
+assert.equal(charts.find(chart=>chart.subjectCode===other.code).sections[0].value,0,'Unselected subjects must not count the irregular student');
 assert.equal(portal.studentMatchesSection({...scoped.students[0],section:section.code},section),false,'Block section membership must not override an individual approved load');
 portal.downloadInstructorGradeTemplate({instructor:teacher,branch:'Bacoor',assignments:scoped.assignments,sections:scoped.sections,students:scoped.students});
 assert(templateSheets.length>0);
@@ -93,3 +96,9 @@ failRequestSave=true;
 await assert.rejects(planning.saveStudentScheduleRequest({...firstRequest,id:'failed-request',studentNumber:'LEGACY-2022-C'}),/Backend unavailable/);
 assert.equal(cache.get(scopes('student-schedule-requests')).length,2,'Failed requests must not be reported as submitted or cached as successful');
 console.log('Schedule persistence checks passed: exact legacy identity, separate requests, and no false success on backend failure.');
+await planning.fetchStudentScheduleRequests('Bacoor',{authoritative:true});
+assert.deepEqual(cache.get(scopes('student-schedule-requests')),[],'Instructor refresh must discard removed remote requests instead of restoring stale local approvals');
+cache.set(scopes('student-subject-plans'),{'stale-plan':remotePlan});
+await planning.fetchStudentSubjectPlans('Bacoor',{authoritative:true});
+assert.deepEqual(cache.get(scopes('student-subject-plans')),{},'Removed subject plans must not survive an authoritative instructor refresh');
+console.log('Instructor refresh checks passed: removed requests and subject plans cannot retain stale roster membership.');

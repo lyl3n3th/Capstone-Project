@@ -6,8 +6,15 @@
 .student-history button { border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 10px; color: #1a3d5c; background: white; cursor: pointer; }
 .student-history button:disabled { cursor: not-allowed; opacity: .6; }
 .student-history-blank { color: #64748b; font-style: italic; }
-.student-history-editor { border: 1px solid #bae6fd; background: #eff6ff; border-radius: 8px; padding: 16px; }
-.student-history-editor label { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; font-size: 13px; }
-.student-history-editor input, .student-history-editor select { padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; max-width: 480px; background: white; }
-.student-history-editor button + button { margin-left: 10px; background: #066287; color: white; }
+.student-history-period + .student-history-period { margin-top: 20px; }
+.student-history-period h4 { margin: 0 0 12px; color: #1a3d5c; }
+.student-history-grade-input, .student-history-instructor-select { padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; background: white; color: #1e293b; font: inherit; }
+.student-history-grade-input { min-width: 170px; max-width: 230px; }
+.student-history-instructor-select { min-width: 210px; max-width: 330px; }
+.student-history-grade-input:focus, .student-history-instructor-select:focus { outline: 2px solid #0284c7; outline-offset: 1px; }
+.student-history input:disabled, .student-history select:disabled { background: #f1f5f9; cursor: not-allowed; color: #64748b; }
+.student-history-readonly { display: block; margin-top: 5px; color: #64748b; }
+.student-history-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+.student-history .student-history-save { background: #066287; color: white; border-color: #066287; }
+.student-history .student-history-success { color: #166534; }
 .student-history .student-history-error { color: #b91c1c; }

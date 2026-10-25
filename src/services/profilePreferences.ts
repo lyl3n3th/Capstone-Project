@@ -4,19 +4,16 @@ const PROFILE_IMAGE_STORAGE_KEY = "aics-profile-images";
 const PROFILE_IMAGE_UPDATED_EVENT = "aics-profile-image-updated";
 
 type ProfileImageStore = Record<string, string>;
+const uncachedImages = new Map<string, string | null>();
 
 const readProfileImageStore = (): ProfileImageStore => {
   if (typeof window === "undefined") {
     return {};
   }
 
-  const rawValue = localStorage.getItem(PROFILE_IMAGE_STORAGE_KEY);
-
-  if (!rawValue) {
-    return {};
-  }
-
   try {
+    const rawValue = localStorage.getItem(PROFILE_IMAGE_STORAGE_KEY);
+    if (!rawValue) return {};
     const parsedValue = JSON.parse(rawValue) as ProfileImageStore;
     return parsedValue && typeof parsedValue === "object" ? parsedValue : {};
   } catch (error) {
@@ -52,6 +49,8 @@ export const getStoredProfileImage = (profileKey: string | null) => {
     return null;
   }
 
+  if (uncachedImages.has(profileKey)) return uncachedImages.get(profileKey) ?? null;
+
   return readProfileImageStore()[profileKey] || null;
 };
 
@@ -65,7 +64,13 @@ export const setStoredProfileImage = (
 
   const currentStore = readProfileImageStore();
   currentStore[profileKey] = imageDataUrl;
-  writeProfileImageStore(currentStore);
+  try {
+    writeProfileImageStore(currentStore);
+    uncachedImages.delete(profileKey);
+  } catch {
+    // A full/disabled browser cache must not turn a successful online save into an error.
+    uncachedImages.set(profileKey, imageDataUrl);
+  }
   emitProfileImageUpdate(profileKey);
   return imageDataUrl;
 };
@@ -77,7 +82,12 @@ export const removeStoredProfileImage = (profileKey: string | null) => {
 
   const currentStore = readProfileImageStore();
   delete currentStore[profileKey];
-  writeProfileImageStore(currentStore);
+  try {
+    writeProfileImageStore(currentStore);
+    uncachedImages.delete(profileKey);
+  } catch {
+    uncachedImages.set(profileKey, null);
+  }
   emitProfileImageUpdate(profileKey);
 };
 
@@ -87,9 +97,7 @@ export const getProfileImageKeyFromUser = (user?: AuthUser | null) => {
   }
 
   if (user.role === "student") {
-    return user.studentNumber
-      ? `student:${user.studentNumber.toUpperCase()}`
-      : `student:${user.id}`;
+    return `student:${user.branch.trim().toUpperCase()}:${user.id}`;
   }
 
   if (user.employeeId) {
@@ -98,6 +106,9 @@ export const getProfileImageKeyFromUser = (user?: AuthUser | null) => {
 
   return `staff:${user.role}:${(user.branch || "").trim().toUpperCase()}`;
 };
+
+export const getLegacyStudentProfileImageKey = (user: AuthUser) =>
+  user.role === "student" ? `student:${user.studentNumber?.toUpperCase() || user.id}` : null;
 
 export const createProfileImageDataUrl = async (
   file: File,

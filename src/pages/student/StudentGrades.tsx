@@ -16,7 +16,6 @@ import aicsLogo from "../../assets/images/AICS_Logo.png";
 import {
   fetchInstructorEvaluationSubmissions,
   INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
-  readInstructorEvaluationSubmissions,
   type InstructorEvaluationSubmissionRecord,
   type StudentPortalSubject,
 } from "../../services/adminStorage";
@@ -1283,10 +1282,14 @@ function StudentGrades() {
   const [evaluationSubmissions, setEvaluationSubmissions] = useState<
     InstructorEvaluationSubmissionRecord[]
   >([]);
+  const [evaluationSync, setEvaluationSync] = useState({ scope: "", loading: true, error: "" });
+  const [isGeneratingReportCard, setIsGeneratingReportCard] = useState(false);
+  const reportCardInFlight = useRef(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const { toasts, addToast, removeToast } = useToast();
 
   const { student, subjects, currentTerm, isLoading } = useStudent();
+  const evaluationScope = `${student?.branch ?? ""}::${student?.studentNumber || student?.id || ""}`;
   const isSHS = student?.programType === "SHS";
 
   useEffect(() => {
@@ -1343,36 +1346,45 @@ function StudentGrades() {
   }, []);
 
   useEffect(() => {
+    if (!student?.branch) return;
+    const branch = student.branch;
+    let cancelled = false;
+    let revision = 0;
     const syncEvaluationSubmissions = () => {
-      setEvaluationSubmissions(readInstructorEvaluationSubmissions(student?.branch));
-
-      if (!student?.branch) {
-        return;
-      }
-
-      void fetchInstructorEvaluationSubmissions(student.branch)
-        .then(setEvaluationSubmissions)
-        .catch((error) => {
+      const requestRevision = ++revision;
+      setEvaluationSync({ scope: evaluationScope, loading: true, error: "" });
+      void fetchInstructorEvaluationSubmissions(branch)
+        .then(submissions => {
+          if (cancelled || requestRevision !== revision) return;
+          setEvaluationSubmissions(submissions);
+          setEvaluationSync({ scope: evaluationScope, loading: false, error: "" });
+        })
+        .catch(error => {
+          if (cancelled || requestRevision !== revision) return;
           console.warn("Failed to sync evaluation submissions.", error);
+          setEvaluationSync({ scope: evaluationScope, loading: false, error: "Unable to verify evaluation completion. Refresh the page to try again." });
         });
     };
 
     syncEvaluationSubmissions();
 
     window.addEventListener("storage", syncEvaluationSubmissions);
+    window.addEventListener("focus", syncEvaluationSubmissions);
     window.addEventListener(
       INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
       syncEvaluationSubmissions,
     );
 
     return () => {
+      cancelled = true;
       window.removeEventListener("storage", syncEvaluationSubmissions);
+      window.removeEventListener("focus", syncEvaluationSubmissions);
       window.removeEventListener(
         INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
         syncEvaluationSubmissions,
       );
     };
-  }, [student?.branch]);
+  }, [student?.branch, evaluationScope]);
 
   const availableAcademicYears = useMemo(() => {
     const years = new Set<string>();
@@ -1477,6 +1489,13 @@ function StudentGrades() {
   });
   const areCurrentTermGradesLocked =
     isViewingCurrentTerm && evaluationLockStatus.isLocked;
+  const reportCardBlockReason = !student || !currentTerm
+    ? "Student profile and subjects are still loading."
+    : evaluationSync.scope !== evaluationScope || evaluationSync.loading
+      ? "Checking instructor evaluation completion..."
+      : evaluationSync.error || (evaluationLockStatus.isLocked
+        ? "Complete all your current instructor evaluations before generating a report card."
+        : "");
 
   const ownScheduleAcademicYear =
     student?.ownScheduleAcademicYear || currentTerm?.academicYear;
@@ -1630,24 +1649,24 @@ function StudentGrades() {
   };
 
   const handleGenerateReportCard = async () => {
-    if (!student) {
-      addToast("Student profile is still loading.", "warning");
+    if (reportCardInFlight.current) return;
+    if (!student || reportCardBlockReason) {
+      addToast(reportCardBlockReason || "Student profile is still loading.", "warning");
       return;
     }
 
+    reportCardInFlight.current = true;
+    setIsGeneratingReportCard(true);
     try {
+      // Recheck online so a stale page cannot bypass the evaluation requirement.
+      const latestSubmissions = await fetchInstructorEvaluationSubmissions(student.branch);
+      setEvaluationSubmissions(latestSubmissions);
+      const latestLock = getCurrentTermEvaluationLockStatus({ student, subjects, currentTerm, submissions: latestSubmissions });
+      if (latestLock.isLocked) {
+        addToast("Complete all your current instructor evaluations before generating a report card.", "warning");
+        return;
+      }
       const studentName = `${student.firstName} ${student.lastName}`.trim();
-      const reportRows = areCurrentTermGradesLocked
-        ? displayRows.map((row) => ({
-            ...row,
-            grade: lockedGradeValue,
-            firstQuarter: lockedGradeValue,
-            secondQuarter: lockedGradeValue,
-            thirdQuarter: lockedGradeValue,
-            fourthQuarter: lockedGradeValue,
-            semesterFinalGrade: lockedGradeValue,
-          }))
-        : displayRows;
       const reportPdf = await buildReportCardPdf({
         studentName,
         studentNumber: student.studentNumber || "",
@@ -1655,14 +1674,12 @@ function StudentGrades() {
         academicYear: effectiveAcademicYear,
         semester: effectiveSemester,
         columns: tableColumns,
-        rows: reportRows,
+        rows: displayRows,
         isSHS: Boolean(isSHS),
         totalUnits,
         totalUnitsEarned: collegePerformanceSummary?.totalUnitsEarned,
         gpa: collegePerformanceSummary?.gpa,
-        shsGeneralAverage: areCurrentTermGradesLocked
-          ? lockedGradeValue
-          : shsGeneralAverage,
+        shsGeneralAverage,
       });
       const url = URL.createObjectURL(reportPdf);
       const reportWindow = window.open(url, "_blank", "noopener,noreferrer");
@@ -1690,6 +1707,9 @@ function StudentGrades() {
     } catch (error) {
       console.error(error);
       addToast("Unable to generate the PDF report card.", "error");
+    } finally {
+      reportCardInFlight.current = false;
+      setIsGeneratingReportCard(false);
     }
   };
 
@@ -1794,11 +1814,25 @@ function StudentGrades() {
               <button
                 className="s-generate-btn"
                 onClick={handleGenerateReportCard}
+                disabled={Boolean(reportCardBlockReason) || isGeneratingReportCard}
+                aria-busy={isGeneratingReportCard}
+                aria-describedby={reportCardBlockReason ? "report-card-evaluation-status" : undefined}
+                title={reportCardBlockReason || undefined}
               >
-                <FaDownload /> Generate Report Card
+                {reportCardBlockReason ? <FaLock /> : <FaDownload />}
+                {isGeneratingReportCard ? "Generating..." : "Generate Report Card"}
               </button>
             </div>
           </div>
+
+          {reportCardBlockReason && (
+            <p id="report-card-evaluation-status" className="s-report-card-evaluation-status" role="status">
+              {reportCardBlockReason}
+              {evaluationLockStatus.isLocked && !evaluationSync.loading && !evaluationSync.error && (
+                <> Completed {evaluationLockStatus.completedCount}/{evaluationLockStatus.requiredCount}. <a href="/student/evaluation">Go to instructor evaluations</a>.</>
+              )}
+            </p>
+          )}
 
           {showFilters && (
             <div className="s-filter-panel">

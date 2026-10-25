@@ -3,7 +3,7 @@ import { fetchStudentImportDetails } from "./studentImport";
 import { applyImportedScheduleDefaults } from "./importedStudentScheduling";
 import {
   forgetDeletedStoredStudent,
-  isStoredStudentDeleted,
+  forgetDeletedStoredStudents,
   normalizeBranchName,
   type StudentStorageRecord,
 } from "./adminStorage";
@@ -235,9 +235,10 @@ export async function fetchAdminStudents(branch?: string | null) {
   }
 
   const rows = Array.isArray(data) ? data : [];
-  const students = rows
-    .map(mapAdminStudentRow)
-    .filter((student) => !isStoredStudentDeleted(student));
+  const students = rows.map(mapAdminStudentRow);
+  // Supabase is authoritative. A successful reimport must not remain hidden
+  // behind an earlier deletion marker on this device.
+  forgetDeletedStoredStudents(students);
 
   try {
     const imported = await fetchStudentImportDetails(branch || undefined);
@@ -286,8 +287,6 @@ export async function getNextAdminStudentNumber(branch?: string | null) {
 }
 
 export async function saveAdminStudent(student: StudentStorageRecord) {
-  forgetDeletedStoredStudent(student);
-
   const { data, error } = await supabase
     .rpc("upsert_admin_student", {
       p_payload: buildStudentPayload(student),
@@ -304,6 +303,7 @@ export async function saveAdminStudent(student: StudentStorageRecord) {
   }
 
   const savedStudent = mapAdminStudentRow(row);
+  forgetDeletedStoredStudent(savedStudent);
 
   const shouldSyncPlanningState =
     hasOwnPlanningField(student, "requestedOwnSchedule") ||

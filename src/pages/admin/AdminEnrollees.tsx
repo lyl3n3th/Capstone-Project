@@ -1,5 +1,5 @@
 import { useConfirmation } from "../../hooks/useConfirmation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FaUserPlus,
   FaUserGraduate,
@@ -1514,6 +1514,8 @@ export default function AdminEnrollees({
     EnrollmentRequest[]
   >([]);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [isProcessingDecision, setIsProcessingDecision] = useState(false);
+  const decisionInFlight = useRef(false);
   const [selectedRejectionReason, setSelectedRejectionReason] = useState("");
   const [selectedAction, setSelectedAction] = useState<{
     id: string;
@@ -5926,6 +5928,7 @@ export default function AdminEnrollees({
   };
 
   const closeConfirmModal = () => {
+    if (decisionInFlight.current) return;
     setIsConfirmModalOpen(false);
     setSelectedAction(null);
     setSelectedRejectionReason("");
@@ -6102,7 +6105,7 @@ export default function AdminEnrollees({
   };
 
   const confirmAction = async () => {
-    if (!selectedAction) return;
+    if (!selectedAction || decisionInFlight.current) return;
     const rejectionReason =
       selectedAction.action === "reject"
         ? selectedRejectionReason.trim()
@@ -6113,6 +6116,8 @@ export default function AdminEnrollees({
       return;
     }
 
+    decisionInFlight.current = true;
+    setIsProcessingDecision(true);
     try {
       // Check if it's an enrollment request (existing student)
       const requestToUpdate = enrollmentRequests.find(
@@ -6260,33 +6265,6 @@ export default function AdminEnrollees({
               );
             }
 
-            if (
-              promotedStudentRecord.requestedOwnSchedule ||
-              promotedStudentRecord.ownScheduleRequestStatus
-            ) {
-              try {
-                await saveStudentPlanningState({
-                  branch: promotedStudentRecord.branch,
-                  studentNumber: promotedStudentRecord.id,
-                  trackingNumber: promotedStudentRecord.trackingNumber,
-                  requestedOwnSchedule: Boolean(
-                    promotedStudentRecord.requestedOwnSchedule,
-                  ),
-                  ownScheduleRequestStatus:
-                    promotedStudentRecord.ownScheduleRequestStatus,
-                  ownScheduleAcademicYear:
-                    promotedStudentRecord.ownScheduleAcademicYear,
-                  ownScheduleSemester: promotedStudentRecord.ownScheduleSemester,
-                  ownScheduleSelectionStatus:
-                    promotedStudentRecord.ownScheduleSelectionStatus,
-                });
-              } catch (planningSyncError) {
-                console.warn(
-                  "Unable to sync the approved own-schedule admission state immediately.",
-                  planningSyncError,
-                );
-              }
-            }
           }
 
           setEnrollees((prev) =>
@@ -6328,8 +6306,8 @@ export default function AdminEnrollees({
                   "The approval email was skipped because no applicant email is on file.",
               };
             } else {
-              try {
-                const notificationResult = await sendAdmissionDecisionNotification(
+              // Email delivery must not hold the approval dialog open after saving.
+              void sendAdmissionDecisionNotification(
                   {
                     trackingNumber: updatedEnrollee.trackingNumber,
                     email: applicantEmail,
@@ -6343,20 +6321,13 @@ export default function AdminEnrollees({
                       studentNumber: updatedEnrollee.studentNumber,
                     }),
                   },
-                );
-                decisionNotificationFeedback =
-                  getApprovalNotificationFeedback(notificationResult);
-              } catch (notificationError) {
-                console.warn(
-                  "Unable to send the admission approval email notification.",
-                  notificationError,
-                );
-                decisionNotificationFeedback = {
-                  type: "warning",
-                  message:
-                    "Admission approved, but the applicant email could not be sent right now.",
-                };
-              }
+                ).then((notificationResult) => {
+                  const feedback = getApprovalNotificationFeedback(notificationResult);
+                  addToast(feedback.message, feedback.type);
+                }).catch((notificationError) => {
+                  console.warn("Unable to send the admission approval email notification.", notificationError);
+                  addToast("Admission approved, but the applicant email could not be sent right now.", "warning");
+                });
             }
           } else {
             const notificationPayload: SendAdmissionDecisionNotificationPayload =
@@ -6570,6 +6541,8 @@ export default function AdminEnrollees({
       console.error("Failed to process enrollment request:", error);
       addToast("Failed to process enrollment request.", "error");
     } finally {
+      decisionInFlight.current = false;
+      setIsProcessingDecision(false);
       closeConfirmModal();
     }
   };
@@ -11203,6 +11176,7 @@ export default function AdminEnrollees({
               <button
                 className="review-modal-close"
                 onClick={closeConfirmModal}
+                disabled={isProcessingDecision}
               >
                 ✕
               </button>
@@ -11245,6 +11219,7 @@ export default function AdminEnrollees({
                     </label>
                     <textarea
                       id="rejection-reason-message"
+                      disabled={isProcessingDecision}
                       value={selectedRejectionReason}
                       onChange={(event) =>
                         setSelectedRejectionReason(event.target.value)
@@ -11263,12 +11238,17 @@ export default function AdminEnrollees({
               <button
                 className={`action-btn ${selectedAction.action === "approve" ? "approve" : "reject"}`}
                 onClick={confirmAction}
+                disabled={isProcessingDecision}
+                aria-busy={isProcessingDecision}
               >
-                {selectedAction.action === "approve" ? "Approve" : "Reject"}
+                {isProcessingDecision
+                  ? selectedAction.action === "approve" ? "Approving..." : "Rejecting..."
+                  : selectedAction.action === "approve" ? "Approve" : "Reject"}
               </button>
               <button
                 className="action-btn cancel"
                 onClick={closeConfirmModal}
+                disabled={isProcessingDecision}
               >
                 Cancel
               </button>

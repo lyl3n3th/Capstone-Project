@@ -4,20 +4,30 @@ import {
   getProfileImageKeyFromUser,
   getStoredProfileImage,
   getProfileImageUpdatedEventName,
-  removeStoredProfileImage,
-  setStoredProfileImage,
 } from "../services/profilePreferences";
+import { fetchProfileImageForUser, getCachedProfileImageForUser, saveProfileImageForUser } from "../services/profileImageSync";
 import type { AuthUser } from "../types/user";
 
 export function useStoredProfileImage(user?: AuthUser | null) {
   const profileKey = getProfileImageKeyFromUser(user);
-  const [profileImage, setProfileImage] = useState<string | null>(() =>
-    getStoredProfileImage(profileKey),
-  );
+  const [imageState, setImageState] = useState(() => ({ key: profileKey, image: getCachedProfileImageForUser(user) }));
+  const profileImage = imageState.key === profileKey ? imageState.image : getCachedProfileImageForUser(user);
 
   useEffect(() => {
-    setProfileImage(getStoredProfileImage(profileKey));
-  }, [profileKey]);
+    if (!user) return;
+    let cancelled = false;
+    const refresh = () => {
+      void fetchProfileImageForUser(user).then(image => {
+        if (!cancelled) setImageState({ key: profileKey, image });
+      }).catch(error => { console.warn("Unable to refresh profile picture.", error); });
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refresh);
+    };
+  }, [profileKey, user]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !profileKey) {
@@ -31,11 +41,11 @@ export function useStoredProfileImage(user?: AuthUser | null) {
         return;
       }
 
-      setProfileImage(getStoredProfileImage(profileKey));
+      setImageState({ key: profileKey, image: getStoredProfileImage(profileKey) });
     };
 
     const handleStorage = () => {
-      setProfileImage(getStoredProfileImage(profileKey));
+      setImageState({ key: profileKey, image: getStoredProfileImage(profileKey) });
     };
 
     window.addEventListener(
@@ -54,19 +64,20 @@ export function useStoredProfileImage(user?: AuthUser | null) {
   }, [profileKey]);
 
   const updateProfileImage = async (file: File) => {
-    if (!profileKey) {
+    if (!profileKey || !user) {
       throw new Error("No signed-in profile was found.");
     }
 
     const imageDataUrl = await createProfileImageDataUrl(file);
-    setStoredProfileImage(profileKey, imageDataUrl);
-    setProfileImage(imageDataUrl);
+    await saveProfileImageForUser(user, imageDataUrl);
+    setImageState({ key: profileKey, image: imageDataUrl });
     return imageDataUrl;
   };
 
-  const clearProfileImage = () => {
-    removeStoredProfileImage(profileKey);
-    setProfileImage(null);
+  const clearProfileImage = async () => {
+    if (!user) return;
+    await saveProfileImageForUser(user, null);
+    setImageState({ key: profileKey, image: null });
   };
 
   return {

@@ -212,6 +212,27 @@ export async function removeManagedBranch(branchName: string) {
   }
 }
 
+export async function fetchArchivedManagedBranches() {
+  const token = getManagerSessionToken();
+  if (!token) throw new Error("Your Area Manager session has expired. Please sign in again.");
+  const { data, error } = await supabase
+    .rpc("list_archived_area_manager_branches", { p_session_token: token })
+    .returns<ManagedBranch[]>();
+  if (error) throw new Error(getErrorMessage(error));
+  return Array.isArray(data) ? data : [];
+}
+
+export async function setManagedBranchArchived(branchName: string, archived: boolean) {
+  const token = getManagerSessionToken();
+  if (!token) throw new Error("Your Area Manager session has expired. Please sign in again.");
+  const { error } = await supabase.rpc("set_area_manager_branch_archived", {
+    p_session_token: token,
+    p_branch: branchName,
+    p_archived: archived,
+  });
+  if (error) throw new Error(getErrorMessage(error));
+}
+
 export async function fetchStaffMembers(options?: { trash?: boolean }) {
   const { data, error } = await supabase
     .rpc("list_staff_accounts", {

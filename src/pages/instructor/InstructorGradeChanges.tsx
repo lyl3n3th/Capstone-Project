@@ -9,6 +9,7 @@ import {
 } from "react-icons/fi";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import { useInstructorPortal } from "../../hooks/useInstructorPortal";
+import { resolveGradeChangeSubjectUnits } from "../../services/gradeChangeSubjectUnits";
 import type { AcademicClassSectionRecord } from "../../services/academicData";
 import {
   fetchAndCacheStudentGradeRecordsForBranch,
@@ -56,6 +57,17 @@ const getProgramType = (
   section?: AcademicClassSectionRecord,
 ): StudentGradeProgramType => (section?.program === "SHS" ? "SHS" : "College");
 
+const formatSemesterAndQuarter = (row: {
+  semester: string;
+  gradingPeriod: string;
+  programType: StudentGradeProgramType;
+}) => {
+  const quarter = row.programType === "SHS" && row.gradingPeriod !== "No approved grade"
+    ? row.gradingPeriod.trim()
+    : "";
+  return [row.semester.trim(), quarter].filter(Boolean).join(" / ") || "-";
+};
+
 const sanitizeRequestedGradeInput = (value: string) => {
   const numericValue = value.replace(/[^\d.]/g, "");
   const [wholePart = "", ...decimalParts] = numericValue.split(".");
@@ -77,6 +89,7 @@ export default function InstructorGradeChanges() {
     instructor,
     assignments,
     sections,
+    subjects,
     students,
     isLoading,
   } = useInstructorPortal();
@@ -172,6 +185,14 @@ export default function InstructorGradeChanges() {
             item.code === assignment.sectionCode,
         );
         const programType = getProgramType(section);
+        const units = resolveGradeChangeSubjectUnits({
+          subjectId: assignment.subjectId,
+          subjectCode: assignment.subjectCode,
+          subjectTitle: assignment.subjectName,
+          programType,
+          semester: assignment.semester,
+          yearLevel: section?.yearLevel,
+        }, subjects);
         const sectionStudents = students.filter(
           (student) =>
             (section && studentMatchesSection(student, section)) ||
@@ -198,7 +219,7 @@ export default function InstructorGradeChanges() {
                 section: section?.code || assignment.sectionCode,
                 subjectCode: assignment.subjectCode,
                 subjectTitle: assignment.subjectName,
-                units: null,
+                units,
                 academicYear: assignment.academicYear,
                 semester: assignment.semester,
                 gradingPeriod:
@@ -218,7 +239,7 @@ export default function InstructorGradeChanges() {
               section: section?.code || assignment.sectionCode,
               subjectCode: currentRecord.subjectCode,
               subjectTitle: currentRecord.subjectTitle,
-              units: currentRecord.units,
+              units,
               academicYear: currentRecord.academicYear,
               semester: currentRecord.semester,
               gradingPeriod: currentRecord.gradingPeriod,
@@ -239,7 +260,23 @@ export default function InstructorGradeChanges() {
     assignedSectionOptions,
     assignments,
     students,
+    subjects,
   ]);
+
+  const getRequestSubjectUnits = (change: InstructorGradeChangeRequest["changes"][number]) => {
+    const assignment = assignments.find(item =>
+      item.subjectCode.trim().toUpperCase() === change.subjectCode.trim().toUpperCase() &&
+      item.academicYear === change.academicYear && item.semester === change.semester &&
+      item.sectionCode.trim().toUpperCase() === change.section.trim().toUpperCase());
+    return resolveGradeChangeSubjectUnits({
+      subjectId: assignment?.subjectId,
+      subjectCode: change.subjectCode,
+      subjectTitle: change.subjectTitle,
+      programType: change.programType,
+      semester: change.semester,
+      yearLevel: change.currentRecord?.yearLevel,
+    }, subjects);
+  };
 
   const handleRequestedGradeChange = (rowId: string, value: string) => {
     const sanitizedValue = sanitizeRequestedGradeInput(value);
@@ -684,11 +721,11 @@ export default function InstructorGradeChanges() {
                     <th>Section</th>
                     <th>Subject Code</th>
                     <th>Subject Title</th>
-                    <th>Units / Period</th>
+                    <th>Units</th>
                     <th>Current Grade</th>
                     <th>Requested Grade</th>
                     <th>Academic Year</th>
-                    <th>Semester</th>
+                    <th>Semester / Quarter</th>
                     <th>Program</th>
                   </tr>
                 </thead>
@@ -700,11 +737,7 @@ export default function InstructorGradeChanges() {
                       <td>{row.section}</td>
                       <td>{row.subjectCode}</td>
                       <td>{row.subjectTitle}</td>
-                      <td>
-                        {row.programType === "SHS"
-                          ? row.gradingPeriod || "-"
-                          : row.units ?? "-"}
-                      </td>
+                      <td>{row.units ?? "-"}</td>
                       <td>{row.currentGrade}</td>
                       <td>
                         <input
@@ -724,7 +757,7 @@ export default function InstructorGradeChanges() {
                         />
                       </td>
                       <td>{row.academicYear}</td>
-                      <td>{row.semester}</td>
+                      <td>{formatSemesterAndQuarter(row)}</td>
                       <td>{row.programType}</td>
                     </tr>
                   ))}
@@ -794,11 +827,11 @@ export default function InstructorGradeChanges() {
                     <th>Section</th>
                     <th>Subject Code</th>
                     <th>Subject Title</th>
-                    <th>Units / Period</th>
+                    <th>Units</th>
                     <th>Current Grade</th>
                     <th>Requested Grade</th>
                     <th>Academic Year</th>
-                    <th>Semester</th>
+                    <th>Semester / Quarter</th>
                     <th>Program</th>
                   </tr>
                 </thead>
@@ -810,15 +843,11 @@ export default function InstructorGradeChanges() {
                       <td>{change.section}</td>
                       <td>{change.subjectCode}</td>
                       <td>{change.subjectTitle}</td>
-                      <td>
-                        {change.programType === "SHS"
-                          ? change.gradingPeriod || "-"
-                          : change.units ?? "-"}
-                      </td>
+                      <td>{getRequestSubjectUnits(change) ?? "-"}</td>
                       <td>{change.currentGrade}</td>
                       <td>{change.requestedGrade}</td>
                       <td>{change.academicYear}</td>
-                      <td>{change.semester}</td>
+                      <td>{formatSemesterAndQuarter(change)}</td>
                       <td>{change.programType}</td>
                     </tr>
                   ))}

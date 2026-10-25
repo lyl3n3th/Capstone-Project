@@ -446,6 +446,7 @@ export const saveStudentPlanningState = async ({
 
 export const fetchStudentSubjectPlans = async (
   branch?: string | null,
+  options: { authoritative?: boolean } = {},
 ): Promise<Record<string, StudentSubjectPlanRecord>> => {
   const resolvedBranch = normalizeBranchName(branch);
   const localPlans =
@@ -468,8 +469,8 @@ export const fetchStudentSubjectPlans = async (
       .map(mapStudentSubjectPlan)
       .map((plan) => [plan.id, plan]),
   );
-  const mergedPlans = mergeStudentSubjectPlans(nextPlans, localPlans);
-  writeBranchScopedData(STUDENT_SUBJECT_PLAN_SCOPE, resolvedBranch, mergedPlans);
+  const mergedPlans = options.authoritative ? nextPlans : mergeStudentSubjectPlans(nextPlans, localPlans);
+  writeBranchScopedData(STUDENT_SUBJECT_PLAN_SCOPE, resolvedBranch, mergedPlans, { skipSupabaseSync: options.authoritative });
   return mergedPlans;
 };
 
@@ -538,6 +539,7 @@ export const deleteStudentSubjectPlan = async (
 
 export const fetchStudentScheduleRequests = async (
   branch?: string | null,
+  options: { authoritative?: boolean } = {},
 ): Promise<StudentScheduleSelectionRequestRecord[]> => {
   const resolvedBranch = normalizeBranchName(branch);
   const localRequests =
@@ -555,11 +557,9 @@ export const fetchStudentScheduleRequests = async (
     throw new Error(getErrorMessage(error));
   }
 
-  const requests = mergeStudentScheduleRequests(
-    (Array.isArray(data) ? data : []).map(mapStudentScheduleRequest),
-    localRequests,
-  );
-  writeBranchScopedData(STUDENT_SCHEDULE_REQUEST_SCOPE, resolvedBranch, requests);
+  const remoteRequests = (Array.isArray(data) ? data : []).map(mapStudentScheduleRequest);
+  const requests = options.authoritative ? remoteRequests : mergeStudentScheduleRequests(remoteRequests, localRequests);
+  writeBranchScopedData(STUDENT_SCHEDULE_REQUEST_SCOPE, resolvedBranch, requests, { skipSupabaseSync: options.authoritative });
   return requests;
 };
 

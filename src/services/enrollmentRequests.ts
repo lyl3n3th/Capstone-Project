@@ -482,7 +482,7 @@ export const readEnrollmentRequestsForBranch = (branch?: string | null) =>
     ),
   );
 
-export const fetchEnrollmentRequests = async (branch?: string | null) => {
+export const fetchEnrollmentRequests = async (branch?: string | null, options: { syncLocal?: boolean } = {}) => {
   const resolvedBranch = normalizeBranchName(branch);
   const localRequests = readEnrollmentRequestsForBranch(resolvedBranch);
   let remoteRequests: EnrollmentRequestRecord[] = [];
@@ -495,7 +495,7 @@ export const fetchEnrollmentRequests = async (branch?: string | null) => {
     return localRequests;
   }
 
-  const requestsToSync = localRequests.filter((localRequest) => {
+  const requestsToSync = options.syncLocal === false ? [] : localRequests.filter((localRequest) => {
     const matchingRemoteRequest =
       remoteRequests.find((remoteRequest) =>
         isSameEnrollmentRequestRecord(localRequest, remoteRequest),

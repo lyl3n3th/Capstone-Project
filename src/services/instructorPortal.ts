@@ -1,7 +1,6 @@
 import * as XLSX from "xlsx";
 import { supabase } from "../lib/supabase";
 import {
-  getStudentPortalSubjects,
   getStudentsForBranch,
   normalizeBranchName,
   fetchAndCacheBranchScopedData,
@@ -21,6 +20,9 @@ import {
 import { fetchAdminStudents } from "./adminStudentsApi";
 import { fetchStudentSubjectPlans, fetchStudentScheduleRequests } from "./studentPlanningApi";
 import { resolveStudentPortalContext } from "./studentPortalResolver";
+import { getCurrentStudentInstructorAssignments } from "./instructorRoster";
+import { fetchEnrollmentRequests } from "./enrollmentRequests";
+import { getStudentInstructorEvaluationStatus } from "./instructorEvaluationStatus";
 import { isImportedIrregularStudent } from "./importedStudentScheduling";
 import {
   fetchAndCacheStudentGradeRecordsForBranch,
@@ -681,33 +683,15 @@ export const studentMatchesSection = (
   student: StudentStorageRecord,
   section: AcademicClassSectionRecord,
 ) =>
-  !isImportedIrregularStudent(student) && (section.enrolleeIds.includes(student.id) ||
-  normalizeValue(student.section) === normalizeValue(section.code) ||
-  normalizeValue(student.section) === normalizeValue(section.section));
+  !isImportedIrregularStudent(student) && !student.requestedOwnSchedule && student.ownScheduleRequestStatus !== "Approved" &&
+  (student.section
+    ? normalizeValue(student.section) === normalizeValue(section.code) || normalizeValue(student.section) === normalizeValue(section.section)
+    : section.enrolleeIds.includes(student.id));
 
 export const studentHasAssignedInstructorSubject = (
   student: StudentStorageRecord,
   assignment: AcademicSubjectAssignmentRecord,
-) => {
-  const assignmentId = normalizeValue(assignment.id);
-  const assignmentInstructorId = normalizeValue(assignment.instructorId);
-  const assignmentSubjectCode = normalizeValue(assignment.subjectCode);
-
-  const subjects = student.importAcademicYear ? resolveStudentPortalContext(student).subjects : getStudentPortalSubjects(student);
-  return subjects.some((subject) => {
-    if (student.importAcademicYear && (subject.academicYear !== assignment.academicYear || subject.semester !== assignment.semester)) return false;
-    if (normalizeValue(subject.id) === assignmentId) {
-      return true;
-    }
-    if (isImportedIrregularStudent(student)) return false;
-
-    return (
-      Boolean(subject.instructorId) &&
-      normalizeValue(subject.instructorId) === assignmentInstructorId &&
-      normalizeValue(subject.code) === assignmentSubjectCode
-    );
-  });
-};
+) => getCurrentStudentInstructorAssignments(student, [assignment]).length > 0;
 
 export const getInstructorScopedData = async ({
   branch,
@@ -729,7 +713,11 @@ export const getInstructorScopedData = async ({
   ]);
 
   try {
-    await Promise.all([fetchStudentSubjectPlans(resolvedBranch), fetchStudentScheduleRequests(resolvedBranch)]);
+    await Promise.all([
+      fetchStudentSubjectPlans(resolvedBranch, { authoritative: true }),
+      fetchStudentScheduleRequests(resolvedBranch, { authoritative: true }),
+      fetchEnrollmentRequests(resolvedBranch, { syncLocal: false }),
+    ]);
   } catch (error) {
     console.warn(
       "Unable to load approved individual schedules from Supabase; using cached schedules.",
@@ -750,13 +738,12 @@ export const getInstructorScopedData = async ({
   const sections = snapshot.classSections.filter(
     (section) => sectionIds.has(section.id) || sectionCodes.has(section.code),
   );
-  const students = remoteStudentsResult.filter(
+  const students = remoteStudentsResult
+    .map(student => resolveStudentPortalContext(student).resolvedStudentRecord)
+    .filter(
     (student) =>
       student.status !== "Archived" &&
-      (sections.some((section) => studentMatchesSection(student, section)) ||
-        assignments.some((assignment) =>
-          studentHasAssignedInstructorSubject(student, assignment),
-        )),
+      getCurrentStudentInstructorAssignments(student, assignments).length > 0,
   );
 
   return {
@@ -772,18 +759,18 @@ export const getInstructorEvaluationProgress = ({
   branch,
   instructorId,
   students,
+  assignments,
 }: {
   branch?: string | null;
   instructorId: string;
   students: StudentStorageRecord[];
+  assignments: AcademicSubjectAssignmentRecord[];
 }) => {
   const submissions = readInstructorEvaluationSubmissions(branch).filter(
     (submission) => submission.instructorId === instructorId,
   );
-  const submittedStudentNumbers = new Set(
-    submissions.map((submission) => submission.studentNumber),
-  );
-  const done = students.filter((student) => submittedStudentNumbers.has(student.id));
+  const done = students.filter(student => getStudentInstructorEvaluationStatus(student.id,
+    getCurrentStudentInstructorAssignments(student, assignments), submissions).status === "completed");
 
   return {
     doneCount: done.length,
@@ -1130,12 +1117,7 @@ export const downloadInstructorGradeTemplate = ({
 
         return {
           student,
-          assignments:
-            scheduledAssignments.length > 0
-              ? scheduledAssignments
-              : studentMatchesSection(student, section)
-                ? sectionAssignments
-                : [],
+          assignments: scheduledAssignments,
         };
       })
       .filter(({ assignments: studentSubjectAssignments }) =>

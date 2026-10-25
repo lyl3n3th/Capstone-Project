@@ -13,13 +13,13 @@ const module = { exports: {} };
 Function("require", "module", "exports", code)((name) => name.includes("supabase") ? { supabase: {} } : require(name), module, module.exports);
 const api = module.exports;
 const offerings = [{ branch_code: "bacoor", branch_name: "Bacoor", program_name: "College", track_name: "BSE - Bachelor of Entrepreneurship" }];
-const valid = { student_number: "001234", first_name: "Mary Ann", middle_name: "Santos", last_name: "De La Cruz", sex: "Female",
+const valid = { student_number: "BAC-001234", first_name: "Mary Ann", middle_name: "Santos", last_name: "De La Cruz", sex: "Female",
   birth_date: "02/29/2004", civil_status: "Single", email: "mary@example.test", phone_number: "09123456789", address: "123 School Road",
   guardian_name: "", guardian_contact: "", program: "College", year_level: "2nd Year", track_name: offerings[0].track_name,
   academic_year: "2026-2027", branch: "Bacoor", semester: "2nd Semester", academic_standing: "Irregular", last_school_attended: "Bacoor National High School", year_completion: "2022" };
-const context = { branch: "Bacoor", offerings, existing: [], today: "2026-10-19" };
+const context = { branch: "Bacoor", studentNumberPrefix: "BAC", offerings, existing: [], today: "2026-10-19" };
 function workbook(entries = [{ row: 2, values: valid }]) {
-  const book = api.buildStudentImportTemplate("Bacoor", offerings);
+  const book = api.buildStudentImportTemplate("Bacoor", offerings, "BAC");
   for (const { row, values } of entries) api.STUDENT_IMPORT_COLUMNS.forEach(({ key }, col) => {
     book.Sheets.Students[XLSX.utils.encode_cell({ r: row - 1, c: col })] = { t: "s", v: values[key] ?? "" };
   });
@@ -29,9 +29,22 @@ const roundTrip = XLSX.read(XLSX.write(workbook(), { type: "buffer", bookType: "
 let result = api.parseStudentImportWorkbook(roundTrip);
 assert.equal(result.rows.length, 1, "Prefilled branch-only rows must be ignored");
 assert.deepEqual(api.validateStudentImportRows(result.rows, context), []);
-assert.equal(result.rows[0].values.student_number, "001234");
+assert.equal(result.rows[0].values.student_number, "BAC-001234");
 assert.equal(result.rows[0].values.phone_number, "09123456789");
 assert.equal(api.STUDENT_IMPORT_COLUMNS.some((column) => column.key === "section"), false);
+
+for (const bad of ["001234", "BAC001234", "bac-001234", "TAY-001234", "BAC-12345", "BAC-1234567", "BA-123456", "BACO-123456", "BAC_123456", "BAC/123456", "BAC-12345A", "BAC-12 456"]) {
+  const parsed = api.parseStudentImportWorkbook(workbook([{ row: 2, values: { ...valid, student_number: bad } }]));
+  const idError = api.validateStudentImportRows(parsed.rows, context).find(error => error.field === "student_number");
+  assert(idError, bad);
+  assert.equal(idError.cell, "A2");
+  assert.match(idError.message, /BAC-.*6 digits/);
+}
+for (const [branch, prefix] of [["Bacoor", "BAC"], ["Commonwealth", "COM"], ["Taytay", "TAY"], ["GMA", "GMA"], ["Batangas", "BAT"], ["Bacoor Annex", "BAX"]]) {
+  const branchOfferings = [{ ...offerings[0], branch_name: branch, branch_code: branch.toLowerCase().replaceAll(" ", "_") }];
+  const parsed = api.parseStudentImportWorkbook(workbook([{ row: 2, values: { ...valid, branch, student_number: `${prefix}-000123` } }]));
+  assert.deepEqual(api.validateStudentImportRows(parsed.rows, { ...context, branch, studentNumberPrefix: prefix, offerings: branchOfferings }), [], branch);
+}
 
 result = api.parseStudentImportWorkbook(workbook([{ row: 2, values: valid }, { row: 5, values: { ...valid, phone_number: "9123456789" } }]));
 let errors = api.validateStudentImportRows(result.rows, context);
@@ -56,16 +69,20 @@ const missing = workbook(); delete missing.Sheets.Students.A1;
 assert(api.parseStudentImportWorkbook(missing).errors.some((error) => error.cell === "A1"));
 const section = workbook(); section.Sheets.Students.V1 = { t: "s", v: "Section" }; section.Sheets.Students["!ref"] = "A1:V21";
 assert(api.parseStudentImportWorkbook(section).errors.some((error) => error.cell === "V1"));
-assert.throws(() => api.parseStudentImportWorkbook(api.buildStudentImportTemplate("Bacoor", offerings)), /no student records/);
+assert.throws(() => api.parseStudentImportWorkbook(api.buildStudentImportTemplate("Bacoor", offerings, "BAC")), /no student records/);
 
 const reordered = workbook();
 [reordered.Sheets.Students.A1, reordered.Sheets.Students.I1] = [reordered.Sheets.Students.I1, reordered.Sheets.Students.A1];
 [reordered.Sheets.Students.A2, reordered.Sheets.Students.I2] = [reordered.Sheets.Students.I2, reordered.Sheets.Students.A2];
 reordered.Sheets.Students.A2.v = "invalid phone";
 assert(api.validateStudentImportRows(api.parseStudentImportWorkbook(reordered).rows, context).some((error) => error.field === "phone_number" && error.cell === "A2"));
+reordered.Sheets.Students.I2.v = "TAY-123456";
+assert(api.validateStudentImportRows(api.parseStudentImportWorkbook(reordered).rows, context).some((error) => error.field === "student_number" && error.cell === "I2"));
 console.log("Student import tests passed: real Excel round-trip, original identifiers, blank sections, exact cell errors, duplicate detection, formulas, dates, branch/course validation, and reordered columns.");
 
-const templateBytes = api.buildStudentImportTemplateFile("Bacoor", offerings);
+const templateBytes = api.buildStudentImportTemplateFile("Bacoor", offerings, "BAC");
+assert(XLSX.utils.sheet_to_json(api.buildStudentImportTemplate("Bacoor", offerings, "BAC").Sheets.Instructions, { header: 1 })
+  .some(row => row[0] === "Student Number" && row[1].includes("BAC-123456") && row[1].includes("6 digits")));
 const templateZip = unzipSync(templateBytes);
 const sheetXml = strFromU8(templateZip["xl/worksheets/sheet1.xml"]);
 const workbookXml = strFromU8(templateZip["xl/workbook.xml"]);
@@ -94,6 +111,6 @@ assert.equal(parsedNumeric.rows[0].values.birth_date,"02/29/2004");
 const realDate = workbook();realDate.Sheets.Students.F2={t:"d",v:new Date("2004-02-29T00:00:00Z"),z:"mm/dd/yyyy"};
 assert.equal(api.parseStudentImportWorkbook(realDate).rows[0].values.birth_date,"02/29/2004");
 const mixedOfferings = [...offerings,{branch_code:"bacoor",branch_name:"Bacoor",program_name:"Senior High School",track_name:"ICT"}];
-const mixedBytes = api.buildStudentImportTemplateFile("Bacoor",mixedOfferings);
+const mixedBytes = api.buildStudentImportTemplateFile("Bacoor",mixedOfferings,"BAC");
 assert(XLSX.read(mixedBytes,{type:"array"}).Sheets["Dropdown Options"]);
 console.log("Template update checks passed: real Excel dropdown XML, dependent choices, hidden named ranges, MM/DD/YYYY dates, and school history cell errors.");

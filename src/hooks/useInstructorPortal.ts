@@ -9,6 +9,7 @@ import {
 import type {
   AcademicClassSectionRecord,
   AcademicInstructorRecord,
+  AcademicSubjectRecord,
   AcademicSubjectAssignmentRecord,
 } from "../services/academicData";
 import type { StudentStorageRecord } from "../services/adminStorage";
@@ -23,13 +24,16 @@ export function useInstructorPortal() {
     AcademicSubjectAssignmentRecord[]
   >([]);
   const [sections, setSections] = useState<AcademicClassSectionRecord[]>([]);
+  const [subjects, setSubjects] = useState<AcademicSubjectRecord[]>([]);
   const [students, setStudents] = useState<StudentStorageRecord[]>([]);
   const [submissionsVersion, setSubmissionsVersion] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
+    let revision = 0;
 
     const load = async () => {
+      const requestRevision = ++revision;
       if (!currentUser?.branch || !currentUser.id) {
         setIsLoading(false);
         return;
@@ -42,13 +46,14 @@ export function useInstructorPortal() {
           instructorId: currentUser.id,
         });
 
-        if (!isMounted) {
+        if (!isMounted || requestRevision !== revision) {
           return;
         }
 
         setInstructor(data.instructor ?? null);
         setAssignments(data.assignments);
         setSections(data.sections);
+        setSubjects(data.snapshot.subjects);
         setStudents(data.students);
         void fetchAndCacheInstructorGradeSubmissions(currentUser.branch)
           .then(() => {
@@ -60,16 +65,19 @@ export function useInstructorPortal() {
             console.warn("Unable to load instructor submissions from Supabase.", error);
           });
       } finally {
-        if (isMounted) {
+        if (isMounted && requestRevision === revision) {
           setIsLoading(false);
         }
       }
     };
 
     void load();
+    const onFocus = () => { void load(); };
+    window.addEventListener("focus", onFocus);
 
     return () => {
       isMounted = false;
+      window.removeEventListener("focus", onFocus);
     };
   }, [currentUser?.branch, currentUser?.id]);
 
@@ -85,6 +93,7 @@ export function useInstructorPortal() {
     instructor,
     assignments,
     sections,
+    subjects,
     students,
     submissions,
     isLoading,

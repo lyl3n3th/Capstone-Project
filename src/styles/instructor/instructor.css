@@ -259,6 +259,40 @@
   margin: 0 auto;
 }
 
+.instructor-evaluation-progress {
+  display: grid;
+  gap: 5px;
+  min-width: 155px;
+}
+
+.instructor-evaluation-progress small {
+  color: #60708a;
+}
+
+.instructor-evaluation-status {
+  justify-self: start;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.instructor-evaluation-status.completed {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.instructor-evaluation-status.in-progress {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.instructor-evaluation-error {
+  color: #b91c1c;
+}
+
 .instructor-page-header {
   display: flex;
   align-items: flex-end;
@@ -479,6 +513,16 @@
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.instructor-filters.instructor-student-filters {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+
+.instructor-masterlist-note {
+  color: #45556f;
+  font-size: 0.85rem;
+  margin: 0 0 16px;
 }
 
 .instructor-filters select {

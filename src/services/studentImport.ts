@@ -59,7 +59,7 @@ const headerKey = (value: string) => normalized(value).replace(/[^a-z0-9]/g, "")
 export const importCell = (row: StudentImportRow, field: StudentImportField) =>
   XLSX.utils.encode_cell({ r: row.rowNumber - 1, c: row.columns[field] });
 
-export function buildStudentImportTemplate(branch: string, offerings: BranchOffering[]) {
+export function buildStudentImportTemplate(branch: string, offerings: BranchOffering[], studentNumberPrefix: string) {
   const book = XLSX.utils.book_new();
   const sheet = XLSX.utils.aoa_to_sheet([STUDENT_IMPORT_COLUMNS.map((column) => column.label)]);
   // Text formatting preserves school IDs, leading zeroes, and phone numbers.
@@ -80,7 +80,7 @@ export function buildStudentImportTemplate(branch: string, offerings: BranchOffe
     ["General", "One student per row. Import up to 500 students at a time. Keep the column headers. Sections are assigned after import."],
     ["Required fields", STUDENT_IMPORT_COLUMNS.filter((column) => column.required).map((column) => column.label).join(", ")],
     ["Optional fields", "Middle Name, Guardian Name, Guardian Contact"],
-    ["Student Number", "Use the existing school student number as text. Do not generate a new one. Duplicates cannot be imported."],
+    ["Student Number", `Use ${studentNumberPrefix}- followed by exactly 6 digits, e.g. ${studentNumberPrefix}-123456. The uppercase prefix must match ${branch}. Keep the existing number; duplicates cannot be imported.`],
     ["Sex", "Male or Female"],
     ["Birth Date", "MM/DD/YYYY, e.g. 08/21/2005. Must be a real date and cannot be in the future."],
     ["Last School Attended", "Name of the student's previous school."],
@@ -112,8 +112,8 @@ export function buildStudentImportTemplate(branch: string, offerings: BranchOffe
 
 // SheetJS CE does not write data validation. Add standard Excel validation XML
 // to the generated workbook, using named ranges so long course names work.
-export function buildStudentImportTemplateFile(branch: string, offerings: BranchOffering[]): Uint8Array {
-  const book = buildStudentImportTemplate(branch, offerings);
+export function buildStudentImportTemplateFile(branch: string, offerings: BranchOffering[], studentNumberPrefix: string): Uint8Array {
+  const book = buildStudentImportTemplate(branch, offerings, studentNumberPrefix);
   const lists = [
     { name: "ImportLevels", values: ["SHS", "College"].filter((level) => offerings.some((item) => item.program_name === (level === "SHS" ? "Senior High School" : "College"))) },
     { name: "ImportSHSYears", values: ["Grade 11", "Grade 12"] },
@@ -208,7 +208,7 @@ export function matchingImportOffering(values: StudentImportValues, offerings: B
 }
 
 export function validateStudentImportRows(rows: StudentImportRow[], context: {
-  branch: string; offerings: BranchOffering[]; existing: Array<{ id: string; email: string }>;
+  branch: string; studentNumberPrefix: string; offerings: BranchOffering[]; existing: Array<{ id: string; email: string }>;
   today?: string;
 }): StudentImportError[] {
   const errors: StudentImportError[] = [];
@@ -232,7 +232,10 @@ export function validateStudentImportRows(rows: StudentImportRow[], context: {
       if (v[column.key].length > (column.key === "address" ? 500 : 160)) add(column.key, "Value is too long.");
       if (row.formulaFields.includes(column.key)) add(column.key, "Formulas are not supported. Enter a value instead.");
     });
-    if (v.student_number && !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,49}$/.test(v.student_number)) add("student_number", "Use up to 50 letters/digits, hyphens, dots, slashes, or underscores. Keep the original school ID.");
+    if (v.student_number && (!/^[A-Z]{3}-[0-9]{6}$/.test(v.student_number.trim()) ||
+      v.student_number.trim().slice(0, 3) !== context.studentNumberPrefix)) {
+      add("student_number", `Use ${context.studentNumberPrefix}- followed by exactly 6 digits (e.g. ${context.studentNumberPrefix}-123456). The prefix must match ${context.branch}.`);
+    }
     for (const field of ["student_number", "email"] as const) {
       if (v[field] && (counts[field].get(normalized(v[field])) ?? 0) > 1) add(field, "Duplicate value in this workbook.");
       if (v[field] && existing[field].has(normalized(v[field]))) add(field, "Already belongs to a student in the system. Import cannot overwrite existing records.");
