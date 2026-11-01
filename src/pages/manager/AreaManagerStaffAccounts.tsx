@@ -1,3 +1,4 @@
+import TablePagination from "../../components/common/TablePagination";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -70,7 +71,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
   } | null>(null);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const itemsPerPage = 15;
 
   const [formData, setFormData] = useState<StaffMember>({
     staff_id: "",
@@ -830,27 +831,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
         </div>
 
         {totalPages > 1 ? (
-          <div className="stf-pagination">
-            <button
-              onClick={() => paginate(currentPage - 1)}
-              disabled={currentPage === 1}
-              className="stf-page-btn"
-            >
-              Previous
-            </button>
-            <div className="stf-page-info">
-              <span>
-                Page <strong>{currentPage}</strong> of {totalPages}
-              </span>
-            </div>
-            <button
-              onClick={() => paginate(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              className="stf-page-btn"
-            >
-              Next
-            </button>
-          </div>
+          <TablePagination page={currentPage} pageSize={itemsPerPage} totalItems={processedStaff.length} onPageChange={paginate} label="Staff account pages" />
         ) : null}
       </div>
 

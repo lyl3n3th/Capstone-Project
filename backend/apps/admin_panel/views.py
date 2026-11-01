@@ -231,8 +231,8 @@ class BackupManualCreateView(APIView):
                     history=history,
                     snapshot_data=snapshot_data,
                 )
-            except BackupStorageError as storage_error:
-                return Response({"detail": str(storage_error)}, status=storage_error.status_code)
+            except Exception as backup_error:
+                return Response({"detail": str(backup_error)}, status=getattr(backup_error, "status_code", 503))
 
         if backup_type == BackupHistory.TYPE_AUTOMATED:
             settings_row = get_or_create_backup_settings(branch_id)
@@ -315,15 +315,12 @@ class BackupRestoreStartView(APIView):
             logger.warning("Celery dispatch failed for restore, running inline: %s", exc)
             try:
                 restore_history = restore_branch_backup(restore_history)
-            except BackupStorageError as storage_error:
-                update_backup_history(
-                    restore_history.id,
-                    status=BackupHistory.STATUS_FAILED,
-                    progress=100,
-                    error_message=str(storage_error),
+            except Exception as restore_error:
+                restore_history = update_backup_history(
+                    restore_history.id, status=BackupHistory.STATUS_FAILED,
+                    progress=100, error_message=str(restore_error),
                     restore_finished_at=timezone.now(),
-                )
-                return Response({"detail": str(storage_error)}, status=storage_error.status_code)
+                ) or restore_history
 
         return Response(BackupHistorySerializer(restore_history).data, status=status.HTTP_202_ACCEPTED)
 

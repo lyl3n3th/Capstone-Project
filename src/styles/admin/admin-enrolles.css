@@ -4283,19 +4283,19 @@
     font-size: 10px;
   }
 
-  .enrollees-table th:nth-child(1),
-  .enrollees-table td:nth-child(1),
-  .enrollees-table th:nth-child(2),
-  .enrollees-table td:nth-child(2) {
+  .enrollees-table th.enrollee-select-column,
+  .enrollees-table td.enrollee-select-column,
+  .enrollees-table th:nth-child(1 of :not(.enrollee-select-column)),
+  .enrollees-table td:nth-child(1 of :not(.enrollee-select-column)) {
     width: 18%;
   }
 
-  .enrollees-table th:nth-child(3),
-  .enrollees-table td:nth-child(3),
-  .enrollees-table th:nth-child(4),
-  .enrollees-table td:nth-child(4),
-  .enrollees-table th:nth-child(5),
-  .enrollees-table td:nth-child(5) {
+  .enrollees-table th:nth-child(2 of :not(.enrollee-select-column)),
+  .enrollees-table td:nth-child(2 of :not(.enrollee-select-column)),
+  .enrollees-table th:nth-child(3 of :not(.enrollee-select-column)),
+  .enrollees-table td:nth-child(3 of :not(.enrollee-select-column)),
+  .enrollees-table th:nth-child(4 of :not(.enrollee-select-column)),
+  .enrollees-table td:nth-child(4 of :not(.enrollee-select-column)) {
     width: 13%;
   }
 
@@ -4488,10 +4488,10 @@
 }
 
 @media (max-width: 560px) {
-  .enrollees-table th:nth-child(4),
-  .enrollees-table td:nth-child(4),
-  .enrollees-table th:nth-child(5),
-  .enrollees-table td:nth-child(5) {
+  .enrollees-table th:nth-child(3 of :not(.enrollee-select-column)),
+  .enrollees-table td:nth-child(3 of :not(.enrollee-select-column)),
+  .enrollees-table th:nth-child(4 of :not(.enrollee-select-column)),
+  .enrollees-table td:nth-child(4 of :not(.enrollee-select-column)) {
     display: none;
   }
 
@@ -4501,15 +4501,15 @@
     font-size: 9px;
   }
 
-  .enrollees-table th:nth-child(1),
-  .enrollees-table td:nth-child(1),
-  .enrollees-table th:nth-child(2),
-  .enrollees-table td:nth-child(2) {
+  .enrollees-table th.enrollee-select-column,
+  .enrollees-table td.enrollee-select-column,
+  .enrollees-table th:nth-child(1 of :not(.enrollee-select-column)),
+  .enrollees-table td:nth-child(1 of :not(.enrollee-select-column)) {
     width: 24%;
   }
 
-  .enrollees-table th:nth-child(3),
-  .enrollees-table td:nth-child(3) {
+  .enrollees-table th:nth-child(2 of :not(.enrollee-select-column)),
+  .enrollees-table td:nth-child(2 of :not(.enrollee-select-column)) {
     width: 18%;
   }
 
@@ -4716,8 +4716,8 @@
   letter-spacing: 0.015em;
 }
 
-.enrollees-content .enrollees-table td:nth-child(2),
-.enrollees-content .enrollees-table td:nth-child(3),
+.enrollees-content .enrollees-table td:nth-child(1 of :not(.enrollee-select-column)),
+.enrollees-content .enrollees-table td:nth-child(2 of :not(.enrollee-select-column)),
 .enrollees-content .subjects-table .subject-prerequisite-cell {
   white-space: normal;
   overflow-wrap: anywhere;
@@ -4729,8 +4729,8 @@
   min-width: 164px;
 }
 
-.enrollees-content .enrollees-admission-table th:nth-child(5),
-.enrollees-content .enrollees-admission-table td:nth-child(5) {
+.enrollees-content .enrollees-admission-table th:nth-child(4 of :not(.enrollee-select-column)),
+.enrollees-content .enrollees-admission-table td:nth-child(4 of :not(.enrollee-select-column)) {
   width: 190px !important;
   min-width: 190px;
   max-width: 190px;
@@ -4740,10 +4740,10 @@
   line-height: 1.35;
 }
 
-.enrollees-content .enrollees-admission-table th:nth-child(8),
-.enrollees-content .enrollees-admission-table td:nth-child(8),
-.enrollees-content .enrollees-enrollment-table th:nth-child(9),
-.enrollees-content .enrollees-enrollment-table td:nth-child(9) {
+.enrollees-content .enrollees-admission-table th:nth-child(7 of :not(.enrollee-select-column)),
+.enrollees-content .enrollees-admission-table td:nth-child(7 of :not(.enrollee-select-column)),
+.enrollees-content .enrollees-enrollment-table th:nth-child(8 of :not(.enrollee-select-column)),
+.enrollees-content .enrollees-enrollment-table td:nth-child(8 of :not(.enrollee-select-column)) {
   width: 90px !important;
   min-width: 90px;
   max-width: 90px;
@@ -4752,10 +4752,10 @@
   line-height: 1.25;
 }
 
-.enrollees-content .enrollees-admission-table th:nth-child(6),
-.enrollees-content .enrollees-admission-table td:nth-child(6),
-.enrollees-content .enrollees-admission-table th:nth-child(7),
-.enrollees-content .enrollees-admission-table td:nth-child(7) {
+.enrollees-content .enrollees-admission-table th:nth-child(5 of :not(.enrollee-select-column)),
+.enrollees-content .enrollees-admission-table td:nth-child(5 of :not(.enrollee-select-column)),
+.enrollees-content .enrollees-admission-table th:nth-child(6 of :not(.enrollee-select-column)),
+.enrollees-content .enrollees-admission-table td:nth-child(6 of :not(.enrollee-select-column)) {
   width: 92px !important;
   min-width: 92px;
   max-width: 92px;
@@ -4965,6 +4965,10 @@
 }
 
 .evaluation-period-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px 24px;
   border: 1px solid #dbe5ef;
   border-radius: 12px;
   padding: 18px;
@@ -4977,8 +4981,24 @@
   display: flex;
   flex-wrap: wrap;
   align-items: end;
+  justify-content: flex-end;
   gap: 12px;
-  margin-top: 14px;
+  max-width: 480px;
+}
+
+.evaluation-period-controls > p[role="alert"] {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 768px) {
+  .evaluation-period-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .evaluation-period-actions {
+    justify-self: end;
+    max-width: 100%;
+  }
 }
 .evaluation-period-actions label {
   display: flex;
@@ -5126,10 +5146,14 @@
 }
 
 .evaluation-toggle-btn {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  width: 190px;
+  max-width: 100%;
+  flex-shrink: 0;
   min-height: 42px;
   padding: 0 14px;
   border: none;
@@ -5837,8 +5861,8 @@
     min-width: 50px !important;
   }
 
-  .enrollees-content .enrollees-admission-table th:nth-child(5),
-  .enrollees-content .enrollees-admission-table td:nth-child(5) {
+  .enrollees-content .enrollees-admission-table th:nth-child(4 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table td:nth-child(4 of :not(.enrollee-select-column)) {
     min-width: 180px !important;
   }
 
@@ -5917,66 +5941,66 @@
   }
 
   .enrollees-content .enrollees-table .enrollee-select-column,
-  .enrollees-content .enrollees-table th:nth-child(1),
-  .enrollees-content .enrollees-table td:nth-child(1) {
+  .enrollees-content .enrollees-table th.enrollee-select-column,
+  .enrollees-content .enrollees-table td.enrollee-select-column {
     width: 52px !important;
   }
 
-  .enrollees-content .enrollees-admission-table th:nth-child(2),
-  .enrollees-content .enrollees-admission-table td:nth-child(2),
-  .enrollees-content .enrollees-enrollment-table th:nth-child(2),
-  .enrollees-content .enrollees-enrollment-table td:nth-child(2) {
+  .enrollees-content .enrollees-admission-table th:nth-child(1 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table td:nth-child(1 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(1 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(1 of :not(.enrollee-select-column)) {
     width: 110px !important;
   }
 
-  .enrollees-content .enrollees-admission-table th:nth-child(3),
-  .enrollees-content .enrollees-admission-table td:nth-child(3),
-  .enrollees-content .enrollees-enrollment-table th:nth-child(3),
-  .enrollees-content .enrollees-enrollment-table td:nth-child(3) {
+  .enrollees-content .enrollees-admission-table th:nth-child(2 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table td:nth-child(2 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(2 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(2 of :not(.enrollee-select-column)) {
     width: 130px !important;
   }
 
-  .enrollees-content .enrollees-admission-table th:nth-child(4),
-  .enrollees-content .enrollees-admission-table td:nth-child(4),
-  .enrollees-content .enrollees-enrollment-table th:nth-child(4),
-  .enrollees-content .enrollees-enrollment-table td:nth-child(4) {
+  .enrollees-content .enrollees-admission-table th:nth-child(3 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table td:nth-child(3 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(3 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(3 of :not(.enrollee-select-column)) {
     width: 90px !important;
   }
 
-  .enrollees-content .enrollees-admission-table th:nth-child(5),
-  .enrollees-content .enrollees-admission-table td:nth-child(5) {
+  .enrollees-content .enrollees-admission-table th:nth-child(4 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table td:nth-child(4 of :not(.enrollee-select-column)) {
     width: 220px !important;
   }
 
-  .enrollees-content .enrollees-admission-table th:nth-child(6),
-  .enrollees-content .enrollees-admission-table td:nth-child(6),
-  .enrollees-content .enrollees-admission-table th:nth-child(7),
-  .enrollees-content .enrollees-admission-table td:nth-child(7),
-  .enrollees-content .enrollees-admission-table th:nth-child(8),
-  .enrollees-content .enrollees-admission-table td:nth-child(8) {
+  .enrollees-content .enrollees-admission-table th:nth-child(5 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table td:nth-child(5 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table th:nth-child(6 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table td:nth-child(6 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table th:nth-child(7 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table td:nth-child(7 of :not(.enrollee-select-column)) {
     width: 105px !important;
   }
 
-  .enrollees-content .enrollees-admission-table th:nth-child(9),
-  .enrollees-content .enrollees-admission-table td:nth-child(9),
-  .enrollees-content .enrollees-enrollment-table th:nth-child(10),
-  .enrollees-content .enrollees-enrollment-table td:nth-child(10) {
+  .enrollees-content .enrollees-admission-table th:nth-child(8 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-admission-table td:nth-child(8 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(9 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(9 of :not(.enrollee-select-column)) {
     width: 140px !important;
   }
 
-  .enrollees-content .enrollees-enrollment-table th:nth-child(5),
-  .enrollees-content .enrollees-enrollment-table td:nth-child(5),
-  .enrollees-content .enrollees-enrollment-table th:nth-child(6),
-  .enrollees-content .enrollees-enrollment-table td:nth-child(6),
-  .enrollees-content .enrollees-enrollment-table th:nth-child(9),
-  .enrollees-content .enrollees-enrollment-table td:nth-child(9) {
+  .enrollees-content .enrollees-enrollment-table th:nth-child(4 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(4 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(5 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(5 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(8 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(8 of :not(.enrollee-select-column)) {
     width: 105px !important;
   }
 
-  .enrollees-content .enrollees-enrollment-table th:nth-child(7),
-  .enrollees-content .enrollees-enrollment-table td:nth-child(7),
-  .enrollees-content .enrollees-enrollment-table th:nth-child(8),
-  .enrollees-content .enrollees-enrollment-table td:nth-child(8) {
+  .enrollees-content .enrollees-enrollment-table th:nth-child(6 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(6 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table th:nth-child(7 of :not(.enrollee-select-column)),
+  .enrollees-content .enrollees-enrollment-table td:nth-child(7 of :not(.enrollee-select-column)) {
     width: 120px !important;
   }
 
@@ -7090,5 +7114,151 @@
   .enrollees-content .year-level-header h4,
   .enrollees-content .semester-header h5 {
     overflow-wrap: anywhere;
+  }
+}
+.scholarship-exam-room-settings {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid #d4e1ec;
+  border-radius: 8px;
+  background: #f5f9fc;
+}
+.scholarship-exam-room-settings label { font-weight: 600; }
+.scholarship-exam-room-settings p { margin: 8px 0; }
+.scholarship-exam-room-settings select { min-width: 0; flex: 1; padding: 10px; }
+
+/* Keep the entry action compact until archive selection is enabled. */
+.enrollees-content .enrollee-archive-entry {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.enrollees-content .enrollee-archive-entry .action-btn.archive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 46px;
+  min-height: 46px;
+  gap: 8px;
+  padding: 0 16px;
+  border: 1px solid #fdba74;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.enrollees-content .enrollee-archive-entry .action-btn.archive:hover:not(:disabled) {
+  background: #ffedd5;
+  border-color: #fb923c;
+}
+
+/* Keep Archive beside its status filter. */
+.enrollees-content .enrollee-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.enrollees-content .enrollee-status-actions .enrollee-archive-entry {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .enrollees-content .controls.enrollee-record-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .enrollees-content .enrollee-status-actions .status-filter {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .enrollees-content .enrollee-archive-entry .action-btn.archive {
+    height: 38px;
+    min-height: 38px;
+  }
+}
+
+.evaluation-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.transferee-subject-planner-grid.transferee-credit-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Preserve compact utility columns through the responsive table resets. */
+.enrollees-content .table-container > .enrollees-table > :is(thead, tbody) > tr > .enrollee-select-column {
+  box-sizing: border-box;
+  width: 72px !important;
+  min-width: 72px !important;
+  max-width: 72px !important;
+  padding: 8px !important;
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}
+
+.enrollees-content .table-container > .enrollees-table > :is(thead, tbody) > tr > .enrollee-action-column {
+  box-sizing: border-box;
+  width: 96px !important;
+  min-width: 96px !important;
+  max-width: 96px !important;
+  padding: 8px !important;
+  white-space: nowrap !important;
+}
+
+.enrollees-content :is(.enrollee-selection-control, .enrollee-select-column) input[type="checkbox"] {
+  box-sizing: border-box;
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  margin: 0;
+  flex: 0 0 18px;
+  vertical-align: middle;
+}
+
+.enrollees-content .enrollee-bulk-toolbar {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.enrollees-content .enrollee-selection-control {
+  min-height: 44px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.enrollees-content .enrollee-bulk-actions {
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .enrollees-content :is(.enrollee-selection-control, .enrollee-select-column) input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    flex-basis: 22px;
+  }
+
+  .enrollees-content .enrollee-bulk-actions {
+    display: flex;
+    width: 100%;
+  }
+
+  .enrollees-content .enrollee-bulk-actions .action-btn {
+    min-height: 44px;
+    white-space: normal;
   }
 }

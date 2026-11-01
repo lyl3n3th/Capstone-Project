@@ -1,5 +1,6 @@
 import {
   getStudentRequirementSnapshot,
+  fetchImportedStudentCredentials,
   normalizeBranchName,
 } from "./adminStorage";
 import {
@@ -29,6 +30,7 @@ export const getStudentRecordProtection = async ({
   trackingNumber?: string | null;
 }): Promise<StudentRecordProtectionResult> => {
   const resolvedBranch = normalizeBranchName(branch);
+  await fetchImportedStudentCredentials(resolvedBranch, studentNumber);
 
   await Promise.all([
     fetchAndCacheStudentGradeRecordsForBranch(resolvedBranch).catch((error) => {

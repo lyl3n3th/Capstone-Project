@@ -10,6 +10,7 @@ import {
   getAdmissionProgress,
 } from "../../services/admission";
 import type { AdmissionApplicationSummary } from "../../types/application";
+import { fetchScholarshipExamRoom } from "../../services/scholarshipExamRoom";
 
 function getQueryParam(name: string): string | null {
   const params = new URLSearchParams(window.location.search);
@@ -66,17 +67,8 @@ function AdmissionStep5() {
         }
 
         setApplication(result);
-        const locations: Record<string, { location: string; room: string }> = {
-          bacoor: { location: "Bacoor Branch", room: "PE Room" },
-          taytay: { location: "Taytay Branch", room: "Auditorium" },
-          gma: { location: "GMA Branch", room: "PE Room" },
-        };
-
-        const branchInfo = locations[result.branchCode] || {
-          location: result.branchName,
-          room: "Room 101",
-        };
-        setExamLocation(branchInfo);
+        const room = await fetchScholarshipExamRoom(result.branchCode);
+        setExamLocation({ location: `${result.branchName} Branch`, room: room || "To be announced" });
       } catch (err) {
         console.error(err);
         setPageError(

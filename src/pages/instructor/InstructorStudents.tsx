@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { FiDownload } from "react-icons/fi";
+import { FiDownload, FiSearch } from "react-icons/fi";
 import { useInstructorPortal } from "../../hooks/useInstructorPortal";
 import { getCurrentStudentInstructorAssignments } from "../../services/instructorRoster";
 import SkeletonPage from "../../components/common/SkeletonPage";
+import TablePagination from "../../components/common/TablePagination";
 import { INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT } from "../../services/adminStorage";
 import { buildInstructorGradeMasterlist } from "../../services/instructorGradeMasterlist";
 import { downloadStyledGradeTemplate } from "../../services/gradeTemplateBuilder";
@@ -29,6 +30,10 @@ export default function InstructorStudents() {
     completions: InstructorEvaluationCompletion[];
   }>({ scope: "", loading: true, error: "", completions: [] });
   const evaluationsReady = evaluations.scope === evaluationScope && !evaluations.loading && !evaluations.error;
+  const [requestedPage, setRequestedPage] = useState({ scope: "", page: 1 });
+  const [searchQuery, setSearchQuery] = useState("");
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const paginationScope = JSON.stringify([evaluationScope, sectionFilter, yearLevelFilter, subjectFilter, evaluationFilter, normalizedSearch]);
 
   useEffect(() => {
     if (!currentUser?.branch || !currentUser.id) return;
@@ -122,12 +127,18 @@ export default function InstructorStudents() {
       .filter(({ student, assignedSubjects, evaluation }) => {
         return (
           assignedSubjects.length > 0 &&
+          (!normalizedSearch || student.name.toLowerCase().includes(normalizedSearch) || student.id.toLowerCase().includes(normalizedSearch)) &&
           (yearLevelFilter === "all" || student.yearLevel === yearLevelFilter) &&
           (subjectFilter === "all" || assignedSubjects.includes(subjectFilter)) &&
           (evaluationFilter === "all" || (evaluationsReady && evaluation.status === evaluationFilter))
         );
       });
-  }, [assignments, sectionFilter, students, subjectFilter, yearLevelFilter, evaluations, evaluationScope, evaluationFilter, evaluationsReady]);
+  }, [assignments, sectionFilter, students, subjectFilter, yearLevelFilter, evaluations, evaluationScope, evaluationFilter, evaluationsReady, normalizedSearch]);
+
+  const pageSize = 15;
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = requestedPage.scope === paginationScope ? Math.min(requestedPage.page, totalPages) : 1;
+  const paginatedRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const handleDownloadMasterlist = async () => {
     if (!currentUser?.branch || isDownloading) return;
@@ -163,8 +174,20 @@ export default function InstructorStudents() {
           <span>Read-only roster</span>
           <h1>Students</h1>
         </div>
+      </div>
+
+      <div className="instructor-student-toolbar">
+        <label className="instructor-student-search">
+          <FiSearch aria-hidden="true" />
+          <input
+            type="search"
+            aria-label="Search students by name or student number"
+            placeholder="Search by name or student number..."
+            value={searchQuery}
+            onChange={(event) => { setSearchQuery(event.target.value); setRequestedPage({ scope: "", page: 1 }); }}
+          />
+        </label>
         <div className="instructor-section-actions">
-          <strong>{rows.length} of {students.length} students</strong>
           <button type="button" onClick={() => void handleDownloadMasterlist()}
             disabled={isDownloading || rows.length === 0 || !currentUser?.branch}>
             <FiDownload aria-hidden="true" /> {isDownloading ? "Preparing..." : "Download Grades Masterlist"}
@@ -177,7 +200,7 @@ export default function InstructorStudents() {
           Section
           <select
             value={sectionFilter}
-            onChange={(event) => setSectionFilter(event.target.value)}
+            onChange={(event) => { setSectionFilter(event.target.value); setRequestedPage({ scope: "", page: 1 }); }}
           >
             <option value="all">All sections</option>
             {sectionOptions.map((section) => (
@@ -191,7 +214,7 @@ export default function InstructorStudents() {
           Year Level
           <select
             value={yearLevelFilter}
-            onChange={(event) => setYearLevelFilter(event.target.value)}
+            onChange={(event) => { setYearLevelFilter(event.target.value); setRequestedPage({ scope: "", page: 1 }); }}
           >
             <option value="all">All year levels</option>
             {yearLevelOptions.map((yearLevel) => (
@@ -205,7 +228,7 @@ export default function InstructorStudents() {
           Subject
           <select
             value={subjectFilter}
-            onChange={(event) => setSubjectFilter(event.target.value)}
+            onChange={(event) => { setSubjectFilter(event.target.value); setRequestedPage({ scope: "", page: 1 }); }}
           >
             <option value="all">All subjects</option>
             {subjectOptions.map(([subjectCode, subjectLabel]) => (
@@ -217,7 +240,7 @@ export default function InstructorStudents() {
         </label>
         <label>
           Evaluation Status
-          <select value={evaluationFilter} onChange={(event) => setEvaluationFilter(event.target.value)}>
+          <select value={evaluationFilter} onChange={(event) => { setEvaluationFilter(event.target.value); setRequestedPage({ scope: "", page: 1 }); }}>
             <option value="all">All evaluation statuses</option>
             <option value="completed">Completed</option>
             <option value="in-progress">In progress</option>
@@ -226,7 +249,6 @@ export default function InstructorStudents() {
         </label>
       </div>
 
-      <p className="instructor-masterlist-note">The masterlist follows the selected filters, with separate sheets per assigned subject, section, and term. Students without recorded grades have blank grade cells.</p>
       {downloadError && <p className="instructor-evaluation-error" role="alert">{downloadError}</p>}
 
       {evaluations.scope === evaluationScope && evaluations.error && (
@@ -246,7 +268,7 @@ export default function InstructorStudents() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ student, assignedSubjects, assignedSections, evaluation }) => (
+            {paginatedRows.map(({ student, assignedSubjects, assignedSections, evaluation }) => (
               <tr key={student.id}>
                 <td>{student.id}</td>
                 <td>{student.name}</td>
@@ -277,6 +299,7 @@ export default function InstructorStudents() {
           </tbody>
         </table>
       </div>
+      <TablePagination page={currentPage} pageSize={pageSize} totalItems={rows.length} onPageChange={(page) => setRequestedPage({ scope: paginationScope, page })} label="Instructor student pages" />
     </div>
   );
 }

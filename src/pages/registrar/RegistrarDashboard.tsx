@@ -29,14 +29,6 @@ interface ProgramData {
   academicLevel: "SHS" | "College" | "Other";
 }
 
-interface StudentRecord {
-  program: string;
-  status: "Complete" | "Incomplete" | "Archived" | "Graduated";
-  strandOrCourse?: string;
-  shsTrackType?: string;
-  branch?: string;
-}
-
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8"];
 
 const formatProgramLabel = (name: string) => {
@@ -63,13 +55,17 @@ export default function RegistrarDashboard({
   const { currentUser } = useAuth();
   const currentBranch = normalizeBranchName(currentUser?.branch);
 
-  const [students, setStudents] = useState<StudentRecord[]>(() =>
-    getStudentsForBranch(currentBranch),
-  );
+  const [studentSnapshot, setStudentSnapshot] = useState(() => ({
+    branch: currentBranch,
+    records: getStudentsForBranch(currentBranch),
+  }));
+  const students =
+    studentSnapshot.branch === currentBranch
+      ? studentSnapshot.records
+      : getStudentsForBranch(currentBranch);
 
   useEffect(() => {
     let isCancelled = false;
-    setStudents(getStudentsForBranch(currentBranch));
 
     const loadSharedStudents = async () => {
       try {
@@ -86,7 +82,7 @@ export default function RegistrarDashboard({
         );
 
         writeStoredStudents([...studentsFromOtherBranches, ...sharedStudents]);
-        setStudents(sharedStudents);
+        setStudentSnapshot({ branch: currentBranch, records: sharedStudents });
       } catch (error) {
         console.warn("Unable to refresh shared registrar student data.", error);
       }

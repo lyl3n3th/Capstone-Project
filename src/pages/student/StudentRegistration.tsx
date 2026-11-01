@@ -16,6 +16,7 @@ import {
   syncApprovedStudentNumber,
 } from "../../services/adminStorage";
 import "../../styles/student/student-regis.css";
+import { fetchBranchDirectory } from "../../services/branchDirectory";
 
 function StudentRegistration() {
   const navigate = useNavigate();
@@ -91,6 +92,13 @@ function StudentRegistration() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    try {
+      await fetchBranchDirectory();
+    } catch {
+      showSystemAlert("Unable to Verify Branch", "Branch settings could not be loaded. Please try again.");
+      return;
+    }
+
     const normalizedStudentNumber = normalizeStudentNumberInput(
       formData.studentNumber,
     );
@@ -98,7 +106,7 @@ function StudentRegistration() {
     if (!isValidStudentNumber(normalizedStudentNumber)) {
       showSystemAlert(
         "Check Student Number",
-        "Please enter a valid student number in the format BAC-261001.",
+        "Please enter your full student number with the prefix assigned to your branch and six digits.",
       );
       return;
     }
@@ -257,7 +265,7 @@ function StudentRegistration() {
                       required
                     />
                     <small className="field-hint">
-                      Use your full student number, like BAC-261001, TAY-261001, or GMA-261001.
+                      Use the full student number issued by your branch, including its three-letter prefix and six digits.
                     </small>
                   </div>
 

@@ -189,7 +189,7 @@ const requirementDefinitionsByStatus: Record<
     {
       code: "transcript_of_records",
       name: "Transcript of Records (TOR)",
-      optional: true,
+      optional: false,
     },
     {
       code: "honorable_dismissal",

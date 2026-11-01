@@ -16,13 +16,16 @@ const students = ['Completed Student', 'Partial Student', 'Pending Student'].map
 const completion = (student, assignment) => ({ studentNumber: student.id, instructorId: 'teacher', academicYear: first.academicYear, semester: first.semester, subjectIds: [assignment.id], subjectCodes: [assignment.subjectCode] });
 const completions = [completion(students[0], first), completion(students[0], second), completion(students[1], first)];
 const source = compile('../src/pages/instructor/InstructorStudents.tsx');
-function render({ status = 'all', subject = 'all', loading = false, error = '' } = {}) {
+const pagination = {};
+new Function('exports', 'require', compile('../src/components/common/TablePagination.tsx'))(pagination, path => path.endsWith('.css') ? {} : require(path));
+function render({ status = 'all', subject = 'all', loading = false, error = '', roster = students, pageNumber = 1, pageScope, search = '' } = {}) {
   let stateIndex = 0;
-  const states = ['all', 'all', subject, status, false, '', { scope: 'Bacoor::teacher', loading, error, completions }];
+  const states = ['all', 'all', subject, status, false, '', { scope: 'Bacoor::teacher', loading, error, completions }, { scope: pageScope ?? JSON.stringify(['Bacoor::teacher', 'all', 'all', subject, status, search.trim().toLowerCase()]), page: pageNumber }, search];
   const page = {};
   new Function('exports', 'require', source)(page, (path) => {
     if (path === 'react') return { ...require('react'), useEffect() {}, useMemo: fn => fn(), useState: () => [states[stateIndex++], () => {}] };
-    if (path.endsWith('useInstructorPortal')) return { useInstructorPortal: () => ({ currentUser: { id: 'teacher', branch: 'Bacoor' }, students, assignments: [first, second], isLoading: false }) };
+    if (path.endsWith('useInstructorPortal')) return { useInstructorPortal: () => ({ currentUser: { id: 'teacher', branch: 'Bacoor' }, students: roster, assignments: [first, second], isLoading: false }) };
+    if (path.endsWith('TablePagination')) return pagination;
     if (path.endsWith('instructorRoster')) return { getCurrentStudentInstructorAssignments: (_student, assignments) => assignments };
     if (path.endsWith('instructorEvaluationStatus')) return evaluationApi;
     if (path.endsWith('adminStorage')) return {};
@@ -41,4 +44,36 @@ assert.ok(!render({ status: 'pending', loading: true }).includes('Pending Studen
 assert.ok(render({ status: 'pending', loading: true }).includes('Loading evaluation statuses...'));
 assert.ok(render({ status: 'pending', error: 'Unavailable' }).includes('Evaluation status is unavailable.'));
 assert.ok(render().includes('Download Grades Masterlist'));
-console.log('Instructor student page checks passed: evaluation status filters, subject selection, loading, errors, and masterlist action.');
+assert.ok(!render().includes('The masterlist follows the selected filters'));
+assert.ok(render().indexOf('type="search"') < render().indexOf('instructor-student-filters'));
+assert.ok(render({ search: '  PARTIAL  ' }).includes('<td>Partial Student</td>'));
+assert.ok(!render({ search: 'partial' }).includes('<td>Completed Student</td>'));
+assert.ok(render({ search: '002' }).includes('<td>Pending Student</td>'));
+assert.ok(render({ search: 'partial', status: 'completed' }).includes('No enrolled students match'));
+assert.ok(render({ search: 'no match' }).includes('No enrolled students match'));
+const largeRoster = Array.from({ length: 35 }, (_, i) => ({ ...students[0], id: `roster-${i}`, name: `Roster Student ${String(i + 1).padStart(3, '0')}` }));
+for (const pageNumber of [1, 2, 3]) {
+  const html = render({ roster: largeRoster, pageNumber });
+  largeRoster.forEach((student, index) => assert.equal(html.includes(`<td>${student.name}</td>`), index >= (pageNumber - 1) * 15 && index < pageNumber * 15));
+  assert.ok(html.includes(`${(pageNumber - 1) * 15 + 1}-${Math.min(pageNumber * 15, 35)} of 35`));
+  assert.ok(html.includes(`aria-label="Page ${pageNumber}" aria-current="page"`));
+}
+const clamped = render({ roster: largeRoster.slice(0, 3), pageNumber: 3 });
+assert.ok(clamped.includes('1-3 of 3'), 'A smaller refreshed roster cannot leave an empty out-of-range page');
+const changedFilter = render({ roster: largeRoster, pageNumber: 3, subject: 'GE1', pageScope: JSON.stringify(['Bacoor::teacher', 'all', 'all', 'all', 'all']) });
+assert.ok(changedFilter.includes('1-15 of 35'), 'New filters start at page one');
+const changedSearch = render({ roster: largeRoster, pageNumber: 3, search: 'roster', pageScope: JSON.stringify(['Bacoor::teacher', 'all', 'all', 'all', 'all', '']) });
+assert.ok(changedSearch.includes('1-15 of 35'), 'A changed search starts at page one');
+assert.ok(!render({ roster: [] }).includes('app-table-pagination'), 'Empty rosters have no invalid page controls');
+const changes = [];
+const firstPage = pagination.default({ page: 1, pageSize: 10, totalItems: 25, onPageChange: page => changes.push(page) });
+const [back, , pages, next] = firstPage.props.children;
+assert.equal(back.props.disabled, true);
+next.props.onClick(); pages.props.children[2].props.onClick();
+assert.deepEqual(changes, [2, 3], 'Next and numbered controls select the requested pages');
+const lastPage = pagination.default({ page: 3, pageSize: 10, totalItems: 25, onPageChange() {} });
+assert.equal(lastPage.props.children[3].props.disabled, true);
+const busyPage = pagination.default({ page: 2, pageSize: 10, totalItems: 25, disabled: true, onPageChange() {} });
+assert.equal(busyPage.props.children[0].props.disabled, true);
+assert.ok(busyPage.props.children[2].props.children.every(button => button.props.disabled));
+console.log('Instructor student checks passed: filters, loading/errors, masterlist action, 15-row pages, page selection, bounds, filter resets, empty rosters, shared pagination actions, and busy states.');

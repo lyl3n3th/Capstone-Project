@@ -1,3 +1,4 @@
+import TablePagination from "../../components/common/TablePagination";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import { useState, useEffect, useMemo } from "react";
 import {
@@ -947,54 +948,7 @@ export default function AdminAlumni({
         </div>
 
         {filteredAlumni.length > 0 && (
-          <div className="archive-pagination">
-            <button
-              className="pagination-btn prev-btn"
-              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              title="Previous page"
-              aria-label="Previous page"
-            >
-              ‹
-            </button>
-
-            <div className="pagination-info">
-              <span>{startIndex + 1}</span>
-              <span>–</span>
-              <span>
-                {Math.min(startIndex + ITEMS_PER_PAGE, filteredAlumni.length)}
-              </span>
-              <span>of</span>
-              <span>{filteredAlumni.length}</span>
-            </div>
-
-            <div className="pagination-pages">
-              {Array.from({ length: totalPages }, (_, index) => {
-                const pageNumber = index + 1;
-                return (
-                  <button
-                    key={pageNumber}
-                    className={`pagination-page ${currentPage === pageNumber ? "active" : ""}`}
-                    onClick={() => setCurrentPage(pageNumber)}
-                  >
-                    {pageNumber}
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              className="pagination-btn next-btn"
-              onClick={() =>
-                setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-              }
-              disabled={currentPage === totalPages}
-              title="Next page"
-              aria-label="Next page"
-            >
-              ›
-            </button>
-          </div>
+          <TablePagination page={currentPage} pageSize={ITEMS_PER_PAGE} totalItems={filteredAlumni.length} onPageChange={setCurrentPage} label="Alumni pages" />
         )}
 
         {/* Add Alumni Modal */}

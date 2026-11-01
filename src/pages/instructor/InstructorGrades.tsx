@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   FiAlertTriangle,
@@ -325,6 +325,25 @@ export default function InstructorGrades() {
   const [message, setMessage] = useState("");
   const [isParsing, setIsParsing] = useState(false);
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
+  const [templateSubjectId, setTemplateSubjectId] = useState("");
+  const templateDropdownRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      const dropdown = templateDropdownRef.current;
+      if (dropdown && event.target instanceof Node && !dropdown.contains(event.target)) dropdown.open = false;
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, []);
+  const templateSubjects = useMemo(() => {
+    const subjects = new Map<string, { id: string; code: string; name: string }>();
+    for (const assignment of assignments) {
+      const id = assignment.subjectId || assignment.subjectCode;
+      subjects.set(id, { id, code: assignment.subjectCode, name: assignment.subjectName });
+    }
+    return [...subjects.values()].sort((a, b) => a.name.localeCompare(b.name) || a.code.localeCompare(b.code));
+  }, [assignments]);
+  const templateSubject = templateSubjects.find((subject) => subject.id === templateSubjectId);
   const [filePreview, setFilePreview] = useState<GradeFilePreview | null>(null);
   const [errorPreviewSubmission, setErrorPreviewSubmission] =
     useState<InstructorGradeSubmission | null>(null);
@@ -337,6 +356,11 @@ export default function InstructorGrades() {
       return;
     }
 
+    if (!templateSubject) {
+      setMessage("Choose a subject before downloading its grade template.");
+      return;
+    }
+
     try {
       setIsDownloadingTemplate(true);
       await downloadInstructorGradeTemplate({
@@ -345,8 +369,9 @@ export default function InstructorGrades() {
         assignments,
         sections,
         students,
+        subjectId: templateSubject.id,
       });
-      setMessage("Grade template downloaded.");
+      setMessage(`${templateSubject.name} grade template downloaded.`);
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -507,12 +532,52 @@ export default function InstructorGrades() {
             <h3>What to do</h3>
             <ol>
               <li>
-                <span>Download the template.</span>
+                <span>Choose a subject and download its template. Each section has its own worksheet.</span>
+                <span className="instructor-template-subject-label" id="instructor-template-subject-label">Subject</span>
+                <details
+                  ref={templateDropdownRef}
+                  className="instructor-template-subject-dropdown"
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.currentTarget.open = false;
+                      event.currentTarget.querySelector("summary")?.focus();
+                    }
+                  }}
+                >
+                  <summary
+                    className="instructor-template-subject-select"
+                    aria-labelledby="instructor-template-subject-label instructor-template-subject-value"
+                    aria-disabled={isLoading || isDownloadingTemplate || templateSubjects.length === 0}
+                    onClick={(event) => {
+                      if (isLoading || isDownloadingTemplate || templateSubjects.length === 0) event.preventDefault();
+                    }}
+                  >
+                    <span id="instructor-template-subject-value">{templateSubject ? `${templateSubject.name} (${templateSubject.code})` : templateSubjects.length === 0 ? "No assigned subjects" : "Select a subject"}</span>
+                  </summary>
+                  <div className="instructor-template-subject-options">
+                    {templateSubjects.map((subject) => (
+                      <button
+                        key={subject.id}
+                        type="button"
+                        title={`${subject.name} (${subject.code})`}
+                        aria-pressed={subject.id === templateSubjectId}
+                        disabled={isDownloadingTemplate}
+                        onClick={() => {
+                          setTemplateSubjectId(subject.id);
+                          if (templateDropdownRef.current) {
+                            templateDropdownRef.current.open = false;
+                            templateDropdownRef.current.querySelector("summary")?.focus();
+                          }
+                        }}
+                      >{subject.name} ({subject.code})</button>
+                    ))}
+                  </div>
+                </details>
                 <button
                   type="button"
                   className="instructor-guide-download-btn"
                   onClick={() => void handleDownloadTemplate()}
-                  disabled={isDownloadingTemplate}
+                  disabled={isLoading || isDownloadingTemplate || !instructor || !templateSubject}
                 >
                   <FiDownload />{" "}
                   {isDownloadingTemplate ? "Preparing..." : "Download Template"}

@@ -1,4 +1,5 @@
 import re
+from unittest.mock import patch
 
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -9,6 +10,24 @@ from apps.core.models import StaffAccount
 class StaffAccountApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+
+    @patch("apps.core.branches.SupabaseRestClient.from_settings")
+    def test_new_registered_branch_can_create_staff_and_login(self, client_factory):
+        client_factory.return_value.select.return_value = [
+            {"code": "commonwealth", "name": "Commonwealth"},
+        ]
+        created = self.create_staff_account(branch="commonwealth")
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["branch"], "Commonwealth")
+        response = self.client.post("/api/staff/login/", {
+            "employee_id": created.data["employee_id"], "password": "StrongPass123",
+        }, format="json")
+        self.assertEqual(response.status_code, 200)
+
+    @patch("apps.core.branches.SupabaseRestClient.from_settings")
+    def test_unregistered_branch_is_rejected(self, client_factory):
+        client_factory.return_value.select.return_value = []
+        self.assertEqual(self.create_staff_account(branch="Not Registered").status_code, 400)
 
     def create_staff_account(self, **overrides):
         payload = {

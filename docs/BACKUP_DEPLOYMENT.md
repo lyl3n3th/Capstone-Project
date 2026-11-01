@@ -37,7 +37,8 @@ still mark generated backups failed.
 Never put `SUPABASE_SERVICE_ROLE_KEY` in a `VITE_*` variable or commit it.
 No public storage policy is needed; ZIP downloads go through the backend.
 
-Local development without cloud credentials still works when `DEBUG=true`.
+Local ZIP storage can be used with `DEBUG=true`, but complete student backups
+still require real backend Supabase credentials to read the main database.
 Render always disallows local fallback, including when DEBUG was left enabled.
 If storage credentials are absent, new production backups now fail explicitly
 instead of creating temporary files that appear safe.
@@ -95,3 +96,69 @@ storage failures (503). Detailed exception causes remain in backend logs.
 
 Reference: [Render filesystem persistence](https://render.com/docs/disks) and
 [Supabase private downloads](https://supabase.com/docs/guides/storage/serving/downloads).
+
+
+## Complete branch recovery archives (version 2)
+
+Apply `supabase/migrations/20261101050332_complete_branch_backups.sql` to the
+same Supabase project used by the frontend. This adds an exporter and an atomic
+restore function, both executable only by `service_role`. Deploy both backend
+and frontend changes together. The backend must have real `SUPABASE_URL` and
+`SUPABASE_SERVICE_ROLE_KEY` values; frontend publishable keys cannot call these
+functions. Placeholder credentials deliberately fail instead of producing a
+partial backup. `USE_SUPABASE_BACKUPS` still selects only the history backend.
+
+New manual and automatic backups contain `data/database.json`, a signed
+`metadata/manifest.json`, and deduplicated `attachments/*` entries. They include
+branch student profiles (including imported students), admissions and requirement
+files, contact/import details, student portal accounts, payments, grades and
+submissions, subjects/prerequisites, instructors and saved password hashes,
+sections, assignments and slots, subject plans, enrollment/schedule requests,
+evaluations, branch settings and synchronized branch JSON records. Referenced
+Supabase Storage files must all download successfully. Missing files fail the
+backup. The current alumni display cache is supplemental signed data; it never
+replaces student profiles. Data existing only in an unsynchronized browser is
+not a database record and must be saved/synchronized before backup.
+
+This is branch recovery within the same project, not a full Supabase project
+backup. Shared staff accounts, area manager accounts, Supabase Auth users,
+reports, storage policies, and backup history are not replaced. Shared program
+and requirement catalogs are included to restore missing references; existing
+catalog entries are preserved. Schema/branch mismatches fail. Maintain separate
+provider-level database/Auth and Storage recovery for project-wide disasters.
+
+Configure a private, stable `BACKUP_SIGNING_KEY` on the backend to keep archives
+restorable across service-key rotations. When omitted, the backend service role
+key signs them. Preserve whichever key signed the archives; signatures reject
+modified ZIPs and archives signed by another installation. Never expose this
+key or the service role key through `VITE_*` variables. Archives include personal
+records and credential/password hashes, so keep the backup bucket private.
+
+Restore validates the signature, checksums, branch, table/column set, and file
+coverage before uploading anything. Files upload to unique new names, then a
+single database transaction replaces only the target branch's records. All
+foreign keys and business validation triggers remain enabled. Invalid rows or
+cross-branch references roll the database transaction back. Other branches are
+checked for unintended cascading changes. The UI requires a confirmation before
+replacement and re-fetches the committed database records afterward.
+
+A storage or database HTTP timeout can have an uncertain outcome. Staged files
+are intentionally retained on errors so a transaction that committed before a
+lost response cannot leave broken credentials. Reconcile job status and actual
+records before retrying; remove unreferenced `backup-restores/*` objects only
+after confirming they are unused. Original storage objects are never overwritten
+or removed by restore. This allows safe failure but may leave unused files.
+
+Legacy JSON/SQL archives remain downloadable and uploadable for manual recovery.
+They cannot perform a complete database restore, and are rejected rather than
+marked successful after updating browser data. Old ZIPs cannot recover grades,
+payments or files they never contained; create new version-2 backups after this
+update. Restore buttons for legacy history entries are disabled.
+
+Verification: `npm run test:complete-backup-db` runs the migration in isolated,
+in-memory PostgreSQL against a schema fixture, including FK/check constraints
+and the actual admission/student business triggers. It tests full recovery,
+inactive historical offerings, other-branch preservation, rollback and RPC
+permissions. Django's `apps.admin_panel.tests.CompleteBackupTests` tests archive
+integrity, missing files, file staging, authoritative RPC calls and failure status.
+No deployed student data is changed by these tests.

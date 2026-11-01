@@ -21,6 +21,7 @@ from apps.admin_panel.storage import (
     upload_backup_blob,
 )
 from apps.admin_panel.services import create_branch_backup
+from apps.admin_panel.complete_backup import create_archive, restore_archive, validate_archive, FORMAT
 
 
 class BackupAutomationTimingTests(TestCase):
@@ -310,7 +311,7 @@ class BackupArchiveApiTests(TestCase):
         self.assertEqual(passed_history.storage_bucket, "local-media")
 
     @patch("apps.admin_panel.services.get_backup_archive_payload")
-    def test_restore_json_backup_completes_inline(self, archive_payload_mock):
+    def test_legacy_restore_reports_incomplete_instead_of_false_success(self, archive_payload_mock):
         archive_payload_mock.return_value = self._build_snapshot_zip()
         source_history = BackupHistory.objects.create(
             branch="Bacoor",
@@ -334,27 +335,20 @@ class BackupArchiveApiTests(TestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data["backup_type"], BackupHistory.TYPE_RESTORE)
-        self.assertEqual(response.data["status"], BackupHistory.STATUS_COMPLETED)
+        self.assertEqual(response.data["status"], BackupHistory.STATUS_FAILED)
         self.assertEqual(response.data["progress"], 100)
         self.assertEqual(str(response.data["restored_from"]), str(source_history.id))
 
         restore_history = BackupHistory.objects.get(pk=response.data["id"])
-        self.assertEqual(restore_history.status, BackupHistory.STATUS_COMPLETED)
+        self.assertEqual(restore_history.status, BackupHistory.STATUS_FAILED)
         self.assertEqual(restore_history.progress, 100)
         archive_payload_mock.assert_called_once()
-        restored_snapshot = BackupSnapshot.objects.get(branch="Bacoor")
-        self.assertEqual(
-            restored_snapshot.students,
-            [{"id": "S-1", "branch": "Bacoor"}],
-        )
-        self.assertEqual(
-            restored_snapshot.alumni,
-            [{"id": "A-1", "becameAlumniOn": "2026-04-24"}],
-        )
+        self.assertIn("legacy backup", response.data["error_message"])
+        self.assertFalse(BackupSnapshot.objects.exists())
 
     @patch("apps.admin_panel.services.get_backup_archive_payload")
     @patch("apps.admin_panel.services.upload_backup_blob")
-    def test_uploaded_json_backup_can_be_restored(self, upload_blob_mock, archive_payload_mock):
+    def test_uploaded_legacy_backup_remains_downloadable_but_cannot_fake_restore(self, upload_blob_mock, archive_payload_mock):
         upload_blob_mock.return_value = (
             "branch-backups",
             "branches/bacoor/uploads/uploaded-backup.zip",
@@ -384,14 +378,13 @@ class BackupArchiveApiTests(TestCase):
             HTTP_X_USER_BRANCH="Bacoor",
         )
         self.assertEqual(restore_response.status_code, 202, restore_response.data)
-        self.assertEqual(restore_response.data["status"], BackupHistory.STATUS_COMPLETED)
-        self.assertEqual(
-            BackupSnapshot.objects.get(branch="Bacoor").students,
-            [{"id": "S-1", "branch": "Bacoor"}],
-        )
+        self.assertEqual(restore_response.data["status"], BackupHistory.STATUS_FAILED)
+        self.assertFalse(BackupSnapshot.objects.exists())
 
+    @patch("apps.admin_panel.services.create_archive")
     @patch("apps.admin_panel.services.upload_backup_blob")
-    def test_generated_backup_completes_after_upload(self, upload_mock):
+    def test_generated_backup_completes_after_upload(self, upload_mock, archive_mock):
+        archive_mock.return_value = (b"zip", {"models": ["student_profiles"], "model_counts": {"student_profiles": 2}, "dataset_counts": {"students": 2, "alumni": 0}, "media_entries": []})
         upload_mock.return_value = ("branch-backups", "backup.zip")
         create_branch_backup(
             branch_id="Bacoor",
@@ -401,7 +394,9 @@ class BackupArchiveApiTests(TestCase):
         history = BackupHistory.objects.get()
         self.assertEqual(history.status, BackupHistory.STATUS_COMPLETED)
         self.assertEqual(history.progress, 100)
-        self.assertEqual(upload_mock.call_count, 2)
+        self.assertEqual(upload_mock.call_count, 1)
+        self.assertEqual(history.metadata["student_count"], 2)
+        archive_mock.assert_called_once_with("Bacoor", "manual", alumni=[])
 
     @patch("apps.admin_panel.views.get_backup_archive_payload")
     def test_download_reports_storage_access_failure_without_calling_it_missing(self, payload_mock):
@@ -427,7 +422,7 @@ class BackupArchiveApiTests(TestCase):
                 format="json", HTTP_X_USER_ROLE="admin", HTTP_X_USER_BRANCH="Bacoor",
             )
             self.assertEqual(response.status_code, 503)
-            self.assertIn("Permanent backup storage is not configured", response.data["detail"])
+            self.assertIn("credentials are required", response.data["detail"])
         self.assertEqual(BackupHistory.objects.filter(status="failed").count(), 2)
         self.assertFalse(BackupHistory.objects.filter(status__in=["pending", "in_progress", "completed"]).exists())
 
@@ -456,7 +451,11 @@ class BackupArchiveApiTests(TestCase):
     )
     @patch("apps.admin_panel.tasks.create_branch_backup_task.delay", side_effect=RuntimeError("No worker"))
     @patch("apps.admin_panel.storage.request.urlopen")
-    def test_cloud_backup_download_and_restore_without_local_files(self, urlopen_mock, _dispatch_mock):
+    @patch("apps.admin_panel.complete_backup.SupabaseRestClient.from_settings")
+    @patch("apps.admin_panel.tasks.restore_branch_backup_task.delay", side_effect=RuntimeError("No worker"))
+    def test_cloud_backup_download_and_restore_without_local_files(self, _restore_dispatch, client_mock, urlopen_mock, _dispatch_mock):
+        database = {"version": 2, "branch": "Bacoor", "tables": {"student_profiles": [{"id": "DATABASE-1"}]}}
+        client_mock.return_value.rpc.side_effect = lambda name, payload: database if name == "export_branch_backup_data" else {"student_profiles": 1}
         objects = {}
 
         def cloud_storage(http_request, **kwargs):
@@ -486,7 +485,9 @@ class BackupArchiveApiTests(TestCase):
             )
             self.assertEqual(restore.status_code, 202, restore.data)
             self.assertEqual(restore.data["status"], "completed")
-            self.assertEqual(BackupSnapshot.objects.get(branch="Bacoor").students, [{"id": "S-1", "branch": "Bacoor"}])
+            self.assertFalse(BackupSnapshot.objects.exists())
+            self.assertTrue(restore.data["metadata"]["authoritative_restored"])
+            self.assertEqual(client_mock.return_value.rpc.call_args.args[0], "restore_branch_backup_data")
 
     @patch("apps.admin_panel.management.commands.migrate_backup_storage.upload_backup_blob")
     @patch("apps.admin_panel.management.commands.migrate_backup_storage.get_storage_config")
@@ -557,3 +558,104 @@ class BackupStorageSafetyTests(SimpleTestCase):
         urlopen_mock.side_effect = URLError("network unavailable")
         with self.assertRaisesMessage(BackupStorageError, "temporarily unreachable"):
             download_backup_blob(object_path="backup.zip", storage_bucket="branch-backups")
+
+
+@override_settings(BACKUP_SIGNING_KEY="isolated-backup-test-key")
+class CompleteBackupTests(TestCase):
+    def setUp(self):
+        self.database = {
+            "version": 2, "branch": "Bacoor", "branch_id": "branch-1",
+            "tables": {
+                "student_profiles": [{"id": "FROM-DATABASE", "status": "active"}],
+                "branch_student_grade_records": [{"payload": {"grade": 95, "instructorName": "Original Teacher"}}],
+                "student_payments": [{"amount": 500}],
+                "branch_subject_assignments": [{"id": "assignment-1"}],
+                "student_import_details": [{"last_school_attended": "Former school", "year_completion": 2025}],
+                "admission_application_requirement_files": [{"storage_bucket": "admission-requirements", "storage_path": "branch-1/credential.pdf"}],
+                "branch_local_storage_records": [{"scope": "imported-student-credential", "payload": {
+                    "storageBucket": "admission-requirements", "storagePath": "branch-1/credential.pdf", "url": "expired-signed-url",
+                }}],
+            },
+        }
+        self.client_patch = patch("apps.admin_panel.complete_backup.SupabaseRestClient.from_settings")
+        self.rpc = self.client_patch.start().return_value.rpc
+        self.addCleanup(self.client_patch.stop)
+        self.rpc.side_effect = lambda name, payload: self.database if name == "export_branch_backup_data" else {"student_profiles": 1}
+        self.file_patch = patch("apps.admin_panel.complete_backup._object", return_value=b"credential-file-bytes")
+        self.objects = self.file_patch.start()
+        self.addCleanup(self.file_patch.stop)
+
+    def archive(self):
+        payload, manifest = create_archive("Bacoor", "manual", alumni=[{"id": "ALUMNI-1"}])
+        return zipfile.ZipFile(io.BytesIO(payload)), manifest
+
+    def test_backup_uses_database_and_preserves_linked_records_and_deduplicated_files(self):
+        archive, manifest = self.archive()
+        with archive:
+            database, _ = validate_archive(archive, "Bacoor")
+            self.assertEqual(database["tables"]["student_profiles"][0]["id"], "FROM-DATABASE")
+            self.assertEqual(database["tables"]["branch_student_grade_records"][0]["payload"]["grade"], 95)
+            self.assertEqual(database["tables"]["student_import_details"][0]["year_completion"], 2025)
+            self.assertEqual(database["alumni"], [{"id": "ALUMNI-1"}])
+            self.assertEqual(len(manifest["media_entries"]), 1)
+            self.assertEqual(archive.read("attachments/0"), b"credential-file-bytes")
+        self.objects.assert_called_once_with("GET", "admission-requirements", "branch-1/credential.pdf")
+
+    def test_missing_credential_fails_backup_instead_of_silently_omitting_it(self):
+        self.objects.side_effect = BackupStorageError("Credential file is missing")
+        with self.assertRaisesMessage(BackupStorageError, "Credential file is missing"):
+            create_archive("Bacoor", "manual")
+
+    def test_restore_stages_files_and_calls_authoritative_database_once(self):
+        archive, _ = self.archive()
+        self.objects.reset_mock()
+        with archive:
+            restore_archive(archive, "Bacoor")
+        name, args = self.rpc.call_args.args
+        self.assertEqual(name, "restore_branch_backup_data")
+        self.assertEqual(args["p_branch"], "Bacoor")
+        tables = args["p_snapshot"]["tables"]
+        restored_path = tables["admission_application_requirement_files"][0]["storage_path"]
+        self.assertTrue(restored_path.startswith("backup-restores/"))
+        self.assertEqual(tables["branch_local_storage_records"][0]["payload"]["storagePath"], restored_path)
+        self.assertEqual(tables["branch_local_storage_records"][0]["payload"]["url"], "")
+        self.objects.assert_called_once_with("POST", "admission-requirements", restored_path, b"credential-file-bytes")
+
+    def test_tampering_and_wrong_branch_fail_before_storage_or_database_writes(self):
+        archive, _ = self.archive()
+        with archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        members["data/database.json"] = b'{}'
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as altered:
+            for name, data in members.items(): altered.writestr(name, data)
+        self.rpc.reset_mock()
+        self.objects.reset_mock()
+        with zipfile.ZipFile(io.BytesIO(buffer.getvalue())) as altered:
+            with self.assertRaisesMessage(ValueError, "checksum"):
+                restore_archive(altered, "Bacoor")
+        archive, _ = self.archive()
+        self.rpc.reset_mock()
+        self.objects.reset_mock()
+        with archive:
+            with self.assertRaisesMessage(ValueError, "branch"):
+                restore_archive(archive, "Taytay")
+        self.rpc.assert_not_called()
+        self.objects.assert_not_called()
+
+    @patch("apps.admin_panel.tasks.restore_branch_backup_task.delay", side_effect=RuntimeError("No worker"))
+    @patch("apps.admin_panel.services.get_backup_archive_payload")
+    def test_failed_database_restore_never_reports_success_or_overwrites_browser_snapshot(self, payload_mock, _dispatch):
+        payload, _ = create_archive("Bacoor", "manual")
+        payload_mock.return_value = payload
+        source = BackupHistory.objects.create(branch="Bacoor", backup_type="manual", file_path="backup.zip",
+            status="completed", metadata={"snapshot_format": FORMAT})
+        self.rpc.side_effect = RuntimeError("Database rejected restore")
+        BackupSnapshot.objects.create(branch="Bacoor", students=[{"id": "CURRENT"}], alumni=[])
+        response = APIClient().post("/api/admin/backup/restore/", {"backup_history_id": str(source.id)},
+            format="json", HTTP_X_USER_ROLE="admin", HTTP_X_USER_BRANCH="Bacoor")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data["status"], "failed")
+        self.assertIn("Database rejected", response.data["error_message"])
+        self.assertEqual(BackupSnapshot.objects.get(branch="Bacoor").students, [{"id": "CURRENT"}])
+        self.assertFalse(any(call.args[0] == "DELETE" for call in self.objects.call_args_list))

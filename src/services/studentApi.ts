@@ -1,9 +1,12 @@
+import { isCollegeTransferee } from "./adminStorage";
 import type { Student } from "../types/student";
 import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 import { isCachedAlumniStudent } from "./backupApi";
 import {
   fetchSupabaseAdmissionApplicants,
   getStudentCredentialOverview,
+  getImportedStudentRequirementRecord,
+  fetchImportedStudentCredentials,
   getStudentsForBranch,
   mergeAdminEnrolleeRecords,
   normalizeStudentNumberInput,
@@ -221,6 +224,10 @@ const syncStudentCredentialCache = async ({
 
   try {
     const resolvedBranch = normalizeBranchName(branch);
+    if (getImportedStudentRequirementRecord(resolvedBranch, studentNumber)) {
+      await fetchImportedStudentCredentials(resolvedBranch, studentNumber!);
+      return;
+    }
     const applicants = await fetchSupabaseAdmissionApplicants(resolvedBranch);
     const applicant = applicants.find(
       (candidate) =>
@@ -418,6 +425,7 @@ const getPortalStudentStatus = (
   }).label;
 
   if (
+    isCollegeTransferee(storedStudent) ||
     hasIrregularScheduleFlag ||
     storedStudent.importAcademicStanding === "Irregular" ||
     hasApprovedIrregularEnrollmentRequest ||

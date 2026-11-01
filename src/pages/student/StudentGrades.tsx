@@ -158,6 +158,7 @@ const getShsColumnsForSemester = (semester: string): TableColumn[] => [
     (quarterLabel) => shsQuarterColumns[quarterLabel],
   ),
   shsSemesterFinalGradeColumn,
+  { key: "instructor", label: "Instructor", cellClassName: "s-instructor-name" },
   shsStatusColumn,
 ];
 
@@ -494,6 +495,7 @@ const buildShsRows = (
   semester: string,
 ) => {
   const rows = new Map<string, DisplayGradeRow>();
+  const recordedInstructors = new Map<string, Set<string>>();
   const semesterQuarterLabels = getShsQuarterLabelsForSemester(semester);
 
   subjects.forEach((subject) => {
@@ -543,6 +545,13 @@ const buildShsRows = (
         subjectTitle: record.subjectTitle,
         units: record.units,
       });
+
+    if (record.instructorName?.trim()) {
+      const names = recordedInstructors.get(key) ?? new Set<string>();
+      names.add(record.instructorName.trim());
+      recordedInstructors.set(key, names);
+      existingRow.instructor = [...names].join(", ");
+    }
 
     if (quarterLabel === "1st Quarter") {
       existingRow.firstQuarter = record.normalizedGrade;
@@ -1114,7 +1123,14 @@ const buildReportCardPdf = async ({
       leftRow,
       collegeGradingSystemRightRows[index],
     ]);
-    const gradingColumnWidths = [52, 132, 96, 52, 132, 96];
+    const gradingColumnWidths = [76, 108, 96, 76, 108, 96];
+    const gradingTextSize = 6.7;
+    const gradingTextContext = document.createElement("canvas").getContext("2d");
+    if (gradingTextContext) {
+      gradingTextContext.font = `${gradingTextSize}px Arial`;
+    }
+    const centeredGradingTextX = (value: string, x: number, width: number) =>
+      x + (width - (gradingTextContext?.measureText(value).width ?? 0)) / 2;
     const gradingTableWidth = gradingColumnWidths.reduce(
       (sum, width) => sum + width,
       0,
@@ -1123,7 +1139,7 @@ const buildReportCardPdf = async ({
     const rowHeight = 13;
     const requiredHeight = rowHeight * (gradingRows.length + 1) + 10;
 
-    if (y - requiredHeight < margin + footerClearance + 34) {
+    if (y - requiredHeight < margin + footerClearance) {
       startPage(true);
     }
 
@@ -1138,7 +1154,13 @@ const buildReportCardPdf = async ({
       });
 
       if (index === 0) {
-        text("Grading System", x + 6, y - 9, 6.7, textColor);
+        text(
+          "Grading System",
+          centeredGradingTextX("Grading System", x, width),
+          y - 9,
+          gradingTextSize,
+          textColor,
+        );
       }
 
       x += width;
@@ -1163,7 +1185,15 @@ const buildReportCardPdf = async ({
           stroke: [0.18, 0.2, 0.23],
           strokeWidth: 0.7,
         });
-        text(value, rowX + 5, y - 9, 6.7, textColor);
+        text(
+          value,
+          index === 0 || index === 3
+            ? centeredGradingTextX(value, rowX, width)
+            : rowX + 5,
+          y - 9,
+          gradingTextSize,
+          textColor,
+        );
         rowX += width;
       });
       y -= rowHeight;
@@ -1225,11 +1255,12 @@ const buildReportCardPdf = async ({
     y -= rowHeight;
   });
 
+  drawSummary();
+
   if (!isSHS) {
     drawCollegeGradingSystem();
   }
 
-  drawSummary();
   text(
     "Generated from the AICS student portal.",
     pageWidth - margin - 194,

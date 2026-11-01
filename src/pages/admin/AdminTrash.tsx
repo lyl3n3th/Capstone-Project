@@ -1,3 +1,4 @@
+import TablePagination from "../../components/common/TablePagination";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import { useEffect, useMemo, useState } from "react";
 import { FaSearch, FaTrash, FaUndo } from "react-icons/fa";
@@ -93,7 +94,7 @@ interface Toast {
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE = 15;
 
 export default function AdminTrash({
   onLogout,
@@ -298,18 +299,6 @@ export default function AdminTrash({
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
-
-  const handlePreviousPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage((prev) => prev - 1);
-    }
-  };
-
-  const handleNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage((prev) => prev + 1);
-    }
-  };
 
   const handlePageSelect = (pageNumber: number) => {
     setCurrentPage(pageNumber);
@@ -1084,52 +1073,7 @@ export default function AdminTrash({
         </div>
 
         {filteredArchivedRecords.length > 0 && (
-          <div className="archive-pagination">
-            <button
-              className="pagination-btn prev-btn"
-              onClick={handlePreviousPage}
-              disabled={currentPage === 1}
-              title="Previous page"
-              aria-label="Previous page"
-              type="button"
-            >
-              &lt;
-            </button>
-
-            <div className="pagination-info">
-              <span>{startIndex + 1}</span>
-              <span>-</span>
-              <span>{Math.min(endIndex, filteredArchivedRecords.length)}</span>
-              <span>of</span>
-              <span>{filteredArchivedRecords.length}</span>
-            </div>
-
-            <div className="pagination-pages">
-              {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-                (pageNumber) => (
-                  <button
-                    key={pageNumber}
-                    className={`pagination-page ${pageNumber === currentPage ? "active" : ""}`}
-                    onClick={() => handlePageSelect(pageNumber)}
-                    type="button"
-                  >
-                    {pageNumber}
-                  </button>
-                ),
-              )}
-            </div>
-
-            <button
-              className="pagination-btn next-btn"
-              onClick={handleNextPage}
-              disabled={currentPage === totalPages}
-              title="Next page"
-              aria-label="Next page"
-              type="button"
-            >
-              &gt;
-            </button>
-          </div>
+          <TablePagination page={currentPage} pageSize={ITEMS_PER_PAGE} totalItems={filteredArchivedRecords.length} onPageChange={handlePageSelect} label="Archive pages" />
         )}
       </main>
     </div>

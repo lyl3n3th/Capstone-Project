@@ -13,6 +13,13 @@ export const isVisibleManagerStudentRecord = (
   (student.status || "").trim().toLowerCase(),
 );
 
+export const isManagerEnrollmentStudent = (
+  student: Pick<StudentStorageRecord, "program" | "studentStatus" | "importAcademicYear" | "importSemester">,
+) => (student.program === "SHS" || student.program === "College")
+  && !student.importAcademicYear
+  && !student.importSemester
+  && student.studentStatus?.trim().toLowerCase() !== "existing student";
+
 // Use the same database reader as the admin list, without depending on its cache.
 export const fetchManagedStudentSnapshot = async (): Promise<ManagedStudentSnapshot> => {
   const managedBranches = await fetchManagedBranches();

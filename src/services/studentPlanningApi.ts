@@ -1,3 +1,4 @@
+import { getIrregularScheduleUnitError } from "./studentScheduleUnitLimit";
 import { supabase } from "../lib/supabase";
 import {
   normalizeBranchName,
@@ -566,6 +567,12 @@ export const fetchStudentScheduleRequests = async (
 export const saveStudentScheduleRequest = async (
   request: StudentScheduleSelectionRequestRecord,
 ) => {
+  // College own-schedule requests are the irregular scheduling flow.
+  // Rejection remains available for older requests that exceed the limit.
+  if (request.program === "College" && request.status !== "Rejected") {
+    const error = getIrregularScheduleUnitError(request.selections);
+    if (error) throw new Error(error);
+  }
   const resolvedBranch = normalizeBranchName(request.branch);
   const { data, error } = await supabase
     .rpc("upsert_student_schedule_request", {

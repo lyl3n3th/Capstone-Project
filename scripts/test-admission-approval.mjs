@@ -18,18 +18,30 @@ const deferred = () => {
   const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
   return { promise, resolve, reject };
 };
-async function scenario(emailFails) {
+async function scenario(emailFails, collegeTransferee = false) {
   const saved = deferred();
   const saveStarted = deferred();
   const email = deferred();
   const calls = [];
   const toasts = [];
-  const applicant = { id: 'applicant', trackingNumber: 'TRACK-1', program: 'College', yearLevel: '1st Year', ownScheduleRequestStatus: 'Approved', personalInfo: { email: 'test@example.invalid' }, fullName: 'Test Student', documentsSubmitted: 2, totalDocuments: 3 };
+  const applicant = { id: 'applicant', trackingNumber: 'TRACK-1', program: 'College', yearLevel: '1st Year', ownScheduleRequestStatus: collegeTransferee ? undefined : 'Approved', studentStatus: collegeTransferee ? 'Transferee' : 'New Student', personalInfo: { email: 'test@example.invalid' }, fullName: 'Test Student', documentsSubmitted: 2, totalDocuments: 3 };
   const context = {
     selectedAction: { id: applicant.id, action: 'approve' }, selectedRejectionReason: '',
     decisionInFlight: { current: false }, isProcessing: false, modalClosed: false,
     enrollmentRequests: [], enrollees: [applicant], currentBranch: 'Bacoor', selectedRequest: null,
-    isTransfereeAdmission: () => false,
+    isTransfereeAdmission: () => collegeTransferee,
+    isCollegeTransferee: record => record.program === 'College' && record.studentStatus === 'Transferee',
+    reflectedAcademicYear: '2026-2027',
+    normalizeSectionSemester: value => value,
+    getTransfereeEvaluation: () => ({resolvedYearLevel:'2nd Year', plannedAcademicYear:'2026-2027', plannedSemester:'2nd Semester', assignedSubjectIds:[], creditedSubjectIds:['credited-1'], recommendedSectionId:''}),
+    syncStudentSubjectPlan: async (record, evaluation) => {
+      assert.equal(record.ownScheduleRequestStatus, 'Approved');
+      assert.equal(record.requestedOwnSchedule, true);
+      assert.deepEqual(evaluation.creditedSubjectIds, ['credited-1']);
+      assert.deepEqual(evaluation.assignedSubjectIds, []);
+      calls.push('credits');
+    },
+    assignEnrolleeToSection: () => { throw new Error('College transferees must not receive a section'); },
     getEstimatedCollegeTuition: () => ({}), hasApprovedAttachmentNamed: () => false,
     updateAdmissionProgress: async () => { calls.push('progress'); },
     activateApprovedStudent: async () => { calls.push('activate'); return { studentNumber: 'BAC-001' }; },
@@ -55,7 +67,7 @@ async function scenario(emailFails) {
   assert.equal(calls.filter(call => call === 'activate').length, 1, 'Repeated clicks cannot activate twice');
   saved.resolve();
   await processing;
-  assert.deepEqual(calls, ['progress', 'activate', 'save', 'saved', 'email']);
+  assert.deepEqual(calls, ['progress', 'activate', 'save', 'saved', ...(collegeTransferee ? ['credits'] : []), 'email']);
   assert.equal(context.modalClosed, true, 'Approval finishes while email delivery is still pending');
   assert.equal(context.isProcessing, false);
   assert.equal(context.decisionInFlight.current, false);
@@ -68,4 +80,5 @@ async function scenario(emailFails) {
 }
 await scenario(false);
 await scenario(true);
+await scenario(false, true);
 console.log('Admission approval checks passed: persistence before success, email runs separately, one planning save, immediate processing state, repeated-click protection, and email failure feedback.');

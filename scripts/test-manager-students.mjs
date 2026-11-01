@@ -29,6 +29,18 @@ new Function('exports', 'require', compiled)(exports, path => {
 });
 const {fetchManagedStudentSnapshot: fetch, isVisibleManagerStudentRecord: visible} = exports;
 
+const enrollment = exports.isManagerEnrollmentStudent;
+for (const program of ['SHS', 'College']) {
+  assert.equal(enrollment({program, studentStatus: 'New Student'}), true);
+  assert.equal(enrollment({program, studentStatus: 'Transferee'}), true);
+  assert.equal(enrollment({program, importAcademicYear: '2026-2027'}), false);
+  assert.equal(enrollment({program, importSemester: '1st Semester'}), false);
+  // The base status still identifies imports when import details cannot load.
+  assert.equal(enrollment({program, studentStatus: ' Existing Student '}), false);
+  assert.equal(enrollment({program, studentStatus: 'Transferee', importAcademicYear: '2026-2027'}), false);
+}
+assert.equal(enrollment({program: 'Other'}), false);
+
 // The database has 25 students even when the browser has fewer or no cached records.
 rows.set('Bacoor', Array.from({length:25}, (_,i) => student(String(i))));
 rows.set('Taytay', [student('T-1','Taytay')]);

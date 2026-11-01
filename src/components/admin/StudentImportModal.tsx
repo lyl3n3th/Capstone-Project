@@ -1,3 +1,4 @@
+import TablePagination from "../common/TablePagination";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
@@ -71,9 +72,9 @@ export default function StudentImportModal({ branch, onClose, onImported }: Prop
   const correctedCount = reviewItems.filter((error) => error.field && !activeErrorKeys.has(reviewKey(error))).length;
   const errorRows = new Set(errors.map((error) => error.rowNumber));
   const visible = errorsOnly ? rows.filter((row) => reviewRows.has(row.rowNumber)) : rows;
-  const pageCount = Math.max(1, Math.ceil(visible.length / 25));
+  const pageCount = Math.max(1, Math.ceil(visible.length / 15));
   const currentPage = Math.min(page, pageCount - 1);
-  const displayed = visible.slice(currentPage * 25, currentPage * 25 + 25);
+  const displayed = visible.slice(currentPage * 15, currentPage * 15 + 15);
   const validCount = rows.filter((row) => !errorRows.has(row.rowNumber)).length;
 
   const change = (rowNumber: number, field: StudentImportField, value: string) => {
@@ -133,7 +134,7 @@ export default function StudentImportModal({ branch, onClose, onImported }: Prop
   const focusError = (error: StudentImportError) => {
     const index = rows.findIndex((row) => row.rowNumber === error.rowNumber);
     if (index < 0) return;
-    setErrorsOnly(false); setPage(Math.floor(index / 25));
+    setErrorsOnly(false); setPage(Math.floor(index / 15));
     requestAnimationFrame(() => document.getElementById(`student-import-${error.cell}`)?.focus());
   };
 
@@ -221,9 +222,7 @@ export default function StudentImportModal({ branch, onClose, onImported }: Prop
                 </tr>)}</tbody>
               </table>
             </div>
-            <div className="student-import-pagination"><button type="button" disabled={busy || currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous</button>
-              <span>Page {currentPage + 1} of {pageCount} · {visible.length} row(s)</span>
-              <button type="button" disabled={busy || currentPage + 1 === pageCount} onClick={() => setPage(currentPage + 1)}>Next</button></div>
+            <TablePagination page={currentPage + 1} pageSize={15} totalItems={visible.length} onPageChange={(nextPage) => setPage(nextPage - 1)} disabled={busy} label="Student import preview pages" />
           </>}
         </div>
         <footer className="student-import-footer"><span>No existing students will be overwritten.</span>

@@ -348,7 +348,8 @@ function AdmissionStep3() {
         },
       }));
       setMissingRequirementErrors((prev) => {
-        const { [requirementCode]: _removedError, ...nextErrors } = prev;
+        const nextErrors = { ...prev };
+        delete nextErrors[requirementCode];
         return nextErrors;
       });
       addToast(`${requirementName} selected successfully!`, "success");
@@ -722,7 +723,10 @@ function AdmissionStep3() {
 
               <div className="notice-list">
                 <p className="notice-text">
-                  Birth Certificate/PSA is required before you can continue.
+                  Required before continuing: {currentRequirements
+                    .filter((requirement) => !requirement.optional)
+                    .map((requirement) => requirement.name)
+                    .join(" and ")}.
                 </p>
                 <p className="notice-text">Upload clear and readable files.</p>
                 <p className="notice-text">
@@ -755,14 +759,6 @@ function AdmissionStep3() {
                 disabled={isSubmitting}
               >
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="btn5 btn-quiet"
-                onClick={handleContinueWithoutUpload}
-                disabled={isSubmitting || hasMissingRequiredRequirements}
-              >
-                Continue without optional files
               </button>
               <button type="submit" className="btn6" disabled={isSubmitting}>
                 {isSubmitting ? "Uploading..." : "Upload & Continue"}

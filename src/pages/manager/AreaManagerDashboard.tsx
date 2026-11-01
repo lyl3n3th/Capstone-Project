@@ -23,6 +23,7 @@ import {
 } from "../../services/adminStorage";
 import { fetchInboxReports, type ReportRecord } from "../../services/reportApi";
 import { useManagedStudents } from "../../hooks/useManagedStudents";
+import { isManagerEnrollmentStudent } from "../../services/managerStudents";
 import ChartNote from "../../components/common/ChartNote";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import "../../styles/manager/area-managerDashboard.css";
@@ -205,10 +206,11 @@ const buildDashboardState = (
   const branches = dashboardBranches.map((branch) => {
     const students = studentRecords.filter((student) => normalizeBranchName(student.branch) === branch);
     const effectivePopulation = buildPopulationRecordsFromStudents(students);
-    const shsEnrollees = students.filter(
+    const enrollmentStudents = students.filter(isManagerEnrollmentStudent);
+    const shsEnrollees = enrollmentStudents.filter(
       (student) => student.program === "SHS",
     ).length;
-    const collegeEnrollees = students.filter(
+    const collegeEnrollees = enrollmentStudents.filter(
       (student) => student.program === "College",
     ).length;
     const pendingReports = pendingReportCounts.countsByBranch.get(branch) || 0;

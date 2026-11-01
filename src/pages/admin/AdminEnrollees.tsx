@@ -1,3 +1,6 @@
+import { isCollegeTransferee } from "../../services/adminStorage";
+import { buildEvaluationSummaryReport } from "../../services/evaluationSummaryReport";
+import TablePagination from "../../components/common/TablePagination";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -31,6 +34,9 @@ import {
 } from "react-icons/fa";
 import { MdArchive } from "react-icons/md";
 import AdminSidebar from "../../components/admin/AdminSidebar";
+import ScholarshipExamRoomSettings from "../../components/admin/ScholarshipExamRoomSettings";
+import { fetchScholarshipExamRoom, saveScholarshipExamRoom } from "../../services/scholarshipExamRoom";
+import { supabase } from "../../lib/supabase";
 import SystemAlertModal from "../../components/common/SystemAlertModal";
 import { ToastContainer } from "../../components/common/Toast";
 import { useAuth } from "../../hooks/useAuth";
@@ -81,6 +87,7 @@ import {
 } from "../../services/academicData";
 import { resetInstructorTemporaryPassword } from "../../services/instructorPortal";
 import { getClassAssignmentScheduleError } from "../../services/classAssignmentSchedule";
+import { ASSIGNMENT_GRADE_REMOVAL_NOTICE, loadAssignmentGradeHistory, preserveAssignmentGradeHistory } from "../../services/assignmentGradeHistory";
 import { useEvaluationPeriod } from "../../hooks/useEvaluationPeriod";
 import { saveEvaluationPeriod, toLocalDateTimeInput } from "../../services/evaluationPeriod";
 import {
@@ -336,7 +343,7 @@ interface AssignmentFormState {
 
 const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
 const DEFAULT_SECTION_SEMESTER = "1st Semester";
-const ENROLLEES_PER_PAGE = 10;
+const ENROLLEES_PER_PAGE = 15;
 
 const getCourseStrandDisplay = ({
   program,
@@ -543,9 +550,9 @@ const getAdmissionPersonalInfoItems = (
 };
 
 const requiresSectionAssignment = (
-  enrollee: Pick<Enrollee, "requestedOwnSchedule" | "ownScheduleRequestStatus">,
+  enrollee: Pick<Enrollee, "requestedOwnSchedule" | "ownScheduleRequestStatus" | "program" | "studentStatus">,
 ) =>
-  !(
+  !isCollegeTransferee(enrollee) && !(
     enrollee.requestedOwnSchedule &&
     enrollee.ownScheduleRequestStatus === "Approved"
   );
@@ -692,7 +699,7 @@ const getUniqueTrimmedValues = (
 };
 
 const normalizeTransfereeEvaluation = (
-  enrollee: Pick<Enrollee, "id" | "yearLevel">,
+  enrollee: Pick<Enrollee, "id" | "yearLevel" | "program" | "studentStatus">,
   evaluation: Partial<TransfereeEvaluationRecord> | null | undefined,
   academicYear = "2026-2027",
 ): TransfereeEvaluationRecord => {
@@ -736,8 +743,8 @@ const normalizeTransfereeEvaluation = (
         ? "All"
         : normalizeSectionSemester(creditSemesterFilter),
     creditedSubjectIds,
-    assignedSubjectIds,
-    recommendedSectionId:
+    assignedSubjectIds: isCollegeTransferee(enrollee) ? [] : assignedSubjectIds,
+    recommendedSectionId: isCollegeTransferee(enrollee) ? "" :
       typeof evaluation?.recommendedSectionId === "string"
         ? evaluation.recommendedSectionId
         : fallback.recommendedSectionId,
@@ -756,17 +763,6 @@ const SCHEDULE_DAYS = [
   "Wednesday",
   "Thursday",
   "Friday",
-] as const;
-const DEFAULT_ASSIGNMENT_ROOMS = [
-  "RM101",
-  "RM102",
-  "RM103",
-  "RM104",
-  "RM205",
-  "Computer Lab 1",
-  "Computer Lab 2",
-  "Science Lab",
-  "Library",
 ] as const;
 const SEMESTER_SORT_ORDER = ["1st Semester", "2nd Semester", "Summer"] as const;
 const AUTO_ASSIGN_SEMESTER_OPTIONS = [
@@ -1524,6 +1520,8 @@ export default function AdminEnrollees({
   } | null>(null);
   const [enrollees, setEnrollees] = useState<Enrollee[]>([]);
   const [currentEnrolleePage, setCurrentEnrolleePage] = useState(1);
+  const [requestedEnrollmentPage, setRequestedEnrollmentPage] = useState({ scope: "", page: 1 });
+  const [isArchiveMode, setIsArchiveMode] = useState(false);
   const [selectedEnrolleeIds, setSelectedEnrolleeIds] = useState<string[]>([]);
   const [selectedEnrollmentRequestIds, setSelectedEnrollmentRequestIds] =
     useState<string[]>([]);
@@ -1742,8 +1740,8 @@ export default function AdminEnrollees({
   const [selectedEvaluationDetailsInstructorId, setSelectedEvaluationDetailsInstructorId] =
     useState("");
   const [evaluationDetailsFilters, setEvaluationDetailsFilters] = useState({
-    subjectId: "",
-    yearLevel: "",
+    subjectId: "All",
+    yearLevel: "All",
     section: "All",
   });
   const [questionnaireCategoryName, setQuestionnaireCategoryName] =
@@ -2865,7 +2863,6 @@ export default function AdminEnrollees({
   };
 
   const assignmentRoomOptions = getUniqueTrimmedValues([
-    ...DEFAULT_ASSIGNMENT_ROOMS,
     ...customAssignmentRooms,
     ...subjectAssignments.flatMap((assignment) =>
       assignment.schedule.map((slot) => slot.room),
@@ -3128,19 +3125,39 @@ export default function AdminEnrollees({
     selectVisibleAssignments();
   };
 
+  const assignmentGradeCheckRequest = useRef(0);
+  const [assignmentGradeHistory, setAssignmentGradeHistory] = useState<Awaited<ReturnType<typeof loadAssignmentGradeHistory>> | null>(null);
+  const [assignmentGradeCheckError, setAssignmentGradeCheckError] = useState("");
+  const [deletingAssignments, setDeletingAssignments] = useState(false);
+
   const closeAssignmentDeleteModal = () => {
+    assignmentGradeCheckRequest.current += 1;
     setShowAssignmentDeleteModal(false);
     setPendingAssignmentDeleteIds([]);
+    setAssignmentGradeHistory(null);
+    setAssignmentGradeCheckError("");
   };
 
-  const openAssignmentDeleteModal = (assignmentIds: string[]) => {
+  const openAssignmentDeleteModal = async (assignmentIds: string[]) => {
     if (assignmentIds.length === 0) {
       addToast("Select at least one assignment to delete.", "warning");
       return;
     }
 
     setPendingAssignmentDeleteIds(Array.from(new Set(assignmentIds)));
+    setAssignmentGradeHistory(null);
+    setAssignmentGradeCheckError("");
     setShowAssignmentDeleteModal(true);
+    const request = ++assignmentGradeCheckRequest.current;
+    try {
+      const history = await loadAssignmentGradeHistory(currentBranch,
+        subjectAssignments.filter(assignment => assignmentIds.includes(assignment.id)));
+      if (request === assignmentGradeCheckRequest.current) setAssignmentGradeHistory(history);
+    } catch (error) {
+      if (request === assignmentGradeCheckRequest.current) setAssignmentGradeCheckError(
+        error instanceof Error ? error.message : "Unable to check recorded grades.",
+      );
+    }
   };
 
   const handleSaveAssignment = async () => {
@@ -3241,6 +3258,14 @@ export default function AdminEnrollees({
       };
 
       try {
+        if (editingAssignment.instructorId !== nextAssignment.instructorId) {
+          const history = await loadAssignmentGradeHistory(currentBranch, [editingAssignment]);
+          if (history.gradedAssignmentIds.length > 0 && !(await requestConfirmation(
+            "This subject has recorded grades. Changing its instructor will preserve those grades and the original instructor details.",
+            { title: "Change Assigned Instructor", confirmLabel: "Save assignment" },
+          ))) return;
+          await preserveAssignmentGradeHistory(currentBranch, history.recordsToPreserve);
+        }
         const savedAssignment = await saveAcademicSubjectAssignment(
           currentBranch,
           nextAssignment,
@@ -3408,6 +3433,17 @@ export default function AdminEnrollees({
     roomNames: string[],
     usedRoomNames: string[] = [],
   ) => {
+    try {
+      const examRoom = await fetchScholarshipExamRoom(currentBranch);
+      if (roomNames.includes(examRoom)) await saveScholarshipExamRoom(currentBranch, "");
+      for (const roomName of roomNames) {
+        const { error } = await supabase.rpc("delete_assignment_room", { p_branch: currentBranch, p_room_name: roomName });
+        if (error) throw new Error(error.message);
+      }
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "Unable to delete classrooms.", "error");
+      return;
+    }
     setCustomAssignmentRooms((prev) =>
       prev.filter(
         (room) =>
@@ -3512,7 +3548,27 @@ export default function AdminEnrollees({
     /Assignment\s+".*"\s+was not found for branch/i.test(error.message);
 
   const handleConfirmAssignmentDelete = async () => {
-    if (pendingAssignmentDeleteIds.length === 0) {
+    if (pendingAssignmentDeleteIds.length === 0 || !assignmentGradeHistory || assignmentGradeCheckError || deletingAssignments) {
+      return;
+    }
+
+    setDeletingAssignments(true);
+    try {
+      if (assignmentGradeHistory.gradedAssignmentIds.length > 0) {
+        const confirmed = await requestConfirmation(ASSIGNMENT_GRADE_REMOVAL_NOTICE, {
+          title: "Recorded Grades Warning",
+          confirmLabel: "Remove assignments",
+          destructive: true,
+        });
+        if (!confirmed) {
+          setDeletingAssignments(false);
+          return;
+        }
+      }
+      await preserveAssignmentGradeHistory(currentBranch, assignmentGradeHistory.recordsToPreserve);
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "Unable to preserve grade details.", "error");
+      setDeletingAssignments(false);
       return;
     }
 
@@ -3521,6 +3577,7 @@ export default function AdminEnrollees({
         deleteAcademicSubjectAssignment(currentBranch, assignmentId),
       ),
     );
+    setDeletingAssignments(false);
     const failedDelete = deleteResults.find(
       (result) =>
         result.status === "rejected" &&
@@ -3620,31 +3677,6 @@ export default function AdminEnrollees({
     );
   };
 
-  const handleArchiveEnrollee = async (enrollee: Enrollee) => {
-    if (enrollee.status === "Pending") {
-      setSystemAlert({
-        title: "Request cannot be archived",
-        message:
-          "Pending admission requests cannot be archived. Approve or reject them first.",
-      });
-      return;
-    }
-
-    const confirmed = (await requestConfirmation(
-      `Archive ${enrollee.fullName}? You can restore this record from Archive later.`,
-      {
-        title: "Archive Enrollee",
-        confirmLabel: "Archive",
-      },
-    ));
-
-    if (!confirmed) {
-      return;
-    }
-
-    archiveEnrollees([enrollee]);
-  };
-
   const handleArchiveSelectedEnrollees = async (recordsToArchive: Enrollee[]) => {
     if (recordsToArchive.length === 0) {
       addToast("Select at least one record to archive.", "info");
@@ -3673,6 +3705,8 @@ export default function AdminEnrollees({
     }
 
     archiveEnrollees(recordsToArchive);
+    setIsArchiveMode(false);
+    setSelectedEnrolleeIds([]);
   };
 
   const archiveEnrollmentRequests = (requestsToArchive: EnrollmentRequest[]) => {
@@ -3770,6 +3804,8 @@ export default function AdminEnrollees({
     }
 
     archiveEnrollmentRequests(requestsToArchive);
+    setIsArchiveMode(false);
+    setSelectedEnrollmentRequestIds([]);
   };
 
   // Update pending assignments
@@ -4387,19 +4423,19 @@ export default function AdminEnrollees({
     return updatedStudentRecord;
   };
 
-  const syncStudentSubjectPlan = (
-    enrollee: Pick<Enrollee, "id" | "trackingNumber" | "studentNumber">,
+  const syncStudentSubjectPlan = async (
+    enrollee: Pick<Enrollee, "id" | "trackingNumber" | "studentNumber" | "program" | "studentStatus">,
     evaluation: TransfereeEvaluationRecord,
   ) => {
     const planKey = enrollee.trackingNumber || enrollee.id;
     const assignedSubjects = mapSubjectsToStudentSubjectPlanItems(
-      evaluation.assignedSubjectIds,
+      isCollegeTransferee(enrollee) ? [] : evaluation.assignedSubjectIds,
     );
     const creditedSubjects = mapSubjectsToStudentSubjectPlanItems(
       evaluation.creditedSubjectIds,
     );
 
-    if (assignedSubjects.length === 0 && creditedSubjects.length === 0) {
+    if (!isCollegeTransferee(enrollee) && assignedSubjects.length === 0 && creditedSubjects.length === 0) {
       if (!studentSubjectPlans[planKey]) {
         return;
       }
@@ -4431,9 +4467,7 @@ export default function AdminEnrollees({
       ...prev,
       [planKey]: nextPlan,
     }));
-    void saveStudentSubjectPlan(currentBranch, nextPlan).catch((error) => {
-      console.error("Failed to sync shared transferee subject plan", error);
-    });
+    await saveStudentSubjectPlan(currentBranch, nextPlan);
   };
 
   const updateTransfereeEvaluation = (
@@ -4479,7 +4513,8 @@ export default function AdminEnrollees({
           reflectedAcademicYear
         ).trim() || reflectedAcademicYear,
       creditedSubjectIds: nextCreditedSubjectIds,
-      assignedSubjectIds: nextAssignedSubjectIds,
+      assignedSubjectIds: isCollegeTransferee(enrollee) ? [] : nextAssignedSubjectIds,
+      recommendedSectionId: isCollegeTransferee(enrollee) ? "" : (updates.recommendedSectionId ?? base.recommendedSectionId),
       updatedAt: new Date().toISOString(),
     };
 
@@ -6050,6 +6085,7 @@ export default function AdminEnrollees({
 
     if (
       !isEnrollmentRequest(request) &&
+      !isCollegeTransferee(request) &&
       request.requestedOwnSchedule &&
       request.ownScheduleRequestStatus !== "Approved" &&
       request.ownScheduleRequestStatus !== "Rejected"
@@ -6150,6 +6186,10 @@ export default function AdminEnrollees({
             : enrolleeToUpdate.ownScheduleSemester;
           const enrolleeForApproval: Enrollee = {
             ...enrolleeToUpdate,
+            ...(isCollegeTransferee(enrolleeToUpdate) ? {
+              requestedOwnSchedule: true,
+              ownScheduleRequestStatus: "Approved" as const,
+            } : {}),
             yearLevel: resolvedYearLevel,
             ownScheduleAcademicYear: resolvedPlacementAcademicYear,
             ownScheduleSemester: resolvedPlacementSemester,
@@ -6276,12 +6316,13 @@ export default function AdminEnrollees({
             transfereeEvaluation &&
             isTransfereeAdmission(updatedEnrollee)
           ) {
-            syncStudentSubjectPlan(updatedEnrollee, transfereeEvaluation);
+            await syncStudentSubjectPlan(updatedEnrollee, transfereeEvaluation);
           }
 
           if (
             isApprove &&
             transfereeEvaluation?.recommendedSectionId &&
+            !isCollegeTransferee(updatedEnrollee) &&
             isTransfereeAdmission(updatedEnrollee)
           ) {
             assignEnrolleeToSection(
@@ -6617,6 +6658,16 @@ export default function AdminEnrollees({
       request.enrollmentStatus === enrollmentStatusFilter;
     return matchesSearch && matchesStatus;
   });
+  const enrollmentPageScope = JSON.stringify([currentBranch, searchTerm, enrollmentStatusFilter, activeTab]);
+  const enrollmentPageSize = 15;
+  const totalEnrollmentPages = Math.max(1, Math.ceil(filteredRequests.length / enrollmentPageSize));
+  const currentEnrollmentPage = requestedEnrollmentPage.scope === enrollmentPageScope
+    ? Math.min(requestedEnrollmentPage.page, totalEnrollmentPages)
+    : 1;
+  const paginatedRequests = filteredRequests.slice(
+    (currentEnrollmentPage - 1) * enrollmentPageSize,
+    currentEnrollmentPage * enrollmentPageSize,
+  );
   const filteredRequestIds = filteredRequests.map((request) => request.id);
   const selectedEnrollmentRequestIdSet = new Set(selectedEnrollmentRequestIds);
   const selectedFilteredEnrollmentRequests = filteredRequests.filter((request) =>
@@ -6786,11 +6837,12 @@ export default function AdminEnrollees({
         )
     : [];
   const resolvedEvaluationSubjectId =
+    evaluationDetailsFilters.subjectId === "All" ||
     selectedEvaluationSubjectOptions.some(
       (option) => option.id === evaluationDetailsFilters.subjectId,
     )
       ? evaluationDetailsFilters.subjectId
-      : selectedEvaluationSubjectOptions[0]?.id || "";
+      : "All";
   const selectedEvaluationSubjectOption =
     selectedEvaluationSubjectOptions.find(
       (option) => option.id === resolvedEvaluationSubjectId,
@@ -6805,6 +6857,7 @@ export default function AdminEnrollees({
   const selectedSubjectAssignments = selectedEvaluationSummary
     ? selectedEvaluationSummary.assignments.filter(
         (assignment) =>
+          resolvedEvaluationSubjectId === "All" ||
           assignment.subjectId === resolvedEvaluationSubjectId ||
           assignment.id === selectedEvaluationSubjectOption?.assignmentId ||
           assignment.subjectCode === selectedEvaluationSubjectOption?.code,
@@ -6831,24 +6884,24 @@ export default function AdminEnrollees({
       ].filter(Boolean),
     ),
   );
-  const resolvedEvaluationYearLevel = selectedEvaluationYearOptions.includes(
+  const resolvedEvaluationYearLevel = evaluationDetailsFilters.yearLevel === "All" || selectedEvaluationYearOptions.includes(
     evaluationDetailsFilters.yearLevel,
   )
     ? evaluationDetailsFilters.yearLevel
-    : selectedEvaluationYearOptions[0] || "";
+    : "All";
   const selectedEvaluationSectionOptions = Array.from(
     new Set(
       [
         ...selectedSubjectSubmissions
           .filter(
             (submission) =>
-              !resolvedEvaluationYearLevel ||
+              resolvedEvaluationYearLevel === "All" ||
               submission.yearLevel === resolvedEvaluationYearLevel,
           )
           .map((submission) => submission.section),
         ...selectedSubjectAssignments
           .filter((assignment) => {
-            if (!resolvedEvaluationYearLevel) {
+            if (resolvedEvaluationYearLevel === "All") {
               return true;
             }
 
@@ -6879,7 +6932,7 @@ export default function AdminEnrollees({
     ? selectedEvaluationSummary.submissions.filter((submission) => {
         const matchesSubject = subjectMatchesSelectedEvaluation(submission);
         const matchesYear =
-          !resolvedEvaluationYearLevel ||
+          resolvedEvaluationYearLevel === "All" ||
           submission.yearLevel === resolvedEvaluationYearLevel;
         const matchesSection =
           resolvedEvaluationSection === "All" ||
@@ -6927,24 +6980,10 @@ export default function AdminEnrollees({
   const openEvaluationDetails = (
     summary: (typeof instructorEvaluationSummaries)[number],
   ) => {
-    const firstSubject = summary.assignments[0];
-    const firstYearLevel =
-      summary.submissions[0]?.yearLevel ||
-      (firstSubject
-        ? classSections.find(
-            (section) =>
-              normalizeSectionCodeValue(section.code) ===
-              normalizeSectionCodeValue(firstSubject.sectionCode),
-          )?.yearLevel ||
-          subjects.find((subject) => subject.id === firstSubject.subjectId)
-            ?.yearLevel ||
-          ""
-        : "");
-
     setSelectedEvaluationDetailsInstructorId(summary.instructor.id);
     setEvaluationDetailsFilters({
-      subjectId: firstSubject?.subjectId || "",
-      yearLevel: firstYearLevel,
+      subjectId: "All",
+      yearLevel: "All",
       section: "All",
     });
   };
@@ -6982,6 +7021,25 @@ export default function AdminEnrollees({
 
   const anonymousEvaluationResponderLabel = "Anonymous";
 
+  const downloadEvaluationSummaryReport = () => {
+    const reportWindow = window.open("", "_blank", "width=1200,height=800");
+    if (!reportWindow) {
+      addToast("Allow popups to download the evaluation summary report.", "warning");
+      return;
+    }
+    reportWindow.document.write(buildEvaluationSummaryReport({
+      branch: currentBranch,
+      academicYear: reflectedAcademicYear,
+      semester: reflectedSemester,
+      categories: evaluationQuestionnaire,
+      instructors: instructorEvaluationSummaries.map((summary) => ({
+        name: summary.instructor.name,
+        submissions: summary.submissions,
+      })),
+    }));
+    reportWindow.document.close();
+  };
+
   const downloadEvaluationReport = () => {
     if (!selectedEvaluationSummary) {
       return;
@@ -6990,8 +7048,10 @@ export default function AdminEnrollees({
     const selectedSubjectLabel =
       selectedEvaluationSubjectOptions.find(
         (option) => option.id === resolvedEvaluationSubjectId,
-      )?.label || "No subject";
-    const classLabel = `${resolvedEvaluationYearLevel || "No year level"} - ${resolvedEvaluationSection}`;
+      )?.label || "All Subjects";
+    const yearLevelLabel = resolvedEvaluationYearLevel === "All"
+      ? "All Year Levels" : resolvedEvaluationYearLevel;
+    const classLabel = `${yearLevelLabel} - ${resolvedEvaluationSection === "All" ? "All Sections" : resolvedEvaluationSection}`;
     const reportRows =
       evaluationQuestionnaire.length > 0
         ? evaluationQuestionnaire
@@ -7065,7 +7125,7 @@ export default function AdminEnrollees({
     const fileLabel = [
       selectedEvaluationSummary.instructor.name,
       selectedSubjectLabel,
-      resolvedEvaluationYearLevel,
+      yearLevelLabel,
       resolvedEvaluationSection,
     ]
       .join("-")
@@ -7743,7 +7803,7 @@ export default function AdminEnrollees({
           <div className="enrollment-tabs">
           <button
             className={`tab-btn ${activeTab === "admissions" ? "active" : ""}`}
-            onClick={() => setActiveTab("admissions")}
+            onClick={() => { setIsArchiveMode(false); setSelectedEnrolleeIds([]); setSelectedEnrollmentRequestIds([]); setActiveTab("admissions"); }}
           >
             <FaUserPlus /> New Admissions{" "}
             {pendingCount > 0 && (
@@ -7752,7 +7812,7 @@ export default function AdminEnrollees({
           </button>
           <button
             className={`tab-btn ${activeTab === "transferees" ? "active" : ""}`}
-            onClick={() => setActiveTab("transferees")}
+            onClick={() => { setIsArchiveMode(false); setSelectedEnrolleeIds([]); setSelectedEnrollmentRequestIds([]); setActiveTab("transferees"); }}
           >
             <FaExchangeAlt /> Transferees{" "}
             {pendingTransfereeCount > 0 && (
@@ -7761,7 +7821,7 @@ export default function AdminEnrollees({
           </button>
           <button
             className={`tab-btn ${activeTab === "enrollments" ? "active" : ""}`}
-            onClick={() => setActiveTab("enrollments")}
+            onClick={() => { setIsArchiveMode(false); setSelectedEnrolleeIds([]); setSelectedEnrollmentRequestIds([]); setActiveTab("enrollments"); }}
           >
             <FaUserGraduate /> Enrollment Requests{" "}
             {pendingRequestsCount > 0 && (
@@ -7770,7 +7830,7 @@ export default function AdminEnrollees({
           </button>
           <button
             className={`tab-btn ${activeTab === "academic" ? "active" : ""}`}
-            onClick={() => setActiveTab("academic")}
+            onClick={() => { setIsArchiveMode(false); setSelectedEnrolleeIds([]); setSelectedEnrollmentRequestIds([]); setActiveTab("academic"); }}
           >
             <FaBook /> Academic Management
           </button>
@@ -7920,7 +7980,7 @@ export default function AdminEnrollees({
                   </button>
                 </div>
               )}
-            <div className="controls">
+            <div className="controls enrollee-record-controls">
               <input
                 type="text"
                 placeholder={
@@ -7932,6 +7992,7 @@ export default function AdminEnrollees({
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="search-input"
               />
+              <div className="enrollee-status-actions">
               <select
                 value={statusFilter}
                 onChange={(e) =>
@@ -7944,7 +8005,18 @@ export default function AdminEnrollees({
                 <option value="Approved">Approved</option>
                 <option value="Rejected">Rejected</option>
               </select>
+{!isArchiveMode ? (
+              <div className="enrollee-archive-entry">
+                <button type="button" className="action-btn archive"
+                  onClick={() => setIsArchiveMode(true)}
+                  disabled={filteredEnrollees.length === 0}>
+                  <MdArchive /> Archive
+                </button>
+              </div>
+            ) : null}
+              </div>
             </div>
+            {isArchiveMode ? (
             <div className="enrollee-bulk-toolbar">
               <label className="enrollee-selection-control">
                 <input
@@ -7972,6 +8044,13 @@ export default function AdminEnrollees({
               <div className="enrollee-bulk-actions">
                 <button
                   type="button"
+                  className="action-btn cancel"
+                  onClick={() => { setSelectedEnrolleeIds([]); setIsArchiveMode(false); }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
                   className="action-btn archive"
                   onClick={() =>
                     handleArchiveSelectedEnrollees(selectedFilteredEnrollees)
@@ -7980,21 +8059,14 @@ export default function AdminEnrollees({
                 >
                   <MdArchive /> Archive Selected
                 </button>
-                <button
-                  type="button"
-                  className="action-btn cancel"
-                  onClick={() => setSelectedEnrolleeIds([])}
-                  disabled={selectedFilteredEnrollees.length === 0}
-                >
-                  Clear Selection
-                </button>
               </div>
             </div>
+            ) : null}
             <div className="table-container">
               <table className="enrollees-table enrollees-admission-table">
                 <thead>
                   <tr>
-                    <th className="enrollee-select-column">SELECT</th>
+                    {isArchiveMode ? <th className="enrollee-select-column">SELECT</th> : null}
                     <th>TRACKING NO.</th>
                     <th>FULL NAME</th>
                     <th>PROGRAM</th>
@@ -8011,14 +8083,14 @@ export default function AdminEnrollees({
                       </>
                     )}
                     <th>STATUS</th>
-                    <th>ACTION</th>
+                    <th className="enrollee-action-column">ACTION</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredEnrollees.length > 0 ? (
                     paginatedEnrollees.map((enrollee) => (
                       <tr key={enrollee.id}>
-                        <td className="enrollee-select-column" data-label="Select">
+                        {isArchiveMode ? (<td className="enrollee-select-column" data-label="Select">
                           <input
                             type="checkbox"
                             checked={selectedEnrolleeIdSet.has(enrollee.id)}
@@ -8031,7 +8103,7 @@ export default function AdminEnrollees({
                             }}
                             aria-label={`Select ${enrollee.fullName}`}
                           />
-                        </td>
+                        </td>) : null}
                         <td data-label="Tracking No.">{enrollee.trackingNumber}</td>
                         <td data-label="Full Name">{enrollee.fullName}</td>
                         <td data-label="Program">{enrollee.program}</td>
@@ -8051,7 +8123,7 @@ export default function AdminEnrollees({
                             </td>
                             <td data-label="Section">
                               <div>
-                                {getAssignedSectionCode(enrollee.id) !==
+                                {isCollegeTransferee(enrollee) ? "Irregular / Own schedule" : getAssignedSectionCode(enrollee.id) !==
                                 "Not assigned"
                                   ? getAssignedSectionCode(enrollee.id)
                                   : getTransfereeEvaluation(enrollee)
@@ -8084,22 +8156,13 @@ export default function AdminEnrollees({
                             {enrollee.status}
                           </span>
                         </td>
-                        <td data-label="Action">
+                        <td className="enrollee-action-column" data-label="Action">
                           <div className="action-buttons">
                             <button
                               className="action-btn review"
                               onClick={() => handleReviewRequirements(enrollee)}
                             >
                               Review
-                            </button>
-                            <button
-                              className="action-btn archive enrollee-archive-btn"
-                              onClick={() => handleArchiveEnrollee(enrollee)}
-                              title={`Move ${enrollee.fullName} to Archive`}
-                              aria-label={`Move ${enrollee.fullName} to Archive`}
-                              type="button"
-                            >
-                              <MdArchive /> Archive
                             </button>
                           </div>
                         </td>
@@ -8108,7 +8171,7 @@ export default function AdminEnrollees({
                   ) : (
                     <tr>
                       <td
-                        colSpan={9}
+                        colSpan={isArchiveMode ? 9 : 8}
                         className="no-results"
                         data-label="Enrollees"
                       >
@@ -8124,54 +8187,7 @@ export default function AdminEnrollees({
               </table>
             </div>
             {filteredEnrollees.length > 0 && (
-              <div className="table-pagination">
-                <button
-                  type="button"
-                  className="table-pagination-btn"
-                  onClick={() =>
-                    setCurrentEnrolleePage((prev) => Math.max(1, prev - 1))
-                  }
-                  disabled={currentEnrolleePage === 1}
-                >
-                  Back
-                </button>
-                <div className="table-pagination-summary">
-                  <span>
-                    {enrolleeStartIndex + 1}-{Math.min(
-                      enrolleeEndIndex,
-                      filteredEnrollees.length,
-                    )}{" "}
-                    of {filteredEnrollees.length}
-                  </span>
-                </div>
-                <div className="table-pagination-pages">
-                  {Array.from(
-                    { length: totalEnrolleePages },
-                    (_, index) => index + 1,
-                  ).map((pageNumber) => (
-                    <button
-                      key={pageNumber}
-                      type="button"
-                      className={`table-pagination-page ${pageNumber === currentEnrolleePage ? "active" : ""}`}
-                      onClick={() => setCurrentEnrolleePage(pageNumber)}
-                    >
-                      {pageNumber}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  className="table-pagination-btn"
-                  onClick={() =>
-                    setCurrentEnrolleePage((prev) =>
-                      Math.min(totalEnrolleePages, prev + 1),
-                    )
-                  }
-                  disabled={currentEnrolleePage === totalEnrolleePages}
-                >
-                  Next
-                </button>
-              </div>
+              <TablePagination page={currentEnrolleePage} pageSize={ENROLLEES_PER_PAGE} totalItems={filteredEnrollees.length} onPageChange={setCurrentEnrolleePage} label="New admission pages" />
             )}
           </>
         )}
@@ -8179,7 +8195,7 @@ export default function AdminEnrollees({
         {/* Enrollment Requests Tab */}
         {activeTab === "enrollments" && (
           <>
-            <div className="controls">
+            <div className="controls enrollee-record-controls">
               <input
                 type="text"
                 placeholder="Search by Name or Student Number..."
@@ -8187,6 +8203,7 @@ export default function AdminEnrollees({
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="search-input"
               />
+              <div className="enrollee-status-actions">
               <select
                 value={enrollmentStatusFilter}
                 onChange={(e) =>
@@ -8205,7 +8222,18 @@ export default function AdminEnrollees({
                 <option value="Approved">Approved</option>
                 <option value="Rejected">Rejected</option>
               </select>
+{!isArchiveMode ? (
+              <div className="enrollee-archive-entry">
+                <button type="button" className="action-btn archive"
+                  onClick={() => setIsArchiveMode(true)}
+                  disabled={filteredRequests.length === 0}>
+                  <MdArchive /> Archive
+                </button>
+              </div>
+            ) : null}
+              </div>
             </div>
+            {isArchiveMode ? (
             <div className="enrollee-bulk-toolbar">
               <label className="enrollee-selection-control">
                 <input
@@ -8225,6 +8253,13 @@ export default function AdminEnrollees({
               <div className="enrollee-bulk-actions">
                 <button
                   type="button"
+                  className="action-btn cancel"
+                  onClick={() => { setSelectedEnrollmentRequestIds([]); setIsArchiveMode(false); }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
                   className="action-btn archive"
                   onClick={() =>
                     handleArchiveSelectedEnrollmentRequests(
@@ -8235,21 +8270,14 @@ export default function AdminEnrollees({
                 >
                   <MdArchive /> Archive Selected
                 </button>
-                <button
-                  type="button"
-                  className="action-btn cancel"
-                  onClick={() => setSelectedEnrollmentRequestIds([])}
-                  disabled={selectedFilteredEnrollmentRequests.length === 0}
-                >
-                  Clear Selection
-                </button>
               </div>
             </div>
+            ) : null}
             <div className="table-container">
               <table className="enrollees-table enrollees-enrollment-table">
                 <thead>
                   <tr>
-                    <th className="enrollee-select-column">SELECT</th>
+                    {isArchiveMode ? <th className="enrollee-select-column">SELECT</th> : null}
                     <th>STUDENT NO.</th>
                     <th>FULL NAME</th>
                     <th>PROGRAM</th>
@@ -8258,14 +8286,14 @@ export default function AdminEnrollees({
                     <th>ENROLLING TERM</th>
                     <th>REQUEST DATE</th>
                     <th>STATUS</th>
-                    <th>ACTION</th>
+                    <th className="enrollee-action-column">ACTION</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredRequests.length > 0 ? (
-                    filteredRequests.map((request) => (
+                    paginatedRequests.map((request) => (
                       <tr key={request.id}>
-                        <td className="enrollee-select-column" data-label="Select">
+                        {isArchiveMode ? (<td className="enrollee-select-column" data-label="Select">
                           <input
                             type="checkbox"
                             checked={selectedEnrollmentRequestIdSet.has(
@@ -8280,7 +8308,7 @@ export default function AdminEnrollees({
                             }}
                             aria-label={`Select enrollment request for ${request.fullName}`}
                           />
-                        </td>
+                        </td>) : null}
                         <td data-label="Student No.">{request.studentNumber}</td>
                         <td data-label="Full Name">{request.fullName}</td>
                         <td data-label="Program">{request.program}</td>
@@ -8303,7 +8331,7 @@ export default function AdminEnrollees({
                             {request.enrollmentStatus}
                           </span>
                         </td>
-                        <td data-label="Action">
+                        <td className="enrollee-action-column" data-label="Action">
                           <div className="action-buttons">
                             <button
                               className="action-btn view"
@@ -8311,24 +8339,13 @@ export default function AdminEnrollees({
                             >
                               Review
                             </button>
-                            <button
-                              className="action-btn archive enrollee-archive-btn"
-                              onClick={() =>
-                                handleArchiveSelectedEnrollmentRequests([request])
-                              }
-                              title={`Move ${request.fullName} enrollment request to Archive`}
-                              aria-label={`Move ${request.fullName} enrollment request to Archive`}
-                              type="button"
-                            >
-                              <MdArchive /> Archive
-                            </button>
                           </div>
                         </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={10} className="no-results" data-label="Enrollment Requests">
+                      <td colSpan={isArchiveMode ? 10 : 9} className="no-results" data-label="Enrollment Requests">
                         No enrollment requests found.
                       </td>
                     </tr>
@@ -8336,6 +8353,13 @@ export default function AdminEnrollees({
                 </tbody>
               </table>
             </div>
+            <TablePagination
+              page={currentEnrollmentPage}
+              pageSize={enrollmentPageSize}
+              totalItems={filteredRequests.length}
+              onPageChange={(page) => setRequestedEnrollmentPage({ scope: enrollmentPageScope, page })}
+              label="Enrollment request pages"
+            />
           </>
         )}
 
@@ -8869,6 +8893,9 @@ export default function AdminEnrollees({
                     </button>
                   </div>
                 </div>
+                {hasInitializedBranchData && subjectAssignments.length === 0 && (
+                  <p role="status">No subject assignments have been saved for {currentBranch}. Create assignments linking each subject, instructor, and section to enable instructor grade templates and student rosters.</p>
+                )}
                 <div className="assignments-filters">
                   <select
                     className="filter-select"
@@ -9124,6 +9151,15 @@ export default function AdminEnrollees({
                       satisfaction ratings.
                     </p>
                   </div>
+                  <div className="evaluation-header-actions">
+                    <button
+                      type="button"
+                      className="add-btn evaluation-questionnaire-btn"
+                      onClick={downloadEvaluationSummaryReport}
+                      disabled={instructorEvaluationSummaries.length === 0}
+                    >
+                      <FaFileAlt /> Download Summary Report
+                    </button>
                   <button
                     type="button"
                     className="add-btn evaluation-questionnaire-btn"
@@ -9138,6 +9174,7 @@ export default function AdminEnrollees({
                   >
                     <FaPlus /> Manage Questionnaire
                   </button>
+                  </div>
                 </div>
 
                 <div className="evaluation-period-controls" aria-busy={savingEvaluationPeriod}>
@@ -9289,11 +9326,12 @@ export default function AdminEnrollees({
                       setEvaluationDetailsFilters((prev) => ({
                         ...prev,
                         subjectId: event.target.value,
-                        yearLevel: "",
+                        yearLevel: "All",
                         section: "All",
                       }))
                     }
                   >
+                    <option value="All">All Subjects</option>
                     {selectedEvaluationSubjectOptions.length > 0 ? (
                       selectedEvaluationSubjectOptions.map((option) => (
                         <option key={option.id} value={option.id}>
@@ -9317,6 +9355,7 @@ export default function AdminEnrollees({
                       }))
                     }
                   >
+                    <option value="All">All Year Levels</option>
                     {selectedEvaluationYearOptions.length > 0 ? (
                       selectedEvaluationYearOptions.map((yearLevel) => (
                         <option key={yearLevel} value={yearLevel}>
@@ -9806,7 +9845,9 @@ export default function AdminEnrollees({
                         <div className="personal-info-item">
                           <span>Own Schedule Request</span>
                           <strong>
-                            {selectedRequest.requestedOwnSchedule
+                            {isCollegeTransferee(selectedRequest)
+                              ? "Automatic irregular schedule"
+                              : selectedRequest.requestedOwnSchedule
                               ? getOwnScheduleRequestLabel(selectedRequest)
                               : "Standard flow"}
                           </strong>
@@ -10230,7 +10271,7 @@ export default function AdminEnrollees({
                   </div>
                 )}
               {!isEnrollmentRequest(selectedRequest) &&
-                selectedRequest.requestedOwnSchedule && (
+                selectedRequest.requestedOwnSchedule && !isCollegeTransferee(selectedRequest) && (
                   <div className="requirements-section transferee-review-section">
                     <h3>Own Schedule Request</h3>
                     <div className="transferee-review-grid">
@@ -10389,14 +10430,15 @@ export default function AdminEnrollees({
                             }
                           />
                           <span>
-                            Initial subject load or deficiencies have been
-                            validated
+                            {isCollegeTransferee(selectedRequest)
+                              ? "Transferred subject credits have been validated"
+                              : "Initial subject load or deficiencies have been validated"}
                           </span>
                         </label>
                       </div>
                       <div className="transferee-review-card">
                         <p className="transferee-review-title">
-                          Placement and section planning
+                          {isCollegeTransferee(selectedRequest) ? "Year-level and term placement" : "Placement and section planning"}
                         </p>
                         <label className="transferee-field">
                           <span>Target Year Level</span>
@@ -10529,6 +10571,7 @@ export default function AdminEnrollees({
                             placeholder={reflectedAcademicYear}
                           />
                         </label>
+                        {!isCollegeTransferee(selectedRequest) ? (
                         <label className="transferee-field">
                           <span>Available Section</span>
                           <select
@@ -10572,6 +10615,7 @@ export default function AdminEnrollees({
                             ))}
                           </select>
                         </label>
+                        ) : null}
                         <label className="transferee-field">
                           <span>Validation Notes</span>
                           <textarea
@@ -10582,12 +10626,14 @@ export default function AdminEnrollees({
                                 notes: event.target.value,
                               })
                             }
-                            placeholder="Example: Credited 11 subjects, advised to repeat NSTP 2, section assignment ready after approval."
+                            placeholder="Record TOR credits and any subjects the student still needs to complete."
                             rows={4}
                           />
                         </label>
                         <div className="transferee-review-note">
-                          {selectedTransfereeMatchingSections.length > 0
+                          {isCollegeTransferee(selectedRequest)
+                            ? "College transferees are automatically irregular. They will request their own schedules after approval, with a maximum of 20 units per semester."
+                            : selectedTransfereeMatchingSections.length > 0
                             ? "Matching sections are based on the applicant's program, strand/course, target year level, and target semester."
                             : "No matching section is available yet. You can still approve first and assign the section later from the section manager."}
                         </div>
@@ -10596,12 +10642,12 @@ export default function AdminEnrollees({
                         <div className="transferee-planner-header">
                           <div>
                             <p className="transferee-review-title">
-                              TOR Credit and Subject Planning
+                              {isCollegeTransferee(selectedRequest) ? "TOR Subject Credits" : "TOR Credit and Subject Planning"}
                             </p>
                             <p className="transferee-planner-copy">
-                              Mark the subjects already credited from the TOR,
-                              then choose the exact load that should appear for
-                              this transferee after approval.
+                              {isCollegeTransferee(selectedRequest)
+                                ? "Credit the subjects already completed at the previous school. The student will select their own schedules after approval."
+                                : "Mark the subjects already credited from the TOR, then choose the exact load for this transferee after approval."}
                             </p>
                           </div>
                           <div className="transferee-planner-stats">
@@ -10617,29 +10663,31 @@ export default function AdminEnrollees({
                                 {selectedTransfereeCreditedSubjects.length}
                               </strong>
                             </div>
+                            {!isCollegeTransferee(selectedRequest) ? (
                             <div className="transferee-planner-stat">
                               <span>Planned Load</span>
                               <strong>
                                 {selectedTransfereeAssignedSubjects.length}
                               </strong>
                             </div>
+                            ) : null}
                           </div>
                         </div>
                         <div className="assignment-subject-picker-header transferee-subject-picker-header">
                           <div>
                             <strong>
-                              {selectedTransfereeEvaluation.plannedSemester} load
+                              {isCollegeTransferee(selectedRequest) ? "Previous-school subject credits" : `${selectedTransfereeEvaluation.plannedSemester} load`}
                             </strong>
                             <p>
-                              Filter the TOR checklist by year level and
-                              semester, then assign the load for the selected
-                              target semester.
+                              {isCollegeTransferee(selectedRequest)
+                                ? "Filter by year level and semester to review and credit completed subjects."
+                                : "Filter the TOR checklist by year level and semester, then assign the target semester load."}
                             </p>
                           </div>
                         </div>
                         {selectedTransfereeCreditSubjectGroups.length > 0 ||
                         selectedTransfereeAvailableSubjects.length > 0 ? (
-                          <div className="transferee-subject-planner-grid">
+                          <div className={`transferee-subject-planner-grid${isCollegeTransferee(selectedRequest) ? " transferee-credit-only" : ""}`}>
                             <div className="transferee-subject-column">
                               <h4>Credited from TOR</h4>
                               <div className="transferee-credit-filters">
@@ -10805,6 +10853,7 @@ export default function AdminEnrollees({
                                 )}
                               </div>
                             </div>
+                            {!isCollegeTransferee(selectedRequest) ? (
                             <div className="transferee-subject-column">
                               <h4>Subject load to assign</h4>
                               <div className="transferee-load-actions-panel">
@@ -10924,6 +10973,7 @@ export default function AdminEnrollees({
                                 )}
                               </div>
                             </div>
+                            ) : null}
                           </div>
                         ) : (
                           <div className="assignment-subject-empty">
@@ -10933,9 +10983,9 @@ export default function AdminEnrollees({
                           </div>
                         )}
                         <div className="transferee-review-note">
-                          If you leave the planned load empty, the approved
-                          transferee will still follow the default
-                          section/curriculum subjects for the chosen semester.
+                          {isCollegeTransferee(selectedRequest)
+                            ? "Credited subjects are kept in the student record. No section or subject load is assigned during approval."
+                            : "If you leave the planned load empty, the approved transferee follows the default section/curriculum subjects for the chosen semester."}
                         </div>
                       </div>
                     </div>
@@ -11194,7 +11244,9 @@ export default function AdminEnrollees({
                 <p className="confirmation-note">
                   {selectedAdmissionActionRecord &&
                   !selectedEnrollmentActionRecord
-                    ? isTransfereeAdmission(selectedAdmissionActionRecord)
+                    ? isCollegeTransferee(selectedAdmissionActionRecord)
+                      ? "This activates the college transferee as an irregular student and preserves TOR credits. The student will request their own schedules, up to 20 units per semester, for admin or registrar approval."
+                      : isTransfereeAdmission(selectedAdmissionActionRecord)
                       ? selectedAdmissionActionEvaluation &&
                         selectedAdmissionActionEvaluation.assignedSubjectIds
                           .length > 0
@@ -11837,6 +11889,7 @@ export default function AdminEnrollees({
                   <FaPlus /> Add Classroom
                 </button>
               </div>
+              <ScholarshipExamRoomSettings key={currentBranch} branch={currentBranch} rooms={customAssignmentRooms} />
               <div className="academic-management-list-toolbar">
                 <span>{selectedClassroomNames.length} selected</span>
                 <button
@@ -12789,6 +12842,11 @@ export default function AdminEnrollees({
                   for deletion
                 </strong>
                 <p>Remove the selected class assignments from this list.</p>
+                {!assignmentGradeHistory && !assignmentGradeCheckError && <p role="status">Checking recorded grades…</p>}
+                {assignmentGradeCheckError && <p role="alert">
+                  Unable to check recorded grades: {assignmentGradeCheckError}{" "}
+                  <button type="button" onClick={() => void openAssignmentDeleteModal(pendingAssignmentDeleteIds)}>Try Again</button>
+                </p>}
               </div>
 
               <div className="assignment-delete-list">
@@ -12817,6 +12875,7 @@ export default function AdminEnrollees({
                 type="button"
                 className="action-btn delete trash-icon-btn"
                 onClick={handleConfirmAssignmentDelete}
+                disabled={!assignmentGradeHistory || Boolean(assignmentGradeCheckError) || deletingAssignments}
                 aria-label={`Delete ${pendingAssignmentDeleteTargets.length} selected assignments`}
                 title={`Delete ${pendingAssignmentDeleteTargets.length} selected assignments`}
               >

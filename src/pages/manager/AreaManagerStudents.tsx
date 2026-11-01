@@ -1,3 +1,4 @@
+import TablePagination from "../../components/common/TablePagination";
 import React, { useMemo, useState } from "react";
 import { BsSearch, BsCaretDownFill, BsCaretUpFill } from "react-icons/bs";
 import {
@@ -176,7 +177,7 @@ const AreaManagerStudents: React.FC = () => {
   } | null>(null);
 
   const [requestedPage, setCurrentPage] = useState(1);
-  const studentsPerPage = 10;
+  const studentsPerPage = 15;
 
   const uniqueCourses = Array.from(
     new Set(students.map((s) => s.course)),
@@ -637,27 +638,7 @@ const AreaManagerStudents: React.FC = () => {
         </div>
 
         {totalPages > 1 && (
-          <div className="am-students-pagination">
-            <button
-              onClick={() => paginate(currentPage - 1)}
-              disabled={currentPage === 1}
-              className="am-students-page-btn"
-            >
-              Previous
-            </button>
-            <div className="am-students-page-info">
-              <span>
-                Page <strong>{currentPage}</strong> of {totalPages}
-              </span>
-            </div>
-            <button
-              onClick={() => paginate(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              className="am-students-page-btn"
-            >
-              Next
-            </button>
-          </div>
+          <TablePagination page={currentPage} pageSize={studentsPerPage} totalItems={processedStudents.length} onPageChange={paginate} label="Area manager student pages" />
         )}
       </div>
 

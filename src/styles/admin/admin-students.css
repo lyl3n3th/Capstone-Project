@@ -616,42 +616,42 @@
   font-size: 12px;
 }
 
-.students-table th:nth-child(1),
-.students-table td:nth-child(1) {
+.students-table th.students-selection-column,
+.students-table td.students-selection-column {
   width: 34px;
 }
 
-.students-table th:nth-child(2),
-.students-table td:nth-child(2) {
+.students-table th:nth-child(1 of :not(.students-selection-column)),
+.students-table td:nth-child(1 of :not(.students-selection-column)) {
   width: 12%;
 }
 
-.students-table th:nth-child(3),
-.students-table td:nth-child(3) {
+.students-table th:nth-child(2 of :not(.students-selection-column)),
+.students-table td:nth-child(2 of :not(.students-selection-column)) {
   width: 18%;
 }
 
-.students-table th:nth-child(4),
-.students-table td:nth-child(4) {
+.students-table th:nth-child(3 of :not(.students-selection-column)),
+.students-table td:nth-child(3 of :not(.students-selection-column)) {
   width: 14%;
 }
 
-.students-table th:nth-child(5),
-.students-table td:nth-child(5),
-.students-table th:nth-child(6),
-.students-table td:nth-child(6) {
+.students-table th:nth-child(4 of :not(.students-selection-column)),
+.students-table td:nth-child(4 of :not(.students-selection-column)),
+.students-table th:nth-child(5 of :not(.students-selection-column)),
+.students-table td:nth-child(5 of :not(.students-selection-column)) {
   width: 10%;
 }
 
-.students-table th:nth-child(7),
-.students-table td:nth-child(7),
-.students-table th:nth-child(8),
-.students-table td:nth-child(8) {
+.students-table th:nth-child(6 of :not(.students-selection-column)),
+.students-table td:nth-child(6 of :not(.students-selection-column)),
+.students-table th:nth-child(7 of :not(.students-selection-column)),
+.students-table td:nth-child(7 of :not(.students-selection-column)) {
   width: 13%;
 }
 
-.students-table th:nth-child(9),
-.students-table td:nth-child(9) {
+.students-table th:nth-child(8 of :not(.students-selection-column)),
+.students-table td:nth-child(8 of :not(.students-selection-column)) {
   width: 96px;
 }
 
@@ -2401,42 +2401,42 @@
 }
 
 @media (max-width: 768px) {
-  .students-table th:nth-child(4),
-  .students-table td:nth-child(4),
-  .students-table th:nth-child(6),
-  .students-table td:nth-child(6) {
+  .students-table th:nth-child(3 of :not(.students-selection-column)),
+  .students-table td:nth-child(3 of :not(.students-selection-column)),
+  .students-table th:nth-child(5 of :not(.students-selection-column)),
+  .students-table td:nth-child(5 of :not(.students-selection-column)) {
     display: none;
   }
 
-  .students-table th:nth-child(1),
-  .students-table td:nth-child(1) {
+  .students-table th.students-selection-column,
+  .students-table td.students-selection-column {
     width: 28px;
   }
 
-  .students-table th:nth-child(2),
-  .students-table td:nth-child(2) {
+  .students-table th:nth-child(1 of :not(.students-selection-column)),
+  .students-table td:nth-child(1 of :not(.students-selection-column)) {
     width: 16%;
   }
 
-  .students-table th:nth-child(3),
-  .students-table td:nth-child(3) {
+  .students-table th:nth-child(2 of :not(.students-selection-column)),
+  .students-table td:nth-child(2 of :not(.students-selection-column)) {
     width: 24%;
   }
 
-  .students-table th:nth-child(5),
-  .students-table td:nth-child(5) {
+  .students-table th:nth-child(4 of :not(.students-selection-column)),
+  .students-table td:nth-child(4 of :not(.students-selection-column)) {
     width: 12%;
   }
 
-  .students-table th:nth-child(7),
-  .students-table td:nth-child(7),
-  .students-table th:nth-child(8),
-  .students-table td:nth-child(8) {
+  .students-table th:nth-child(6 of :not(.students-selection-column)),
+  .students-table td:nth-child(6 of :not(.students-selection-column)),
+  .students-table th:nth-child(7 of :not(.students-selection-column)),
+  .students-table td:nth-child(7 of :not(.students-selection-column)) {
     width: 17%;
   }
 
-  .students-table th:nth-child(9),
-  .students-table td:nth-child(9) {
+  .students-table th:nth-child(8 of :not(.students-selection-column)),
+  .students-table td:nth-child(8 of :not(.students-selection-column)) {
     width: 82px;
   }
 
@@ -2452,8 +2452,8 @@
 }
 
 @media (max-width: 560px) {
-  .students-table th:nth-child(5),
-  .students-table td:nth-child(5) {
+  .students-table th:nth-child(4 of :not(.students-selection-column)),
+  .students-table td:nth-child(4 of :not(.students-selection-column)) {
     display: none;
   }
 
@@ -2463,25 +2463,25 @@
     font-size: 9px;
   }
 
-  .students-table th:nth-child(2),
-  .students-table td:nth-child(2) {
+  .students-table th:nth-child(1 of :not(.students-selection-column)),
+  .students-table td:nth-child(1 of :not(.students-selection-column)) {
     width: 18%;
   }
 
-  .students-table th:nth-child(3),
-  .students-table td:nth-child(3) {
+  .students-table th:nth-child(2 of :not(.students-selection-column)),
+  .students-table td:nth-child(2 of :not(.students-selection-column)) {
     width: 28%;
   }
 
-  .students-table th:nth-child(7),
-  .students-table td:nth-child(7),
-  .students-table th:nth-child(8),
-  .students-table td:nth-child(8) {
+  .students-table th:nth-child(6 of :not(.students-selection-column)),
+  .students-table td:nth-child(6 of :not(.students-selection-column)),
+  .students-table th:nth-child(7 of :not(.students-selection-column)),
+  .students-table td:nth-child(7 of :not(.students-selection-column)) {
     width: 19%;
   }
 
-  .students-table th:nth-child(9),
-  .students-table td:nth-child(9),
+  .students-table th:nth-child(8 of :not(.students-selection-column)),
+  .students-table td:nth-child(8 of :not(.students-selection-column)),
   .students-table .students-action-cell {
     width: 78px;
   }
@@ -2834,14 +2834,14 @@
   word-break: normal;
 }
 
-.students-table td:nth-child(3),
-.students-table td:nth-child(4) {
+.students-table td:nth-child(2 of :not(.students-selection-column)),
+.students-table td:nth-child(3 of :not(.students-selection-column)) {
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-.students-table th:nth-child(9),
-.students-table td:nth-child(9),
+.students-table th:nth-child(8 of :not(.students-selection-column)),
+.students-table td:nth-child(8 of :not(.students-selection-column)),
 .students-table .students-action-cell {
   min-width: 84px !important;
 }
@@ -2896,8 +2896,8 @@
   }
 
   .students-table .students-action-cell,
-  .students-table th:nth-child(9),
-  .students-table td:nth-child(9) {
+  .students-table th:nth-child(8 of :not(.students-selection-column)),
+  .students-table td:nth-child(8 of :not(.students-selection-column)) {
     min-width: 120px !important;
     width: 120px !important;
   }
@@ -2928,4 +2928,20 @@
   .students-controls .students-schedule-notification-btn { grid-column: 2; grid-row: 2; }
   .students-controls .students-export-btn { grid-column: 2; grid-row: 3; width: 100%; min-width: 0; justify-self: stretch; }
   .students-controls .students-import-btn { grid-column: 1; grid-row: 3; }
+}
+
+/* Selection actions sit between the filters and the student table. */
+.students-selection-entry {
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+/* Center the details action under the Action heading. */
+.students-table .students-action-cell {
+  text-align: center;
+  padding-inline: 4px;
+}
+
+.students-table .students-action-group {
+  justify-content: center;
 }

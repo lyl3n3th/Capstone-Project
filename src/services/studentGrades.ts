@@ -37,6 +37,9 @@ export interface StudentGradeRecordIdentity {
 }
 
 export interface StoredStudentGradeRecord {
+  assignmentId?: string;
+  sectionId?: string;
+  sectionCode?: string;
   studentNumberIsOriginal?: boolean;
   source?: "historical";
   yearLevel?: string;
@@ -181,7 +184,7 @@ export const COLLEGE_GRADE_CONVERSION_SCALE = [
   {
     grade: "5.00",
     description: "Failed",
-    range: "Use FAILED",
+    range: "Below 50",
     min: Number.NEGATIVE_INFINITY,
     max: 49.999,
     evaluation: "Failed" as const,

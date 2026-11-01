@@ -1,3 +1,4 @@
+import { fetchAdminStudents } from "./adminStudentsApi";
 import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 import {
   getCurrentBranch,
@@ -67,6 +68,7 @@ export interface AlumniBackupRecord {
 export interface BackupSnapshotPayload {
   branch: string;
   snapshot_format: string;
+  authoritative_restored?: boolean;
   students: StudentStorageRecord[];
   alumni: AlumniBackupRecord[];
 }
@@ -283,14 +285,6 @@ export const clearBackupRestoreMarker = () => {
   }
 
   localStorage.removeItem(BACKUP_RESTORE_MARKER_KEY);
-};
-
-const rememberBackupRestoreApplied = (marker: BackupRestoreMarker) => {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  localStorage.setItem(BACKUP_RESTORE_MARKER_KEY, JSON.stringify(marker));
 };
 
 const readCachedAlumniRestoreStatuses = (): Record<string, StudentStorageRecord["status"]> => {
@@ -580,8 +574,21 @@ export async function fetchBackupSnapshot(backupHistoryId: string) {
   return parseJsonResponse<BackupSnapshotPayload>(response);
 }
 
-export function applyBackupSnapshot(snapshot: BackupSnapshotPayload) {
+export async function applyBackupSnapshot(snapshot: BackupSnapshotPayload) {
+  if (!snapshot.authoritative_restored) {
+    throw new Error("This legacy backup cannot restore the main student database. Create a complete backup first.");
+  }
   const currentBranch = getCurrentBranch();
+  if (normalizeBranchName(snapshot.branch) !== currentBranch) {
+    throw new Error("The restored branch differs from the current branch. Reload the correct branch to refresh its records.");
+  }
+  // Fetch the actual committed records rather than replaying an exported browser list.
+  snapshot = { ...snapshot, students: await fetchAdminStudents(snapshot.branch) };
+  const suffix = `:${normalizeBranchName(snapshot.branch).toLowerCase()}`;
+  Object.keys(window.localStorage).forEach((key) => {
+    if (key.startsWith("aics-admin:") && key.endsWith(suffix)) window.localStorage.removeItem(key);
+  });
+  clearBackupRestoreMarker();
   const restoredStudents = dedupeStoredStudents(snapshot.students || []);
   const otherBranchStudents = readStoredStudents().filter(
     (student) =>
@@ -599,13 +606,6 @@ export function applyBackupSnapshot(snapshot: BackupSnapshotPayload) {
 
   writeStoredStudents([...otherBranchStudents, ...restoredStudents]);
   persistAlumniBackupCacheForBranch(snapshot.alumni || [], currentBranch);
-  rememberBackupRestoreApplied({
-    branch: normalizeBranchName(snapshot.branch || currentBranch),
-    appliedAt: new Date().toISOString(),
-    studentCount: restoredStudents.length,
-    alumniCount: (snapshot.alumni || []).length,
-    snapshotFormat: snapshot.snapshot_format || "",
-  });
 
   if (typeof window !== "undefined") {
     window.dispatchEvent(

@@ -1082,14 +1082,19 @@ export const downloadInstructorGradeTemplate = ({
   assignments,
   sections,
   students,
+  subjectId,
 }: {
   instructor: AcademicInstructorRecord;
   branch?: string | null;
   assignments: AcademicSubjectAssignmentRecord[];
   sections: AcademicClassSectionRecord[];
   students: StudentStorageRecord[];
+  subjectId?: string;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
+  const selectedAssignments = subjectId
+    ? assignments.filter((assignment) => (assignment.subjectId || assignment.subjectCode) === subjectId)
+    : assignments;
   const subjects =
     readBranchScopedData<InstructorTemplateSubject[]>(
       "subjects",
@@ -1100,7 +1105,7 @@ export const downloadInstructorGradeTemplate = ({
 
   sections.forEach((section) => {
     const programType = getProgramType(section);
-    const sectionAssignments = assignments.filter(
+    const sectionAssignments = selectedAssignments.filter(
       (assignment) =>
         assignment.sectionId === section.id || assignment.sectionCode === section.code,
     );
@@ -1153,13 +1158,17 @@ export const downloadInstructorGradeTemplate = ({
     sheetsByProgram.set(programType, existingSheets);
   });
 
+  if (sheetsByProgram.size === 0) {
+    throw new Error("No assigned subjects or sections found. Ask your branch administrator to complete your subject assignments before downloading a grade template.");
+  }
+
   return Promise.all(
     Array.from(sheetsByProgram.entries()).map(([programType, sheets]) =>
       downloadStyledGradeTemplate({
         branch: resolvedBranch,
         fileName: getStyledGradeTemplateFileName(
           programType,
-          `${instructor.employeeId}-${resolvedBranch}`,
+          `${instructor.employeeId}-${resolvedBranch}${subjectId ? `-${selectedAssignments[0]?.subjectCode || subjectId}` : ""}`,
         ),
         templateType: programType,
         sheets,
@@ -1826,7 +1835,7 @@ export const parseInstructorGradeWorkbook = async ({
         const assignment = allowedAssignments.find(item =>
           valuesMatch(item.subjectCode, subjectCode) && item.academicYear === errorRow.academicYear && item.semester === semester &&
           matchedStudent && studentHasAssignedInstructorSubject(matchedStudent, item));
-        records.push({ ...result.normalizedRecord, instructorId: assignment?.instructorId || instructor.id, instructorName: assignment?.instructorName || instructor.name, instructorEmployeeId: instructor.employeeId });
+        records.push({ ...result.normalizedRecord, assignmentId: assignment?.id, sectionId: assignment?.sectionId, sectionCode: assignment?.sectionCode, instructorId: instructor.id, instructorName: instructor.name, instructorEmployeeId: instructor.employeeId });
         return;
       }
 

@@ -18,7 +18,7 @@ let remoteStudent={...base};
 const snapshot={subjects:[subject,other],instructors:[teacher],classSections:[section],subjectAssignments:[assignment,unselected],assignmentRooms:[]};
 const scopes=(scope,branch='Bacoor')=>`${branch}:${scope}`;
 let failRequestSave=false;
-const supabase={rpc(name,args){let data=name==='list_student_grade_records'?remoteGrades.map(payload=>({payload})):[];let error=null;
+const supabase={from:()=>({select:()=>({returns:async()=>({data:[{code:'bacoor',name:'Bacoor',student_number_prefix:'BAC',is_active:true}]})})}),rpc(name,args){let data=name==='list_student_grade_records'?remoteGrades.map(payload=>({payload})):[];let error=null;
 if(name==='upsert_student_schedule_request'){if(failRequestSave)error={message:'Backend unavailable'};else{const request=args.p_payload;data=[{id:request.id,student_number:request.studentNumber,tracking_number:null,academic_year:request.academicYear,semester:request.semester,status:request.status,payload:request}];}}
 return {returns:async()=>({data,error}),then:(resolve,reject)=>Promise.resolve({data,error}).then(resolve,reject)};}};
 const overrides={
@@ -42,6 +42,7 @@ function load(name){
  return module.exports;
 }
 function loadUtils(specifier){const source=readFileSync(new URL(`../src/utils/${specifier.split('/').at(-1)}.ts`,import.meta.url),'utf8');const module={exports:{}};Function('module','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(module,module.exports);return module.exports;}
+await load('branchDirectory').fetchBranchDirectory();
 const storage=load('adminStorage');
 Object.assign(storage,{normalizeBranchName:value=>value||'Bacoor',readStoredStudents:()=>localStudents,writeStoredStudents:students=>{localStudents=students;},getStudentsForBranch:branch=>localStudents.filter(student=>student.branch===branch),readBranchScopedData:(scope,branch)=>cache.get(scopes(scope,branch)),writeBranchScopedData:(scope,branch,value)=>cache.set(scopes(scope,branch),value)});
 const defaults=load('importedStudentScheduling');const resolver=load('studentPortalResolver');const portal=load('instructorPortal');

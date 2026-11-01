@@ -61,9 +61,9 @@ class StaffAccount(models.Model):
         on_delete=models.CASCADE,
         related_name="staff_account",
     )
-    employee_id = models.CharField(max_length=32, unique=True, editable=False)
+    employee_id = models.CharField(max_length=128, unique=True, editable=False)
     role = models.CharField(max_length=20, choices=STAFF_ROLE_CHOICES)
-    branch = models.CharField(max_length=20, choices=BRANCH_CHOICES)
+    branch = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
     contact_number = models.CharField(max_length=20)
     address = models.TextField()

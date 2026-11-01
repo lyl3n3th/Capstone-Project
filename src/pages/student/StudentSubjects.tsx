@@ -1,3 +1,4 @@
+import { IRREGULAR_SEMESTER_UNIT_LIMIT, getIrregularScheduleUnitError, getScheduleTotalUnits } from "../../services/studentScheduleUnitLimit";
 import { useState, useRef, useEffect, useMemo } from "react";
 import {
   FaCalendarAlt,
@@ -15,13 +16,16 @@ import type {
   StudentScheduleChoiceGroup,
   StudentScheduleSelectionRequestRecord,
   StudentScheduledAssignmentItem,
+  StudentSubjectPlanRecord,
 } from "../../services/adminStorage";
 import {
+  readBranchScopedData,
   getStudentScheduleChoiceGroups,
   getStudentScheduleSelectionRequest,
 } from "../../services/adminStorage";
 import {
   fetchStudentScheduleRequests,
+  fetchStudentSubjectPlans,
   saveStudentPlanningState,
   saveStudentScheduleRequest,
 } from "../../services/studentPlanningApi";
@@ -1042,7 +1046,10 @@ function StudentSubjects() {
 
     const loadOwnScheduleRequest = async () => {
       try {
-        await fetchStudentScheduleRequests(student.branch);
+        await Promise.all([
+          fetchStudentScheduleRequests(student.branch),
+          fetchStudentSubjectPlans(student.branch),
+        ]);
       } catch (error) {
         console.warn("Failed to fetch shared student schedule requests.", error);
       }
@@ -1070,6 +1077,14 @@ function StudentSubjects() {
         currentTerm?.semester ||
         nextScheduleRequest?.semester ||
         "1st Semester";
+      const plans = readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
+        "student-subject-plans", student.branch,
+      ) ?? {};
+      const creditedSubjects = Object.values(plans).filter((plan) =>
+        plan.studentNumber === student.studentNumber || Boolean(
+          student.trackingNumber && plan.trackingNumber === student.trackingNumber,
+        ),
+      ).flatMap((plan) => plan.creditedSubjects);
       const nextChoiceGroups = getStudentScheduleChoiceGroups({
         branch: student.branch,
         program: student.programType === "SHS" ? "SHS" : "College",
@@ -1078,6 +1093,7 @@ function StudentSubjects() {
         semester: nextSemester,
         academicYear: nextAcademicYear,
         gradeRecords: studentGradeRecords,
+        creditedSubjects,
         strictScope: true,
       });
 
@@ -1250,7 +1266,7 @@ function StudentSubjects() {
           (assignment) => assignment.assignmentId === assignmentId,
         );
 
-        return selectedAssignment ? [selectedAssignment] : [];
+        return selectedAssignment ? [{ ...selectedAssignment, units: selectedAssignment.units ?? group.units }] : [];
       }),
     [selectedAssignmentsBySubject, visibleScheduleChoiceGroups],
   );
@@ -1271,10 +1287,9 @@ function StudentSubjects() {
     [ownScheduleConflicts],
   );
 
-  const ownScheduleSelectedUnits = selectedOwnScheduleAssignments.reduce(
-    (sum, assignment) => sum + (assignment.units ?? 0),
-    0,
-  );
+  const ownScheduleSelectedUnits = getScheduleTotalUnits(selectedOwnScheduleAssignments);
+  const ownScheduleUnitError = !isSHS
+    ? getIrregularScheduleUnitError(selectedOwnScheduleAssignments) : null;
 
   const handleMenuClick = () => {
     setSidebarOpen(!sidebarOpen);
@@ -1297,6 +1312,20 @@ function StudentSubjects() {
     subjectId: string,
     assignmentId: string,
   ) => {
+    if (!isSHS && assignmentId) {
+      const nextSelections = { ...selectedAssignmentsBySubject, [subjectId]: assignmentId };
+      const assignments = visibleScheduleChoiceGroups.flatMap((group) => {
+        const selected = group.assignmentOptions.find(
+          (option) => option.assignmentId === nextSelections[group.subjectId],
+        );
+        return selected ? [{ ...selected, units: selected.units ?? group.units }] : [];
+      });
+      const error = getIrregularScheduleUnitError(assignments);
+      if (error) {
+        addToast(error, "warning");
+        return;
+      }
+    }
     scheduleDraftEditedRef.current = true;
     setSelectedAssignmentsBySubject((prev) => ({
       ...prev,
@@ -1317,6 +1346,11 @@ function StudentSubjects() {
 
     if (selectedOwnScheduleAssignments.length === 0) {
       addToast("Choose at least one schedule before submitting.", "warning");
+      return;
+    }
+
+    if (ownScheduleUnitError) {
+      addToast(ownScheduleUnitError, "warning");
       return;
     }
 
@@ -1364,7 +1398,7 @@ function StudentSubjects() {
       addToast("Schedule request submitted for approval.", "success");
     } catch (error) {
       console.error("Failed to save own schedule request", error);
-      addToast("Unable to submit the schedule request right now.", "error");
+      addToast(error instanceof Error ? error.message : "Unable to submit the schedule request right now.", "error");
     } finally {
       setIsSubmittingScheduleRequest(false);
     }
@@ -1542,10 +1576,16 @@ function StudentSubjects() {
                 {!isSHS ? (
                   <div className="s-summary-card">
                     <h4>Total Units</h4>
-                    <div className="s-summary-value">{ownScheduleSelectedUnits}</div>
+                    <div className="s-summary-value">{ownScheduleSelectedUnits} / {IRREGULAR_SEMESTER_UNIT_LIMIT}</div>
                   </div>
                 ) : null}
               </div>
+
+              {!isSHS ? (
+                <div className="s-own-schedule-warning" role={ownScheduleUnitError ? "alert" : "status"}>
+                  {ownScheduleUnitError || `Maximum ${IRREGULAR_SEMESTER_UNIT_LIMIT} units per semester, including leftover subjects from other semesters.`}
+                </div>
+              ) : null}
 
               {ownScheduleConflicts.length > 0 ? (
                 <div className="s-own-schedule-warning">
@@ -1720,6 +1760,7 @@ function StudentSubjects() {
                       onClick={() => void handleSubmitOwnScheduleRequest()}
                       disabled={
                         isSubmittingScheduleRequest ||
+                        Boolean(ownScheduleUnitError) ||
                         selectedOwnScheduleAssignments.length === 0
                       }
                     >

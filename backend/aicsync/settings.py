@@ -31,6 +31,8 @@ load_dotenv(PROJECT_ROOT / ".env", override=False)
 # SECURITY WARNING: keep the secret key used in production secret!
 #SECRET_KEY = 'django-insecure-6mk4w=7@vie$iwe__nqs_2*^g53h&jai9n(e$mt-%l-2$t2u4k'
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-this-in-production')
+# Keep stable (and private) to verify recovery archives across deployments.
+BACKUP_SIGNING_KEY = os.getenv('BACKUP_SIGNING_KEY', '')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 #DEBUG = True

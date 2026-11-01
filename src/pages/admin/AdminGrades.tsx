@@ -1,11 +1,10 @@
+import TablePagination from "../../components/common/TablePagination";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import { useEffect, useState, useRef } from "react";
 import { PiMicrosoftExcelLogo } from "react-icons/pi";
 import { IoMdCheckmarkCircleOutline } from "react-icons/io";
 import {
   FiAlertCircle,
-  FiChevronLeft,
-  FiChevronRight,
   FiCheck,
   FiDownload,
   FiMenu,
@@ -212,9 +211,9 @@ const TEMPLATE_FIRST_DATA_ROW_INDEX = 6;
 const TEMPLATE_DATA_CAPACITY = 19;
 const TEMPLATE_FILE_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const PREVIEW_PAGE_SIZE = 12;
-const UPLOAD_HISTORY_PAGE_SIZE = 6;
-const INSTRUCTOR_APPROVAL_PAGE_SIZE = 10;
+const PREVIEW_PAGE_SIZE = 15;
+const UPLOAD_HISTORY_PAGE_SIZE = 15;
+const INSTRUCTOR_APPROVAL_PAGE_SIZE = 15;
 const XML_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const XML_REL_NS =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -611,14 +610,6 @@ export default function AdminGrades({
     instructorApprovalStartIndex,
     instructorApprovalStartIndex + INSTRUCTOR_APPROVAL_PAGE_SIZE,
   );
-  const instructorApprovalRangeStart =
-    instructorGradeApprovalItems.length === 0
-      ? 0
-      : instructorApprovalStartIndex + 1;
-  const instructorApprovalRangeEnd = Math.min(
-    instructorApprovalStartIndex + INSTRUCTOR_APPROVAL_PAGE_SIZE,
-    instructorGradeApprovalItems.length,
-  );
   const getInstructorApprovalKey = (item: InstructorGradeApprovalItem) =>
     `${item.kind}:${item.id}`;
   const instructorApprovalPageKeys = instructorApprovalPageItems.map(
@@ -649,12 +640,6 @@ export default function AdminGrades({
     previewPageStartIndex,
     previewPageStartIndex + PREVIEW_PAGE_SIZE,
   );
-  const previewRangeStart =
-    previewRows.length === 0 ? 0 : previewPageStartIndex + 1;
-  const previewRangeEnd = Math.min(
-    previewPageStartIndex + PREVIEW_PAGE_SIZE,
-    previewRows.length,
-  );
   const historyPageCount = Math.max(
     1,
     Math.ceil(sortedUploadHistory.length / UPLOAD_HISTORY_PAGE_SIZE),
@@ -665,12 +650,6 @@ export default function AdminGrades({
   const historyPageRows = sortedUploadHistory.slice(
     historyPageStartIndex,
     historyPageStartIndex + UPLOAD_HISTORY_PAGE_SIZE,
-  );
-  const historyRangeStart =
-    sortedUploadHistory.length === 0 ? 0 : historyPageStartIndex + 1;
-  const historyRangeEnd = Math.min(
-    historyPageStartIndex + UPLOAD_HISTORY_PAGE_SIZE,
-    sortedUploadHistory.length,
   );
   const historyPageIds = historyPageRows
     .map((item) => item.id)
@@ -2791,7 +2770,12 @@ export default function AdminGrades({
         currentBranch,
         submission.records.map((record) => ({
           type: "upsert" as const,
-          record,
+          record: {
+            ...record,
+            instructorId: record.instructorId || submission.instructorId,
+            instructorName: record.instructorName?.trim() || submission.instructorName,
+            instructorEmployeeId: record.instructorEmployeeId || submission.employeeId,
+          },
         })),
       );
     }
@@ -3572,48 +3556,7 @@ export default function AdminGrades({
             </table>
           </div>
 
-          <div
-            className="preview-pagination history-pagination"
-            aria-label="Instructor grade request pages"
-          >
-            <div className="preview-pagination-summary">
-              Showing {instructorApprovalRangeStart}-{instructorApprovalRangeEnd} of{" "}
-              {instructorGradeApprovalItems.length} requests
-            </div>
-            <div className="preview-pagination-controls">
-              <button
-                type="button"
-                className="preview-page-btn"
-                onClick={() =>
-                  setInstructorApprovalPage((previousPage) =>
-                    Math.max(1, previousPage - 1),
-                  )
-                }
-                disabled={currentInstructorApprovalPage === 1}
-                aria-label="Previous instructor request page"
-              >
-                <FiChevronLeft />
-              </button>
-              <span className="preview-page-indicator">
-                Page {currentInstructorApprovalPage} of {instructorApprovalPageCount}
-              </span>
-              <button
-                type="button"
-                className="preview-page-btn"
-                onClick={() =>
-                  setInstructorApprovalPage((previousPage) =>
-                    Math.min(instructorApprovalPageCount, previousPage + 1),
-                  )
-                }
-                disabled={
-                  currentInstructorApprovalPage === instructorApprovalPageCount
-                }
-                aria-label="Next instructor request page"
-              >
-                <FiChevronRight />
-              </button>
-            </div>
-          </div>
+          <TablePagination page={currentInstructorApprovalPage} pageSize={INSTRUCTOR_APPROVAL_PAGE_SIZE} totalItems={instructorGradeApprovalItems.length} onPageChange={setInstructorApprovalPage} label="Instructor grade request pages" />
         </div>
 
         {viewingInstructorGradeItem?.kind === "upload" && (
@@ -3999,40 +3942,7 @@ export default function AdminGrades({
                   </table>
                 </div>
 
-                <div className="preview-pagination" aria-label="Preview table pages">
-                  <div className="preview-pagination-summary">
-                    Showing {previewRangeStart}-{previewRangeEnd} of {previewRows.length} records
-                  </div>
-                  <div className="preview-pagination-controls">
-                    <button
-                      type="button"
-                      className="preview-page-btn"
-                      onClick={() =>
-                        setPreviewPage((prev) => Math.max(1, prev - 1))
-                      }
-                      disabled={currentPreviewPage === 1}
-                      aria-label="Previous preview page"
-                    >
-                      <FiChevronLeft />
-                    </button>
-                    <span className="preview-page-indicator">
-                      Page {currentPreviewPage} of {previewPageCount}
-                    </span>
-                    <button
-                      type="button"
-                      className="preview-page-btn"
-                      onClick={() =>
-                        setPreviewPage((prev) =>
-                          Math.min(previewPageCount, prev + 1),
-                        )
-                      }
-                      disabled={currentPreviewPage === previewPageCount}
-                      aria-label="Next preview page"
-                    >
-                      <FiChevronRight />
-                    </button>
-                  </div>
-                </div>
+                <TablePagination page={currentPreviewPage} pageSize={PREVIEW_PAGE_SIZE} totalItems={previewRows.length} onPageChange={setPreviewPage} label="Grade preview pages" />
 
                 <div className="preview-modal-actions">
                   {errorRecords > 0 && (
@@ -4213,42 +4123,7 @@ export default function AdminGrades({
             </table>
           </div>
 
-          <div
-            className="preview-pagination history-pagination"
-            aria-label="Upload history pages"
-          >
-            <div className="preview-pagination-summary">
-              Showing {historyRangeStart}-{historyRangeEnd} of{" "}
-              {sortedUploadHistory.length} uploads
-            </div>
-            <div className="preview-pagination-controls">
-              <button
-                type="button"
-                className="preview-page-btn"
-                onClick={() => setHistoryPage((prev) => Math.max(1, prev - 1))}
-                disabled={currentHistoryPage === 1}
-                aria-label="Previous history page"
-              >
-                <FiChevronLeft />
-              </button>
-              <span className="preview-page-indicator">
-                Page {currentHistoryPage} of {historyPageCount}
-              </span>
-              <button
-                type="button"
-                className="preview-page-btn"
-                onClick={() =>
-                  setHistoryPage((prev) =>
-                    Math.min(historyPageCount, prev + 1),
-                  )
-                }
-                disabled={currentHistoryPage === historyPageCount}
-                aria-label="Next history page"
-              >
-                <FiChevronRight />
-              </button>
-            </div>
-          </div>
+          <TablePagination page={currentHistoryPage} pageSize={UPLOAD_HISTORY_PAGE_SIZE} totalItems={sortedUploadHistory.length} onPageChange={setHistoryPage} label="Grade upload history pages" />
         </div>
       </main>
     </div>

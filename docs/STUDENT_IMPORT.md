@@ -10,6 +10,14 @@ The server revalidates the entire batch against active branch offerings and exis
 
 Verification: `npm run test:student-import` covers workbook parsing, leading zeros, original cell references, duplicates, formulas, required headers, dates, branch offerings, and standing validation. `npm run build` checks TypeScript and the production bundle. The migration was also exercised in isolated PostgreSQL for full rollback, durable metadata, branch restrictions, duplicates, SHS/College records, and offering deletion protection. Browser verification used mocked network responses, with no real student writes.
 
+## School history and credentials
+
+Apply `20261019000600_student_import_school_history.sql` so imports save Last School Attended and Year Completion and return them to Student Details. The previous import function discarded these fields; values from earlier imports must be restored from the original spreadsheet rather than inferred.
+
+Imported students have the same credential checklist as SHS completers or College entrants, based on their program. Admin/Registrar can upload, replace, view, download, and remove credentials in Student Details without a linked admission. Each credential is persisted independently in the existing branch data store, scoped to the original student number and requirement code; files use the existing requirements bucket. Uploads are approved only after successful file and metadata saves. Missing files remain pending. Student portal credential summaries load the same saved files, and deletion protection checks them before removing a student. Imported records are not added to New Admission.
+
+Run `npm run test:imported-credentials` for checklist selection, identity isolation, school-history display, uploads, refresh persistence, portal status, removals and failure handling.
+
 ## Historical grades for imported students
 
 Apply `supabase/migrations/20261019000700_imported_student_historical_grades.sql` after the import migrations. In Student Details, imported students have a Previous Years and Semesters section. A 4th Year student imported for 2026-2027, 1st Semester gets both semesters of 1st Year (2023-2024), 2nd Year (2024-2025), and 3rd Year (2025-2026). An imported second semester also includes the first semester of that year. Grade 12 students similarly see Grade 11 and any earlier semester of Grade 12. Regular historical terms include the two main semesters; summer attendance is not inferred.

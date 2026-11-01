@@ -4,6 +4,7 @@ import type {
   AdmissionDraft,
 } from "../types/application";
 import { supabase } from "../lib/supabase";
+import { findRegisteredBranch, findBranchByStudentPrefix } from "./branchDirectory";
 import {
   getAdmissionRequirements,
   getEstimatedCollegeTuition,
@@ -541,11 +542,14 @@ export const normalizeBranchName = (branch?: string | null): AdminBranchName => 
   const trimmedBranch = branch?.trim();
   const normalizedBranch = trimmedBranch?.toLowerCase();
 
+  const registered = trimmedBranch && findRegisteredBranch(trimmedBranch);
+  if (registered) return registered.name;
+
   if (!normalizedBranch) {
     return DEFAULT_BRANCH;
   }
 
-  if (normalizedBranch.includes("taytay")) {
+  if (normalizedBranch === "taytay" || normalizedBranch === "taytay branch") {
     return "Taytay";
   }
 
@@ -556,39 +560,18 @@ export const normalizeBranchName = (branch?: string | null): AdminBranchName => 
     return "GMA";
   }
 
-  if (normalizedBranch.includes("bacoor")) {
+  if (normalizedBranch === "bacoor" || normalizedBranch === "bacoor branch") {
     return "Bacoor";
   }
 
   return toDisplayCapitalization(trimmedBranch || DEFAULT_BRANCH);
 };
 
-const STUDENT_NUMBER_PREFIX_BY_BRANCH: Record<string, string> = {
-  Bacoor: "BAC",
-  Taytay: "TAY",
-  GMA: "GMA",
-};
-
-const BRANCH_BY_STUDENT_NUMBER_PREFIX: Record<string, AdminBranchName> = {
-  BAC: "Bacoor",
-  TAY: "Taytay",
-  GMA: "GMA",
-};
-
-const buildDynamicStudentNumberPrefix = (branch?: string | null) => {
-  const normalizedBranch = normalizeBranchName(branch);
-  const compactBranch = normalizedBranch.replace(/[^A-Za-z0-9]/g, "");
-
-  return (compactBranch.slice(0, 3).toUpperCase() || "STD").padEnd(3, "X");
-};
-
 export const getStudentNumberPrefix = (branch?: string | null) => {
   const normalizedBranch = normalizeBranchName(branch);
-
-  return (
-    STUDENT_NUMBER_PREFIX_BY_BRANCH[normalizedBranch] ||
-    buildDynamicStudentNumberPrefix(normalizedBranch)
-  );
+  const registered = findRegisteredBranch(normalizedBranch);
+  if (!registered) throw new Error(`Student-number settings for ${normalizedBranch} are unavailable. Reload the page.`);
+  return registered.student_number_prefix;
 };
 
 export const getBranchFromStudentNumber = (
@@ -609,7 +592,7 @@ export const getBranchFromStudentNumber = (
     return null;
   }
 
-  return BRANCH_BY_STUDENT_NUMBER_PREFIX[prefixMatch[1]] ?? null;
+  return findBranchByStudentPrefix(prefixMatch[1])?.name ?? null;
 };
 
 export interface InstructorEvaluationStatusRecord {
@@ -732,6 +715,9 @@ export const normalizeStudentNumberInput = (
     .replace(/\D/g, "")
     .slice(0, STUDENT_NUMBER_SUFFIX_LENGTH);
 
+  const explicitNumber = trimmedValue.replace(/[^A-Z0-9]/g, "").match(/^([A-Z]{3})(\d{1,6})$/);
+  if (explicitNumber) return `${explicitNumber[1]}-${explicitNumber[2]}`;
+
   if (branch) {
     if (!digitsOnly) {
       return "";
@@ -763,9 +749,11 @@ export const isValidStudentNumber = (
   const normalizedValue = normalizeStudentNumberInput(value, branch);
 
   if (!branch) {
-    return /^(BAC|TAY|GMA)-\d{6}$/.test(normalizedValue);
+    const match = normalizedValue.match(/^([A-Z]{3})-\d{6}$/);
+    return Boolean(match && findBranchByStudentPrefix(match[1])?.is_active);
   }
 
+  if (!findRegisteredBranch(branch)?.is_active) return false;
   const prefix = getStudentNumberPrefix(branch);
   const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -2093,10 +2081,12 @@ const subjectPrerequisitesArePassed = ({
   subject,
   subjects,
   latestGradeRecordsBySubjectCode,
+  creditedSubjectCodes = new Set<string>(),
 }: {
   subject: Pick<StoredAcademicSubject, "prerequisiteSubjectIds">;
   subjects: Pick<StoredAcademicSubject, "id" | "code">[];
   latestGradeRecordsBySubjectCode: Map<string, StoredStudentGradeRecord>;
+  creditedSubjectCodes?: Set<string>;
 }) => {
   const prerequisiteIds = subject.prerequisiteSubjectIds ?? [];
 
@@ -2120,7 +2110,7 @@ const subjectPrerequisitesArePassed = ({
     const latestGradeRecord =
       latestGradeRecordsBySubjectCode.get(prerequisiteCode);
 
-    return latestGradeRecord?.evaluation === "Passed";
+    return creditedSubjectCodes.has(prerequisiteCode) || latestGradeRecord?.evaluation === "Passed";
   });
 };
 
@@ -2793,6 +2783,98 @@ export const mergeAdminEnrolleeRecords = (
   );
 };
 
+const importedCredentialScope = (studentNumber: string, code: string) =>
+  `imported-student-credential-${encodeURIComponent(studentNumber.trim().toUpperCase())}-${code}`;
+
+export const isImportedStudent = (
+  student?: Pick<StudentStorageRecord, "importAcademicYear" | "studentStatus"> | null,
+) => Boolean(student?.importAcademicYear || student?.studentStatus?.trim().toLowerCase() === "existing student");
+
+export const getImportedStudentRequirementRecord = (branch?: string | null, studentNumber?: string | null): AdminEnrolleeRecord | null => {
+  if (!studentNumber) return null;
+  const student = readStoredStudents().find(item =>
+    item.id.trim().toUpperCase() === studentNumber.trim().toUpperCase()
+    && normalizeBranchName(item.branch) === normalizeBranchName(branch));
+  if (!student || !isImportedStudent(student)) return null;
+  const studentStatus = student.program === "SHS" ? "Junior High Completer" : "Senior High Graduate";
+  const requirements = getAdmissionRequirements(studentStatus, mapAdminProgramToAdmissionProgram(student.program), "No Honor");
+  const attachments = requirements.flatMap(requirement => {
+    const file = readBranchScopedData<AdminAttachment>(importedCredentialScope(student.id, requirement.code), branch);
+    return file ? [file] : [];
+  });
+  return {
+    id: student.id, trackingNumber: "", studentNumber: student.id, fullName: student.name,
+    program: student.program, yearLevel: student.yearLevel, strandOrCourse: student.strandOrCourse || "",
+    applicationDate: student.documentSubmitted || "", documentsSubmitted: attachments.length,
+    totalDocuments: requirements.length, status: "Approved", branch: student.branch, studentStatus, attachments,
+    personalInfo: {
+      fullName: student.name, birthDate: student.birthDate || "", contactNumber: student.contact,
+      program: student.program, guardianName: student.guardianName || "", email: student.email,
+      address: student.address, yearLevel: student.yearLevel, guardianContact: student.guardianContact || "",
+      lastSchoolAttended: student.lastSchoolAttended, yearCompletion: student.yearCompletion,
+    },
+  };
+};
+
+export const fetchImportedStudentCredentials = async (branch: string, studentNumber: string) => {
+  const student = getImportedStudentRequirementRecord(branch, studentNumber);
+  if (!student) return;
+  const requirements = getAdmissionRequirements(student.studentStatus, mapAdminProgramToAdmissionProgram(student.program), "No Honor");
+  const files = await Promise.all(requirements.map(async requirement => {
+    const scope = importedCredentialScope(studentNumber, requirement.code);
+    const { data, error } = await supabase.rpc("get_branch_local_storage_record", { p_branch: normalizeBranchName(branch), p_scope: scope });
+    if (error) throw new Error(error.message);
+    const file = data as AdminAttachment | null;
+    const url = file?.storagePath ? await getSignedRequirementUrl(file.storagePath, file.storageBucket || REQUIREMENTS_BUCKET) : "";
+    if (file?.storagePath && (!url || url === "#")) throw new Error("Unable to open the saved credential file. Please retry.");
+    return { scope, file: file?.storagePath ? {
+      ...file, url,
+    } : null };
+  }));
+  files.forEach(({ scope, file }) => writeBranchScopedData(scope, branch, file, { skipSupabaseSync: true }));
+};
+
+export const uploadImportedStudentCredential = async ({ branch, studentNumber, requirementCode, file }: {
+  branch: string; studentNumber: string; requirementCode: string; file: File;
+}) => {
+  const student = getImportedStudentRequirementRecord(branch, studentNumber);
+  const requirement = student && getAdmissionRequirements(student.studentStatus,
+    mapAdminProgramToAdmissionProgram(student.program), "No Honor").find(item => item.code === requirementCode);
+  if (!requirement) throw new Error("This credential is not required for the selected student.");
+  const storagePath = `imported/${encodeURIComponent(normalizeBranchName(branch))}/${encodeURIComponent(studentNumber)}/${requirementCode}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+  const { error: uploadError } = await supabase.storage.from(REQUIREMENTS_BUCKET).upload(storagePath, file, { contentType: file.type || undefined });
+  if (uploadError) throw new Error(uploadError.message);
+  try {
+    const url = await getSignedRequirementUrl(storagePath);
+    if (!url || url === "#") throw new Error("Unable to open the uploaded credential file. Please retry.");
+    const attachment: AdminAttachment = {
+      name: requirement.name, type: file.type || "file", storagePath, storageBucket: REQUIREMENTS_BUCKET,
+      url, reviewStatus: "Approved", uploadedAt: new Date().toISOString(),
+    };
+    const scope = importedCredentialScope(studentNumber, requirementCode);
+    const { error } = await supabase.rpc("upsert_branch_local_storage_record", {
+      p_branch: normalizeBranchName(branch), p_scope: scope, p_payload: attachment,
+    });
+    if (error) throw new Error(error.message);
+    writeBranchScopedData(scope, branch, attachment, { skipSupabaseSync: true });
+  } catch (error) {
+    await supabase.storage.from(REQUIREMENTS_BUCKET).remove([storagePath]);
+    throw error;
+  }
+};
+
+export const removeImportedStudentCredential = async (branch: string, studentNumber: string, requirementCode: string) => {
+  const student = getImportedStudentRequirementRecord(branch, studentNumber);
+  if (!student || !getAdmissionRequirements(student.studentStatus, mapAdminProgramToAdmissionProgram(student.program), "No Honor")
+    .some(item => item.code === requirementCode)) throw new Error("This credential is not required for the selected student.");
+  const scope = importedCredentialScope(studentNumber, requirementCode);
+  const { error } = await supabase.rpc("upsert_branch_local_storage_record", {
+    p_branch: normalizeBranchName(branch), p_scope: scope, p_payload: null,
+  });
+  if (error) throw new Error(error.message);
+  writeBranchScopedData(scope, branch, null, { skipSupabaseSync: true });
+};
+
 export const getStudentRequirementSnapshot = ({
   branch,
   studentNumber,
@@ -2804,7 +2886,9 @@ export const getStudentRequirementSnapshot = ({
 }) => {
   const storedEnrollees =
     readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", branch) ?? [];
-  const applicantRecord = storedEnrollees.find(
+  // Use the same source as imported-student uploads, even when an admission
+  // record also exists. Existing Student has no admission requirement list.
+  const applicantRecord = getImportedStudentRequirementRecord(branch, studentNumber) ?? storedEnrollees.find(
     (record) =>
       (trackingNumber && record.trackingNumber === trackingNumber) ||
       (studentNumber && record.studentNumber === studentNumber),
@@ -4047,6 +4131,7 @@ export const getStudentScheduleChoiceGroups = ({
   semester,
   academicYear,
   gradeRecords,
+  creditedSubjects = [],
   strictScope = false,
 }: {
   branch?: string | null;
@@ -4056,6 +4141,7 @@ export const getStudentScheduleChoiceGroups = ({
   semester: string;
   academicYear?: string;
   gradeRecords?: StoredStudentGradeRecord[];
+  creditedSubjects?: StudentSubjectPlanItem[];
   strictScope?: boolean;
 }): StudentScheduleChoiceGroup[] => {
   const resolvedBranch = normalizeBranchName(branch);
@@ -4090,7 +4176,7 @@ export const getStudentScheduleChoiceGroups = ({
       : storedAssignments.filter(
           (assignment) => assignment.semester === normalizedSemester,
         );
-  const hasGradeEligibilityContext = Array.isArray(gradeRecords);
+  const hasGradeEligibilityContext = Array.isArray(gradeRecords) || creditedSubjects.length > 0;
   const subjectYearLevelFilter = hasGradeEligibilityContext
     ? (subject: StoredAcademicSubject) =>
         subjectIsAtOrBeforeYearLevel(subject, yearLevel)
@@ -4115,7 +4201,11 @@ export const getStudentScheduleChoiceGroups = ({
             subjectYearLevelFilter(subject) &&
             subject.semester === normalizedSemester,
         );
+  const creditedSubjectCodes = new Set(creditedSubjects.map(
+    (item) => normalizeStoredSubjectCompletionCode(item.subjectCode),
+  ));
   const completedSubjectCodes = getCompletedSubjectCodes(gradeRecords ?? []);
+  creditedSubjectCodes.forEach((code) => completedSubjectCodes.add(code));
   const latestGradeRecordsBySubjectCode =
     getLatestTerminalGradeRecordsBySubjectCode(gradeRecords ?? []);
   const relaxedSubjectMatches = hasGradeEligibilityContext
@@ -4126,6 +4216,7 @@ export const getStudentScheduleChoiceGroups = ({
             subject,
             subjects: storedSubjects,
             latestGradeRecordsBySubjectCode,
+            creditedSubjectCodes,
           }),
       )
     : matchedSubjects;
@@ -4694,10 +4785,22 @@ export const upsertSubmittedApplicant = ({
   return nextApplicants;
 };
 
+export const isCollegeTransferee = (student: {
+  program?: string | null;
+  studentStatus?: string | null;
+}) => student.program?.trim().toLowerCase() === "college" &&
+  student.studentStatus?.trim().toLowerCase() === "transferee";
+
 export const promoteApplicantToStoredStudent = (
   applicant: AdminEnrolleeRecord,
 ) => {
-  const normalizedApplicant = normalizeAdminEnrolleeCapitalization(applicant);
+  const normalizedApplicant = normalizeAdminEnrolleeCapitalization(
+    isCollegeTransferee(applicant) ? {
+      ...applicant,
+      requestedOwnSchedule: true,
+      ownScheduleRequestStatus: "Approved",
+    } : applicant,
+  );
   const existingStudents = readStoredStudents();
   const existingStudent = findStoredStudent({
     branch: normalizedApplicant.branch,
@@ -4724,7 +4827,7 @@ export const promoteApplicantToStoredStudent = (
       [firstName, middleName, lastName].filter(Boolean).join(" "),
     program: normalizedApplicant.program,
     yearLevel: normalizedApplicant.yearLevel,
-    section: existingStudent?.section || "",
+    section: isCollegeTransferee(normalizedApplicant) ? "" : existingStudent?.section || "",
     shsTrackType:
       normalizedApplicant.program === "SHS"
         ? resolveShsTrackType(normalizedApplicant.strandOrCourse)

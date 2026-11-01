@@ -7,10 +7,11 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import BRANCH_CHOICES, STAFF_ROLE_CHOICES, STAFF_STATUS_CHOICES, StaffAccount
+from .models import STAFF_ROLE_CHOICES, STAFF_STATUS_CHOICES, StaffAccount
+from .branches import resolve_registered_branch
+from .supabase_rest import SupabaseRestError
 
 User = get_user_model()
-VALID_BRANCHES = {value for value, _label in BRANCH_CHOICES}
 VALID_ROLES = {value for value, _label in STAFF_ROLE_CHOICES}
 VALID_STATUSES = {value for value, _label in STAFF_STATUS_CHOICES}
 
@@ -103,8 +104,16 @@ def validate_staff_payload(payload, *, is_create):
         cleaned["role"] = normalized_role
 
     branch = cleaned.get("branch", "")
-    if branch and branch not in VALID_BRANCHES:
-        errors.setdefault("branch", []).append("Select a valid branch.")
+    if branch:
+        try:
+            registered_branch = resolve_registered_branch(branch)
+        except SupabaseRestError:
+            errors.setdefault("branch", []).append("Unable to verify branch settings. Please try again.")
+        else:
+            if registered_branch:
+                cleaned["branch"] = registered_branch
+            else:
+                errors.setdefault("branch", []).append("Select an active registered branch.")
 
     email = cleaned.get("email", "")
     if email:

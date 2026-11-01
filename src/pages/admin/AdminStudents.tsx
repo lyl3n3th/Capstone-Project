@@ -1,3 +1,6 @@
+import { isCollegeTransferee } from "../../services/adminStorage";
+import { getIrregularScheduleUnitError } from "../../services/studentScheduleUnitLimit";
+import TablePagination from "../../components/common/TablePagination";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MdArchive } from "react-icons/md";
@@ -9,9 +12,7 @@ import StudentHistoricalGrades from "../../components/admin/StudentHistoricalGra
 import { useAuth } from "../../hooks/useAuth";
 import {
   BACKUP_RESTORE_APPLIED_EVENT,
-  clearBackupRestoreMarker,
   persistAlumniBackupCache,
-  readBackupRestoreMarker,
   readCachedAlumni,
   rememberAlumniStudentStatus,
   type AlumniBackupRecord,
@@ -19,6 +20,7 @@ import {
 import {
   getNextStudentNumber,
   getStudentRequirementSnapshot,
+  isImportedStudent,
   fetchSupabaseAdmissionApplicants,
   updateStoredStudentOwnScheduleState,
   getStudentsForBranch,
@@ -29,6 +31,9 @@ import {
   readStoredStudents,
   removeStudentCredentialUpload,
   syncStudentCredentialUpload,
+  fetchImportedStudentCredentials,
+  uploadImportedStudentCredential,
+  removeImportedStudentCredential,
   writeBranchScopedData,
   updateStudentRequirementReviewStatus,
   writeStoredStudents,
@@ -512,12 +517,13 @@ const getDisplayedAcademicStandingLabel = (
   student:
     | Pick<
         Student,
-        "id" | "branch" | "trackingNumber" | "requestedOwnSchedule" | "ownScheduleRequestStatus" | "importAcademicStanding"
+        "id" | "branch" | "trackingNumber" | "requestedOwnSchedule" | "ownScheduleRequestStatus" | "importAcademicStanding" | "program" | "studentStatus"
       >
     | null
     | undefined,
   fallbackLabel?: string | null,
 ): "Regular" | "Irregular" =>
+  (student ? isCollegeTransferee(student) : false) ||
   hasRequestedOwnSchedule(student) ||
   student?.importAcademicStanding === "Irregular" ||
   Boolean(
@@ -797,28 +803,6 @@ const getActiveStudentsForAdminList = (branch: string) =>
 const removeHiddenStudentsFromAdminList = (students: Student[]) =>
   students.filter(isActiveStudentListRecord);
 
-const RESTORE_SNAPSHOT_GUARD_MS = 5 * 60 * 1000;
-
-const hasFreshRestoreSnapshotForBranch = (branch: string) => {
-  const restoreMarker = readBackupRestoreMarker();
-
-  if (!restoreMarker) {
-    return false;
-  }
-
-  const restoredAt = Date.parse(restoreMarker.appliedAt);
-  const isExpired =
-    !Number.isFinite(restoredAt) ||
-    Date.now() - restoredAt > RESTORE_SNAPSHOT_GUARD_MS;
-
-  if (isExpired) {
-    clearBackupRestoreMarker();
-    return false;
-  }
-
-  return normalizeBranchName(restoreMarker.branch) === normalizeBranchName(branch);
-};
-
 const persistArchivedStudentsLocally = (
   branch: string,
   studentsToArchive: Student[],
@@ -992,11 +976,9 @@ export default function AdminStudents({
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterAcademicStanding, setFilterAcademicStanding] = useState("All");
   const [requestedStudentPage, setRequestedStudentPage] = useState(1);
-  const studentsPerPage = 25;
+  const studentsPerPage = 15;
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
-  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
-  const [studentToArchive, setStudentToArchive] = useState<string | null>(null);
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
   const [shsTrackType, setShsTrackType] = useState("");
   const [programSpecialization, setProgramSpecialization] = useState("");
@@ -1020,6 +1002,7 @@ export default function AdminStudents({
   >([]);
   const [hasLoadedStudentPlanData, setHasLoadedStudentPlanData] =
     useState(false);
+  const [studentSelectionMode, setStudentSelectionMode] = useState<"archive" | "alumni" | null>(null);
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [isBulkMovingToAlumni, setIsBulkMovingToAlumni] = useState(false);
   const [isBulkArchiving, setIsBulkArchiving] = useState(false);
@@ -1033,6 +1016,7 @@ export default function AdminStudents({
   const [credentialActionKey, setCredentialActionKey] = useState<string | null>(
     null,
   );
+  const credentialLoadRequest = useRef(0);
   const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
   const [gradeSchoolYearFilter, setGradeSchoolYearFilter] = useState("all");
   const [gradeSemesterFilter, setGradeSemesterFilter] = useState("all");
@@ -1104,14 +1088,6 @@ export default function AdminStudents({
       setStudentRecoveryMessage(null);
 
       try {
-        if (hasFreshRestoreSnapshotForBranch(currentBranch)) {
-          if (isCurrentLoad()) {
-            setStudents(getActiveStudentsForAdminList(currentBranch));
-            setStudentRecoveryMessage(null);
-          }
-          return;
-        }
-
         try {
           await fetchEnrollmentRequests(currentBranch);
         } catch (error) {
@@ -1130,9 +1106,7 @@ export default function AdminStudents({
           if (!isCurrentLoad()) {
             return;
           }
-          if (!hasFreshRestoreSnapshotForBranch(currentBranch)) {
-            writeBranchScopedData(ENROLLEE_STORAGE_SCOPE, currentBranch, applicants);
-          }
+          writeBranchScopedData(ENROLLEE_STORAGE_SCOPE, currentBranch, applicants);
         } catch (error) {
           console.warn("Unable to fetch linked admission records.", error);
         }
@@ -1142,12 +1116,6 @@ export default function AdminStudents({
         );
 
         if (isCurrentLoad()) {
-          if (hasFreshRestoreSnapshotForBranch(currentBranch)) {
-            setStudents(getActiveStudentsForAdminList(currentBranch));
-            setStudentRecoveryMessage(null);
-            return;
-          }
-
           const studentsFromOtherBranches = readStoredStudents().filter(
             (student) =>
               normalizeBranchName(student.branch) !==
@@ -1417,18 +1385,12 @@ export default function AdminStudents({
   const filteredStudents = useMemo(
     () =>
       students.filter((student) => {
-        const search = searchTerm.toLowerCase();
+        const search = searchTerm.trim().toLowerCase();
         const academicStanding = getStudentAcademicStandingLabel(student);
         const lifecycleStatus = getStudentLifecycleStatus(student);
         const matchesSearch =
           student.name.toLowerCase().includes(search) ||
-          student.id.toLowerCase().includes(search) ||
-          student.program.toLowerCase().includes(search) ||
-          student.email.toLowerCase().includes(search) ||
-          student.contact.toLowerCase().includes(search) ||
-          (student.section || "").toLowerCase().includes(search) ||
-          getAdmissionTypeLabel(student.studentStatus).toLowerCase().includes(search) ||
-          academicStanding.toLowerCase().includes(search);
+          student.id.toLowerCase().includes(search);
 
         const matchesProgram =
           filterProgram === "All Programs" || student.program === filterProgram;
@@ -1877,100 +1839,6 @@ export default function AdminStudents({
     }
   };
 
-  // Open archive modal
-  const openArchiveConfirm = async (id: string) => {
-    const student = students.find((record) => record.id === id);
-    if (!student) {
-      return;
-    }
-
-    const protection = await getStudentRecordProtection({
-      branch: student.branch || currentBranch,
-      studentNumber: student.id,
-      trackingNumber: student.trackingNumber,
-    });
-    if (protection.isProtected) {
-      showSystemAlert(
-        "Student Record Is Protected",
-        getStudentRecordProtectionMessage(protection),
-      );
-      return;
-    }
-
-    setStudentToArchive(id);
-    setIsArchiveModalOpen(true);
-  };
-
-  const confirmArchive = async () => {
-    if (!studentToArchive) {
-      setIsArchiveModalOpen(false);
-      return;
-    }
-
-    const student = students.find((record) => record.id === studentToArchive);
-    if (student) {
-      const protection = await getStudentRecordProtection({
-        branch: student.branch || currentBranch,
-        studentNumber: student.id,
-        trackingNumber: student.trackingNumber,
-      });
-      if (protection.isProtected) {
-        setIsArchiveModalOpen(false);
-        setStudentToArchive(null);
-        showSystemAlert(
-          "Student Record Is Protected",
-          getStudentRecordProtectionMessage(protection),
-        );
-        return;
-      }
-    }
-
-    invalidateStudentDataLoad();
-    const archiveStudentLocally = () => {
-      if (student) {
-        forgetDeletedStoredStudent({
-          branch: student.branch || currentBranch,
-          id: student.id,
-          trackingNumber: student.trackingNumber,
-          name: student.name,
-        });
-        persistArchivedStudentsLocally(currentBranch, [student]);
-      }
-
-      setStudents((prev) =>
-        prev.filter((record) => record.id !== studentToArchive),
-      );
-      setIsArchiveModalOpen(false);
-      setStudentToArchive(null);
-    };
-
-    try {
-      if (student) {
-        await updateAdminStudentStatus({
-          branch: student.branch || currentBranch,
-          studentNumber: student.id,
-          status: "Archived",
-        });
-      }
-
-      archiveStudentLocally();
-    } catch (error) {
-      console.warn(
-        "Unable to sync archived student to Supabase. Keeping the archived state on this device only.",
-        error,
-      );
-      archiveStudentLocally();
-      setStudentRecoveryMessage(
-        "Student was archived only on this device because Supabase sync failed.",
-      );
-    }
-  };
-
-  const cancelArchive = () => {
-    setIsArchiveModalOpen(false);
-    setStudentToArchive(null);
-  };
-
   const archiveSelectedStudents = async (studentsToArchive: Student[]) => {
     const archivedStudentIds: string[] = [];
     const failedStudents: string[] = [];
@@ -2059,6 +1927,7 @@ export default function AdminStudents({
         messages.join("\n\n"),
       );
     }
+    return archivedStudentIds;
   };
 
   const openViewModal = (student: Student) => {
@@ -2077,6 +1946,20 @@ export default function AdminStudents({
     setPaymentFeedback(null);
     setViewingStudent(student);
     const branch = student.branch || currentBranch;
+    const credentialRequest = ++credentialLoadRequest.current;
+    setCredentialActionFeedback(null);
+    setCredentialActionKey(null);
+    if (isImportedStudent(student)) {
+      setCredentialActionKey("loading");
+      void fetchImportedStudentCredentials(branch, student.id).then(() => {
+        if (credentialRequest === credentialLoadRequest.current) setStudents(prev => [...prev]);
+      }).catch(error => {
+        if (credentialRequest === credentialLoadRequest.current) setCredentialActionFeedback({ type: "error",
+          message: error instanceof Error ? error.message : "Unable to load student credentials." });
+      }).finally(() => {
+        if (credentialRequest === credentialLoadRequest.current) setCredentialActionKey(null);
+      });
+    }
     void fetchAndCacheStudentPaymentsForBranch(branch)
       .then(() => fetchNextStudentPaymentReceiptNumber(branch))
       .then(setPaymentReceiptNumber)
@@ -2095,6 +1978,7 @@ export default function AdminStudents({
   };
 
   const closeViewModal = () => {
+    credentialLoadRequest.current += 1;
     setViewingStudent(null);
     setPendingScholarshipScore("");
     setScholarshipScoreFeedback(null);
@@ -2253,7 +2137,8 @@ export default function AdminStudents({
     code: string;
     name: string;
   }) => {
-    if (!viewingStudent || !viewingStudentApplicantRecord?.trackingNumber) {
+    const isImported = isImportedStudent(viewingStudent);
+    if (!viewingStudent || (!isImported && !viewingStudentApplicantRecord?.trackingNumber)) {
       setCredentialActionFeedback({
         type: "error",
         message: "No linked admission record was found for this student.",
@@ -2276,6 +2161,10 @@ export default function AdminStudents({
       setCredentialActionFeedback(null);
 
       try {
+        if (isImported) {
+          await uploadImportedStudentCredential({ branch: viewingStudent.branch || currentBranch,
+            studentNumber: viewingStudent.id, requirementCode: requirement.code, file });
+        } else if (viewingStudentApplicantRecord) {
         const uploadResult = await uploadAdmissionRequirementFile({
           trackingNumber: viewingStudentApplicantRecord.trackingNumber,
           requirementCode: requirement.code,
@@ -2292,6 +2181,7 @@ export default function AdminStudents({
           storagePath: uploadResult.storagePath,
           reviewStatus: "Approved",
         });
+        }
 
         setStudents((prev) => [...prev]);
         setCredentialActionFeedback({
@@ -2317,7 +2207,8 @@ export default function AdminStudents({
 
   const handleAdminCredentialRemove = async (requirement: { code: string; name: string }) => {
     const requirementName = requirement.name;
-    if (!viewingStudent || !viewingStudentApplicantRecord?.trackingNumber) {
+    const isImported = isImportedStudent(viewingStudent);
+    if (!viewingStudent || (!isImported && !viewingStudentApplicantRecord?.trackingNumber)) {
       setCredentialActionFeedback({
         type: "error",
         message: "No linked admission record was found for this student.",
@@ -2342,6 +2233,9 @@ export default function AdminStudents({
     setCredentialActionFeedback(null);
 
     try {
+      if (isImported) {
+        await removeImportedStudentCredential(viewingStudent.branch || currentBranch, viewingStudent.id, requirement.code);
+      } else if (viewingStudentApplicantRecord) {
       const updatedRecord = await removeStudentCredentialUpload({
         branch: viewingStudent.branch || currentBranch,
         trackingNumber: viewingStudentApplicantRecord.trackingNumber,
@@ -2351,6 +2245,7 @@ export default function AdminStudents({
       });
       if (!updatedRecord) {
         throw new Error("The credential was removed, but the student record could not be refreshed. Please reload the page.");
+      }
       }
       setStudents((prev) => [...prev]);
       setCredentialActionFeedback({
@@ -2810,6 +2705,26 @@ export default function AdminStudents({
 
     try {
       await archiveSelectedStudents(selectedStudents);
+      setStudentSelectionMode(null);
+      setSelectedStudentIds([]);
+    } finally {
+      setIsBulkArchiving(false);
+    }
+  };
+
+  const handleArchiveViewedStudent = async () => {
+    if (!viewingStudent || isAnyBulkActionPending) return;
+    const student = viewingStudent;
+    const confirmed = await requestConfirmation(
+      `Archive ${student.name}? You can restore this student from Archive later.`,
+      { title: "Archive Student", confirmLabel: "Archive" },
+    );
+    if (!confirmed) return;
+
+    setIsBulkArchiving(true);
+    try {
+      const archivedIds = await archiveSelectedStudents([student]);
+      if (archivedIds.includes(student.id)) closeViewModal();
     } finally {
       setIsBulkArchiving(false);
     }
@@ -3435,36 +3350,45 @@ export default function AdminStudents({
       return;
     }
 
+    if (status === "Approved" && notification.request.program === "College") {
+      const error = getIrregularScheduleUnitError(notification.request.selections);
+      if (error) {
+        showSystemAlert("Schedule Exceeds Allowed Load", error);
+        return;
+      }
+    }
+
     const timestamp = new Date().toISOString();
+    // Validate and save the request on the server before changing the official load.
+    // The server verifies units against the subject catalog and returns canonical units.
+    let updatedRequest: StudentScheduleSelectionRequestRecord;
+    try {
+      updatedRequest = await saveStudentScheduleRequest({
+        ...notification.request,
+        status,
+        updatedAt: timestamp,
+        reviewedAt: timestamp,
+        reviewedByRole: loggedInRole,
+      });
+    } catch (error) {
+      showSystemAlert(
+        "Unable to Review Schedule",
+        error instanceof Error ? error.message : "Unable to save the schedule decision.",
+      );
+      return;
+    }
     const nextRequests = studentScheduleRequests.map((request) =>
-      request.id === notification.request.id
-        ? {
-            ...request,
-            status,
-            updatedAt: timestamp,
-            reviewedAt: timestamp,
-            reviewedByRole: loggedInRole,
-          }
-        : request,
+      request.id === notification.request.id ? updatedRequest : request,
     );
-
     setStudentScheduleRequests(nextRequests);
-    writeBranchScopedData(
-      STUDENT_SCHEDULE_REQUEST_SCOPE,
-      currentBranch,
-      nextRequests,
-    );
-
-    const updatedRequest =
-      nextRequests.find((request) => request.id === notification.request.id) ||
-      notification.request;
+    writeBranchScopedData(STUDENT_SCHEDULE_REQUEST_SCOPE, currentBranch, nextRequests);
 
     if (status === "Approved") {
       const student = notification.student;
       const planKey = getStudentSubjectPlanKey(student);
       const existingPlan = studentSubjectPlans[planKey];
       const assignedSubjects: StudentSubjectPlanItem[] = Array.from(
-        notification.request.selections.reduce((items, selection) => {
+        updatedRequest.selections.reduce((items, selection) => {
           const key = `${selection.subjectId}:${selection.subjectCode}`;
           if (!items.has(key)) {
             items.set(key, {
@@ -3493,7 +3417,7 @@ export default function AdminStudents({
         academicYear: notification.request.academicYear,
         assignedSubjects,
         creditedSubjects: existingPlan?.creditedSubjects ?? [],
-        scheduledAssignments: notification.request.selections,
+        scheduledAssignments: updatedRequest.selections,
         notes:
           existingPlan?.notes ||
           "Approved from student own-schedule selection.",
@@ -3523,7 +3447,6 @@ export default function AdminStudents({
       },
     });
 
-    await saveStudentScheduleRequest(updatedRequest);
     await saveStudentPlanningState({
       branch: notification.student.branch || currentBranch,
       studentNumber: notification.student.id,
@@ -3793,7 +3716,7 @@ export default function AdminStudents({
         <div className="students-controls">
           <input
             type="text"
-            placeholder="Search by Name, ID, Email..."
+            placeholder="Search by full name or student ID..."
             value={searchTerm}
             onChange={(e) => {
               setRequestedStudentPage(1);
@@ -3834,48 +3757,6 @@ export default function AdminStudents({
             Export Excel
           </button>
         </div>
-
-        {selectedStudents.length > 0 ? (
-          <div className="students-bulk-actions">
-            <div className="students-bulk-copy">
-              <strong>{selectedStudents.length} selected</strong>
-              <span>
-                Move selected students to alumni or archive in one action.
-              </span>
-            </div>
-            <div className="students-bulk-action-buttons">
-              <button
-                type="button"
-                className="students-bulk-move-btn"
-                onClick={handleMoveSelectedStudentsToAlumni}
-                disabled={
-                  isAnyBulkActionPending ||
-                  alumniEligibleSelectedStudents.length === 0
-                }
-                title="Only Grade 12 SHS and 4th Year College students can be moved to alumni"
-              >
-                {isBulkMovingToAlumni ? "Moving..." : "Move to Alumni"}
-              </button>
-              <button
-                type="button"
-                className="students-bulk-archive-btn"
-                onClick={handleMoveSelectedStudentsToArchive}
-                disabled={isAnyBulkActionPending}
-              >
-                <MdArchive />
-                {isBulkArchiving ? "Archiving..." : "Move to Archive"}
-              </button>
-              <button
-                type="button"
-                className="students-bulk-clear-btn"
-                onClick={() => setSelectedStudentIds([])}
-                disabled={isAnyBulkActionPending}
-              >
-                Clear Selection
-              </button>
-            </div>
-          </div>
-        ) : null}
 
         <div className="students-filters">
           <div className="students-filter-group">
@@ -3956,11 +3837,73 @@ export default function AdminStudents({
           </div>
         </div>
 
+        {!studentSelectionMode ? (
+          <div className="students-bulk-action-buttons students-selection-entry">
+            <button type="button" className="students-bulk-archive-btn"
+              onClick={() => { setSelectedStudentIds([]); setStudentSelectionMode("archive"); }}
+              disabled={isLoading || sortedStudents.length === 0}>
+              <MdArchive /> Archive
+            </button>
+            <button type="button" className="students-bulk-move-btn"
+              onClick={() => { setSelectedStudentIds([]); setStudentSelectionMode("alumni"); }}
+              disabled={isLoading || sortedStudents.length === 0}>
+              Move to Alumni
+            </button>
+          </div>
+        ) : null}
+
+        {studentSelectionMode ? (
+          <div className="students-bulk-actions">
+            <div className="students-bulk-copy">
+              <strong>{selectedStudents.length} selected</strong>
+              <span>
+                Select students, then confirm the action below.
+              </span>
+            </div>
+            <div className="students-bulk-action-buttons">
+              <button
+                type="button"
+                className="students-bulk-clear-btn"
+                onClick={() => { setSelectedStudentIds([]); setStudentSelectionMode(null); }}
+                disabled={isAnyBulkActionPending}
+              >
+                Cancel
+              </button>
+              {studentSelectionMode === "alumni" ? (
+              <button
+                type="button"
+                className="students-bulk-move-btn"
+                onClick={handleMoveSelectedStudentsToAlumni}
+                disabled={
+                  isAnyBulkActionPending ||
+                  alumniEligibleSelectedStudents.length === 0
+                }
+                title="Only Grade 12 SHS and 4th Year College students can be moved to alumni"
+              >
+                {isBulkMovingToAlumni ? "Moving..." : "Move to Alumni"}
+              </button>
+              ) : null}
+              {studentSelectionMode === "archive" ? (
+              <button
+                type="button"
+                className="students-bulk-archive-btn"
+                onClick={handleMoveSelectedStudentsToArchive}
+                disabled={isAnyBulkActionPending || selectedStudents.length === 0}
+              >
+                <MdArchive />
+                {isBulkArchiving ? "Archiving..." : "Archive Selected"}
+              </button>
+              ) : null}
+
+            </div>
+          </div>
+        ) : null}
+
         <div className="students-table-container">
           <table className="students-table">
             <thead>
               <tr>
-                <th className="students-selection-column">
+                {studentSelectionMode ? (<th className="students-selection-column">
                   <input
                     type="checkbox"
                     className="students-selection-checkbox"
@@ -3969,7 +3912,7 @@ export default function AdminStudents({
                     disabled={isLoading || visibleStudentIds.length === 0}
                     aria-label="Select all visible students"
                   />
-                </th>
+                </th>) : null}
                 <th>
                   <button
                     type="button"
@@ -4000,7 +3943,7 @@ export default function AdminStudents({
                         : ""
                     }
                   >
-                    <td className="students-selection-column" data-label="Select">
+                    {studentSelectionMode ? (<td className="students-selection-column" data-label="Select">
                       <input
                         type="checkbox"
                         className="students-selection-checkbox"
@@ -4009,7 +3952,7 @@ export default function AdminStudents({
                         disabled={!isStudentSelectableForBulkActions(student)}
                         aria-label={`Select ${student.name}`}
                       />
-                    </td>
+                    </td>) : null}
                     <td data-label="Student ID">{student.id}</td>
                     <td data-label="Name">{student.name}</td>
                     <td data-label="Course/Track">
@@ -4044,25 +3987,14 @@ export default function AdminStudents({
                         >
                           View details
                         </button>
-                        {student.status !== "Archived" ? (
-                          <button
-                            className="students-action-btn students-archive-btn students-icon-only-btn"
-                            onClick={() => void openArchiveConfirm(student.id)}
-                            disabled={isAnyBulkActionPending}
-                            type="button"
-                            aria-label={`Move ${student.name} to Archive`}
-                            title={`Move ${student.name} to Archive`}
-                          >
-                            <MdArchive />
-                          </button>
-                        ) : null}
+
                       </div>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9} className="students-no-results">
+                  <td colSpan={studentSelectionMode ? 9 : 8} className="students-no-results">
                     {isLoading ? (
                       <div className="skeleton-table-row">
                         <span className="skeleton-line short" />
@@ -4080,40 +4012,7 @@ export default function AdminStudents({
         </div>
 
         {sortedStudents.length > 0 && totalStudentPages > 1 ? (
-          <nav className="students-pagination" aria-label="Student list pages">
-            <span className="students-pagination-summary">
-              Showing {(currentStudentPage - 1) * studentsPerPage + 1}–
-              {Math.min(currentStudentPage * studentsPerPage, sortedStudents.length)}
-              {" of "}{sortedStudents.length} students
-            </span>
-            <div className="students-pagination-controls">
-              <button
-                type="button"
-                className="students-pagination-button"
-                onClick={() => setRequestedStudentPage((page) => Math.max(1, page - 1))}
-                disabled={currentStudentPage === 1}
-                aria-label="Previous student page"
-              >
-                ← Previous
-              </button>
-              <span aria-live="polite">
-                Page {currentStudentPage} of {totalStudentPages}
-              </span>
-              <button
-                type="button"
-                className="students-pagination-button"
-                onClick={() =>
-                  setRequestedStudentPage((page) =>
-                    Math.min(totalStudentPages, page + 1),
-                  )
-                }
-                disabled={currentStudentPage === totalStudentPages}
-                aria-label="Next student page"
-              >
-                Next →
-              </button>
-            </div>
-          </nav>
+          <TablePagination page={currentStudentPage} pageSize={studentsPerPage} totalItems={sortedStudents.length} onPageChange={setRequestedStudentPage} label="Student list pages" />
         ) : null}
 
         {isImportModalOpen && <StudentImportModal key={currentBranch} branch={currentBranch}
@@ -5541,6 +5440,16 @@ export default function AdminStudents({
                   </button>
                 ) : null}
                 */}
+                {viewingStudent.status !== "Archived" ? (
+                  <button
+                    type="button"
+                    className="students-bulk-archive-btn"
+                    onClick={() => void handleArchiveViewedStudent()}
+                    disabled={isAnyBulkActionPending}
+                  >
+                    <MdArchive /> {isBulkArchiving ? "Archiving..." : "Archive"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="students-save-btn"
@@ -6215,55 +6124,6 @@ export default function AdminStudents({
                   onClick={handleCloseScheduleNotifications}
                 >
                   Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Archive Confirmation Modal */}
-        {isArchiveModalOpen && (
-          <div className="students-modal-overlay students-archive-confirm-overlay">
-            <div className="students-modal students-archive-confirm-modal">
-              <div className="students-modal-header">
-                <h2>Confirm Archive</h2>
-                <button
-                  className="students-modal-close"
-                  onClick={cancelArchive}
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="students-modal-body">
-                <p>Are you sure you want to move this student to Archive?</p>
-                <p className="students-student-info">
-                  <strong>
-                    {students.find((s) => s.id === studentToArchive)?.name}
-                  </strong>{" "}
-                  <br />
-                  (ID: {studentToArchive})
-                </p>
-                <p>This student will be hidden from Active records.</p>
-              </div>
-
-              <div className="students-modal-actions">
-                <button
-                  type="button"
-                  className="students-cancel-btn"
-                  onClick={cancelArchive}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="students-archive-confirm-btn"
-                  onClick={confirmArchive}
-                  aria-label="Confirm move to Archive"
-                  title="Confirm move to Archive"
-                >
-                  <MdArchive />
-                  Archive
                 </button>
               </div>
             </div>

@@ -1,3 +1,4 @@
+import { isCollegeTransferee } from "./adminStorage";
 import {
   getStudentPortalSubjects,
   getStudentPortalSubjectsFromScheduledAssignments,
@@ -203,6 +204,8 @@ const getApprovedOwnScheduleSubjects = ({
   });
 
   if (resolvedStudentRecord.ownScheduleSelectionStatus !== "Approved") {
+    // College transferees have no official load until their schedule is approved.
+    if (isCollegeTransferee(resolvedStudentRecord)) return [];
     if (ownSchedulePlan?.assignedSubjects.length) {
       return getStudentPortalSubjectsFromScheduledAssignments({
         branch,

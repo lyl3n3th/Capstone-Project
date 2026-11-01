@@ -1,0 +1,2875 @@
+{
+  "columns": [
+    {
+      "name": "subject_row_id",
+      "type": "uuid",
+      "table": "branch_academic_subject_prerequisites",
+      "notnull": true
+    },
+    {
+      "name": "prerequisite_subject_row_id",
+      "type": "uuid",
+      "table": "branch_academic_subject_prerequisites",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_academic_subject_prerequisites",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_student_number_settings",
+      "notnull": true
+    },
+    {
+      "name": "next_sequence",
+      "type": "bigint",
+      "table": "branch_student_number_settings",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_student_number_settings",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "branch_student_planning_states",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_student_planning_states",
+      "notnull": true
+    },
+    {
+      "name": "student_number",
+      "type": "text",
+      "table": "branch_student_planning_states",
+      "notnull": true
+    },
+    {
+      "name": "tracking_number",
+      "type": "text",
+      "table": "branch_student_planning_states",
+      "notnull": false
+    },
+    {
+      "name": "requested_own_schedule",
+      "type": "boolean",
+      "table": "branch_student_planning_states",
+      "notnull": true
+    },
+    {
+      "name": "own_schedule_request_status",
+      "type": "text",
+      "table": "branch_student_planning_states",
+      "notnull": false
+    },
+    {
+      "name": "own_schedule_academic_year",
+      "type": "text",
+      "table": "branch_student_planning_states",
+      "notnull": false
+    },
+    {
+      "name": "own_schedule_semester",
+      "type": "text",
+      "table": "branch_student_planning_states",
+      "notnull": false
+    },
+    {
+      "name": "own_schedule_selection_status",
+      "type": "text",
+      "table": "branch_student_planning_states",
+      "notnull": false
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_student_planning_states",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_student_planning_states",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "branch_student_subject_plans",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_student_subject_plans",
+      "notnull": true
+    },
+    {
+      "name": "external_id",
+      "type": "text",
+      "table": "branch_student_subject_plans",
+      "notnull": true
+    },
+    {
+      "name": "student_number",
+      "type": "text",
+      "table": "branch_student_subject_plans",
+      "notnull": false
+    },
+    {
+      "name": "tracking_number",
+      "type": "text",
+      "table": "branch_student_subject_plans",
+      "notnull": false
+    },
+    {
+      "name": "semester",
+      "type": "text",
+      "table": "branch_student_subject_plans",
+      "notnull": true
+    },
+    {
+      "name": "academic_year",
+      "type": "text",
+      "table": "branch_student_subject_plans",
+      "notnull": true
+    },
+    {
+      "name": "source",
+      "type": "text",
+      "table": "branch_student_subject_plans",
+      "notnull": true
+    },
+    {
+      "name": "payload",
+      "type": "jsonb",
+      "table": "branch_student_subject_plans",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "branch_student_subject_plans",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_student_subject_plans",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_student_subject_plans",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "external_id",
+      "type": "text",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "student_number",
+      "type": "text",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "tracking_number",
+      "type": "text",
+      "table": "branch_student_schedule_requests",
+      "notnull": false
+    },
+    {
+      "name": "academic_year",
+      "type": "text",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "semester",
+      "type": "text",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "status",
+      "type": "text",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "payload",
+      "type": "jsonb",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_student_schedule_requests",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "admission_branches",
+      "notnull": true
+    },
+    {
+      "name": "code",
+      "type": "text",
+      "table": "admission_branches",
+      "notnull": true
+    },
+    {
+      "name": "name",
+      "type": "text",
+      "table": "admission_branches",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "admission_branches",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "admission_branches",
+      "notnull": true
+    },
+    {
+      "name": "student_number_prefix",
+      "type": "text",
+      "table": "admission_branches",
+      "notnull": false
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "admission_student_statuses",
+      "notnull": true
+    },
+    {
+      "name": "code",
+      "type": "text",
+      "table": "admission_student_statuses",
+      "notnull": true
+    },
+    {
+      "name": "label",
+      "type": "text",
+      "table": "admission_student_statuses",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "admission_student_statuses",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "admission_student_statuses",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "academic_programs",
+      "notnull": true
+    },
+    {
+      "name": "code",
+      "type": "text",
+      "table": "academic_programs",
+      "notnull": true
+    },
+    {
+      "name": "name",
+      "type": "text",
+      "table": "academic_programs",
+      "notnull": true
+    },
+    {
+      "name": "level",
+      "type": "text",
+      "table": "academic_programs",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "academic_programs",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "academic_programs",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "program_offerings",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "program_offerings",
+      "notnull": true
+    },
+    {
+      "name": "program_id",
+      "type": "uuid",
+      "table": "program_offerings",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "program_offerings",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "program_offerings",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "program_tracks",
+      "notnull": true
+    },
+    {
+      "name": "program_id",
+      "type": "uuid",
+      "table": "program_tracks",
+      "notnull": true
+    },
+    {
+      "name": "code",
+      "type": "text",
+      "table": "program_tracks",
+      "notnull": true
+    },
+    {
+      "name": "name",
+      "type": "text",
+      "table": "program_tracks",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "program_tracks",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "program_tracks",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "admission_honors",
+      "notnull": true
+    },
+    {
+      "name": "code",
+      "type": "text",
+      "table": "admission_honors",
+      "notnull": true
+    },
+    {
+      "name": "label",
+      "type": "text",
+      "table": "admission_honors",
+      "notnull": true
+    },
+    {
+      "name": "tuition_discount_percent",
+      "type": "numeric(5,2)",
+      "table": "admission_honors",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "admission_honors",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "admission_honors",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "admission_requirement_types",
+      "notnull": true
+    },
+    {
+      "name": "code",
+      "type": "text",
+      "table": "admission_requirement_types",
+      "notnull": true
+    },
+    {
+      "name": "name",
+      "type": "text",
+      "table": "admission_requirement_types",
+      "notnull": true
+    },
+    {
+      "name": "sort_order",
+      "type": "integer",
+      "table": "admission_requirement_types",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "admission_requirement_types",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "admission_requirement_types",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "admission_requirement_rules",
+      "notnull": true
+    },
+    {
+      "name": "student_status_id",
+      "type": "uuid",
+      "table": "admission_requirement_rules",
+      "notnull": true
+    },
+    {
+      "name": "requirement_type_id",
+      "type": "uuid",
+      "table": "admission_requirement_rules",
+      "notnull": true
+    },
+    {
+      "name": "program_level",
+      "type": "text",
+      "table": "admission_requirement_rules",
+      "notnull": true
+    },
+    {
+      "name": "honor_required",
+      "type": "boolean",
+      "table": "admission_requirement_rules",
+      "notnull": true
+    },
+    {
+      "name": "is_optional",
+      "type": "boolean",
+      "table": "admission_requirement_rules",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "admission_requirement_rules",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "admission_application_requirement_files",
+      "notnull": true
+    },
+    {
+      "name": "application_id",
+      "type": "uuid",
+      "table": "admission_application_requirement_files",
+      "notnull": true
+    },
+    {
+      "name": "requirement_type_id",
+      "type": "uuid",
+      "table": "admission_application_requirement_files",
+      "notnull": true
+    },
+    {
+      "name": "storage_bucket",
+      "type": "text",
+      "table": "admission_application_requirement_files",
+      "notnull": true
+    },
+    {
+      "name": "storage_path",
+      "type": "text",
+      "table": "admission_application_requirement_files",
+      "notnull": true
+    },
+    {
+      "name": "original_file_name",
+      "type": "text",
+      "table": "admission_application_requirement_files",
+      "notnull": true
+    },
+    {
+      "name": "mime_type",
+      "type": "text",
+      "table": "admission_application_requirement_files",
+      "notnull": false
+    },
+    {
+      "name": "file_size_bytes",
+      "type": "bigint",
+      "table": "admission_application_requirement_files",
+      "notnull": false
+    },
+    {
+      "name": "uploaded_at",
+      "type": "timestamp with time zone",
+      "table": "admission_application_requirement_files",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "admission_application_requirement_files",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "external_id",
+      "type": "text",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "code",
+      "type": "text",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "name",
+      "type": "text",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "units",
+      "type": "integer",
+      "table": "branch_academic_subjects",
+      "notnull": false
+    },
+    {
+      "name": "program",
+      "type": "text",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "year_level",
+      "type": "text",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "semester",
+      "type": "text",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "strand",
+      "type": "text",
+      "table": "branch_academic_subjects",
+      "notnull": false
+    },
+    {
+      "name": "is_minor",
+      "type": "boolean",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_academic_subjects",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "branch_academic_instructors",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_academic_instructors",
+      "notnull": true
+    },
+    {
+      "name": "external_id",
+      "type": "text",
+      "table": "branch_academic_instructors",
+      "notnull": true
+    },
+    {
+      "name": "name",
+      "type": "text",
+      "table": "branch_academic_instructors",
+      "notnull": true
+    },
+    {
+      "name": "employee_id",
+      "type": "text",
+      "table": "branch_academic_instructors",
+      "notnull": true
+    },
+    {
+      "name": "department",
+      "type": "text",
+      "table": "branch_academic_instructors",
+      "notnull": true
+    },
+    {
+      "name": "email",
+      "type": "citext",
+      "table": "branch_academic_instructors",
+      "notnull": false
+    },
+    {
+      "name": "contact_number",
+      "type": "text",
+      "table": "branch_academic_instructors",
+      "notnull": false
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "branch_academic_instructors",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_academic_instructors",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_academic_instructors",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "admission_application_id",
+      "type": "uuid",
+      "table": "student_profiles",
+      "notnull": false
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "student_status_id",
+      "type": "uuid",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "program_offering_id",
+      "type": "uuid",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "track_id",
+      "type": "uuid",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "student_number",
+      "type": "text",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "first_name",
+      "type": "text",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "last_name",
+      "type": "text",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "middle_name",
+      "type": "text",
+      "table": "student_profiles",
+      "notnull": false
+    },
+    {
+      "name": "sex",
+      "type": "text",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "civil_status",
+      "type": "text",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "year_level",
+      "type": "text",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "section",
+      "type": "text",
+      "table": "student_profiles",
+      "notnull": false
+    },
+    {
+      "name": "status",
+      "type": "text",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "approved_at",
+      "type": "timestamp with time zone",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "completion_status",
+      "type": "text",
+      "table": "student_profiles",
+      "notnull": true
+    },
+    {
+      "name": "document_submitted_date",
+      "type": "date",
+      "table": "student_profiles",
+      "notnull": false
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "external_id",
+      "type": "text",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "code",
+      "type": "text",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "program",
+      "type": "text",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "year_level",
+      "type": "text",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "semester",
+      "type": "text",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "strand",
+      "type": "text",
+      "table": "branch_class_sections",
+      "notnull": false
+    },
+    {
+      "name": "section",
+      "type": "text",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "current_enrollees",
+      "type": "integer",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "max_capacity",
+      "type": "integer",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "enrollee_ids",
+      "type": "text[]",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_class_sections",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "branch_assignment_rooms",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_assignment_rooms",
+      "notnull": true
+    },
+    {
+      "name": "room_name",
+      "type": "text",
+      "table": "branch_assignment_rooms",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "branch_assignment_rooms",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_assignment_rooms",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_assignment_rooms",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "branch_subject_assignments",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_subject_assignments",
+      "notnull": true
+    },
+    {
+      "name": "external_id",
+      "type": "text",
+      "table": "branch_subject_assignments",
+      "notnull": true
+    },
+    {
+      "name": "subject_row_id",
+      "type": "uuid",
+      "table": "branch_subject_assignments",
+      "notnull": true
+    },
+    {
+      "name": "instructor_row_id",
+      "type": "uuid",
+      "table": "branch_subject_assignments",
+      "notnull": false
+    },
+    {
+      "name": "section_row_id",
+      "type": "uuid",
+      "table": "branch_subject_assignments",
+      "notnull": true
+    },
+    {
+      "name": "academic_year",
+      "type": "text",
+      "table": "branch_subject_assignments",
+      "notnull": true
+    },
+    {
+      "name": "semester",
+      "type": "text",
+      "table": "branch_subject_assignments",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "branch_subject_assignments",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_subject_assignments",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_subject_assignments",
+      "notnull": true
+    },
+    {
+      "name": "student_id",
+      "type": "uuid",
+      "table": "student_contact_details",
+      "notnull": true
+    },
+    {
+      "name": "email",
+      "type": "citext",
+      "table": "student_contact_details",
+      "notnull": true
+    },
+    {
+      "name": "phone_number",
+      "type": "text",
+      "table": "student_contact_details",
+      "notnull": true
+    },
+    {
+      "name": "address",
+      "type": "text",
+      "table": "student_contact_details",
+      "notnull": true
+    },
+    {
+      "name": "birth_date",
+      "type": "date",
+      "table": "student_contact_details",
+      "notnull": false
+    },
+    {
+      "name": "guardian_name",
+      "type": "text",
+      "table": "student_contact_details",
+      "notnull": false
+    },
+    {
+      "name": "guardian_contact",
+      "type": "text",
+      "table": "student_contact_details",
+      "notnull": false
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "student_contact_details",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "student_contact_details",
+      "notnull": true
+    },
+    {
+      "name": "student_id",
+      "type": "uuid",
+      "table": "student_portal_accounts",
+      "notnull": true
+    },
+    {
+      "name": "password_hash",
+      "type": "text",
+      "table": "student_portal_accounts",
+      "notnull": true
+    },
+    {
+      "name": "status",
+      "type": "text",
+      "table": "student_portal_accounts",
+      "notnull": true
+    },
+    {
+      "name": "registered_at",
+      "type": "timestamp with time zone",
+      "table": "student_portal_accounts",
+      "notnull": true
+    },
+    {
+      "name": "last_login_at",
+      "type": "timestamp with time zone",
+      "table": "student_portal_accounts",
+      "notnull": false
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "student_portal_accounts",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "student_portal_accounts",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "branch_subject_assignment_slots",
+      "notnull": true
+    },
+    {
+      "name": "assignment_id",
+      "type": "uuid",
+      "table": "branch_subject_assignment_slots",
+      "notnull": true
+    },
+    {
+      "name": "sort_order",
+      "type": "integer",
+      "table": "branch_subject_assignment_slots",
+      "notnull": true
+    },
+    {
+      "name": "day",
+      "type": "text",
+      "table": "branch_subject_assignment_slots",
+      "notnull": true
+    },
+    {
+      "name": "start_time",
+      "type": "text",
+      "table": "branch_subject_assignment_slots",
+      "notnull": true
+    },
+    {
+      "name": "end_time",
+      "type": "text",
+      "table": "branch_subject_assignment_slots",
+      "notnull": true
+    },
+    {
+      "name": "room",
+      "type": "text",
+      "table": "branch_subject_assignment_slots",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_subject_assignment_slots",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "external_id",
+      "type": "text",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "student_number",
+      "type": "text",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "tracking_number",
+      "type": "text",
+      "table": "branch_enrollment_requests",
+      "notnull": false
+    },
+    {
+      "name": "academic_year",
+      "type": "text",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "semester",
+      "type": "text",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "enrollment_status",
+      "type": "text",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "payload",
+      "type": "jsonb",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_enrollment_requests",
+      "notnull": true
+    },
+    {
+      "name": "branch",
+      "type": "text",
+      "table": "instructor_evaluation_statuses",
+      "notnull": true
+    },
+    {
+      "name": "instructor_id",
+      "type": "text",
+      "table": "instructor_evaluation_statuses",
+      "notnull": true
+    },
+    {
+      "name": "is_open",
+      "type": "boolean",
+      "table": "instructor_evaluation_statuses",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "instructor_evaluation_statuses",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "text",
+      "table": "evaluation_questionnaire_categories",
+      "notnull": true
+    },
+    {
+      "name": "branch",
+      "type": "text",
+      "table": "evaluation_questionnaire_categories",
+      "notnull": true
+    },
+    {
+      "name": "name",
+      "type": "text",
+      "table": "evaluation_questionnaire_categories",
+      "notnull": true
+    },
+    {
+      "name": "sort_order",
+      "type": "integer",
+      "table": "evaluation_questionnaire_categories",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "evaluation_questionnaire_categories",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "evaluation_questionnaire_categories",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "text",
+      "table": "evaluation_questionnaire_questions",
+      "notnull": true
+    },
+    {
+      "name": "category_id",
+      "type": "text",
+      "table": "evaluation_questionnaire_questions",
+      "notnull": true
+    },
+    {
+      "name": "branch",
+      "type": "text",
+      "table": "evaluation_questionnaire_questions",
+      "notnull": true
+    },
+    {
+      "name": "text",
+      "type": "text",
+      "table": "evaluation_questionnaire_questions",
+      "notnull": true
+    },
+    {
+      "name": "question_type",
+      "type": "text",
+      "table": "evaluation_questionnaire_questions",
+      "notnull": true
+    },
+    {
+      "name": "sort_order",
+      "type": "integer",
+      "table": "evaluation_questionnaire_questions",
+      "notnull": true
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "evaluation_questionnaire_questions",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "evaluation_questionnaire_questions",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "text",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "branch",
+      "type": "text",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "instructor_id",
+      "type": "text",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "instructor_name",
+      "type": "text",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "student_number",
+      "type": "text",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "student_name",
+      "type": "text",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "year_level",
+      "type": "text",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "section",
+      "type": "text",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "academic_year",
+      "type": "text",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "semester",
+      "type": "text",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "subject_ids",
+      "type": "text[]",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "subject_codes",
+      "type": "text[]",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "responses",
+      "type": "jsonb",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "submitted_at",
+      "type": "timestamp with time zone",
+      "table": "instructor_evaluation_submissions",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "text",
+      "table": "branch_student_grade_records",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_student_grade_records",
+      "notnull": true
+    },
+    {
+      "name": "student_number",
+      "type": "text",
+      "table": "branch_student_grade_records",
+      "notnull": true
+    },
+    {
+      "name": "subject_code",
+      "type": "text",
+      "table": "branch_student_grade_records",
+      "notnull": true
+    },
+    {
+      "name": "academic_year",
+      "type": "text",
+      "table": "branch_student_grade_records",
+      "notnull": true
+    },
+    {
+      "name": "semester",
+      "type": "text",
+      "table": "branch_student_grade_records",
+      "notnull": true
+    },
+    {
+      "name": "grading_period",
+      "type": "text",
+      "table": "branch_student_grade_records",
+      "notnull": true
+    },
+    {
+      "name": "payload",
+      "type": "jsonb",
+      "table": "branch_student_grade_records",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_student_grade_records",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "text",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "instructor_id",
+      "type": "text",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "instructor_name",
+      "type": "text",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "employee_id",
+      "type": "text",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "file_name",
+      "type": "text",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "submitted_at",
+      "type": "timestamp with time zone",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "status",
+      "type": "text",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "records",
+      "type": "jsonb",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "errors",
+      "type": "jsonb",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "reviewed_at",
+      "type": "timestamp with time zone",
+      "table": "instructor_grade_submissions",
+      "notnull": false
+    },
+    {
+      "name": "reviewed_by",
+      "type": "text",
+      "table": "instructor_grade_submissions",
+      "notnull": false
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "instructor_grade_submissions",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_instructor_passwords",
+      "notnull": true
+    },
+    {
+      "name": "employee_id",
+      "type": "text",
+      "table": "branch_instructor_passwords",
+      "notnull": true
+    },
+    {
+      "name": "password_hash",
+      "type": "text",
+      "table": "branch_instructor_passwords",
+      "notnull": true
+    },
+    {
+      "name": "password_change_required",
+      "type": "boolean",
+      "table": "branch_instructor_passwords",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_instructor_passwords",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_local_storage_records",
+      "notnull": true
+    },
+    {
+      "name": "scope",
+      "type": "text",
+      "table": "branch_local_storage_records",
+      "notnull": true
+    },
+    {
+      "name": "payload",
+      "type": "jsonb",
+      "table": "branch_local_storage_records",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "branch_local_storage_records",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "student_payments",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "student_payments",
+      "notnull": true
+    },
+    {
+      "name": "student_number",
+      "type": "text",
+      "table": "student_payments",
+      "notnull": true
+    },
+    {
+      "name": "tracking_number",
+      "type": "text",
+      "table": "student_payments",
+      "notnull": false
+    },
+    {
+      "name": "amount",
+      "type": "numeric(12,2)",
+      "table": "student_payments",
+      "notnull": true
+    },
+    {
+      "name": "receipt_number",
+      "type": "text",
+      "table": "student_payments",
+      "notnull": true
+    },
+    {
+      "name": "paid_at",
+      "type": "timestamp with time zone",
+      "table": "student_payments",
+      "notnull": true
+    },
+    {
+      "name": "encoded_by",
+      "type": "text",
+      "table": "student_payments",
+      "notnull": true
+    },
+    {
+      "name": "encoded_role",
+      "type": "text",
+      "table": "student_payments",
+      "notnull": false
+    },
+    {
+      "name": "notes",
+      "type": "text",
+      "table": "student_payments",
+      "notnull": false
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "student_payments",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "admission_portal_statuses",
+      "notnull": true
+    },
+    {
+      "name": "is_open",
+      "type": "boolean",
+      "table": "admission_portal_statuses",
+      "notnull": true
+    },
+    {
+      "name": "close_on_date",
+      "type": "text",
+      "table": "admission_portal_statuses",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "admission_portal_statuses",
+      "notnull": true
+    },
+    {
+      "name": "academic_year",
+      "type": "text",
+      "table": "admission_portal_statuses",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "branch_track_offerings",
+      "notnull": true
+    },
+    {
+      "name": "track_id",
+      "type": "uuid",
+      "table": "branch_track_offerings",
+      "notnull": true
+    },
+    {
+      "name": "is_active",
+      "type": "boolean",
+      "table": "branch_track_offerings",
+      "notnull": true
+    },
+    {
+      "name": "is_deleted",
+      "type": "boolean",
+      "table": "branch_track_offerings",
+      "notnull": true
+    },
+    {
+      "name": "id",
+      "type": "uuid",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "auth_user_id",
+      "type": "uuid",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "tracking_number",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "branch_id",
+      "type": "uuid",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "student_status_id",
+      "type": "uuid",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "program_offering_id",
+      "type": "uuid",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "track_id",
+      "type": "uuid",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "honor_id",
+      "type": "uuid",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "first_name",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "last_name",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "middle_name",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "sex",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "civil_status",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "address",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "email",
+      "type": "citext",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "phone_number",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "last_school_attended",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "year_completion",
+      "type": "integer",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "applied_for_scholarship",
+      "type": "boolean",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "current_step",
+      "type": "smallint",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "application_status",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "requirements_uploaded_at",
+      "type": "timestamp with time zone",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "submitted_at",
+      "type": "timestamp with time zone",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp with time zone",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "scholarship_exam_score",
+      "type": "numeric(5,2)",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "rejection_reason",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "requested_year_level",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "academic_year",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "requested_own_schedule",
+      "type": "boolean",
+      "table": "admission_applications",
+      "notnull": true
+    },
+    {
+      "name": "own_schedule_request_status",
+      "type": "text",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "own_schedule_request_submitted_at",
+      "type": "timestamp with time zone",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "own_schedule_request_decided_at",
+      "type": "timestamp with time zone",
+      "table": "admission_applications",
+      "notnull": false
+    },
+    {
+      "name": "branch",
+      "type": "text",
+      "table": "instructor_evaluation_periods",
+      "notnull": true
+    },
+    {
+      "name": "is_open",
+      "type": "boolean",
+      "table": "instructor_evaluation_periods",
+      "notnull": true
+    },
+    {
+      "name": "closes_at",
+      "type": "timestamp with time zone",
+      "table": "instructor_evaluation_periods",
+      "notnull": false
+    },
+    {
+      "name": "updated_at",
+      "type": "timestamp with time zone",
+      "table": "instructor_evaluation_periods",
+      "notnull": true
+    },
+    {
+      "name": "student_id",
+      "type": "uuid",
+      "table": "student_import_details",
+      "notnull": true
+    },
+    {
+      "name": "academic_year",
+      "type": "text",
+      "table": "student_import_details",
+      "notnull": true
+    },
+    {
+      "name": "semester",
+      "type": "text",
+      "table": "student_import_details",
+      "notnull": true
+    },
+    {
+      "name": "academic_standing",
+      "type": "text",
+      "table": "student_import_details",
+      "notnull": true
+    },
+    {
+      "name": "batch_id",
+      "type": "uuid",
+      "table": "student_import_details",
+      "notnull": true
+    },
+    {
+      "name": "imported_at",
+      "type": "timestamp with time zone",
+      "table": "student_import_details",
+      "notnull": true
+    },
+    {
+      "name": "last_school_attended",
+      "type": "text",
+      "table": "student_import_details",
+      "notnull": false
+    },
+    {
+      "name": "year_completion",
+      "type": "integer",
+      "table": "student_import_details",
+      "notnull": false
+    }
+  ],
+  "constraints": [
+    {
+      "name": "branch_academic_subject_prereq_prerequisite_subject_row_id_fkey",
+      "table": "branch_academic_subject_prerequisites",
+      "definition": "FOREIGN KEY (prerequisite_subject_row_id) REFERENCES branch_academic_subjects(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_academic_subject_prerequisites_distinct_check",
+      "table": "branch_academic_subject_prerequisites",
+      "definition": "CHECK ((subject_row_id <> prerequisite_subject_row_id))"
+    },
+    {
+      "name": "branch_academic_subject_prerequisites_pkey",
+      "table": "branch_academic_subject_prerequisites",
+      "definition": "PRIMARY KEY (subject_row_id, prerequisite_subject_row_id)"
+    },
+    {
+      "name": "branch_academic_subject_prerequisites_subject_row_id_fkey",
+      "table": "branch_academic_subject_prerequisites",
+      "definition": "FOREIGN KEY (subject_row_id) REFERENCES branch_academic_subjects(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_student_number_settings_branch_id_fkey",
+      "table": "branch_student_number_settings",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_student_number_settings_next_sequence_check",
+      "table": "branch_student_number_settings",
+      "definition": "CHECK (((next_sequence >= 0) AND (next_sequence <= 1000000)))"
+    },
+    {
+      "name": "branch_student_number_settings_pkey",
+      "table": "branch_student_number_settings",
+      "definition": "PRIMARY KEY (branch_id)"
+    },
+    {
+      "name": "branch_student_planning_states_branch_id_fkey",
+      "table": "branch_student_planning_states",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_student_planning_states_branch_id_student_number_key",
+      "table": "branch_student_planning_states",
+      "definition": "UNIQUE (branch_id, student_number)"
+    },
+    {
+      "name": "branch_student_planning_states_pkey",
+      "table": "branch_student_planning_states",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "branch_student_planning_states_request_status_check",
+      "table": "branch_student_planning_states",
+      "definition": "CHECK (((own_schedule_request_status IS NULL) OR (own_schedule_request_status = ANY (ARRAY['Pending'::text, 'Approved'::text, 'Rejected'::text]))))"
+    },
+    {
+      "name": "branch_student_planning_states_selection_status_check",
+      "table": "branch_student_planning_states",
+      "definition": "CHECK (((own_schedule_selection_status IS NULL) OR (own_schedule_selection_status = ANY (ARRAY['Not Submitted'::text, 'Pending Approval'::text, 'Approved'::text, 'Rejected'::text]))))"
+    },
+    {
+      "name": "branch_student_planning_states_semester_check",
+      "table": "branch_student_planning_states",
+      "definition": "CHECK (((own_schedule_semester IS NULL) OR (own_schedule_semester = ANY (ARRAY['1st Semester'::text, '2nd Semester'::text, 'Summer'::text]))))"
+    },
+    {
+      "name": "branch_student_planning_states_student_unique",
+      "table": "branch_student_planning_states",
+      "definition": "UNIQUE (branch_id, student_number)"
+    },
+    {
+      "name": "branch_student_subject_plans_branch_id_external_id_key",
+      "table": "branch_student_subject_plans",
+      "definition": "UNIQUE (branch_id, external_id)"
+    },
+    {
+      "name": "branch_student_subject_plans_branch_id_fkey",
+      "table": "branch_student_subject_plans",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_student_subject_plans_external_unique",
+      "table": "branch_student_subject_plans",
+      "definition": "UNIQUE (branch_id, external_id)"
+    },
+    {
+      "name": "branch_student_subject_plans_pkey",
+      "table": "branch_student_subject_plans",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "branch_student_subject_plans_semester_check",
+      "table": "branch_student_subject_plans",
+      "definition": "CHECK ((semester = ANY (ARRAY['1st Semester'::text, '2nd Semester'::text, 'Summer'::text])))"
+    },
+    {
+      "name": "branch_student_subject_plans_source_check",
+      "table": "branch_student_subject_plans",
+      "definition": "CHECK ((source = ANY (ARRAY['transferee_validation'::text, 'irregular_assignment'::text, 'student_schedule_request'::text, 'enrollment_request'::text])))"
+    },
+    {
+      "name": "branch_student_schedule_reque_branch_id_student_number_acad_key",
+      "table": "branch_student_schedule_requests",
+      "definition": "UNIQUE (branch_id, student_number, academic_year, semester)"
+    },
+    {
+      "name": "branch_student_schedule_requests_branch_id_external_id_key",
+      "table": "branch_student_schedule_requests",
+      "definition": "UNIQUE (branch_id, external_id)"
+    },
+    {
+      "name": "branch_student_schedule_requests_branch_id_fkey",
+      "table": "branch_student_schedule_requests",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_student_schedule_requests_pkey",
+      "table": "branch_student_schedule_requests",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "branch_student_schedule_requests_semester_check",
+      "table": "branch_student_schedule_requests",
+      "definition": "CHECK ((semester = ANY (ARRAY['1st Semester'::text, '2nd Semester'::text, 'Summer'::text])))"
+    },
+    {
+      "name": "branch_student_schedule_requests_status_check",
+      "table": "branch_student_schedule_requests",
+      "definition": "CHECK ((status = ANY (ARRAY['Pending'::text, 'Approved'::text, 'Rejected'::text])))"
+    },
+    {
+      "name": "branch_student_schedule_requests_student_term_unique",
+      "table": "branch_student_schedule_requests",
+      "definition": "UNIQUE (branch_id, student_number, academic_year, semester)"
+    },
+    {
+      "name": "admission_branches_code_format",
+      "table": "admission_branches",
+      "definition": "CHECK ((code = lower(code)))"
+    },
+    {
+      "name": "admission_branches_code_key",
+      "table": "admission_branches",
+      "definition": "UNIQUE (code)"
+    },
+    {
+      "name": "admission_branches_name_key",
+      "table": "admission_branches",
+      "definition": "UNIQUE (name)"
+    },
+    {
+      "name": "admission_branches_pkey",
+      "table": "admission_branches",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "admission_branches_student_number_prefix_format",
+      "table": "admission_branches",
+      "definition": "CHECK (((student_number_prefix IS NULL) OR (student_number_prefix ~ '^[A-Z]{3}$'::text)))"
+    },
+    {
+      "name": "admission_student_statuses_code_key",
+      "table": "admission_student_statuses",
+      "definition": "UNIQUE (code)"
+    },
+    {
+      "name": "admission_student_statuses_label_key",
+      "table": "admission_student_statuses",
+      "definition": "UNIQUE (label)"
+    },
+    {
+      "name": "admission_student_statuses_pkey",
+      "table": "admission_student_statuses",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "academic_programs_code_key",
+      "table": "academic_programs",
+      "definition": "UNIQUE (code)"
+    },
+    {
+      "name": "academic_programs_level_check",
+      "table": "academic_programs",
+      "definition": "CHECK ((level = ANY (ARRAY['college'::text, 'senior_high_school'::text])))"
+    },
+    {
+      "name": "academic_programs_name_key",
+      "table": "academic_programs",
+      "definition": "UNIQUE (name)"
+    },
+    {
+      "name": "academic_programs_pkey",
+      "table": "academic_programs",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "program_offerings_branch_id_fkey",
+      "table": "program_offerings",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "program_offerings_branch_id_program_id_key",
+      "table": "program_offerings",
+      "definition": "UNIQUE (branch_id, program_id)"
+    },
+    {
+      "name": "program_offerings_pkey",
+      "table": "program_offerings",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "program_offerings_program_id_fkey",
+      "table": "program_offerings",
+      "definition": "FOREIGN KEY (program_id) REFERENCES academic_programs(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "program_tracks_pkey",
+      "table": "program_tracks",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "program_tracks_program_id_code_key",
+      "table": "program_tracks",
+      "definition": "UNIQUE (program_id, code)"
+    },
+    {
+      "name": "program_tracks_program_id_fkey",
+      "table": "program_tracks",
+      "definition": "FOREIGN KEY (program_id) REFERENCES academic_programs(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "program_tracks_program_id_name_key",
+      "table": "program_tracks",
+      "definition": "UNIQUE (program_id, name)"
+    },
+    {
+      "name": "admission_honors_code_key",
+      "table": "admission_honors",
+      "definition": "UNIQUE (code)"
+    },
+    {
+      "name": "admission_honors_label_key",
+      "table": "admission_honors",
+      "definition": "UNIQUE (label)"
+    },
+    {
+      "name": "admission_honors_pkey",
+      "table": "admission_honors",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "admission_requirement_types_code_key",
+      "table": "admission_requirement_types",
+      "definition": "UNIQUE (code)"
+    },
+    {
+      "name": "admission_requirement_types_name_key",
+      "table": "admission_requirement_types",
+      "definition": "UNIQUE (name)"
+    },
+    {
+      "name": "admission_requirement_types_pkey",
+      "table": "admission_requirement_types",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "admission_requirement_rules_pkey",
+      "table": "admission_requirement_rules",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "admission_requirement_rules_program_level_check",
+      "table": "admission_requirement_rules",
+      "definition": "CHECK ((program_level = ANY (ARRAY['any'::text, 'college'::text, 'senior_high_school'::text])))"
+    },
+    {
+      "name": "admission_requirement_rules_requirement_type_id_fkey",
+      "table": "admission_requirement_rules",
+      "definition": "FOREIGN KEY (requirement_type_id) REFERENCES admission_requirement_types(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "admission_requirement_rules_student_status_id_fkey",
+      "table": "admission_requirement_rules",
+      "definition": "FOREIGN KEY (student_status_id) REFERENCES admission_student_statuses(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "admission_requirement_rules_student_status_id_requirement_t_key",
+      "table": "admission_requirement_rules",
+      "definition": "UNIQUE (student_status_id, requirement_type_id, program_level, honor_required)"
+    },
+    {
+      "name": "admission_application_require_application_id_requirement_ty_key",
+      "table": "admission_application_requirement_files",
+      "definition": "UNIQUE (application_id, requirement_type_id)"
+    },
+    {
+      "name": "admission_application_requirement_file_requirement_type_id_fkey",
+      "table": "admission_application_requirement_files",
+      "definition": "FOREIGN KEY (requirement_type_id) REFERENCES admission_requirement_types(id)"
+    },
+    {
+      "name": "admission_application_requirement_files_application_id_fkey",
+      "table": "admission_application_requirement_files",
+      "definition": "FOREIGN KEY (application_id) REFERENCES admission_applications(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "admission_application_requirement_files_pkey",
+      "table": "admission_application_requirement_files",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "admission_application_requirement_files_storage_path_key",
+      "table": "admission_application_requirement_files",
+      "definition": "UNIQUE (storage_path)"
+    },
+    {
+      "name": "branch_academic_subjects_branch_id_external_id_key",
+      "table": "branch_academic_subjects",
+      "definition": "UNIQUE (branch_id, external_id)"
+    },
+    {
+      "name": "branch_academic_subjects_branch_id_fkey",
+      "table": "branch_academic_subjects",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_academic_subjects_pkey",
+      "table": "branch_academic_subjects",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "branch_academic_subjects_program_check",
+      "table": "branch_academic_subjects",
+      "definition": "CHECK ((program = ANY (ARRAY['College'::text, 'SHS'::text])))"
+    },
+    {
+      "name": "branch_academic_subjects_semester_check",
+      "table": "branch_academic_subjects",
+      "definition": "CHECK ((semester = ANY (ARRAY['1st Semester'::text, '2nd Semester'::text, 'Summer'::text])))"
+    },
+    {
+      "name": "branch_academic_subjects_units_check",
+      "table": "branch_academic_subjects",
+      "definition": "CHECK (((units IS NULL) OR (units >= 0)))"
+    },
+    {
+      "name": "branch_academic_instructors_branch_id_employee_id_key",
+      "table": "branch_academic_instructors",
+      "definition": "UNIQUE (branch_id, employee_id)"
+    },
+    {
+      "name": "branch_academic_instructors_branch_id_external_id_key",
+      "table": "branch_academic_instructors",
+      "definition": "UNIQUE (branch_id, external_id)"
+    },
+    {
+      "name": "branch_academic_instructors_branch_id_fkey",
+      "table": "branch_academic_instructors",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_academic_instructors_pkey",
+      "table": "branch_academic_instructors",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "student_profiles_admission_application_id_fkey",
+      "table": "student_profiles",
+      "definition": "FOREIGN KEY (admission_application_id) REFERENCES admission_applications(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "student_profiles_admission_application_id_key",
+      "table": "student_profiles",
+      "definition": "UNIQUE (admission_application_id)"
+    },
+    {
+      "name": "student_profiles_branch_id_fkey",
+      "table": "student_profiles",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "student_profiles_civil_status_check",
+      "table": "student_profiles",
+      "definition": "CHECK ((civil_status = ANY (ARRAY['Single'::text, 'Married'::text, 'Widowed'::text, 'Separated'::text])))"
+    },
+    {
+      "name": "student_profiles_completion_status_check",
+      "table": "student_profiles",
+      "definition": "CHECK ((completion_status = ANY (ARRAY['complete'::text, 'incomplete'::text])))"
+    },
+    {
+      "name": "student_profiles_pkey",
+      "table": "student_profiles",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "student_profiles_program_offering_id_fkey",
+      "table": "student_profiles",
+      "definition": "FOREIGN KEY (program_offering_id) REFERENCES program_offerings(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "student_profiles_sex_check",
+      "table": "student_profiles",
+      "definition": "CHECK ((sex = ANY (ARRAY['Male'::text, 'Female'::text])))"
+    },
+    {
+      "name": "student_profiles_status_check",
+      "table": "student_profiles",
+      "definition": "CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text, 'graduated'::text, 'archived'::text])))"
+    },
+    {
+      "name": "student_profiles_student_status_id_fkey",
+      "table": "student_profiles",
+      "definition": "FOREIGN KEY (student_status_id) REFERENCES admission_student_statuses(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "student_profiles_track_id_fkey",
+      "table": "student_profiles",
+      "definition": "FOREIGN KEY (track_id) REFERENCES program_tracks(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "branch_class_sections_branch_id_code_key",
+      "table": "branch_class_sections",
+      "definition": "UNIQUE (branch_id, code)"
+    },
+    {
+      "name": "branch_class_sections_branch_id_external_id_key",
+      "table": "branch_class_sections",
+      "definition": "UNIQUE (branch_id, external_id)"
+    },
+    {
+      "name": "branch_class_sections_branch_id_fkey",
+      "table": "branch_class_sections",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_class_sections_current_enrollees_check",
+      "table": "branch_class_sections",
+      "definition": "CHECK ((current_enrollees >= 0))"
+    },
+    {
+      "name": "branch_class_sections_max_capacity_check",
+      "table": "branch_class_sections",
+      "definition": "CHECK ((max_capacity > 0))"
+    },
+    {
+      "name": "branch_class_sections_pkey",
+      "table": "branch_class_sections",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "branch_class_sections_program_check",
+      "table": "branch_class_sections",
+      "definition": "CHECK ((program = ANY (ARRAY['College'::text, 'SHS'::text])))"
+    },
+    {
+      "name": "branch_class_sections_semester_check",
+      "table": "branch_class_sections",
+      "definition": "CHECK ((semester = ANY (ARRAY['1st Semester'::text, '2nd Semester'::text, 'Summer'::text])))"
+    },
+    {
+      "name": "branch_assignment_rooms_branch_id_fkey",
+      "table": "branch_assignment_rooms",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_assignment_rooms_branch_id_room_name_key",
+      "table": "branch_assignment_rooms",
+      "definition": "UNIQUE (branch_id, room_name)"
+    },
+    {
+      "name": "branch_assignment_rooms_pkey",
+      "table": "branch_assignment_rooms",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "branch_subject_assignments_branch_id_external_id_key",
+      "table": "branch_subject_assignments",
+      "definition": "UNIQUE (branch_id, external_id)"
+    },
+    {
+      "name": "branch_subject_assignments_branch_id_fkey",
+      "table": "branch_subject_assignments",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_subject_assignments_instructor_row_id_fkey",
+      "table": "branch_subject_assignments",
+      "definition": "FOREIGN KEY (instructor_row_id) REFERENCES branch_academic_instructors(id) ON DELETE SET NULL"
+    },
+    {
+      "name": "branch_subject_assignments_pkey",
+      "table": "branch_subject_assignments",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "branch_subject_assignments_section_row_id_fkey",
+      "table": "branch_subject_assignments",
+      "definition": "FOREIGN KEY (section_row_id) REFERENCES branch_class_sections(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_subject_assignments_semester_check",
+      "table": "branch_subject_assignments",
+      "definition": "CHECK ((semester = ANY (ARRAY['1st Semester'::text, '2nd Semester'::text, 'Summer'::text])))"
+    },
+    {
+      "name": "branch_subject_assignments_subject_row_id_fkey",
+      "table": "branch_subject_assignments",
+      "definition": "FOREIGN KEY (subject_row_id) REFERENCES branch_academic_subjects(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "student_contact_details_pkey",
+      "table": "student_contact_details",
+      "definition": "PRIMARY KEY (student_id)"
+    },
+    {
+      "name": "student_contact_details_student_id_fkey",
+      "table": "student_contact_details",
+      "definition": "FOREIGN KEY (student_id) REFERENCES student_profiles(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "student_portal_accounts_pkey",
+      "table": "student_portal_accounts",
+      "definition": "PRIMARY KEY (student_id)"
+    },
+    {
+      "name": "student_portal_accounts_status_check",
+      "table": "student_portal_accounts",
+      "definition": "CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text, 'locked'::text])))"
+    },
+    {
+      "name": "student_portal_accounts_student_id_fkey",
+      "table": "student_portal_accounts",
+      "definition": "FOREIGN KEY (student_id) REFERENCES student_profiles(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_subject_assignment_slots_assignment_id_fkey",
+      "table": "branch_subject_assignment_slots",
+      "definition": "FOREIGN KEY (assignment_id) REFERENCES branch_subject_assignments(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_subject_assignment_slots_end_time_check",
+      "table": "branch_subject_assignment_slots",
+      "definition": "CHECK ((end_time ~ '^[0-9]{2}:[0-9]{2}$'::text))"
+    },
+    {
+      "name": "branch_subject_assignment_slots_pkey",
+      "table": "branch_subject_assignment_slots",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "branch_subject_assignment_slots_sort_order_check",
+      "table": "branch_subject_assignment_slots",
+      "definition": "CHECK ((sort_order >= 0))"
+    },
+    {
+      "name": "branch_subject_assignment_slots_start_time_check",
+      "table": "branch_subject_assignment_slots",
+      "definition": "CHECK ((start_time ~ '^[0-9]{2}:[0-9]{2}$'::text))"
+    },
+    {
+      "name": "branch_enrollment_requests_branch_id_external_id_key",
+      "table": "branch_enrollment_requests",
+      "definition": "UNIQUE (branch_id, external_id)"
+    },
+    {
+      "name": "branch_enrollment_requests_branch_id_fkey",
+      "table": "branch_enrollment_requests",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_enrollment_requests_branch_id_student_number_academi_key",
+      "table": "branch_enrollment_requests",
+      "definition": "UNIQUE (branch_id, student_number, academic_year, semester)"
+    },
+    {
+      "name": "branch_enrollment_requests_pkey",
+      "table": "branch_enrollment_requests",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "branch_enrollment_requests_semester_check",
+      "table": "branch_enrollment_requests",
+      "definition": "CHECK ((semester = ANY (ARRAY['1st Semester'::text, '2nd Semester'::text, 'Summer'::text])))"
+    },
+    {
+      "name": "branch_enrollment_requests_status_check",
+      "table": "branch_enrollment_requests",
+      "definition": "CHECK ((enrollment_status = ANY (ARRAY['Pending'::text, 'Approved'::text, 'Rejected'::text])))"
+    },
+    {
+      "name": "branch_enrollment_requests_student_term_unique",
+      "table": "branch_enrollment_requests",
+      "definition": "UNIQUE (branch_id, student_number, academic_year, semester)"
+    },
+    {
+      "name": "instructor_evaluation_statuses_pkey",
+      "table": "instructor_evaluation_statuses",
+      "definition": "PRIMARY KEY (branch, instructor_id)"
+    },
+    {
+      "name": "evaluation_questionnaire_categories_pkey",
+      "table": "evaluation_questionnaire_categories",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "evaluation_questionnaire_questions_category_id_fkey",
+      "table": "evaluation_questionnaire_questions",
+      "definition": "FOREIGN KEY (category_id) REFERENCES evaluation_questionnaire_categories(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "evaluation_questionnaire_questions_pkey",
+      "table": "evaluation_questionnaire_questions",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "evaluation_questionnaire_questions_type_check",
+      "table": "evaluation_questionnaire_questions",
+      "definition": "CHECK ((question_type = ANY (ARRAY['rating'::text, 'essay'::text])))"
+    },
+    {
+      "name": "instructor_evaluation_submissions_pkey",
+      "table": "instructor_evaluation_submissions",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "branch_student_grade_records_branch_id_fkey",
+      "table": "branch_student_grade_records",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_student_grade_records_pkey",
+      "table": "branch_student_grade_records",
+      "definition": "PRIMARY KEY (branch_id, id)"
+    },
+    {
+      "name": "instructor_grade_submissions_branch_id_fkey",
+      "table": "instructor_grade_submissions",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "instructor_grade_submissions_pkey",
+      "table": "instructor_grade_submissions",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "instructor_grade_submissions_status_check",
+      "table": "instructor_grade_submissions",
+      "definition": "CHECK ((status = ANY (ARRAY['Pending'::text, 'Approved'::text, 'Rejected'::text])))"
+    },
+    {
+      "name": "branch_instructor_passwords_branch_id_fkey",
+      "table": "branch_instructor_passwords",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_instructor_passwords_pkey",
+      "table": "branch_instructor_passwords",
+      "definition": "PRIMARY KEY (branch_id, employee_id)"
+    },
+    {
+      "name": "branch_local_storage_records_branch_id_fkey",
+      "table": "branch_local_storage_records",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_local_storage_records_pkey",
+      "table": "branch_local_storage_records",
+      "definition": "PRIMARY KEY (branch_id, scope)"
+    },
+    {
+      "name": "student_payments_amount_check",
+      "table": "student_payments",
+      "definition": "CHECK ((amount > (0)::numeric))"
+    },
+    {
+      "name": "student_payments_branch_id_fkey",
+      "table": "student_payments",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "student_payments_branch_id_receipt_number_key",
+      "table": "student_payments",
+      "definition": "UNIQUE (branch_id, receipt_number)"
+    },
+    {
+      "name": "student_payments_pkey",
+      "table": "student_payments",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "admission_portal_statuses_branch_id_fkey",
+      "table": "admission_portal_statuses",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "admission_portal_statuses_pkey",
+      "table": "admission_portal_statuses",
+      "definition": "PRIMARY KEY (branch_id)"
+    },
+    {
+      "name": "branch_track_offerings_branch_id_fkey",
+      "table": "branch_track_offerings",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "branch_track_offerings_pkey",
+      "table": "branch_track_offerings",
+      "definition": "PRIMARY KEY (branch_id, track_id)"
+    },
+    {
+      "name": "branch_track_offerings_track_id_fkey",
+      "table": "branch_track_offerings",
+      "definition": "FOREIGN KEY (track_id) REFERENCES program_tracks(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "deleted_branch_tracks_are_disabled",
+      "table": "branch_track_offerings",
+      "definition": "CHECK (((NOT is_deleted) OR (NOT is_active)))"
+    },
+    {
+      "name": "admission_applications_auth_user_id_fkey",
+      "table": "admission_applications",
+      "definition": "FOREIGN KEY (auth_user_id) REFERENCES auth.users(id) ON DELETE SET NULL"
+    },
+    {
+      "name": "admission_applications_branch_id_fkey",
+      "table": "admission_applications",
+      "definition": "FOREIGN KEY (branch_id) REFERENCES admission_branches(id)"
+    },
+    {
+      "name": "admission_applications_civil_status_check",
+      "table": "admission_applications",
+      "definition": "CHECK ((civil_status = ANY (ARRAY['Single'::text, 'Married'::text, 'Widowed'::text, 'Separated'::text])))"
+    },
+    {
+      "name": "admission_applications_current_step_check",
+      "table": "admission_applications",
+      "definition": "CHECK (((current_step >= 1) AND (current_step <= 5)))"
+    },
+    {
+      "name": "admission_applications_honor_id_fkey",
+      "table": "admission_applications",
+      "definition": "FOREIGN KEY (honor_id) REFERENCES admission_honors(id)"
+    },
+    {
+      "name": "admission_applications_own_schedule_request_status_check",
+      "table": "admission_applications",
+      "definition": "CHECK (((own_schedule_request_status IS NULL) OR (own_schedule_request_status = ANY (ARRAY['Pending'::text, 'Approved'::text, 'Rejected'::text]))))"
+    },
+    {
+      "name": "admission_applications_pkey",
+      "table": "admission_applications",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "admission_applications_program_offering_id_fkey",
+      "table": "admission_applications",
+      "definition": "FOREIGN KEY (program_offering_id) REFERENCES program_offerings(id)"
+    },
+    {
+      "name": "admission_applications_requested_year_level_check",
+      "table": "admission_applications",
+      "definition": "CHECK (((requested_year_level IS NULL) OR (requested_year_level = ANY (ARRAY['Grade 11'::text, 'Grade 12'::text, '1st Year'::text, '2nd Year'::text, '3rd Year'::text, '4th Year'::text]))))"
+    },
+    {
+      "name": "admission_applications_scholarship_exam_score_check",
+      "table": "admission_applications",
+      "definition": "CHECK (((scholarship_exam_score IS NULL) OR ((scholarship_exam_score >= (0)::numeric) AND (scholarship_exam_score <= (100)::numeric))))"
+    },
+    {
+      "name": "admission_applications_sex_check",
+      "table": "admission_applications",
+      "definition": "CHECK ((sex = ANY (ARRAY['Male'::text, 'Female'::text])))"
+    },
+    {
+      "name": "admission_applications_status_check",
+      "table": "admission_applications",
+      "definition": "CHECK ((application_status = ANY (ARRAY['draft'::text, 'submitted'::text, 'under_review'::text, 'accepted'::text, 'rejected'::text, 'cancelled'::text])))"
+    },
+    {
+      "name": "admission_applications_student_status_id_fkey",
+      "table": "admission_applications",
+      "definition": "FOREIGN KEY (student_status_id) REFERENCES admission_student_statuses(id)"
+    },
+    {
+      "name": "admission_applications_track_id_fkey",
+      "table": "admission_applications",
+      "definition": "FOREIGN KEY (track_id) REFERENCES program_tracks(id)"
+    },
+    {
+      "name": "admission_applications_tracking_number_key",
+      "table": "admission_applications",
+      "definition": "UNIQUE (tracking_number)"
+    },
+    {
+      "name": "admission_applications_year_completion_check",
+      "table": "admission_applications",
+      "definition": "CHECK (((year_completion >= 1900) AND (year_completion <= ((EXTRACT(year FROM timezone('utc'::text, now())))::integer + 1))))"
+    },
+    {
+      "name": "instructor_evaluation_periods_pkey",
+      "table": "instructor_evaluation_periods",
+      "definition": "PRIMARY KEY (branch)"
+    },
+    {
+      "name": "student_import_details_academic_standing_check",
+      "table": "student_import_details",
+      "definition": "CHECK ((academic_standing = ANY (ARRAY['Regular'::text, 'Irregular'::text])))"
+    },
+    {
+      "name": "student_import_details_academic_year_check",
+      "table": "student_import_details",
+      "definition": "CHECK ((academic_year ~ '^[0-9]{4}-[0-9]{4}$'::text))"
+    },
+    {
+      "name": "student_import_details_pkey",
+      "table": "student_import_details",
+      "definition": "PRIMARY KEY (student_id)"
+    },
+    {
+      "name": "student_import_details_semester_check",
+      "table": "student_import_details",
+      "definition": "CHECK ((semester = ANY (ARRAY['1st Semester'::text, '2nd Semester'::text, 'Summer'::text])))"
+    },
+    {
+      "name": "student_import_details_student_id_fkey",
+      "table": "student_import_details",
+      "definition": "FOREIGN KEY (student_id) REFERENCES student_profiles(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "student_import_details_year_completion_check",
+      "table": "student_import_details",
+      "definition": "CHECK (((year_completion >= 1900) AND (year_completion <= 9999)))"
+    }
+  ]
+}

@@ -67,6 +67,9 @@ class SupabaseRestClient:
         query = list((filters or {}).items())
         return self._request("PATCH", table, query=query, payload=payload, headers=headers)
 
+    def rpc(self, name, payload):
+        return self._request("POST", f"rpc/{name}", payload=payload)
+
     def delete(self, table, *, filters=None):
         headers = {"Prefer": "return=representation"}
         query = list((filters or {}).items())

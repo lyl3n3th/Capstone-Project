@@ -22,6 +22,7 @@ globalThis.window = {
 
 const api = loadModule('../src/services/adminStorage.ts', {
   '../utils/textFormatting': loadModule('../src/utils/textFormatting.ts'),
+  './branchDirectory': { findRegisteredBranch: () => undefined },
 });
 const markerKey = 'aics-deleted-students';
 const original = {

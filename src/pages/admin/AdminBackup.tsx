@@ -1,9 +1,8 @@
+import TablePagination from "../../components/common/TablePagination";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaCalendarAlt,
-  FaChevronLeft,
-  FaChevronRight,
   FaClock,
   FaDatabase,
   FaHdd,
@@ -51,6 +50,7 @@ interface BackupItem {
   status: "Success" | "Failed" | "In Progress";
   progress: number;
   rawStatus: BackupHistoryRecord["status"];
+  canRestore: boolean;
 }
 
 interface Toast {
@@ -60,7 +60,7 @@ interface Toast {
 }
 
 const POLLABLE_STATUSES: BackupHistoryRecord["status"][] = ["pending", "in_progress"];
-const BACKUP_HISTORY_PAGE_SIZE = 5;
+const BACKUP_HISTORY_PAGE_SIZE = 15;
 
 interface LoadBackupDataOptions {
   showErrorToast?: boolean;
@@ -150,6 +150,7 @@ export default function AdminBackup({
           : "In Progress",
     progress: record.progress,
     rawStatus: record.status,
+    canRestore: record.metadata?.snapshot_format === "branch-database-v2",
   });
 
   const markSettingsDirty = () => {
@@ -367,6 +368,10 @@ export default function AdminBackup({
       ]);
       clearSelectedUploadFile();
       await loadBackupData({ showErrorToast: false, preserveDirtySettings: true });
+      if (!mappedBackup.canRestore) {
+        addToast("Legacy backup uploaded for download. It lacks the database records needed for a complete restore.", "warning");
+        return;
+      }
       addToast(
         `Uploaded ${uploadedBackup.backup_filename}. Starting restore...`,
         "info",
@@ -405,21 +410,31 @@ export default function AdminBackup({
       return;
     }
 
-    const finishRestore = async () => {
-      const snapshot = await fetchBackupSnapshot(backupId);
-      applyBackupSnapshot(snapshot);
+    const confirmed = await requestConfirmation(
+      `Restore "${backupName}"? This replaces this branch's current students, grades, payments, credentials, and academic assignments with the backed-up records. Changes made after that backup will be removed.`,
+      { title: "Restore Branch Backup", confirmLabel: "Restore", destructive: true },
+    );
+    if (!confirmed) return;
+
+    const finishRestore = async (restoreHistoryId: string) => {
       await loadBackupData({ showErrorToast: false, preserveDirtySettings: true });
-      addToast(`Restore completed for ${backupName}.`, "success");
+      try {
+        const snapshot = await fetchBackupSnapshot(restoreHistoryId);
+        await applyBackupSnapshot(snapshot);
+        addToast(`Restore completed for ${backupName}.`, "success");
+      } catch {
+        addToast("Database restore completed. The screen could not refresh; reload before continuing.", "warning");
+      }
     };
 
-    addToast(`Restore clicked for ${backupName}. Starting now...`, "info");
+    addToast(`Restoring ${backupName}...`, "info");
     setRestoringBackupId(backupId);
 
     try {
       const restoreJob = await startBackupRestore(backupId);
 
       if (restoreJob.status === "completed") {
-        await finishRestore();
+        await finishRestore(restoreJob.id);
         setRestoringBackupId(null);
         return;
       }
@@ -440,7 +455,7 @@ export default function AdminBackup({
           const restoreStatus = await fetchBackupStatus(restoreJob.id);
           if (restoreStatus.status === "completed") {
             window.clearInterval(restorePoll);
-            await finishRestore();
+            await finishRestore(restoreStatus.id);
             setRestoringBackupId(null);
           } else if (restoreStatus.status === "failed") {
             window.clearInterval(restorePoll);
@@ -673,7 +688,7 @@ export default function AdminBackup({
                         ? "Starting manual backup..."
                         : hasIncompleteManualBackup
                           ? "Delete or finish the current manual backup first"
-                          : "Create a manual backup of all student data"}
+                          : "Back up student records, grades, payments, credentials, assignments, and files"}
                     </p>
                   </div>
                 </button>
@@ -685,8 +700,9 @@ export default function AdminBackup({
                   <div className="summary-text upload-backup-text">
                     <h4>Upload &amp; Restore Backup ZIP</h4>
                     <p>
-                      Upload an AICSync backup ZIP to history, then restore its
-                      student and alumni data.
+                      Upload a complete AICSync backup ZIP to restore students, grades,
+                      payments, credentials, assignments, and attached files. Legacy
+                      student-list backups remain downloadable but cannot perform a full restore.
                     </p>
 
                     <div className="upload-backup-controls">
@@ -743,33 +759,7 @@ export default function AdminBackup({
                     Showing {historyRangeStart}-{historyRangeEnd} of {backups.length}
                   </small>
                 </div>
-                <div className="backup-history-pagination" aria-label="Backup history pages">
-                  <button
-                    type="button"
-                    className="history-page-btn"
-                    onClick={() => setHistoryPage((currentPage) => Math.max(currentPage - 1, 0))}
-                    disabled={historyPage === 0}
-                    aria-label="Previous backup history page"
-                  >
-                    <FaChevronLeft />
-                  </button>
-                  <span className="history-page-indicator">
-                    Page {totalHistoryPages === 0 ? 0 : historyPage + 1} of {totalHistoryPages}
-                  </span>
-                  <button
-                    type="button"
-                    className="history-page-btn"
-                    onClick={() =>
-                      setHistoryPage((currentPage) =>
-                        Math.min(currentPage + 1, totalHistoryPages - 1),
-                      )
-                    }
-                    disabled={historyPage >= totalHistoryPages - 1}
-                    aria-label="Next backup history page"
-                  >
-                    <FaChevronRight />
-                  </button>
-                </div>
+
               </div>
 
               <table className="backup-table">
@@ -827,9 +817,10 @@ export default function AdminBackup({
                             <button
                               className="action-btn restore"
                               onClick={() => void handleRestore(backup.id, backup.name)}
-                              title="Restore backup"
+                              title={backup.canRestore ? "Restore complete branch backup" : "Legacy backup: download only; a complete database backup is required to restore"}
                               disabled={
                                 backup.rawStatus !== "completed" ||
+                                !backup.canRestore ||
                                 restoringBackupId !== null
                               }
                             >
@@ -859,6 +850,7 @@ export default function AdminBackup({
                   )}
                 </tbody>
               </table>
+              <TablePagination page={historyPage + 1} pageSize={BACKUP_HISTORY_PAGE_SIZE} totalItems={backups.length} onPageChange={(page) => setHistoryPage(page - 1)} label="Backup history pages" />
             </div>
           </>
         )}
