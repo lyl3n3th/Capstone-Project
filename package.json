@@ -18,6 +18,7 @@
     "lint": "eslint .",
     "test:student-import": "node scripts/test-student-import.mjs",
     "test:imported-credentials": "node scripts/test-imported-student-credentials.mjs",
+    "test:credential-review": "node scripts/test-student-credential-review.mjs",
     "test:student-deletion-markers": "node scripts/test-student-deletion-markers.mjs",
     "test:instructor-evaluation-status": "node scripts/test-instructor-evaluation-status.mjs",
     "test:instructor-grade-masterlist": "node scripts/test-instructor-grade-masterlist.mjs",

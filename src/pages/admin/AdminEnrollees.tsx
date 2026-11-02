@@ -768,7 +768,6 @@ const SEMESTER_SORT_ORDER = ["1st Semester", "2nd Semester", "Summer"] as const;
 const AUTO_ASSIGN_SEMESTER_OPTIONS = [
   "1st Semester",
   "2nd Semester",
-  "Summer",
 ] as const;
 type AutoAssignSemester = (typeof AUTO_ASSIGN_SEMESTER_OPTIONS)[number];
 

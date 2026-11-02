@@ -759,7 +759,6 @@ export default function AdminBackup({
                     Showing {historyRangeStart}-{historyRangeEnd} of {backups.length}
                   </small>
                 </div>
-
               </div>
 
               <table className="backup-table">

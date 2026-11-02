@@ -2677,6 +2677,12 @@ const mergeAttachmentLists = (
     if (existingAttachment?.type === "pending" && !hasRealAttachmentUrl(existingAttachment)) {
       return;
     }
+    // A replacement upload is a new review, even when the browser still has
+    // an approval for the old file under the same requirement name.
+    if (existingAttachment?.storagePath &&
+        existingAttachment.storagePath !== attachment.storagePath) {
+      return;
+    }
 
     mergedAttachments.set(key, {
       ...existingAttachment,
@@ -2888,22 +2894,27 @@ export const getStudentRequirementSnapshot = ({
     readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", branch) ?? [];
   // Use the same source as imported-student uploads, even when an admission
   // record also exists. Existing Student has no admission requirement list.
-  const applicantRecord = getImportedStudentRequirementRecord(branch, studentNumber) ?? storedEnrollees.find(
+  const sourceRecord = getImportedStudentRequirementRecord(branch, studentNumber) ?? storedEnrollees.find(
     (record) =>
       (trackingNumber && record.trackingNumber === trackingNumber) ||
       (studentNumber && record.studentNumber === studentNumber),
   );
 
-  if (!applicantRecord) {
+  if (!sourceRecord) {
     return null;
   }
+
+  const applicantRecord = applyCredentialReviewDecisions(sourceRecord, branch);
 
   const allRequirements = getAdmissionRequirements(
     applicantRecord.studentStatus,
     mapAdminProgramToAdmissionProgram(applicantRecord.program),
     applicantRecord.honorLabel || "No Honor",
   );
-  const allAttachments = applicantRecord.attachments ?? [];
+  const requiredNames = new Set(allRequirements.map(requirement => requirement.name.trim().toLowerCase()));
+  const allAttachments = Array.from(new Map((applicantRecord.attachments ?? [])
+    .filter(attachment => requiredNames.has(getAttachmentKey(attachment)))
+    .map(attachment => [getAttachmentKey(attachment), attachment])).values());
   const submittedAttachments = getEffectiveSubmittedAttachments(
     allAttachments,
     applicantRecord.documentsSubmitted,
@@ -3029,6 +3040,13 @@ export const getStudentCredentialOverview = ({
   };
 };
 
+export const getStudentRequirementStatus = (student: Pick<StudentStorageRecord, "id" | "branch" | "trackingNumber" | "status">): StudentStorageRecord["status"] => {
+  if (student.status === "Archived" || student.status === "Graduated") return student.status;
+  const overview = getStudentCredentialOverview({ branch: student.branch, studentNumber: student.id, trackingNumber: student.trackingNumber });
+  if (!overview || overview.summary.total === 0) return student.status;
+  return overview.summary.overallStatus === "Complete" ? "Complete" : "Incomplete";
+};
+
 export const syncStudentCredentialUpload = async ({
   branch,
   trackingNumber,
@@ -3074,7 +3092,7 @@ export const syncStudentCredentialUpload = async ({
       url: signedUrl,
       storagePath,
       storageBucket,
-      reviewStatus,
+      reviewStatus: reviewStatus === "Approved" ? "Pending" : reviewStatus,
     };
 
     const nextAttachments =
@@ -3110,6 +3128,9 @@ export const syncStudentCredentialUpload = async ({
   });
 
   writeBranchScopedData("enrollees", resolvedBranch, nextEnrollees);
+  if (reviewStatus === "Approved") {
+    await updateStudentRequirementReviewStatus({ branch: resolvedBranch, trackingNumber, studentNumber, requirementName, status: reviewStatus });
+  }
   return nextEnrollees;
 };
 
@@ -3189,7 +3210,45 @@ export const removeStudentCredentialUpload = async ({
   return updatedRecord;
 };
 
-export const updateStudentRequirementReviewStatus = ({
+type CredentialReviewDecision = {
+  status: NonNullable<AdminAttachment["reviewStatus"]>;
+  storagePath?: string;
+  uploadedAt?: string;
+  url?: string;
+};
+
+const credentialReviewScope = (record: AdminEnrolleeRecord, name: string) =>
+  `credential-review:${encodeURIComponent((record.trackingNumber || record.studentNumber || "").trim().toUpperCase())}:${encodeURIComponent(name.trim().toLowerCase())}`;
+
+const applyCredentialReviewDecisions = (record: AdminEnrolleeRecord, branch?: string | null) => ({
+  ...record,
+  attachments: record.attachments?.map(attachment => {
+    const decision = readBranchScopedData<CredentialReviewDecision>(credentialReviewScope(record, attachment.name), branch);
+    const sameFile = attachment.storagePath
+      ? decision?.storagePath === attachment.storagePath
+      : attachment.uploadedAt
+        ? decision?.uploadedAt === attachment.uploadedAt
+        : decision?.url === attachment.url;
+    return decision && sameFile && hasRealAttachmentUrl(attachment)
+      ? { ...attachment, reviewStatus: decision.status }
+      : attachment;
+  }),
+});
+
+export const fetchStudentCredentialReviewDecisions = async (record: AdminEnrolleeRecord, branch?: string | null) => {
+  await Promise.all((record.attachments ?? []).filter(hasRealAttachmentUrl).map(async attachment => {
+    const scope = credentialReviewScope(record, attachment.name);
+    const { data, error } = await supabase.rpc("get_branch_local_storage_record", {
+      p_branch: normalizeBranchName(branch), p_scope: scope,
+    });
+    if (error) throw new Error(error.message);
+    // A server-side deletion must also clear any old decision in this browser.
+    writeBranchScopedData(scope, branch, data ?? null, { skipSupabaseSync: true });
+  }));
+  return applyCredentialReviewDecisions(record, branch);
+};
+
+export const updateStudentRequirementReviewStatus = async ({
   branch,
   trackingNumber,
   studentNumber,
@@ -3253,7 +3312,23 @@ export const updateStudentRequirementReviewStatus = ({
     return null;
   }
 
-  writeBranchScopedData("enrollees", resolvedBranch, nextEnrollees);
+  const reviewedRecord = updatedRecord as AdminEnrolleeRecord;
+  const attachment = reviewedRecord.attachments?.find(item => getAttachmentKey(item) === requirementKey);
+  if (!attachment || !hasRealAttachmentUrl(attachment)) {
+    throw new Error("The credential file is missing. Refresh the student before reviewing it.");
+  }
+  const decision: CredentialReviewDecision = {
+    status, storagePath: attachment.storagePath, uploadedAt: attachment.uploadedAt, url: attachment.url,
+  };
+  const scope = credentialReviewScope(reviewedRecord, requirementName);
+  const { error } = await supabase.rpc("upsert_branch_local_storage_record", {
+    p_branch: resolvedBranch, p_scope: scope, p_payload: decision,
+  });
+  if (error) throw new Error(error.message);
+  writeBranchScopedData(scope, resolvedBranch, decision, { skipSupabaseSync: true });
+  // Only publish the local change after persistence succeeds. A per-file scope
+  // prevents another browser's stale branch snapshot from undoing the review.
+  writeBranchScopedData("enrollees", resolvedBranch, nextEnrollees, { skipSupabaseSync: true });
   return updatedRecord;
 };
 
@@ -4638,7 +4713,12 @@ export const fetchSupabaseAdmissionApplicants = async (
   const applicantRecords = await Promise.all(
     queueRows.map(mapSupabaseApplicantToAdminRecord),
   );
-  return applicantRecords.map(normalizeAdminEnrolleeCapitalization);
+  const persisted = await fetchAndCacheBranchScopedData<AdminEnrolleeRecord[]>("enrollees", branch);
+  const merged = mergeAdminEnrolleeRecords(applicantRecords, persisted ?? []);
+  const reviewed = await Promise.all(merged.map(record => fetchStudentCredentialReviewDecisions(record, branch)));
+  const records = reviewed.map(normalizeAdminEnrolleeCapitalization);
+  writeBranchScopedData("enrollees", branch, records, { skipSupabaseSync: true });
+  return records;
 };
 
 export const upsertSubmittedApplicant = ({

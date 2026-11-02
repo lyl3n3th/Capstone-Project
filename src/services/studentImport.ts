@@ -93,7 +93,7 @@ export function buildStudentImportTemplate(branch: string, offerings: BranchOffe
     ["Dropdowns", "Educational Level, Grade / Year Level, Course / Strand, Semester, and Academic Standing have dropdowns for rows 2–501. Changing the educational level requires reviewing the other selections."],
     ["Academic Year", "Consecutive years in YYYY-YYYY format, e.g. 2026-2027."],
     ["Branch", `Only ${branch} students can be imported from this page.`],
-    ["Semester", "1st Semester or 2nd Semester. College also supports Summer."],
+    ["Semester", "1st Semester or 2nd Semester."],
     ["Academic Standing", "Regular or Irregular"],
     ["Existing records", "Import creates new enrolled student records. It never overwrites existing students or marks credentials as submitted."],
     ["Blank rows", "Rows with only the prefilled Branch value are ignored. Paste values, not formulas."],
@@ -121,7 +121,7 @@ export function buildStudentImportTemplateFile(branch: string, offerings: Branch
     { name: "ImportSHSTracks", values: offerings.filter((item) => item.program_name === "Senior High School").map((item) => item.track_name) },
     { name: "ImportCollegeTracks", values: offerings.filter((item) => item.program_name === "College").map((item) => item.track_name) },
     { name: "ImportSHSSemesters", values: ["1st Semester", "2nd Semester"] },
-    { name: "ImportCollegeSemesters", values: ["1st Semester", "2nd Semester", "Summer"] },
+    { name: "ImportCollegeSemesters", values: ["1st Semester", "2nd Semester"] },
     { name: "ImportStandings", values: ["Regular", "Irregular"] },
     { name: "ImportBlank", values: [""] },
   ];
@@ -255,7 +255,7 @@ export function validateStudentImportRows(rows: StudentImportRow[], context: {
     if (v.branch && normalized(v.branch) !== normalized(context.branch) && !context.offerings.some((offering) => normalized(offering.branch_code) === normalized(v.branch))) add("branch", `This import is for ${context.branch} only.`);
     if (v.track_name && !matchingImportOffering(v, context.offerings)) add("track_name", "Choose a course/strand offered by this branch. Use its full name from the template.");
     if (v.academic_year && (!/^\d{4}-\d{4}$/.test(v.academic_year) || Number(v.academic_year.slice(5)) !== Number(v.academic_year.slice(0, 4)) + 1)) add("academic_year", "Use consecutive academic years, e.g. 2026-2027.");
-    if (v.semester && !(program === "shs" ? ["1st semester", "2nd semester"] : ["1st semester", "2nd semester", "summer"]).includes(normalized(v.semester))) add("semester", "Choose 1st Semester or 2nd Semester. Summer is for College only.");
+    if (v.semester && !["1st semester", "2nd semester"].includes(normalized(v.semester))) add("semester", "Choose 1st Semester or 2nd Semester.");
     if (v.academic_standing && !["regular", "irregular"].includes(normalized(v.academic_standing))) add("academic_standing", "Choose Regular or Irregular.");
   }
   return errors;

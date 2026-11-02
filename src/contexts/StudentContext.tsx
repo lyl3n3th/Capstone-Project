@@ -109,6 +109,36 @@ export const StudentProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   useEffect(() => {
+    if (!student?.studentNumber) return;
+    let active = true;
+    let refreshing = false;
+    const refreshCredentials = async () => {
+      if (refreshing || document.visibilityState === "hidden") return;
+      refreshing = true;
+      try {
+        const overview = await studentApi.refreshCredentials();
+        if (active && overview) {
+          setCredentialItems(overview.items);
+          setCredentialSummary(overview.summary);
+        }
+      } catch (error) {
+        console.warn("Unable to refresh credential approvals.", error);
+      } finally {
+        refreshing = false;
+      }
+    };
+    const timer = window.setInterval(() => { void refreshCredentials(); }, 15000);
+    window.addEventListener("focus", refreshCredentials);
+    document.addEventListener("visibilitychange", refreshCredentials);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshCredentials);
+      document.removeEventListener("visibilitychange", refreshCredentials);
+    };
+  }, [student?.studentNumber, student?.branch]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }

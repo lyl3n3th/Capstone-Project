@@ -113,4 +113,13 @@ assert.equal(api.parseStudentImportWorkbook(realDate).rows[0].values.birth_date,
 const mixedOfferings = [...offerings,{branch_code:"bacoor",branch_name:"Bacoor",program_name:"Senior High School",track_name:"ICT"}];
 const mixedBytes = api.buildStudentImportTemplateFile("Bacoor",mixedOfferings,"BAC");
 assert(XLSX.read(mixedBytes,{type:"array"}).Sheets["Dropdown Options"]);
+const semesterOptions = XLSX.utils.sheet_to_json(
+  XLSX.read(mixedBytes, { type: "array" }).Sheets["Dropdown Options"], { header: 1 },
+);
+assert.deepEqual(semesterOptions.slice(1).map(row => row[6]).filter(Boolean), ["1st Semester", "2nd Semester"]);
+for (const program of ["SHS", "College"]) {
+  const summerRows = api.parseStudentImportWorkbook(workbook([{ row: 2, values: { ...valid, program, semester: "Summer" } }]));
+  assert(api.validateStudentImportRows(summerRows.rows, { ...context, offerings: mixedOfferings })
+    .some(error => error.field === "semester" && error.message === "Choose 1st Semester or 2nd Semester."));
+}
 console.log("Template update checks passed: real Excel dropdown XML, dependent choices, hidden named ranges, MM/DD/YYYY dates, and school history cell errors.");

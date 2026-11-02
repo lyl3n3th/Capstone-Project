@@ -5,17 +5,16 @@ import { isCachedAlumniStudent } from "./backupApi";
 import {
   fetchSupabaseAdmissionApplicants,
   getStudentCredentialOverview,
+  getStudentRequirementSnapshot,
+  fetchStudentCredentialReviewDecisions,
   getImportedStudentRequirementRecord,
   fetchImportedStudentCredentials,
   getStudentsForBranch,
-  mergeAdminEnrolleeRecords,
   normalizeStudentNumberInput,
   normalizeBranchName,
-  readBranchScopedData,
   readStoredStudents,
   writeBranchScopedData,
   writeStoredStudents,
-  type AdminEnrolleeRecord,
   type StudentPortalCredentialItem,
   type StudentPortalCredentialSummary,
   type StudentPortalSubject,
@@ -241,15 +240,9 @@ const syncStudentCredentialCache = async ({
       return;
     }
 
-    const storedEnrollees =
-      readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", resolvedBranch) ??
-      [];
-    const mergedEnrollees = mergeAdminEnrolleeRecords(
-      [applicant],
-      storedEnrollees,
-    );
-
-    writeBranchScopedData("enrollees", resolvedBranch, mergedEnrollees);
+    // These records already include the saved server review decisions. Never
+    // merge a stale browser's Pending values over them or write them back.
+    writeBranchScopedData("enrollees", resolvedBranch, applicants, { skipSupabaseSync: true });
   } catch (error) {
     console.warn(
       "Unable to load the linked admission credentials; using the cached credential status.",
@@ -549,6 +542,19 @@ const persistStudentProfileUpdate = async (
 };
 
 export const studentApi = {
+  async refreshCredentials() {
+    const student = getStoredStudentRecordForCurrentSession();
+    if (!student) throw new Error("Student session is missing. Please log in again.");
+    const identity = { branch: student.branch, studentNumber: student.id, trackingNumber: student.trackingNumber };
+    const snapshot = getStudentRequirementSnapshot(identity);
+    if (getImportedStudentRequirementRecord(student.branch, student.id)) {
+      await fetchImportedStudentCredentials(student.branch || "", student.id);
+    } else if (snapshot) {
+      await fetchStudentCredentialReviewDecisions(snapshot.applicantRecord, student.branch);
+    }
+    return getStudentCredentialOverview(identity);
+  },
+
   async getStudentPortalData(): Promise<StudentPortalData> {
     return getStudentPortalDataForCurrentSession();
   },

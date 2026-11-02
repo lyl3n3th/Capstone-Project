@@ -20,6 +20,7 @@ import {
 import {
   getNextStudentNumber,
   getStudentRequirementSnapshot,
+  getStudentRequirementStatus,
   isImportedStudent,
   fetchSupabaseAdmissionApplicants,
   updateStoredStudentOwnScheduleState,
@@ -106,6 +107,12 @@ interface StudentsProps {
 }
 
 interface Student {
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  birthDate?: string;
+  gender?: "Male" | "Female";
+  civilStatus?: string;
   importAcademicYear?: string;
   importSemester?: string;
   importAcademicStanding?: "Regular" | "Irregular";
@@ -343,7 +350,7 @@ const mergeAlumniBackupRecords = (
   return Array.from(alumniById.values());
 };
 
-const SEMESTER_DISPLAY_ORDER = ["1st Semester", "2nd Semester", "Summer"];
+const SEMESTER_DISPLAY_ORDER = ["1st Semester", "2nd Semester"];
 const COLLEGE_PERIOD_DISPLAY_ORDER = [
   "Prelim",
   "Midterm",
@@ -581,24 +588,6 @@ const mergeStudentOwnScheduleState = <
       primaryStudent.ownScheduleSelectionStatus ??
       fallbackStudent?.ownScheduleSelectionStatus,
   };
-};
-
-const getOwnScheduleSelectionLabel = (
-  status?: Student["ownScheduleSelectionStatus"],
-) => {
-  if (status === "Pending Approval") {
-    return "Pending Approval";
-  }
-
-  if (status === "Approved") {
-    return "Approved";
-  }
-
-  if (status === "Rejected") {
-    return "Needs Resubmission";
-  }
-
-  return "Not Submitted";
 };
 
 const buildGradeTermKey = (academicYear: string, semester: string) =>
@@ -1106,7 +1095,7 @@ export default function AdminStudents({
           if (!isCurrentLoad()) {
             return;
           }
-          writeBranchScopedData(ENROLLEE_STORAGE_SCOPE, currentBranch, applicants);
+          writeBranchScopedData(ENROLLEE_STORAGE_SCOPE, currentBranch, applicants, { skipSupabaseSync: true });
         } catch (error) {
           console.warn("Unable to fetch linked admission records.", error);
         }
@@ -1126,7 +1115,12 @@ export default function AdminStudents({
           // branch's cache prevents an old browser tab from reviving a student
           // who was permanently deleted elsewhere.
           writeStoredStudents([...studentsFromOtherBranches, ...fetchedBranchStudents]);
-          setStudents(removeHiddenStudentsFromAdminList(fetchedBranchStudents));
+          await Promise.all(fetchedBranchStudents.filter(isImportedStudent).map(student =>
+            fetchImportedStudentCredentials(currentBranch, student.id).catch(error => {
+              console.warn("Unable to refresh imported student requirements.", error);
+            }),
+          ));
+          if (isCurrentLoad()) setStudents(removeHiddenStudentsFromAdminList(fetchedBranchStudents));
         }
       } catch (error) {
         console.error("Failed to load branch students", error);
@@ -1401,7 +1395,7 @@ export default function AdminStudents({
         const matchesStudentLifecycleStatus =
           lifecycleStatus === filterStudentLifecycleStatus;
         const matchesStatus =
-          filterStatus === "All" || student.status === filterStatus;
+          filterStatus === "All" || getStudentRequirementStatus(student) === filterStatus;
         const matchesAcademicStanding =
           filterAcademicStanding === "All" ||
           academicStanding === filterAcademicStanding;
@@ -1551,18 +1545,20 @@ export default function AdminStudents({
       errors.email = "Email is required";
     }
 
-    if (!formData.program.trim()) errors.program = "Program is required";
-    if (!formData.yearLevel.trim()) errors.yearLevel = "Year Level is required";
-    if (formData.program === "SHS" && !formData.shsTrackType?.trim()) {
-      errors.yearLevel = "Track is required for SHS";
-    } else if (
-      (formData.program === "SHS" || formData.program === "College") &&
-      !formData.strandOrCourse?.trim()
-    ) {
-      errors.yearLevel =
-        formData.program === "SHS"
-          ? "Specialization is required for SHS"
-          : "Course selection is required for College";
+    if (!editingStudent) {
+      if (!formData.program.trim()) errors.program = "Program is required";
+      if (!formData.yearLevel.trim()) errors.yearLevel = "Year Level is required";
+      if (formData.program === "SHS" && !formData.shsTrackType?.trim()) {
+        errors.yearLevel = "Track is required for SHS";
+      } else if (
+        (formData.program === "SHS" || formData.program === "College") &&
+        !formData.strandOrCourse?.trim()
+      ) {
+        errors.yearLevel =
+          formData.program === "SHS"
+            ? "Specialization is required for SHS"
+            : "Course selection is required for College";
+      }
     }
 
     setFormErrors(errors);
@@ -1768,6 +1764,15 @@ export default function AdminStudents({
     const normalizedStudent: Student = {
       ...formData,
       branch: formData.branch || editingStudent?.branch || currentBranch,
+      ...(editingStudent
+        ? {
+            program: editingStudent.program,
+            yearLevel: editingStudent.yearLevel,
+            shsTrackType: editingStudent.shsTrackType,
+            strandOrCourse: editingStudent.strandOrCourse,
+            status: getStudentRequirementStatus(editingStudent),
+          }
+        : {}),
     };
     const didChangeLoginEmail =
       normalizeComparableText(normalizedStudent.email) !==
@@ -2133,6 +2138,20 @@ export default function AdminStudents({
     }
   };
 
+  const syncStudentRequirementStatus = async (student: Student) => {
+    const status = getStudentRequirementStatus(student);
+    setStudents(previous => previous.map(item => studentsMatch(item, student) ? { ...item, status } : item));
+    setViewingStudent(previous => previous && studentsMatch(previous, student) ? { ...previous, status } : previous);
+    if (status === student.status) return;
+    try {
+      await updateAdminStudentStatus({ branch: student.branch || currentBranch, studentNumber: student.id, status });
+      const stored = readStoredStudents();
+      writeStoredStudents(stored.map(item => studentsMatch(item, student) ? { ...item, status } : item));
+    } catch (error) {
+      throw new Error(`The credential was saved, but the student status could not be synchronized: ${error instanceof Error ? error.message : "Please retry."}`);
+    }
+  };
+
   const handleAdminCredentialUpload = (requirement: {
     code: string;
     name: string;
@@ -2183,6 +2202,7 @@ export default function AdminStudents({
         });
         }
 
+        await syncStudentRequirementStatus(viewingStudent);
         setStudents((prev) => [...prev]);
         setCredentialActionFeedback({
           type: "success",
@@ -2247,6 +2267,7 @@ export default function AdminStudents({
         throw new Error("The credential was removed, but the student record could not be refreshed. Please reload the page.");
       }
       }
+      await syncStudentRequirementStatus(viewingStudent);
       setStudents((prev) => [...prev]);
       setCredentialActionFeedback({
         type: "success",
@@ -3307,7 +3328,7 @@ export default function AdminStudents({
     openViewModal(student);
   };
 
-  const handleNotificationRequirementDecision = ({
+  const handleNotificationRequirementDecision = async ({
     student,
     requirementName,
     status,
@@ -3316,23 +3337,24 @@ export default function AdminStudents({
     requirementName: string;
     status: NonNullable<AdminAttachment["reviewStatus"]>;
   }) => {
-    const updatedRecord = updateStudentRequirementReviewStatus({
-      branch: student.branch || currentBranch,
-      trackingNumber: student.trackingNumber,
-      studentNumber: student.id,
-      requirementName,
-      status,
-    });
-
-    if (!updatedRecord) {
-      showSystemAlert(
-        "Unable to Update Requirement",
-        "Unable to update requirement review status.",
-      );
-      return;
+    if (credentialActionKey) return;
+    setCredentialActionKey(`review:${student.id}:${requirementName}`);
+    try {
+      const updatedRecord = await updateStudentRequirementReviewStatus({
+        branch: student.branch || currentBranch,
+        trackingNumber: student.trackingNumber,
+        studentNumber: student.id,
+        requirementName,
+        status,
+      });
+      if (!updatedRecord) throw new Error("Unable to find the credential. Refresh the student list and try again.");
+      await syncStudentRequirementStatus(student);
+    } catch (error) {
+      showSystemAlert("Unable to Update Requirement", error instanceof Error ? error.message : "Unable to save the review decision.");
+    } finally {
+      setStudents(prev => [...prev]);
+      setCredentialActionKey(null);
     }
-
-    setStudents((prev) => [...prev]);
   };
 
   const handleScheduleSelectionDecision = async (
@@ -3559,21 +3581,19 @@ export default function AdminStudents({
           studentNumber: student.id,
           trackingNumber: student.trackingNumber,
         });
-        const ownScheduleTerm = student.requestedOwnSchedule
-          ? `${
-              student.ownScheduleAcademicYear || "Academic year pending"
-            } / ${student.ownScheduleSemester || "Semester pending"}`
-          : "Not applicable";
+        const personalInfo = requirementSnapshot?.applicantRecord?.personalInfo;
 
         return {
           "Student ID": student.id,
           "Full Name": student.name,
+          "First Name": student.firstName || "",
+          "Middle Name": student.middleName || personalInfo?.middleName || "",
+          "Last Name": student.lastName || "",
+          "Birth Date": student.birthDate || personalInfo?.birthDate || "Not provided",
+          Sex: student.gender || personalInfo?.sex || "Not provided",
+          "Civil Status": student.civilStatus || personalInfo?.civilStatus || "Not provided",
           "Academic Level": student.program,
-          "Track / Course":
-            student.program === "SHS"
-              ? getShsTrackDisplay(student)
-              : getStudentCourseDisplay(student),
-          Specialization:
+          "Course / Strand":
             student.program === "SHS"
               ? getShsSpecializationDisplay(student)
               : getStudentCourseDisplay(student),
@@ -3582,31 +3602,25 @@ export default function AdminStudents({
               ? getShsYearLevelDisplay(student)
               : student.yearLevel || "N/A",
           Section: student.section || "N/A",
-          "Requirement Status": student.status,
+          "Requirement Status": getStudentRequirementStatus(student),
           "Academic Standing": getStudentAcademicStandingLabel(student),
           "Admission Type": getAdmissionTypeLabel(student.studentStatus),
           Branch: student.branch || currentBranch,
-          "Tracking Number": student.trackingNumber || "",
-          "Document Submitted": student.documentSubmitted || "Not submitted",
-          "Requirements Submitted": requirementSnapshot?.summary.submitted ?? 0,
-          "Requirements Pending": requirementSnapshot?.summary.pending ?? 0,
-          "Requirements Approved": requirementSnapshot?.summary.approved ?? 0,
-          "Requirements Rejected": requirementSnapshot?.summary.rejected ?? 0,
-          "Own Schedule Admission": student.requestedOwnSchedule
-            ? student.ownScheduleRequestStatus || "Requested"
-            : "Standard",
-          "Schedule Selection": student.requestedOwnSchedule
-            ? getOwnScheduleSelectionLabel(student.ownScheduleSelectionStatus)
-            : "Not applicable",
-          "Own Schedule Term": ownScheduleTerm,
-          Contact: student.contact || "Not provided",
-          Email: student.email || "Not provided",
-          Address: student.address || "Not provided",
+          Contact: student.contact || personalInfo?.contactNumber || "Not provided",
+          Email: student.email || personalInfo?.email || "Not provided",
+          Address: student.address || personalInfo?.address || "Not provided",
+          "Guardian Name": student.guardianName || personalInfo?.guardianName || "Not provided",
+          "Guardian Contact": student.guardianContact || personalInfo?.guardianContact || "Not provided",
+          "Last School Attended": student.lastSchoolAttended || personalInfo?.lastSchoolAttended || "Not provided",
+          "Year Completion": student.yearCompletion || personalInfo?.yearCompletion || "Not provided",
+          "Imported Academic Year": student.importAcademicYear || "N/A",
+          "Imported Semester": student.importSemester || "N/A",
         };
       });
 
       const workbook = XLSX.utils.book_new();
       const studentsSheet = XLSX.utils.json_to_sheet(exportRows);
+      studentsSheet["!autofilter"] = { ref: studentsSheet["!ref"]! };
       const filtersSheet = XLSX.utils.aoa_to_sheet([
         ["Branch", currentBranch],
         ["Exported By", `${loggedInUsername} (${loggedInRole})`],
@@ -3621,32 +3635,15 @@ export default function AdminStudents({
         ["Sort", `${sortField} ${sortDirection}`],
       ]);
 
-      studentsSheet["!cols"] = [
-        { wch: 16 },
-        { wch: 28 },
-        { wch: 16 },
-        { wch: 28 },
-        { wch: 30 },
-        { wch: 16 },
-        { wch: 14 },
-        { wch: 18 },
-        { wch: 18 },
-        { wch: 18 },
-        { wch: 20 },
-        { wch: 12 },
-        { wch: 20 },
-        { wch: 18 },
-        { wch: 20 },
-        { wch: 20 },
-        { wch: 20 },
-        { wch: 20 },
-        { wch: 22 },
-        { wch: 20 },
-        { wch: 30 },
-        { wch: 18 },
-        { wch: 28 },
-        { wch: 42 },
-      ];
+      studentsSheet["!cols"] = Object.keys(exportRows[0]).map((header) => ({
+        wch: Math.min(
+          42,
+          exportRows.reduce(
+            (width, row) => Math.max(width, String(row[header as keyof typeof row]).length + 2),
+            Math.max(16, header.length + 2),
+          ),
+        ),
+      }));
       filtersSheet["!cols"] = [{ wch: 24 }, { wch: 40 }];
 
       XLSX.utils.book_append_sheet(workbook, studentsSheet, "Students");
@@ -3923,7 +3920,7 @@ export default function AdminStudents({
                   </button>
                 </th>
                 <th>Name</th>
-                <th>Course/Track</th>
+                <th>Course / Strand</th>
                 <th>Grade Year</th>
                 <th>Section</th>
                 <th>Requirement Status</th>
@@ -3955,9 +3952,9 @@ export default function AdminStudents({
                     </td>) : null}
                     <td data-label="Student ID">{student.id}</td>
                     <td data-label="Name">{student.name}</td>
-                    <td data-label="Course/Track">
+                    <td data-label="Course / Strand">
                       {student.program === "SHS"
-                        ? getShsTrackDisplay(student)
+                        ? getShsSpecializationDisplay(student)
                         : getStudentCourseDisplay(student)}
                     </td>
                     <td data-label="Grade Year">
@@ -3967,7 +3964,7 @@ export default function AdminStudents({
                     </td>
                     <td data-label="Section">{student.section || "N/A"}</td>
                     <td data-label="Requirement Status">
-                      {student.status}
+                      {getStudentRequirementStatus(student)}
                     </td>
                     <td data-label="Academic Standing">
                       <span
@@ -4071,10 +4068,13 @@ export default function AdminStudents({
                   )}
                 </div>
 
+                {!editingStudent ? (
+                  <>
                 <div className="students-form-group">
                   <label>Program *</label>
                   <select
                     name="program"
+                    disabled={Boolean(editingStudent)}
                     value={formData.program}
                     onChange={handleChange}
                     required
@@ -4092,53 +4092,137 @@ export default function AdminStudents({
                 </div>
 
                 <div className="students-form-group">
-                  <label>Year Level *</label>
-                  {formData.program === "SHS" ? (
-                    <>
-                      <select
-                        name="yearLevel"
-                        value={formData.yearLevel}
-                        onChange={handleChange}
-                        required
-                        className={
-                          formErrors.yearLevel ? "students-input-error" : ""
-                        }
-                      >
-                        <option value="">Select SHS Year Level</option>
-                        <option value="Grade 11">Grade 11</option>
-                        <option value="Grade 12">Grade 12</option>
-                      </select>
-                      {formErrors.yearLevel === "Year Level is required" && (
-                        <span className="students-error-text">
-                          {formErrors.yearLevel}
-                        </span>
-                      )}
-
-                      <select
-                        value={shsTrackType}
-                        onChange={(e) =>
-                          handleShsTrackTypeChange(e.target.value)
-                        }
-                        required
-                        className={
-                          formErrors.yearLevel ? "students-input-error" : ""
-                        }
-                        style={{ marginTop: "10px" }}
-                      >
-                        <option value="">Select SHS Track</option>
-                        <option value="Academic Track">Academic Track</option>
-                        <option value="Technical Professional Track">
-                          Technical Professional Track
-                        </option>
-                      </select>
-                      {formErrors.yearLevel === "Track is required for SHS" && (
-                        <span className="students-error-text">
-                          {formErrors.yearLevel}
-                        </span>
-                      )}
-
-                      {shsTrackType === "Academic Track" ? (
+                      <label>Year Level *</label>
+                      {formData.program === "SHS" ? (
                         <>
+                          <select
+                            name="yearLevel"
+                            value={formData.yearLevel}
+                            onChange={handleChange}
+                            required
+                            className={
+                              formErrors.yearLevel ? "students-input-error" : ""
+                            }
+                          >
+                            <option value="">Select SHS Year Level</option>
+                            <option value="Grade 11">Grade 11</option>
+                            <option value="Grade 12">Grade 12</option>
+                          </select>
+                          {formErrors.yearLevel === "Year Level is required" && (
+                            <span className="students-error-text">
+                              {formErrors.yearLevel}
+                            </span>
+                          )}
+    
+                          <select
+                            value={shsTrackType}
+                            onChange={(e) =>
+                              handleShsTrackTypeChange(e.target.value)
+                            }
+                            required
+                            className={
+                              formErrors.yearLevel ? "students-input-error" : ""
+                            }
+                            style={{ marginTop: "10px" }}
+                          >
+                            <option value="">Select SHS Track</option>
+                            <option value="Academic Track">Academic Track</option>
+                            <option value="Technical Professional Track">
+                              Technical Professional Track
+                            </option>
+                          </select>
+                          {formErrors.yearLevel === "Track is required for SHS" && (
+                            <span className="students-error-text">
+                              {formErrors.yearLevel}
+                            </span>
+                          )}
+    
+                          {shsTrackType === "Academic Track" ? (
+                            <>
+                              <select
+                                value={programSpecialization}
+                                onChange={(e) =>
+                                  handleProgramSpecializationChange(e.target.value)
+                                }
+                                required
+                                className={
+                                  formErrors.yearLevel ? "students-input-error" : ""
+                                }
+                                style={{ marginTop: "10px" }}
+                              >
+                                <option value="">
+                                  Select Academic Track Specialization
+                                </option>
+                                <option value="Arts, Social Science and Humanities">
+                                  Arts, Social Science and Humanities
+                                </option>
+                                <option value="Business Entrepreneurship">
+                                  Business Entrepreneurship
+                                </option>
+                              </select>
+                              {formErrors.yearLevel ===
+                                "Specialization is required for SHS" && (
+                                <span className="students-error-text">
+                                  {formErrors.yearLevel}
+                                </span>
+                              )}
+                            </>
+                          ) : null}
+    
+                          {shsTrackType === "Technical Professional Track" ? (
+                            <>
+                              <select
+                                value={programSpecialization}
+                                onChange={(e) =>
+                                  handleProgramSpecializationChange(e.target.value)
+                                }
+                                required
+                                className={
+                                  formErrors.yearLevel ? "students-input-error" : ""
+                                }
+                                style={{ marginTop: "10px" }}
+                              >
+                                <option value="">
+                                  Select Technical Track Specialization
+                                </option>
+                                <option value="ICT SUPPORT AND PROGRAMMING TECHNOLOGIES">
+                                  ICT SUPPORT AND PROGRAMMING TECHNOLOGIES
+                                </option>
+                              </select>
+                              {formErrors.yearLevel ===
+                                "Specialization is required for SHS" && (
+                                <span className="students-error-text">
+                                  {formErrors.yearLevel}
+                                </span>
+                              )}
+                            </>
+                          ) : null}
+                        </>
+                      ) : formData.program === "College" ? (
+                        <>
+                          <select
+                            name="yearLevel"
+                            value={formData.yearLevel}
+                            onChange={(e) =>
+                              handleCollegeYearLevelChange(e.target.value)
+                            }
+                            required
+                            className={
+                              formErrors.yearLevel ? "students-input-error" : ""
+                            }
+                          >
+                            <option value="">Select College Year Level</option>
+                            <option value="1st Year">1st Year</option>
+                            <option value="2nd Year">2nd Year</option>
+                            <option value="3rd Year">3rd Year</option>
+                            <option value="4th Year">4th Year</option>
+                          </select>
+                          {formErrors.yearLevel === "Year Level is required" && (
+                            <span className="students-error-text">
+                              {formErrors.yearLevel}
+                            </span>
+                          )}
+    
                           <select
                             value={programSpecialization}
                             onChange={(e) =>
@@ -4150,114 +4234,33 @@ export default function AdminStudents({
                             }
                             style={{ marginTop: "10px" }}
                           >
-                            <option value="">
-                              Select Academic Track Specialization
-                            </option>
-                            <option value="Arts, Social Science and Humanities">
-                              Arts, Social Science and Humanities
-                            </option>
-                            <option value="Business Entrepreneurship">
-                              Business Entrepreneurship
+                            <option value="">Select Course</option>
+                            <option value="BS ENTREPRENEURSHIP">
+                              BS ENTREPRENEURSHIP
                             </option>
                           </select>
                           {formErrors.yearLevel ===
-                            "Specialization is required for SHS" && (
+                            "Course selection is required for College" && (
                             <span className="students-error-text">
                               {formErrors.yearLevel}
                             </span>
                           )}
                         </>
-                      ) : null}
-
-                      {shsTrackType === "Technical Professional Track" ? (
-                        <>
-                          <select
-                            value={programSpecialization}
-                            onChange={(e) =>
-                              handleProgramSpecializationChange(e.target.value)
-                            }
-                            required
-                            className={
-                              formErrors.yearLevel ? "students-input-error" : ""
-                            }
-                            style={{ marginTop: "10px" }}
-                          >
-                            <option value="">
-                              Select Technical Track Specialization
-                            </option>
-                            <option value="ICT SUPPORT AND PROGRAMMING TECHNOLOGIES">
-                              ICT SUPPORT AND PROGRAMMING TECHNOLOGIES
-                            </option>
-                          </select>
-                          {formErrors.yearLevel ===
-                            "Specialization is required for SHS" && (
-                            <span className="students-error-text">
-                              {formErrors.yearLevel}
-                            </span>
-                          )}
-                        </>
-                      ) : null}
-                    </>
-                  ) : formData.program === "College" ? (
-                    <>
-                      <select
-                        name="yearLevel"
-                        value={formData.yearLevel}
-                        onChange={(e) =>
-                          handleCollegeYearLevelChange(e.target.value)
-                        }
-                        required
-                        className={
-                          formErrors.yearLevel ? "students-input-error" : ""
-                        }
-                      >
-                        <option value="">Select College Year Level</option>
-                        <option value="1st Year">1st Year</option>
-                        <option value="2nd Year">2nd Year</option>
-                        <option value="3rd Year">3rd Year</option>
-                        <option value="4th Year">4th Year</option>
-                      </select>
-                      {formErrors.yearLevel === "Year Level is required" && (
-                        <span className="students-error-text">
-                          {formErrors.yearLevel}
-                        </span>
+                      ) : (
+                        <input
+                          name="yearLevel"
+                          value={formData.yearLevel}
+                          onChange={handleChange}
+                          required
+                          className={
+                            formErrors.yearLevel ? "students-input-error" : ""
+                          }
+                        />
                       )}
-
-                      <select
-                        value={programSpecialization}
-                        onChange={(e) =>
-                          handleProgramSpecializationChange(e.target.value)
-                        }
-                        required
-                        className={
-                          formErrors.yearLevel ? "students-input-error" : ""
-                        }
-                        style={{ marginTop: "10px" }}
-                      >
-                        <option value="">Select Course</option>
-                        <option value="BS ENTREPRENEURSHIP">
-                          BS ENTREPRENEURSHIP
-                        </option>
-                      </select>
-                      {formErrors.yearLevel ===
-                        "Course selection is required for College" && (
-                        <span className="students-error-text">
-                          {formErrors.yearLevel}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <input
-                      name="yearLevel"
-                      value={formData.yearLevel}
-                      onChange={handleChange}
-                      required
-                      className={
-                        formErrors.yearLevel ? "students-input-error" : ""
-                      }
-                    />
-                  )}
                 </div>
+
+                  </>
+                ) : null}
 
                 <div className="students-form-group">
                   <label>Document Submitted Date</label>
@@ -4349,6 +4352,7 @@ export default function AdminStudents({
                   )}
                 </div>
 
+                {!editingStudent ? (
                 <div className="students-form-group">
                   <label>Status</label>
                   <select
@@ -4360,6 +4364,7 @@ export default function AdminStudents({
                     <option value="Incomplete">Incomplete</option>
                   </select>
                 </div>
+                ) : null}
 
                 <div className="students-modal-actions">
                   <button
@@ -4431,9 +4436,9 @@ export default function AdminStudents({
                   <div className="students-profile-field">
                     <label>Requirement Status</label>
                     <div
-                      className={`students-profile-value students-profile-value-highlight ${getStudentStatusClassName(viewingStudent.status)}`}
+                      className={`students-profile-value students-profile-value-highlight ${getStudentStatusClassName(getStudentRequirementStatus(viewingStudent))}`}
                     >
-                      {viewingStudent.status}
+                      {getStudentRequirementStatus(viewingStudent)}
                     </div>
                   </div>
                   <div className="students-profile-field">
@@ -5879,7 +5884,7 @@ export default function AdminStudents({
                                       status: "Approved",
                                     })
                                   }
-                                  disabled={attachment.reviewStatus === "Approved"}
+                                  disabled={Boolean(credentialActionKey) || attachment.reviewStatus === "Approved"}
                                 >
                                   Approve
                                 </button>
@@ -5893,7 +5898,7 @@ export default function AdminStudents({
                                       status: "Rejected",
                                     })
                                   }
-                                  disabled={attachment.reviewStatus === "Rejected"}
+                                  disabled={Boolean(credentialActionKey) || attachment.reviewStatus === "Rejected"}
                                 >
                                   Need Redo
                                 </button>
