@@ -1,6 +1,5 @@
 import io
 import json
-import logging
 import zipfile
 from collections import defaultdict, deque
 from datetime import datetime
@@ -31,7 +30,6 @@ from .storage import (
 
 
 BACKUP_APP_LABELS = ("admission", "student", "registrar")
-logger = logging.getLogger(__name__)
 BRANCH_FIELD_NAMES = ("branch", "branch_name")
 RESTORE_PROGRESS_STEPS = {
     "started": 5,
@@ -555,31 +553,7 @@ def _create_branch_backup(*, branch_id, backup_type, created_by, history, snapsh
 
     # Browser snapshots are retained for old clients but are never the source
     # of a recovery archive. Both manual and scheduled jobs use the database.
-    last_reported_progress = history.progress
-
-    def report_archive_progress(progress):
-        nonlocal history, last_reported_progress
-        progress = min(int(progress), 74)
-        if progress <= last_reported_progress or progress - last_reported_progress < 2:
-            return
-        try:
-            updated_history = set_history_progress(
-                history,
-                status=BackupHistory.STATUS_IN_PROGRESS,
-                progress=progress,
-            )
-        except Exception:
-            logger.warning("Could not update backup progress for history %s", history.id, exc_info=True)
-            return
-        history = updated_history
-        last_reported_progress = progress
-
-    archive_payload, manifest = create_archive(
-        branch_id,
-        backup_type,
-        alumni=(snapshot_data or {}).get("alumni", []),
-        progress_callback=report_archive_progress,
-    )
+    archive_payload, manifest = create_archive(branch_id, backup_type, alumni=(snapshot_data or {}).get("alumni", []))
     history = set_history_progress(history, progress=75)
     archive_storage_path = f"branches/{branch_slug}/{timezone.now():%Y/%m/%d}/{archive_name}"
     bucket, stored_archive_path = upload_backup_blob(

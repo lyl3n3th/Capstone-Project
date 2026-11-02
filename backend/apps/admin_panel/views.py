@@ -1,6 +1,5 @@
 import logging
 
-from django.conf import settings
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
@@ -43,7 +42,6 @@ from .services import (
 
 
 logger = logging.getLogger(__name__)
-BACKUP_QUEUE_UNAVAILABLE_DETAIL = "The backup job queue is unavailable. Please try again later or contact an administrator."
 
 
 def get_request_branch_context(request):
@@ -215,8 +213,6 @@ class BackupManualCreateView(APIView):
         try:
             from .tasks import create_branch_backup_task
 
-            if not settings.CELERY_BROKER_URL:
-                raise RuntimeError("The backup job queue is not configured.")
             task = create_branch_backup_task.delay(
                 branch_id=branch_id,
                 backup_type=backup_type,
@@ -226,18 +222,7 @@ class BackupManualCreateView(APIView):
             )
             history = update_backup_history(history.id, task_id=task.id) or history
         except Exception as exc:
-            logger.warning("Celery dispatch failed for %s backup (%s)", backup_type, type(exc).__name__)
-            if not settings.BACKUP_ALLOW_INLINE_TASK_FALLBACK:
-                update_backup_history(
-                    history.id,
-                    status=BackupHistory.STATUS_FAILED,
-                    progress=100,
-                    error_message=BACKUP_QUEUE_UNAVAILABLE_DETAIL,
-                )
-                return Response(
-                    {"detail": BACKUP_QUEUE_UNAVAILABLE_DETAIL, "history_id": str(history.id)},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
-                )
+            logger.warning("Celery dispatch failed for %s backup, running inline: %s", backup_type, exc)
             try:
                 history = create_branch_backup(
                     branch_id=branch_id,
@@ -324,24 +309,10 @@ class BackupRestoreStartView(APIView):
         try:
             from .tasks import restore_branch_backup_task
 
-            if not settings.CELERY_BROKER_URL:
-                raise RuntimeError("The backup job queue is not configured.")
             task = restore_branch_backup_task.delay(str(restore_history.id))
             restore_history = update_backup_history(restore_history.id, task_id=task.id) or restore_history
         except Exception as exc:
-            logger.warning("Celery dispatch failed for restore (%s)", type(exc).__name__)
-            if not settings.BACKUP_ALLOW_INLINE_TASK_FALLBACK:
-                update_backup_history(
-                    restore_history.id,
-                    status=BackupHistory.STATUS_FAILED,
-                    progress=100,
-                    error_message=BACKUP_QUEUE_UNAVAILABLE_DETAIL,
-                    restore_finished_at=timezone.now(),
-                )
-                return Response(
-                    {"detail": BACKUP_QUEUE_UNAVAILABLE_DETAIL, "history_id": str(restore_history.id)},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
-                )
+            logger.warning("Celery dispatch failed for restore, running inline: %s", exc)
             try:
                 restore_history = restore_branch_backup(restore_history)
             except Exception as restore_error:

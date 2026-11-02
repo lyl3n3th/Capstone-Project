@@ -36,7 +36,7 @@ def _signature(manifest):
     return hmac.new(str(key).encode(), _encode(manifest), hashlib.sha256).hexdigest()
 
 
-def _object(method, bucket, path, payload=None, *, progress_callback=None):
+def _object(method, bucket, path, payload=None):
     if not bucket or not path or path.startswith("/") or any(p in (".", "..") for p in path.split("/")):
         raise ValueError("Invalid credential storage reference in backup.")
     url, key, _ = get_storage_config()
@@ -44,24 +44,7 @@ def _object(method, bucket, path, payload=None, *, progress_callback=None):
     headers = _build_headers(key, content_type=mimetypes.guess_type(path)[0] or "application/octet-stream")
     headers["x-upsert"] = "false"
     with _storage_request(request.Request(endpoint, method=method, data=payload, headers=headers)) as response:
-        if method != "GET" or not progress_callback:
-            return response.read()
-        try:
-            content_length = int(getattr(response, "headers", {}).get("Content-Length", "0"))
-        except (TypeError, ValueError):
-            content_length = 0
-        if content_length <= 0:
-            return response.read()
-        chunks = []
-        received = 0
-        while True:
-            chunk = response.read(256 * 1024)
-            if not chunk:
-                break
-            chunks.append(chunk)
-            received += len(chunk)
-            progress_callback(min(received / content_length, 1.0))
-        return b"".join(chunks)
+        return response.read()
 
 
 def _references(value):
@@ -79,9 +62,7 @@ def _references(value):
             yield from _references(nested)
 
 
-def create_archive(branch, backup_type, *, alumni=None, progress_callback=None):
-    if progress_callback:
-        progress_callback(8)
+def create_archive(branch, backup_type, *, alumni=None):
     snapshot = SupabaseRestClient.from_settings().rpc("export_branch_backup_data", {"p_branch": branch})
     if not isinstance(snapshot, dict) or snapshot.get("version") != 2:
         raise ValueError("The database backup migration is missing or returned an unsupported snapshot.")
@@ -90,26 +71,10 @@ def create_archive(branch, backup_type, *, alumni=None, progress_callback=None):
     snapshot["alumni"] = alumni or []
     data = _encode(snapshot)
     files = {}
-    references = list(dict.fromkeys(
-        (record[bucket_key], record[path_key])
-        for record, path_key, bucket_key in _references(snapshot)
-    ))
-    if progress_callback:
-        progress_callback(15)
-    total_files = len(references)
-    for index, reference in enumerate(references, start=1):
-        def report_file_progress(fraction):
-            if progress_callback:
-                position = (index - 1 + fraction) / max(total_files, 1)
-                progress_callback(15 + int(position * 55))
-
-        files[reference] = _object(
-            "GET",
-            *reference,
-            progress_callback=report_file_progress if progress_callback else None,
-        )
-        if progress_callback:
-            progress_callback(15 + int((index / max(total_files, 1)) * 55))
+    for record, path_key, bucket_key in _references(snapshot):
+        reference = (record[bucket_key], record[path_key])
+        if reference not in files:
+            files[reference] = _object("GET", *reference)
     counts = {name: len(rows) for name, rows in snapshot["tables"].items()}
     manifest = {
         "branch": branch, "snapshot_format": FORMAT, "version": 2,
@@ -120,8 +85,6 @@ def create_archive(branch, backup_type, *, alumni=None, progress_callback=None):
         "media_entries": [],
     }
     buffer = io.BytesIO()
-    if progress_callback:
-        progress_callback(71)
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(DATA_MEMBER, data)
         for index, ((bucket, path), payload) in enumerate(files.items()):
