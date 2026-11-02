@@ -396,7 +396,53 @@ class BackupArchiveApiTests(TestCase):
         self.assertEqual(history.progress, 100)
         self.assertEqual(upload_mock.call_count, 1)
         self.assertEqual(history.metadata["student_count"], 2)
-        archive_mock.assert_called_once_with("Bacoor", "manual", alumni=[])
+        archive_mock.assert_called_once()
+        self.assertEqual(archive_mock.call_args.args, ("Bacoor", "manual"))
+        self.assertEqual(archive_mock.call_args.kwargs["alumni"], [])
+        self.assertTrue(callable(archive_mock.call_args.kwargs["progress_callback"]))
+
+    @override_settings(BACKUP_ALLOW_INLINE_TASK_FALLBACK=False, CELERY_BROKER_URL="")
+    def test_manual_backup_fails_promptly_when_queue_is_unavailable(self):
+        with patch("apps.admin_panel.views.create_branch_backup") as inline_backup:
+            response = self.client.post(
+                "/api/admin/backup/manual/",
+                {"backup_type": "manual", "students": [], "alumni": []},
+                format="json",
+                HTTP_X_USER_ROLE="admin",
+                HTTP_X_USER_BRANCH="Bacoor",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("job queue is unavailable", response.data["detail"])
+        inline_backup.assert_not_called()
+        history = BackupHistory.objects.get()
+        self.assertEqual(history.status, BackupHistory.STATUS_FAILED)
+        self.assertEqual(history.progress, 100)
+
+    @override_settings(BACKUP_ALLOW_INLINE_TASK_FALLBACK=False, CELERY_BROKER_URL="")
+    def test_restore_fails_promptly_when_queue_is_unavailable(self):
+        source = BackupHistory.objects.create(
+            branch="Bacoor",
+            backup_type="manual",
+            file_path="backup.zip",
+            storage_bucket="branch-backups",
+            status=BackupHistory.STATUS_COMPLETED,
+            metadata={"snapshot_format": FORMAT},
+        )
+        with patch("apps.admin_panel.views.restore_branch_backup") as inline_restore:
+            response = self.client.post(
+                "/api/admin/backup/restore/",
+                {"backup_history_id": str(source.id)},
+                format="json",
+                HTTP_X_USER_ROLE="admin",
+                HTTP_X_USER_BRANCH="Bacoor",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        inline_restore.assert_not_called()
+        restore_history = BackupHistory.objects.exclude(id=source.id).get()
+        self.assertEqual(restore_history.status, BackupHistory.STATUS_FAILED)
+        self.assertEqual(restore_history.progress, 100)
 
     @patch("apps.admin_panel.views.get_backup_archive_payload")
     def test_download_reports_storage_access_failure_without_calling_it_missing(self, payload_mock):
@@ -412,17 +458,18 @@ class BackupArchiveApiTests(TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.data["detail"], "Backup storage access was denied.")
 
-    @override_settings(BACKUP_ALLOW_LOCAL_STORAGE=False)
+    @override_settings(BACKUP_ALLOW_LOCAL_STORAGE=False, BACKUP_ALLOW_INLINE_TASK_FALLBACK=True)
     @patch("apps.admin_panel.tasks.create_branch_backup_task.delay", side_effect=RuntimeError("No worker"))
     @patch("apps.admin_panel.storage.get_storage_config", side_effect=ImproperlyConfigured("Missing credentials"))
-    def test_inline_storage_failure_does_not_leave_backup_stuck_or_block_retry(self, _config_mock, _dispatch_mock):
+    @patch("apps.admin_panel.services.create_archive", return_value=(b"zip", {"models": [], "model_counts": {}, "dataset_counts": {"students": 0, "alumni": 0}, "media_entries": []}))
+    def test_inline_storage_failure_does_not_leave_backup_stuck_or_block_retry(self, _archive_mock, _config_mock, _dispatch_mock):
         for _attempt in range(2):
             response = self.client.post(
                 "/api/admin/backup/manual/", {"backup_type": "manual", "students": [], "alumni": []},
                 format="json", HTTP_X_USER_ROLE="admin", HTTP_X_USER_BRANCH="Bacoor",
             )
             self.assertEqual(response.status_code, 503)
-            self.assertIn("credentials are required", response.data["detail"])
+            self.assertIn("Permanent backup storage is not configured", response.data["detail"])
         self.assertEqual(BackupHistory.objects.filter(status="failed").count(), 2)
         self.assertFalse(BackupHistory.objects.filter(status__in=["pending", "in_progress", "completed"]).exists())
 
@@ -445,6 +492,7 @@ class BackupArchiveApiTests(TestCase):
 
     @override_settings(
         BACKUP_ALLOW_LOCAL_STORAGE=False,
+        BACKUP_ALLOW_INLINE_TASK_FALLBACK=True,
         SUPABASE_URL="https://project.supabase.co",
         SUPABASE_SERVICE_ROLE_KEY="test-service-key",
         SUPABASE_BACKUP_BUCKET="branch-backups",
@@ -599,7 +647,21 @@ class CompleteBackupTests(TestCase):
             self.assertEqual(database["alumni"], [{"id": "ALUMNI-1"}])
             self.assertEqual(len(manifest["media_entries"]), 1)
             self.assertEqual(archive.read("attachments/0"), b"credential-file-bytes")
-        self.objects.assert_called_once_with("GET", "admission-requirements", "branch-1/credential.pdf")
+        self.objects.assert_called_once()
+        self.assertEqual(
+            self.objects.call_args.args,
+            ("GET", "admission-requirements", "branch-1/credential.pdf"),
+        )
+        self.assertIsNone(self.objects.call_args.kwargs["progress_callback"])
+
+    def test_archive_reports_progress_during_database_and_attachment_work(self):
+        progress = []
+        create_archive("Bacoor", "manual", progress_callback=progress.append)
+
+        self.assertEqual(progress[0:2], [8, 15])
+        self.assertIn(70, progress)
+        self.assertEqual(progress[-1], 71)
+        self.assertEqual(progress, sorted(progress))
 
     def test_missing_credential_fails_backup_instead_of_silently_omitting_it(self):
         self.objects.side_effect = BackupStorageError("Credential file is missing")
@@ -643,6 +705,7 @@ class CompleteBackupTests(TestCase):
         self.rpc.assert_not_called()
         self.objects.assert_not_called()
 
+    @override_settings(BACKUP_ALLOW_INLINE_TASK_FALLBACK=True)
     @patch("apps.admin_panel.tasks.restore_branch_backup_task.delay", side_effect=RuntimeError("No worker"))
     @patch("apps.admin_panel.services.get_backup_archive_payload")
     def test_failed_database_restore_never_reports_success_or_overwrites_browser_snapshot(self, payload_mock, _dispatch):

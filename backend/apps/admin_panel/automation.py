@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta, timezone as dt_timezone
 
+from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -19,6 +20,7 @@ from .storage import BackupStorageError
 
 
 logger = logging.getLogger(__name__)
+BACKUP_QUEUE_UNAVAILABLE_DETAIL = "The backup job queue is unavailable. Please try again later or contact an administrator."
 
 AUTOMATED_BACKUP_WINDOW = timedelta(minutes=10)
 
@@ -167,6 +169,8 @@ def dispatch_due_automated_backups(
         try:
             from .tasks import create_branch_backup_task
 
+            if not settings.CELERY_BROKER_URL:
+                raise RuntimeError("The backup job queue is not configured.")
             task = create_branch_backup_task.delay(
                 branch_id=settings_row.branch,
                 backup_type=BackupHistory.TYPE_AUTOMATED,
@@ -177,21 +181,30 @@ def dispatch_due_automated_backups(
             history = update_backup_history(history.id, task_id=task.id) or history
         except Exception as exc:
             logger.warning(
-                "Celery dispatch failed for automated backup on %s, running inline: %s",
+                "Celery dispatch failed for automated backup on %s (inline fallback allowed=%s, error=%s)",
                 settings_row.branch,
-                exc,
+                settings.BACKUP_ALLOW_INLINE_TASK_FALLBACK,
+                type(exc).__name__,
             )
-            try:
-                history = create_branch_backup(
-                    branch_id=settings_row.branch,
-                    backup_type=BackupHistory.TYPE_AUTOMATED,
-                    created_by=actor,
-                    history=history,
-                    snapshot_data=snapshot_data,
-                )
-            except BackupStorageError:
-                logger.exception("Permanent storage failed for automated backup on %s", settings_row.branch)
-                continue
+            if settings.BACKUP_ALLOW_INLINE_TASK_FALLBACK:
+                try:
+                    history = create_branch_backup(
+                        branch_id=settings_row.branch,
+                        backup_type=BackupHistory.TYPE_AUTOMATED,
+                        created_by=actor,
+                        history=history,
+                        snapshot_data=snapshot_data,
+                    )
+                except BackupStorageError:
+                    logger.exception("Permanent storage failed for automated backup on %s", settings_row.branch)
+                    continue
+            else:
+                history = update_backup_history(
+                    history.id,
+                    status=BackupHistory.STATUS_FAILED,
+                    progress=100,
+                    error_message=BACKUP_QUEUE_UNAVAILABLE_DETAIL,
+                ) or history
 
         save_backup_settings(
             settings_row.branch,

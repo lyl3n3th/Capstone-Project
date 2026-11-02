@@ -17,7 +17,7 @@ from .services import create_branch_backup, delete_backup_artifacts, restore_bra
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True)
+@shared_task(bind=True, acks_late=True, reject_on_worker_lost=True)
 def create_branch_backup_task(
     self,
     branch_id,
@@ -76,7 +76,7 @@ def cleanup_expired_backups():
             delete_backup_artifacts(history)
 
 
-@shared_task(bind=True)
+@shared_task(bind=True, acks_late=True, reject_on_worker_lost=True)
 def restore_branch_backup_task(self, restore_history_id):
     history = get_backup_history(restore_history_id)
     if not history:
