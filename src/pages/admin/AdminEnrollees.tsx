@@ -7104,40 +7104,17 @@ export default function AdminEnrollees({
     const reportRows =
       evaluationQuestionnaire.length > 0
         ? evaluationQuestionnaire
+            .filter((category) =>
+              category.questions.some(
+                (question) => (question.type || "rating") === "rating",
+              ),
+            )
             .map((category) => {
               const questionRows =
                 category.questions.length > 0
                   ? category.questions
+                      .filter((question) => (question.type || "rating") === "rating")
                       .map((question) => {
-                        if ((question.type || "rating") === "essay") {
-                          const essayAnswers =
-                            selectedEvaluationFilteredSubmissions
-                              .map((submission) => submission.responses[question.id])
-                              .filter(
-                                (answer): answer is string =>
-                                  typeof answer === "string" &&
-                                  answer.trim().length > 0,
-                              );
-
-                          return `
-                            <tr>
-                              <td>${escapeReportHtml(question.text)}</td>
-                              <td colspan="5">${
-                                essayAnswers.length > 0
-                                  ? essayAnswers
-                                      .map(
-                                        (answer) =>
-                                          `<p class="essay-answer"><strong>${escapeReportHtml(
-                                            anonymousEvaluationResponderLabel,
-                                          )}:</strong> ${escapeReportHtml(answer)}</p>`,
-                                      )
-                                      .join("")
-                                  : "-"
-                              }</td>
-                            </tr>
-                          `;
-                        }
-
                         const result = getEvaluationQuestionPercentages(
                           question.id,
                         );
@@ -7194,6 +7171,7 @@ export default function AdminEnrollees({
         <head>
           <title>evaluation-report-${escapeReportHtml(fileLabel || "filtered")}</title>
           <style>
+            @page { margin: 0; }
             * { box-sizing: border-box; }
             body {
               margin: 0;
@@ -7252,11 +7230,6 @@ export default function AdminEnrollees({
               width: 56%;
               text-align: left;
             }
-            .essay-answer {
-              margin: 0 0 8px;
-              text-align: left;
-              line-height: 1.45;
-            }
             .category-row th {
               border-bottom: none;
               background: #727c85;
@@ -7265,7 +7238,7 @@ export default function AdminEnrollees({
               font-weight: 700;
             }
             @media print {
-              body { padding: 18px 14px; }
+              body { padding: 12mm; }
               button { display: none; }
             }
           </style>
@@ -10701,7 +10674,7 @@ export default function AdminEnrollees({
                           </div>
                           <div className="transferee-planner-stats">
                             <div className="transferee-planner-stat">
-                              <span>Curriculum</span>
+                              <span>Subjects</span>
                               <strong>
                                 {selectedTransfereeFilteredCreditSubjects.length}
                               </strong>

@@ -287,6 +287,29 @@ export const setInstructorPassword = async ({
   }
 };
 
+export const resetInstructorPassword = async (payload: {
+  branch: string;
+  email: string;
+  contactNumber: string;
+  newPassword: string;
+}) => {
+  const { data, error } = await supabase.rpc("reset_instructor_account_password", {
+    p_branch: normalizeBranchName(payload.branch),
+    p_email: payload.email.trim().toLowerCase(),
+    p_contact_number: payload.contactNumber.replace(/\D/g, ""),
+    p_new_password: payload.newPassword,
+  }).returns<{ branch: string }[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+  const row = getSingleRow<{ branch: string }>(data);
+  if (!row) {
+    throw new Error("Unable to reset the instructor password right now.");
+  }
+  return { branch: row.branch, role: "instructor" as const };
+};
+
 export const resetInstructorTemporaryPassword = async ({
   branch,
   employeeId,

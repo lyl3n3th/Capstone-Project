@@ -18,13 +18,14 @@ import {
 } from "../../services/staffApi";
 import {
   authenticateInstructor,
+  resetInstructorPassword,
   setInstructorPassword,
 } from "../../services/instructorPortal";
 import { STAFF_ROLE_LABELS, type StaffRole } from "../../types/user";
 import "../../styles/staff/staff-login.css";
 
 type StaffLoginAccessRole = StaffRole;
-type StaffResetAccessRole = Extract<StaffRole, "admin" | "registrar">;
+type StaffResetAccessRole = Extract<StaffRole, "admin" | "registrar" | "instructor">;
 
 function StaffLogin() {
   const navigate = useNavigate();
@@ -489,13 +490,15 @@ function StaffLogin() {
     try {
       setIsResetSubmitting(true);
 
-      const result = await resetStaffPassword({
+      const resetPayload = {
         branch: resetData.branch as StaffBranch,
-        role: resetData.role,
         email: resetData.email,
         contactNumber: resetData.contactNumber,
         newPassword: resetData.newPassword,
-      });
+      };
+      const result = resetData.role === "instructor"
+        ? await resetInstructorPassword(resetPayload)
+        : await resetStaffPassword({ ...resetPayload, role: resetData.role });
 
       setLoginData((current) => ({
         ...current,
@@ -887,6 +890,7 @@ function StaffLogin() {
                 >
                   <option value="admin">Administrator</option>
                   <option value="registrar">Registrar</option>
+                  <option value="instructor">Instructor</option>
                 </select>
                 <span className="staff-select-arrow" aria-hidden="true">
                   <MdKeyboardArrowDown size={18} />

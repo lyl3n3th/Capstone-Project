@@ -413,10 +413,6 @@ export default function AdminReports({
                           <td>
                             <div className="report-status-report-cell">
                               <strong>{report.subject}</strong>
-                              <span>
-                                {report.senderName} | {report.branchName}
-                              </span>
-                              <p>{report.message}</p>
                             </div>
                           </td>
                           <td>
