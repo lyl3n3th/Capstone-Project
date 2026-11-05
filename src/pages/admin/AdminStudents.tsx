@@ -1077,27 +1077,32 @@ export default function AdminStudents({
       setStudentRecoveryMessage(null);
 
       try {
-        try {
-          await fetchEnrollmentRequests(currentBranch);
-        } catch (error) {
-          console.warn("Unable to fetch shared enrollment requests.", error);
-        }
-        let fetchedBranchStudents = (await fetchAdminStudents(
-          currentBranch,
-        )) as Student[];
+        const [fetchedBranchStudentsResult, applicantsResult] = await Promise.all([
+          Promise.all([
+            fetchEnrollmentRequests(currentBranch).catch((error) => {
+              console.warn("Unable to fetch shared enrollment requests.", error);
+            }),
+            fetchAdminStudents(currentBranch),
+          ]).then(([, students]) => students as Student[]),
+          fetchSupabaseAdmissionApplicants(currentBranch).catch((error) => {
+            console.warn("Unable to fetch linked admission records.", error);
+            return null;
+          }),
+        ]);
+
+        let fetchedBranchStudents = fetchedBranchStudentsResult;
 
         if (!isCurrentLoad()) {
           return;
         }
 
-        try {
-          const applicants = await fetchSupabaseAdmissionApplicants(currentBranch);
-          if (!isCurrentLoad()) {
-            return;
-          }
-          writeBranchScopedData(ENROLLEE_STORAGE_SCOPE, currentBranch, applicants, { skipSupabaseSync: true });
-        } catch (error) {
-          console.warn("Unable to fetch linked admission records.", error);
+        if (applicantsResult && isCurrentLoad()) {
+          writeBranchScopedData(
+            ENROLLEE_STORAGE_SCOPE,
+            currentBranch,
+            applicantsResult,
+            { skipSupabaseSync: true },
+          );
         }
 
         fetchedBranchStudents = fetchedBranchStudents.map(

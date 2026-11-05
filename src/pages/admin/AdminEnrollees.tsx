@@ -5646,24 +5646,38 @@ export default function AdminEnrollees({
       let remoteAcademicSnapshot: AcademicSnapshot | null = null;
       let remoteStudentSubjectPlans: Record<string, StudentSubjectPlanRecord> | null =
         null;
+      const [academicResult, subjectPlanResult, studentResult] =
+        await Promise.allSettled([
+          fetchAcademicSnapshot(currentBranch),
+          fetchStudentSubjectPlans(currentBranch),
+          fetchAdminStudents(currentBranch),
+        ]);
 
-      try {
-        remoteAcademicSnapshot = await fetchAcademicSnapshot(currentBranch);
-      } catch (error) {
-        console.warn("Unable to fetch shared academic data from Supabase.", error);
+      if (academicResult.status === "fulfilled") {
+        remoteAcademicSnapshot = academicResult.value;
+      } else {
+        console.warn(
+          "Unable to fetch shared academic data from Supabase.",
+          academicResult.reason,
+        );
       }
 
-      try {
-        remoteStudentSubjectPlans = await fetchStudentSubjectPlans(currentBranch);
-      } catch (error) {
-        console.warn("Unable to fetch shared student subject plans.", error);
+      if (subjectPlanResult.status === "fulfilled") {
+        remoteStudentSubjectPlans = subjectPlanResult.value;
+      } else {
+        console.warn(
+          "Unable to fetch shared student subject plans.",
+          subjectPlanResult.reason,
+        );
       }
 
-      try {
-        const remoteStudents = await fetchAdminStudents(currentBranch);
-        mergeBranchStudentsIntoLocalCache(remoteStudents);
-      } catch (error) {
-        console.warn("Unable to fetch shared student records from Supabase.", error);
+      if (studentResult.status === "fulfilled") {
+        mergeBranchStudentsIntoLocalCache(studentResult.value);
+      } else {
+        console.warn(
+          "Unable to fetch shared student records from Supabase.",
+          studentResult.reason,
+        );
       }
 
       setTransfereeEvaluations(storedTransfereeEvaluations ?? {});
