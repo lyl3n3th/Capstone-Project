@@ -1883,7 +1883,7 @@ export default function AdminEnrollees({
     );
 
     if (uniqueStudentNumbers.length === 0) {
-      return;
+      return { savedCount: 0, failedCount: 0 };
     }
 
     const storedStudents = readStoredStudents();
@@ -1894,36 +1894,61 @@ export default function AdminEnrollees({
     );
 
     if (matchedStudents.length === 0) {
-      return;
+      return { savedCount: 0, failedCount: uniqueStudentNumbers.length };
     }
 
-    try {
-      const syncedStudents = await Promise.all(
-        matchedStudents.map((student) => saveAdminStudent(student)),
+    const syncedStudents: StudentStorageRecord[] = [];
+    const syncBatchSize = 5;
+
+    for (let start = 0; start < matchedStudents.length; start += syncBatchSize) {
+      const batch = matchedStudents.slice(start, start + syncBatchSize);
+      const results = await Promise.allSettled(
+        batch.map((student) => saveAdminStudent(student)),
       );
-
-      if (syncedStudents.length > 0) {
-        mergeBranchStudentsIntoLocalCache(syncedStudents);
-      }
-    } catch (error) {
-      console.warn("Unable to sync updated students to Supabase.", error);
+      results.forEach((result) => {
+        if (result.status === "fulfilled") {
+          syncedStudents.push(result.value);
+        } else {
+          console.warn("Unable to sync an updated student to Supabase.", result.reason);
+        }
+      });
     }
+
+    if (syncedStudents.length > 0) {
+      mergeBranchStudentsIntoLocalCache(syncedStudents);
+    }
+
+    return {
+      savedCount: syncedStudents.length,
+      failedCount: uniqueStudentNumbers.length - syncedStudents.length,
+    };
   };
 
   const syncClassSectionsToSupabase = async (sectionsToSync: ClassSection[]) => {
     if (sectionsToSync.length === 0) {
-      return;
+      return { savedCount: 0, failedCount: 0 };
     }
 
-    try {
-      await Promise.all(
-        sectionsToSync.map((section) =>
-          saveAcademicClassSection(currentBranch, section),
-        ),
+    let savedCount = 0;
+    let failedCount = 0;
+    const syncBatchSize = 5;
+
+    for (let start = 0; start < sectionsToSync.length; start += syncBatchSize) {
+      const batch = sectionsToSync.slice(start, start + syncBatchSize);
+      const results = await Promise.allSettled(
+        batch.map((section) => saveAcademicClassSection(currentBranch, section)),
       );
-    } catch (error) {
-      console.warn("Unable to sync updated class sections to Supabase.", error);
+      results.forEach((result) => {
+        if (result.status === "fulfilled") {
+          savedCount += 1;
+        } else {
+          failedCount += 1;
+          console.warn("Unable to sync an updated class section to Supabase.", result.reason);
+        }
+      });
     }
+
+    return { savedCount, failedCount };
   };
 
   // Load class sections
@@ -5041,7 +5066,7 @@ export default function AdminEnrollees({
     assignEnrolleeToSection(enrollee, sectionId);
   };
 
-  const autoAssignEnrollees = (
+  const autoAssignEnrollees = async (
     candidates: Enrollee[],
     label = "students",
   ) => {
@@ -5129,14 +5154,25 @@ export default function AdminEnrollees({
     }
 
     setPendingAssignments(unassignedStudents);
-    assignments.forEach(({ enrollee }) => {
-      if (enrollee.studentNumber) {
-        void syncStoredStudentsToSupabase([enrollee.studentNumber]);
-      }
-    });
-    void loadClassSections().then((nextSections) => {
-      void syncClassSectionsToSupabase(nextSections);
-    });
+    const studentNumbers = assignments
+      .map(({ enrollee }) => enrollee.studentNumber)
+      .filter((studentNumber): studentNumber is string => Boolean(studentNumber));
+    const [studentSync, sectionSync] = await Promise.all([
+      syncStoredStudentsToSupabase(studentNumbers),
+      loadClassSections().then(syncClassSectionsToSupabase),
+    ]);
+
+    if (studentSync.failedCount > 0 || sectionSync.failedCount > 0) {
+      const unsavedDetails = [
+        studentSync.failedCount > 0 && `${studentSync.failedCount} student(s)`,
+        sectionSync.failedCount > 0 && `${sectionSync.failedCount} section(s)`,
+      ].filter(Boolean).join(" and ");
+      addToast(
+        `Assigned ${assignments.length} ${label}, but ${unsavedDetails} could not be saved to the shared database. Retry before creating a backup.`,
+        "warning",
+      );
+      return;
+    }
 
     addToast(
       unassignedStudents.length > 0
@@ -5148,7 +5184,7 @@ export default function AdminEnrollees({
 
   // Handle auto-assign all
   const handleAutoAssignAll = () => {
-    autoAssignEnrollees(
+    void autoAssignEnrollees(
       pendingAssignments.filter(
         (enrollee) =>
           !isTransfereeAdmission(enrollee) && requiresSectionAssignment(enrollee),
@@ -5158,7 +5194,7 @@ export default function AdminEnrollees({
   };
 
   const handleAutoAssignTransferees = () => {
-    autoAssignEnrollees(
+    void autoAssignEnrollees(
       pendingAssignments.filter(
         (enrollee) =>
           isTransfereeAdmission(enrollee) && requiresSectionAssignment(enrollee),
