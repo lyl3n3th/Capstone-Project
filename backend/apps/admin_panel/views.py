@@ -298,8 +298,10 @@ class BackupRestoreStartView(APIView):
             return Response(BackupHistorySerializer(restore_history).data, status=status.HTTP_202_ACCEPTED)
 
         try:
-            from .tasks import restore_branch_backup_task
+            from .tasks import backup_worker_available, restore_branch_backup_task
 
+            if not backup_worker_available():
+                raise RuntimeError("No Celery worker responded; running the restore on the web service.")
             task = restore_branch_backup_task.delay(str(restore_history.id))
             restore_history = update_backup_history(restore_history.id, task_id=task.id) or restore_history
         except Exception as exc:
