@@ -32,7 +32,6 @@ from .serializers import (
     BackupSnapshotSyncSerializer,
 )
 from .services import (
-    create_branch_backup,
     delete_backup_artifacts,
     expire_stale_backup_runs,
     get_backup_archive_payload,
@@ -214,31 +213,24 @@ class BackupManualCreateView(APIView):
             "alumni": request_serializer.validated_data.get("alumni", []),
         }
         try:
-            from .tasks import backup_worker_available, create_branch_backup_task
+            from .tasks import dispatch_backup_job
 
-            if not backup_worker_available():
-                raise RuntimeError("No Celery worker responded; running the backup on the web service.")
-
-            task = create_branch_backup_task.delay(
+            history = dispatch_backup_job(
                 branch_id=branch_id,
                 backup_type=backup_type,
                 created_by_id=str(user.id) if user else None,
-                history_id=str(history.id),
+                history=history,
                 snapshot_data=snapshot_data,
             )
-            history = update_backup_history(history.id, task_id=task.id) or history
         except Exception as exc:
-            logger.warning("Celery dispatch failed for %s backup, running inline: %s", backup_type, exc)
-            try:
-                history = create_branch_backup(
-                    branch_id=branch_id,
-                    backup_type=backup_type,
-                    created_by=user,
-                    history=history,
-                    snapshot_data=snapshot_data,
-                )
-            except Exception as backup_error:
-                return Response({"detail": str(backup_error)}, status=getattr(backup_error, "status_code", 503))
+            logger.exception("Could not start %s backup for branch %s", backup_type, branch_id)
+            update_backup_history(
+                history.id,
+                status=BackupHistory.STATUS_FAILED,
+                progress=100,
+                error_message=str(exc),
+            )
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         return Response(BackupHistorySerializer(history).data, status=status.HTTP_202_ACCEPTED)
 

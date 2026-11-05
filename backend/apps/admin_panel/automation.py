@@ -14,8 +14,7 @@ from .repository import (
     save_backup_settings,
     update_backup_history,
 )
-from .services import create_branch_backup, expire_stale_backup_runs
-from .storage import BackupStorageError
+from .services import expire_stale_backup_runs
 
 
 logger = logging.getLogger(__name__)
@@ -166,36 +165,24 @@ def dispatch_due_automated_backups(
         )
 
         try:
-            from .tasks import backup_worker_available, create_branch_backup_task
+            from .tasks import dispatch_backup_job
 
-            if not backup_worker_available():
-                raise RuntimeError("No Celery worker responded; running the backup on the web service.")
-
-            task = create_branch_backup_task.delay(
+            history = dispatch_backup_job(
                 branch_id=settings_row.branch,
                 backup_type=BackupHistory.TYPE_AUTOMATED,
                 created_by_id=str(actor.id) if hasattr(actor, "id") else actor,
-                history_id=str(history.id),
+                history=history,
                 snapshot_data=snapshot_data,
             )
-            history = update_backup_history(history.id, task_id=task.id) or history
         except Exception as exc:
-            logger.warning(
-                "Celery dispatch failed for automated backup on %s, running inline: %s",
-                settings_row.branch,
-                exc,
+            logger.exception("Could not start automated backup for %s", settings_row.branch)
+            update_backup_history(
+                history.id,
+                status=BackupHistory.STATUS_FAILED,
+                progress=100,
+                error_message=str(exc),
             )
-            try:
-                history = create_branch_backup(
-                    branch_id=settings_row.branch,
-                    backup_type=BackupHistory.TYPE_AUTOMATED,
-                    created_by=actor,
-                    history=history,
-                    snapshot_data=snapshot_data,
-                )
-            except BackupStorageError:
-                logger.exception("Permanent storage failed for automated backup on %s", settings_row.branch)
-                continue
+            continue
 
         dispatched_histories.append(history)
 
