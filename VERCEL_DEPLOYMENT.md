@@ -57,9 +57,13 @@ Postgres connection with `DB_ENGINE=django.db.backends.postgresql` plus
 `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT` from Supabase's
 Connect dialog. Keep all credentials in Render—not in Git.
 
-Celery-powered backup automation additionally needs a managed Redis URL and
-separate Render worker/scheduler services. Deploy the web service first; add
-those services only when automated backups are ready to test.
+Server-side Celery backup processing additionally needs a managed Redis URL
+and a worker/scheduler. The admin page also has a browser-driven daily backup
+trigger that can use the existing web service while an admin is signed in and
+the page is open. The backend checks for an active Celery worker and uses the
+web service's inline fallback when none responds. Deploy the web service first,
+then add worker services only if you need server-side processing while no
+admin page is open.
 
 ### 3. Connect Vercel to Render
 

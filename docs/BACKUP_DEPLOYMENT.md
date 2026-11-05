@@ -120,6 +120,28 @@ backup. The current alumni display cache is supplemental signed data; it never
 replaces student profiles. Data existing only in an unsynchronized browser is
 not a database record and must be saved/synchronized before backup.
 
+The archive builder downloads and packages one referenced attachment at a time.
+It rolls ZIPs larger than 8 MiB onto temporary service storage, and reports
+progress while it exports the database and packages attachments. The default
+database export timeout is 180 seconds; set `BACKUP_EXPORT_TIMEOUT_SECONDS` on
+the Django service only if the branch needs a different limit. The exported
+records and attachments are unchanged, including student credentials and
+academic records.
+
+An additional Render worker is optional. Without one, the existing admin page
+can trigger automatic backups while it is open in a signed-in administrator's
+browser. The backend checks for a responding Celery worker; when none responds,
+it runs the backup on the existing web service instead of leaving a queued job
+pending. A Celery broker and worker remain optional. A
+server-only schedule that runs while no admin browser is open requires a
+scheduler/worker somewhere, but it does not have to be a Render service.
+
+The configured retention period is applied after each successful backup, so
+expired archives are removed from the private bucket even when Celery Beat is
+not running. Pending or in-progress runs without a progress update for 45
+minutes are marked failed when the admin page next checks history or attempts a
+backup, allowing a retry instead of leaving that branch locked indefinitely.
+
 This is branch recovery within the same project, not a full Supabase project
 backup. Shared staff accounts, area manager accounts, Supabase Auth users,
 reports, storage policies, and backup history are not replaced. Shared program

@@ -233,8 +233,10 @@ def delete_backup_blob(*, object_path, storage_bucket=None):
     try:
         with request.urlopen(delete_request, timeout=60):
             return True
-    except error.HTTPError:
-        return False
+    except error.HTTPError as exc:
+        # Repeated retention cleanup is idempotent when an earlier attempt
+        # already removed the object but failed before updating its history.
+        return exc.code == 404
 
 
 def upload_media_blob(*, object_path, payload, content_type=None):

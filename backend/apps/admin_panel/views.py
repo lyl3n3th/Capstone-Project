@@ -34,6 +34,7 @@ from .serializers import (
 from .services import (
     create_branch_backup,
     delete_backup_artifacts,
+    expire_stale_backup_runs,
     get_backup_archive_payload,
     read_backup_snapshot,
     restore_branch_backup,
@@ -97,6 +98,7 @@ class BackupHistoryListView(APIView):
         if not branch_id:
             return Response({"detail": "Branch context is required."}, status=status.HTTP_400_BAD_REQUEST)
 
+        expire_stale_backup_runs(branch_id)
         history = list_backup_history(branch_id)
         return Response(BackupHistorySerializer(history, many=True).data)
 
@@ -173,6 +175,7 @@ class BackupManualCreateView(APIView):
         request_serializer = BackupSnapshotCreateSerializer(data=request.data or {})
         request_serializer.is_valid(raise_exception=True)
         backup_type = request_serializer.validated_data["backup_type"]
+        expire_stale_backup_runs(branch_id)
 
         existing_manual_backup = next(
             (
@@ -211,7 +214,10 @@ class BackupManualCreateView(APIView):
             "alumni": request_serializer.validated_data.get("alumni", []),
         }
         try:
-            from .tasks import create_branch_backup_task
+            from .tasks import backup_worker_available, create_branch_backup_task
+
+            if not backup_worker_available():
+                raise RuntimeError("No Celery worker responded; running the backup on the web service.")
 
             task = create_branch_backup_task.delay(
                 branch_id=branch_id,
@@ -233,21 +239,6 @@ class BackupManualCreateView(APIView):
                 )
             except Exception as backup_error:
                 return Response({"detail": str(backup_error)}, status=getattr(backup_error, "status_code", 503))
-
-        if backup_type == BackupHistory.TYPE_AUTOMATED:
-            settings_row = get_or_create_backup_settings(branch_id)
-            save_backup_settings(
-                branch_id,
-                {
-                    "automated_time": settings_row.automated_time,
-                    "retention_days": settings_row.retention_days,
-                    "is_enabled": settings_row.is_enabled,
-                    "timezone_offset_minutes": settings_row.timezone_offset_minutes,
-                    "last_automated_backup_at": timezone.now(),
-                },
-                updated_by=user,
-                updated_by_name=request.headers.get("X-User-Name", "").strip(),
-            )
 
         return Response(BackupHistorySerializer(history).data, status=status.HTTP_202_ACCEPTED)
 
@@ -374,7 +365,11 @@ class BackupHistoryDeleteView(APIView):
         if not history:
             return Response({"detail": "Backup history not found for this branch."}, status=status.HTTP_404_NOT_FOUND)
 
-        delete_backup_artifacts(history)
+        if not delete_backup_artifacts(history):
+            return Response(
+                {"detail": "The backup file could not be removed from storage, so its history entry was kept. Try again later."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

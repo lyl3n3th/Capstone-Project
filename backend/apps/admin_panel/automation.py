@@ -14,7 +14,7 @@ from .repository import (
     save_backup_settings,
     update_backup_history,
 )
-from .services import create_branch_backup
+from .services import create_branch_backup, expire_stale_backup_runs
 from .storage import BackupStorageError
 
 
@@ -118,6 +118,7 @@ def dispatch_due_automated_backups(
             actor_name=created_by_name,
         )
         effective_offset = settings_row.timezone_offset_minutes
+        expire_stale_backup_runs(settings_row.branch)
 
         if not is_automated_backup_due(
             settings_row,
@@ -165,7 +166,10 @@ def dispatch_due_automated_backups(
         )
 
         try:
-            from .tasks import create_branch_backup_task
+            from .tasks import backup_worker_available, create_branch_backup_task
+
+            if not backup_worker_available():
+                raise RuntimeError("No Celery worker responded; running the backup on the web service.")
 
             task = create_branch_backup_task.delay(
                 branch_id=settings_row.branch,
@@ -193,15 +197,6 @@ def dispatch_due_automated_backups(
                 logger.exception("Permanent storage failed for automated backup on %s", settings_row.branch)
                 continue
 
-        save_backup_settings(
-            settings_row.branch,
-            {
-                "timezone_offset_minutes": effective_offset,
-                "last_automated_backup_at": timezone.now(),
-            },
-            updated_by=actor,
-            updated_by_name=actor_name,
-        )
         dispatched_histories.append(history)
 
     return dispatched_histories

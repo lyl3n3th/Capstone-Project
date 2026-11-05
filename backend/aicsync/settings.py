@@ -178,6 +178,7 @@ BACKUP_ALLOW_LOCAL_STORAGE = DEBUG and not (
     os.getenv("RENDER") or os.getenv("RENDER_EXTERNAL_HOSTNAME")
 )
 BACKUP_DISPATCH_INTERVAL_SECONDS = float(os.getenv("BACKUP_DISPATCH_INTERVAL_SECONDS", "60"))
+BACKUP_EXPORT_TIMEOUT_SECONDS = int(os.getenv("BACKUP_EXPORT_TIMEOUT_SECONDS", "180"))
 
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"

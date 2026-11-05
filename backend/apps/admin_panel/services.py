@@ -1,8 +1,9 @@
 import io
 import json
+import logging
 import zipfile
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from django.apps import apps
@@ -10,14 +11,24 @@ from django.core.exceptions import FieldDoesNotExist
 from django.core.files.storage import default_storage
 from django.db import connection, models, transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 import sqlparse
 
-from .complete_backup import (FORMAT as COMPLETE_BACKUP_FORMAT, create_archive, restore_archive, validate_archive)
+from .complete_backup import (
+    FORMAT as COMPLETE_BACKUP_FORMAT,
+    archive_progress_reporting,
+    create_archive,
+    restore_archive,
+    validate_archive,
+)
 from .models import BackupHistory
 from .repository import (
     create_backup_history,
     get_backup_history,
+    get_or_create_backup_settings,
+    list_backup_history,
+    save_backup_settings,
     update_backup_history,
 )
 from .storage import (
@@ -27,6 +38,9 @@ from .storage import (
     upload_backup_blob,
     upload_media_blob,
 )
+
+logger = logging.getLogger(__name__)
+BACKUP_STALE_AFTER = timedelta(minutes=45)
 
 
 BACKUP_APP_LABELS = ("admission", "student", "registrar")
@@ -66,11 +80,70 @@ def set_history_progress(history, *, status=None, progress=None, error_message=N
         update_fields.append(("progress", progress))
     if error_message is not None and history.error_message != error_message:
         update_fields.append(("error_message", error_message))
-    if metadata is not None:
-        update_fields.append(("metadata", metadata))
+    next_metadata = metadata
+    if next_metadata is None and (status == BackupHistory.STATUS_IN_PROGRESS or history.status == BackupHistory.STATUS_IN_PROGRESS):
+        next_metadata = dict(history.metadata or {})
+        next_metadata["progress_updated_at"] = timezone.now().isoformat()
+    if next_metadata is not None and history.metadata != next_metadata:
+        update_fields.append(("metadata", next_metadata))
     if update_fields:
         history = update_backup_history(history.id, **dict(update_fields)) or history
     return history
+
+
+def expire_stale_backup_runs(branch, *, now=None):
+    """Release branch backup slots left open by a stopped web/worker process."""
+    now = now or timezone.now()
+    expired = []
+    for history in list_backup_history(branch, include_deleted=True):
+        if history.status not in (BackupHistory.STATUS_PENDING, BackupHistory.STATUS_IN_PROGRESS):
+            continue
+
+        metadata = history.metadata or {}
+        try:
+            heartbeat = parse_datetime(str(metadata.get("progress_updated_at") or ""))
+        except ValueError:
+            heartbeat = None
+        last_activity = heartbeat or history.creation_date
+        if not last_activity:
+            continue
+        if timezone.is_naive(last_activity):
+            last_activity = timezone.make_aware(last_activity, timezone.get_current_timezone())
+        if now - last_activity <= BACKUP_STALE_AFTER:
+            continue
+
+        updated = update_backup_history(
+            history.id,
+            status=BackupHistory.STATUS_FAILED,
+            progress=100,
+            error_message=(
+                "This backup stopped before it finished. Start a new backup; "
+                "the archived records were not marked complete."
+            ),
+        )
+        expired.append(updated or history)
+    return expired
+
+
+def cleanup_expired_backups_for_branch(branch, *, now=None):
+    """Apply the configured retention period without requiring a Celery beat service."""
+    now = now or timezone.now()
+    settings_row = get_or_create_backup_settings(branch)
+    cutoff = now - timedelta(days=settings_row.retention_days)
+    removed = 0
+    for history in list_backup_history(branch, include_deleted=True):
+        if (
+            history.backup_type in (BackupHistory.TYPE_MANUAL, BackupHistory.TYPE_AUTOMATED)
+            and history.status in (BackupHistory.STATUS_COMPLETED, BackupHistory.STATUS_FAILED)
+            and history.creation_date
+            and history.creation_date < cutoff
+        ):
+            try:
+                if delete_backup_artifacts(history):
+                    removed += 1
+            except Exception:
+                logger.exception("Could not remove expired backup %s for %s", history.id, branch)
+    return removed
 
 def _iter_candidate_models():
     for app_label in BACKUP_APP_LABELS:
@@ -516,13 +589,32 @@ def create_branch_backup(*, branch_id, backup_type, created_by=None, history=Non
         progress=1,
     )
     try:
-        return _create_branch_backup(
+        completed = _create_branch_backup(
             branch_id=branch_id,
             backup_type=backup_type,
             created_by=created_by,
             history=history,
             snapshot_data=snapshot_data,
         )
+        try:
+            cleanup_expired_backups_for_branch(branch_id)
+        except Exception:
+            # A retention cleanup failure must not turn a valid new archive into
+            # a failed backup. A later run can retry the cleanup.
+            logger.exception("Backup retention cleanup failed for branch %s", branch_id)
+        if backup_type == BackupHistory.TYPE_AUTOMATED:
+            try:
+                save_backup_settings(
+                    branch_id,
+                    {"last_automated_backup_at": timezone.now()},
+                    updated_by=created_by,
+                    updated_by_name=getattr(history, "created_by_name", ""),
+                )
+            except Exception:
+                # Keep the completed archive even if the schedule metadata write
+                # fails; the history record still prevents duplicate dispatch.
+                logger.exception("Could not update the last successful backup time for %s", branch_id)
+        return completed
     except Exception as exc:
         current_history = get_backup_history(history.id)
         if current_history and current_history.status != BackupHistory.STATUS_DELETED:
@@ -553,7 +645,26 @@ def _create_branch_backup(*, branch_id, backup_type, created_by, history, snapsh
 
     # Browser snapshots are retained for old clients but are never the source
     # of a recovery archive. Both manual and scheduled jobs use the database.
-    archive_payload, manifest = create_archive(branch_id, backup_type, alumni=(snapshot_data or {}).get("alumni", []))
+    last_progress_update = timezone.now()
+
+    def report_archive_progress(progress):
+        nonlocal history, last_progress_update
+        now = timezone.now()
+        if progress == history.progress and now - last_progress_update < timedelta(seconds=30):
+            return
+        history = set_history_progress(
+            history,
+            status=BackupHistory.STATUS_IN_PROGRESS,
+            progress=progress,
+        )
+        last_progress_update = now
+
+    with archive_progress_reporting(report_archive_progress):
+        archive_payload, manifest = create_archive(
+            branch_id,
+            backup_type,
+            alumni=(snapshot_data or {}).get("alumni", []),
+        )
     history = set_history_progress(history, progress=75)
     archive_storage_path = f"branches/{branch_slug}/{timezone.now():%Y/%m/%d}/{archive_name}"
     bucket, stored_archive_path = upload_backup_blob(
@@ -693,9 +804,11 @@ def delete_backup_artifacts(history):
         if history.sql_file_path
         else True
     )
+    if not archive_deleted or not sql_deleted:
+        return False
     update_backup_history(
         history.id,
         status=BackupHistory.STATUS_DELETED,
         progress=0,
     )
-    return archive_deleted and sql_deleted
+    return True

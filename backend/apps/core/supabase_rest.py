@@ -68,14 +68,17 @@ class SupabaseRestClient:
         return self._request("PATCH", table, query=query, payload=payload, headers=headers)
 
     def rpc(self, name, payload):
-        return self._request("POST", f"rpc/{name}", payload=payload)
+        timeout = 30
+        if name == "export_branch_backup_data":
+            timeout = int(getattr(settings, "BACKUP_EXPORT_TIMEOUT_SECONDS", 180))
+        return self._request("POST", f"rpc/{name}", payload=payload, timeout=timeout)
 
     def delete(self, table, *, filters=None):
         headers = {"Prefer": "return=representation"}
         query = list((filters or {}).items())
         return self._request("DELETE", table, query=query, headers=headers)
 
-    def _request(self, method, path, *, query=None, payload=None, headers=None):
+    def _request(self, method, path, *, query=None, payload=None, headers=None, timeout=30):
         query_string = ""
         if query:
             query_string = "?" + parse.urlencode(
@@ -106,7 +109,7 @@ class SupabaseRestClient:
         )
 
         try:
-            with request.urlopen(http_request, timeout=30) as response:
+            with request.urlopen(http_request, timeout=timeout) as response:
                 body = response.read()
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")

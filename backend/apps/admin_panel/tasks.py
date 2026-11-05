@@ -4,6 +4,7 @@ from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 
+from aicsync.celery import app as celery_app
 from .automation import dispatch_due_automated_backups
 from .models import BackupHistory
 from .repository import (
@@ -15,6 +16,19 @@ from .repository import (
 from .services import create_branch_backup, delete_backup_artifacts, restore_branch_backup
 
 logger = logging.getLogger(__name__)
+
+
+def backup_worker_available():
+    """Avoid queueing a backup when the broker has no consuming worker."""
+    try:
+        inspector = celery_app.control.inspect(timeout=1.0)
+        if inspector and inspector.ping():
+            return True
+        logger.info("No Celery backup worker responded; the web service will run the job inline.")
+        return False
+    except Exception:
+        logger.info("No Celery backup worker responded; the web service will run the job inline.")
+        return False
 
 
 @shared_task(bind=True)
