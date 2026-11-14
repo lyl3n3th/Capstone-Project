@@ -315,13 +315,17 @@ export const deleteAcademicSubject = async (
   }
 };
 
-export const fetchAcademicInstructors = async (branch?: string | null) => {
+export const fetchAcademicInstructors = async (
+  branch?: string | null,
+  signal?: AbortSignal,
+) => {
   const resolvedBranch = normalizeBranchName(branch);
-  const { data, error } = await supabase
+  const query = supabase
     .rpc("list_academic_instructors", {
       p_branch: resolvedBranch,
     })
     .returns<AcademicInstructorRow[]>();
+  const { data, error } = await (signal ? query.abortSignal(signal) : query);
 
   if (error) {
     throw new Error(getErrorMessage(error));

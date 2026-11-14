@@ -4,13 +4,24 @@ import {
   isEvaluationPeriodOpen, readEvaluationPeriod,
 } from "../services/evaluationPeriod";
 
-export const useEvaluationPeriod = (branch?: string | null) => {
+export const useEvaluationPeriod = (
+  branch?: string | null,
+  options: { enabled?: boolean } = {},
+) => {
+  const enabled = options.enabled ?? true;
   const [period, setPeriod] = useState(() => readEvaluationPeriod(branch));
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now);
 
   useEffect(() => {
+    if (!enabled) {
+      setPeriod(readEvaluationPeriod(branch));
+      setIsLoading(false);
+      setError("");
+      return;
+    }
+
     let active = true;
     let request = 0;
     setPeriod(readEvaluationPeriod(branch));
@@ -47,7 +58,7 @@ export const useEvaluationPeriod = (branch?: string | null) => {
       window.removeEventListener("storage", sync);
       window.removeEventListener(EVALUATION_PERIOD_UPDATED_EVENT, sync);
     };
-  }, [branch]);
+  }, [branch, enabled]);
 
   return { period, setPeriod, isLoading, error, isOpen: !isLoading && !error && isEvaluationPeriodOpen(period, now) };
 };

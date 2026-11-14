@@ -77,6 +77,8 @@ import {
   deleteAcademicClassSection,
   deleteAcademicSubject,
   deleteAcademicSubjectAssignment,
+  fetchAcademicInstructors,
+  fetchAcademicSubjectAssignments,
   fetchAcademicSnapshot,
   saveAcademicInstructor,
   saveAcademicAssignmentRoom,
@@ -1470,12 +1472,16 @@ export default function AdminEnrollees({
   const [offeringDirectory, setOfferingDirectory] = useState<{ branch: string; items: BranchOffering[] } | null>(null);
 
   useEffect(() => {
+    if (instructorManagementOnly) {
+      return;
+    }
+
     let cancelled = false;
     void fetchBranchOfferings(currentBranch)
       .then((items) => { if (!cancelled) setOfferingDirectory({ branch: currentBranch, items }); })
       .catch((error) => console.warn("Unable to load branch courses and strands.", error));
     return () => { cancelled = true; };
-  }, [currentBranch]);
+  }, [currentBranch, instructorManagementOnly]);
 
   const branchOfferings = offeringDirectory?.branch === currentBranch ? offeringDirectory.items : [];
   const hasCollegeOfferings = branchOfferings.some((item) => item.program_name === "College");
@@ -1504,7 +1510,20 @@ export default function AdminEnrollees({
   const [enrollmentStatusFilter, setEnrollmentStatusFilter] = useState<
     "All" | "Pending" | "Approved" | "Rejected"
   >("All");
-  const [isLoading, setIsLoading] = useState(true);
+  const cachedInstructorRecords = readBranchScopedData<Instructor[]>(
+    "instructors",
+    currentBranch,
+  );
+  const cachedInstructorDepartments = readBranchScopedData<string[]>(
+    "instructor-departments",
+    currentBranch,
+  );
+  const [isLoading, setIsLoading] = useState(
+    () => !instructorManagementOnly || cachedInstructorRecords == null,
+  );
+  const [instructorManagementLoadError, setInstructorManagementLoadError] =
+    useState("");
+  const [instructorLoadAttempt, setInstructorLoadAttempt] = useState(0);
   const [enrollmentRequests, setEnrollmentRequests] = useState<
     EnrollmentRequest[]
   >([]);
@@ -1625,7 +1644,11 @@ export default function AdminEnrollees({
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [instructorsByBranch, setInstructorsByBranch] = useState<
     Record<string, Instructor[]>
-  >({});
+  >(() =>
+    cachedInstructorRecords == null
+      ? {}
+      : { [currentBranch]: cachedInstructorRecords },
+  );
   const instructors = instructorsByBranch[currentBranch] ?? [];
   const setInstructors = (
     nextInstructors:
@@ -1687,7 +1710,7 @@ export default function AdminEnrollees({
     string[]
   >([]);
   const [instructorDepartments, setInstructorDepartments] = useState<string[]>(
-    [],
+    cachedInstructorDepartments ?? [],
   );
   const [newDepartmentName, setNewDepartmentName] = useState("");
   const [showDepartmentManagerModal, setShowDepartmentManagerModal] =
@@ -1723,7 +1746,9 @@ export default function AdminEnrollees({
     period: evaluationPeriod, setPeriod: setEvaluationPeriod,
     isOpen: evaluationsOpen, isLoading: evaluationPeriodLoading,
     error: evaluationPeriodError,
-  } = useEvaluationPeriod(currentBranch);
+  } = useEvaluationPeriod(currentBranch, {
+    enabled: !instructorManagementOnly,
+  });
   const [evaluationClosesAt, setEvaluationClosesAt] = useState("");
   const [savingEvaluationPeriod, setSavingEvaluationPeriod] = useState(false);
   useEffect(() => {
@@ -2168,9 +2193,18 @@ export default function AdminEnrollees({
       return;
     }
 
-    setInstructorDepartments((prev) =>
-      getUniqueTrimmedValues([...prev, trimmedDepartmentName]),
-    );
+    const nextDepartments = getUniqueTrimmedValues([
+      ...instructorDepartmentOptions,
+      trimmedDepartmentName,
+    ]);
+    setInstructorDepartments(nextDepartments);
+    if (instructorManagementOnly) {
+      writeBranchScopedData(
+        storageScopes.instructorDepartments,
+        currentBranch,
+        nextDepartments,
+      );
+    }
     setInstructorForm((prev) => ({
       ...prev,
       department: trimmedDepartmentName,
@@ -2199,16 +2233,22 @@ export default function AdminEnrollees({
   };
 
   const deleteDepartmentOptions = (departmentNames: string[]) => {
-    setInstructorDepartments((prev) =>
-      prev.filter(
-        (department) =>
-          !departmentNames.some(
-            (departmentName) =>
-              department.trim().toLowerCase() ===
-              departmentName.trim().toLowerCase(),
-          ),
-      ),
+    const nextDepartments = instructorDepartments.filter(
+      (department) =>
+        !departmentNames.some(
+          (departmentName) =>
+            department.trim().toLowerCase() ===
+            departmentName.trim().toLowerCase(),
+        ),
     );
+    setInstructorDepartments(nextDepartments);
+    if (instructorManagementOnly) {
+      writeBranchScopedData(
+        storageScopes.instructorDepartments,
+        currentBranch,
+        nextDepartments,
+      );
+    }
     if (
       departmentNames.some(
         (departmentName) =>
@@ -2346,13 +2386,30 @@ export default function AdminEnrollees({
         });
       }
 
-      setInstructors((prev) =>
-        editingInstructor
-          ? prev.map((instructor) =>
-              instructor.id === editingInstructor.id ? savedInstructor : instructor,
-            )
-          : [...prev, savedInstructor],
+      const nextInstructors = editingInstructor
+        ? instructors.map((instructor) =>
+            instructor.id === editingInstructor.id ? savedInstructor : instructor,
+          )
+        : [...instructors, savedInstructor];
+      setInstructors(nextInstructors);
+      writeBranchScopedData(
+        storageScopes.instructors,
+        currentBranch,
+        nextInstructors,
+        { skipSupabaseSync: true },
       );
+      const nextDepartments = getUniqueTrimmedValues([
+        ...instructorDepartments,
+        savedInstructor.department,
+      ]);
+      setInstructorDepartments(nextDepartments);
+      if (instructorManagementOnly) {
+        writeBranchScopedData(
+          storageScopes.instructorDepartments,
+          currentBranch,
+          nextDepartments,
+        );
+      }
 
       addToast(
         editingInstructor
@@ -2374,11 +2431,34 @@ export default function AdminEnrollees({
 
   const handleDeleteInstructor = async (instructor: Instructor) => {
     const normalizedInstructorId = instructor.id.trim().toLowerCase();
-    const hasAssignedSchedule = subjectAssignments.some(
+    let assignmentsForDeletionCheck = subjectAssignments;
+    let studentsForDeletionCheck = getStudentsForBranch(currentBranch);
+
+    if (instructorManagementOnly) {
+      try {
+        const [loadedAssignments, loadedStudents] = await Promise.all([
+          fetchAcademicSubjectAssignments(currentBranch),
+          fetchAdminStudents(currentBranch),
+        ]);
+        assignmentsForDeletionCheck = loadedAssignments;
+        studentsForDeletionCheck = loadedStudents;
+        setSubjectAssignments(loadedAssignments);
+        mergeBranchStudentsIntoLocalCache(loadedStudents);
+      } catch (error) {
+        console.error("Unable to verify instructor assignments before deletion.", error);
+        addToast(
+          "Unable to check this instructor's assignments. Please try again when the connection is stable.",
+          "error",
+        );
+        return;
+      }
+    }
+
+    const hasAssignedSchedule = assignmentsForDeletionCheck.some(
       (assignment) =>
         assignment.instructorId.trim().toLowerCase() === normalizedInstructorId,
     );
-    const hasAssignedStudents = getStudentsForBranch(currentBranch).some(
+    const hasAssignedStudents = studentsForDeletionCheck.some(
       (student) =>
         student.status !== "Archived" &&
         getStudentPortalSubjects(student).some(
@@ -2418,8 +2498,13 @@ export default function AdminEnrollees({
     try {
       await deleteAcademicInstructor(currentBranch, instructor.id);
 
-      setInstructors((prev) =>
-        prev.filter((item) => item.id !== instructor.id),
+      const nextInstructors = instructors.filter((item) => item.id !== instructor.id);
+      setInstructors(nextInstructors);
+      writeBranchScopedData(
+        storageScopes.instructors,
+        currentBranch,
+        nextInstructors,
+        { skipSupabaseSync: true },
       );
 
       if (editingInstructor?.id === instructor.id) {
@@ -5625,7 +5710,88 @@ export default function AdminEnrollees({
   }, [currentBranch, studentSubjectPlans, hasInitializedBranchData]);
 
   useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    let timeoutId: number | undefined;
     const initializeBranchData = async () => {
+      if (instructorManagementOnly) {
+        const cachedInstructors = readBranchScopedData<Instructor[]>(
+          storageScopes.instructors,
+          currentBranch,
+        );
+        const cachedDepartments = readBranchScopedData<string[]>(
+          storageScopes.instructorDepartments,
+          currentBranch,
+        );
+        const cachedInstructorList = cachedInstructors ?? [];
+
+        setInstructorManagementLoadError("");
+        setIsLoading(cachedInstructors == null);
+        setInstructors(cachedInstructorList);
+        setInstructorDepartments(
+          getUniqueTrimmedValues([
+            ...(cachedDepartments ?? []),
+            ...cachedInstructorList.map((instructor) => instructor.department),
+          ]),
+        );
+        let timedOut = false;
+        timeoutId = window.setTimeout(() => {
+          if (!cancelled) {
+            timedOut = true;
+            controller.abort();
+            setIsLoading(false);
+            setInstructorManagementLoadError(
+              "Instructor data is taking too long to respond. You can retry the connection.",
+            );
+          }
+        }, 12_000);
+
+        try {
+          const loadedInstructors = await fetchAcademicInstructors(
+            currentBranch,
+            controller.signal,
+          );
+          if (cancelled) {
+            return;
+          }
+
+          setInstructorManagementLoadError("");
+          const loadedDepartments = getUniqueTrimmedValues([
+            ...(cachedDepartments ?? []),
+            ...loadedInstructors.map((instructor) => instructor.department),
+          ]);
+          setInstructors(loadedInstructors);
+          setInstructorDepartments(loadedDepartments);
+          writeBranchScopedData(
+            storageScopes.instructors,
+            currentBranch,
+            loadedInstructors,
+            { skipSupabaseSync: true },
+          );
+          writeBranchScopedData(
+            storageScopes.instructorDepartments,
+            currentBranch,
+            loadedDepartments,
+            { skipSupabaseSync: true },
+          );
+        } catch (error) {
+          console.warn("Unable to refresh instructor management data.", error);
+          if (!cancelled && !timedOut) {
+            setInstructorManagementLoadError(
+              "Unable to load instructors. Check the connection and try again.",
+            );
+          }
+        } finally {
+          if (timeoutId !== undefined) {
+            window.clearTimeout(timeoutId);
+          }
+          if (!cancelled) {
+            setIsLoading(false);
+          }
+        }
+        return;
+      }
+
       const storedSectionAssignments = readBranchScopedData<
         SectionAssignment[]
       >(storageScopes.sectionAssignments, currentBranch);
@@ -5727,7 +5893,14 @@ export default function AdminEnrollees({
 
     setHasInitializedBranchData(false);
     void initializeBranchData();
-  }, [currentBranch]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [currentBranch, instructorManagementOnly, instructorLoadAttempt]);
 
   useEffect(() => {
     if (!hasInitializedBranchData) {
@@ -7389,6 +7562,10 @@ export default function AdminEnrollees({
   };
 
   useEffect(() => {
+    if (instructorManagementOnly) {
+      return;
+    }
+
     const nextQuestionnaire = readEvaluationQuestionnaire(currentBranch);
     setEvaluationQuestionnaire(nextQuestionnaire);
     setEvaluationSubmissions(readInstructorEvaluationSubmissions(currentBranch));
@@ -7404,9 +7581,13 @@ export default function AdminEnrollees({
     ]).catch((error) => {
       console.warn("Failed to sync instructor evaluations from Supabase.", error);
     });
-  }, [currentBranch]);
+  }, [currentBranch, instructorManagementOnly]);
 
   useEffect(() => {
+    if (instructorManagementOnly) {
+      return;
+    }
+
     const syncEvaluationSubmissions = () => {
       setEvaluationSubmissions(readInstructorEvaluationSubmissions(currentBranch));
       void fetchInstructorEvaluationSubmissions(currentBranch)
@@ -7429,7 +7610,7 @@ export default function AdminEnrollees({
         syncEvaluationSubmissions as EventListener,
       );
     };
-  }, [currentBranch]);
+  }, [currentBranch, instructorManagementOnly]);
 
   useEffect(() => {
     const existingAssignmentIds = new Set(
@@ -8814,6 +8995,25 @@ export default function AdminEnrollees({
                 <div className="section-header-actions instructor-management-header">
                   <h3>Instructor Management</h3>
                 </div>
+                {instructorManagementLoadError && (
+                  <div className="instructor-load-error" role="alert">
+                    <p className="instructor-evaluation-error">
+                      {instructorManagementLoadError}
+                    </p>
+                    <button
+                      type="button"
+                      className="action-btn secondary"
+                      disabled={isLoading}
+                      onClick={() => {
+                        setInstructorManagementLoadError("");
+                        setIsLoading(true);
+                        setInstructorLoadAttempt((attempt) => attempt + 1);
+                      }}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
                 <div className="instructor-toolbar">
                   <div className="instructor-search">
                     <FaSearch className="search-icon" />
@@ -8827,6 +9027,9 @@ export default function AdminEnrollees({
                   <button
                     className="action-btn add"
                     onClick={openCreateInstructorModal}
+                    disabled={Boolean(
+                      instructorManagementLoadError && instructors.length === 0,
+                    )}
                   >
                     <FaPlus /> Add Instructor
                   </button>
@@ -8839,28 +9042,41 @@ export default function AdminEnrollees({
                   </button>
                 </div>
                 <div className="instructors-grid">
-                  {filteredInstructors.length === 0 && (
-                    <div className="instructor-empty-state" role="status">
-                      <div className="instructor-empty-icon" aria-hidden="true">
-                        {instructors.length === 0 ? <FaChalkboardTeacher /> : <FaSearch />}
+                  {filteredInstructors.length === 0 &&
+                    !(instructorManagementLoadError && instructors.length === 0) && (
+                      <div className="instructor-empty-state" role="status">
+                        <div className="instructor-empty-icon" aria-hidden="true">
+                          {instructors.length === 0 ? <FaChalkboardTeacher /> : <FaSearch />}
+                        </div>
+                        <h4>
+                          {instructors.length === 0
+                            ? "No instructors yet"
+                            : "No matching instructors"}
+                        </h4>
+                        <p>
+                          {instructors.length === 0
+                            ? `Add the first instructor for ${currentBranch} to start managing their profile, department, and account access.`
+                            : "Try a different name, employee ID, or department, or clear your search to see all instructors."}
+                        </p>
+                        {instructors.length === 0 ? (
+                          <button
+                            type="button"
+                            className="action-btn add"
+                            onClick={openCreateInstructorModal}
+                          >
+                            <FaPlus aria-hidden="true" /> Add Instructor
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="action-btn secondary"
+                            onClick={() => setInstructorSearch("")}
+                          >
+                            Clear Search
+                          </button>
+                        )}
                       </div>
-                      <h4>{instructors.length === 0 ? "No instructors yet" : "No matching instructors"}</h4>
-                      <p>
-                        {instructors.length === 0
-                          ? `Add the first instructor for ${currentBranch} to start managing their profile, department, and account access.`
-                          : "Try a different name, employee ID, or department, or clear your search to see all instructors."}
-                      </p>
-                      {instructors.length === 0 ? (
-                        <button type="button" className="action-btn add" onClick={openCreateInstructorModal}>
-                          <FaPlus aria-hidden="true" /> Add Instructor
-                        </button>
-                      ) : (
-                        <button type="button" className="action-btn secondary" onClick={() => setInstructorSearch("")}>
-                          Clear Search
-                        </button>
-                      )}
-                    </div>
-                  )}
+                    )}
                   {filteredInstructors.map((instructor) => (
                     <div key={instructor.id} className="instructor-card">
                       <div className="instructor-avatar">
