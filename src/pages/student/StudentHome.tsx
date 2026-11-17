@@ -166,11 +166,22 @@ function StudentHome() {
 
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
+    input.accept =
+      requirementCode === "transcript_of_records"
+        ? ".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : ".pdf,.jpg,.jpeg,.png,.doc,.docx";
 
     input.onchange = (event) => {
       const file = (event.target as HTMLInputElement).files?.[0];
       if (!file) {
+        return;
+      }
+
+      if (
+        requirementCode === "transcript_of_records" &&
+        !/\.(xls|xlsx)$/i.test(file.name)
+      ) {
+        addToast("TOR must be an Excel file (.xls or .xlsx).", "error");
         return;
       }
 

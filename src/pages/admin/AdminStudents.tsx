@@ -2172,11 +2172,25 @@ export default function AdminStudents({
 
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx";
+    input.accept =
+      requirement.code === "transcript_of_records"
+        ? ".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : ".pdf,.jpg,.jpeg,.png,.doc,.docx";
 
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) {
+        return;
+      }
+
+      if (
+        requirement.code === "transcript_of_records" &&
+        !/\.(xls|xlsx)$/i.test(file.name)
+      ) {
+        setCredentialActionFeedback({
+          type: "error",
+          message: "TOR must be an Excel file (.xls or .xlsx).",
+        });
         return;
       }
 

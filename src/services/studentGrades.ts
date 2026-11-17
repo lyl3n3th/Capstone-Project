@@ -73,6 +73,7 @@ export interface UploadedStudentGradeValidationResult {
 export interface UploadedStudentGradeValidationOptions {
   allowBlankGradeClear?: boolean;
   preserveStudentNumber?: boolean;
+  shsMinimumGrade?: number;
 }
 
 export type StudentGradeUploadOperation =
@@ -477,6 +478,7 @@ const normalizeUnits = (value: string) => {
 const evaluateGradeValue = (
   rawValue: string,
   programType: StudentGradeProgramType,
+  shsMinimumGrade = SHS_MIN_GRADE,
 ): UploadedStudentGradeValidationResult & {
   normalizedGrade?: string;
   numericGrade?: number | null;
@@ -540,7 +542,7 @@ const evaluateGradeValue = (
   const numericGrade = Number(trimmed);
   if (
     Number.isFinite(numericGrade) &&
-    numericGrade >= SHS_MIN_GRADE &&
+    numericGrade >= shsMinimumGrade &&
     numericGrade <= SHS_MAX_GRADE
   ) {
     return {
@@ -808,7 +810,7 @@ export const validateAndNormalizeUploadedGradeRow = (
     options.allowBlankGradeClear === true && trimmedGrade === "";
   const gradeEvaluation = shouldClearBlankGrade
     ? null
-    : evaluateGradeValue(row.grade, row.programType);
+    : evaluateGradeValue(row.grade, row.programType, options.shsMinimumGrade);
 
   if (!studentId) reasons.push("Missing Student ID");
   if (!fullName) reasons.push("Missing Full Name");

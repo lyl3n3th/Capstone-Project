@@ -332,6 +332,25 @@ function AdmissionStep3() {
   ) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (
+        requirementCode === "transcript_of_records" &&
+        !/\.(xls|xlsx)$/i.test(file.name)
+      ) {
+        const previousPreviewUrl = previewUrlsRef.current[requirementCode];
+        if (previousPreviewUrl) {
+          URL.revokeObjectURL(previousPreviewUrl);
+          delete previewUrlsRef.current[requirementCode];
+        }
+        setUploadedFiles((prev) => {
+          const nextFiles = { ...prev };
+          delete nextFiles[requirementCode];
+          return nextFiles;
+        });
+        e.target.value = "";
+        addToast("TOR must be an Excel file (.xls or .xlsx).", "error");
+        return;
+      }
+
       const previousPreviewUrl = previewUrlsRef.current[requirementCode];
       if (previousPreviewUrl) {
         URL.revokeObjectURL(previousPreviewUrl);
@@ -679,7 +698,11 @@ function AdmissionStep3() {
                             : !requirement.optional
                         }
                         disabled={!isEditable}
-                        accept=".pdf,.jpg,.jpeg,.png"
+                        accept={
+                          requirement.code === "transcript_of_records"
+                            ? ".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            : ".pdf,.jpg,.jpeg,.png"
+                        }
                         onChange={(e) =>
                           handleFileChange(
                             requirement.code,
@@ -730,7 +753,11 @@ function AdmissionStep3() {
                 </p>
                 <p className="notice-text">Upload clear and readable files.</p>
                 <p className="notice-text">
-                  Accepted formats: PDF, JPG, and PNG.
+                  {currentRequirements.some(
+                    (requirement) => requirement.code === "transcript_of_records",
+                  )
+                    ? "Accepted formats: PDF, JPG, and PNG. TOR files must be Excel (.xls or .xlsx)."
+                    : "Accepted formats: PDF, JPG, and PNG."}
                 </p>
                 <p className="notice-text">
                   Maximum file size is 5MB per document.

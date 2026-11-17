@@ -80,7 +80,7 @@ const sanitizeRequestedGradeInput = (value: string) => {
 
 const isRequestedGradeInAllowedRange = (value: string) => {
   const numericValue = Number(value);
-  return Number.isFinite(numericValue) && numericValue >= 70 && numericValue <= 100;
+  return Number.isFinite(numericValue) && numericValue >= 50 && numericValue <= 100;
 };
 
 export default function InstructorGradeChanges() {
@@ -346,7 +346,7 @@ export default function InstructorGradeChanges() {
       const rowErrors: string[] = [];
 
       if (!isRequestedGradeInAllowedRange(requestedGrade)) {
-        rowErrors.push("Requested grade must be 70-100.");
+        rowErrors.push("Requested grade must be 50-100.");
       }
 
       const validationResult =
@@ -363,7 +363,10 @@ export default function InstructorGradeChanges() {
               academicYear: row.academicYear,
               semester: row.semester,
               branch: currentUser.branch,
-            }, undefined, { preserveStudentNumber: row.currentRecord?.studentNumberIsOriginal })
+            }, undefined, {
+              preserveStudentNumber: row.currentRecord?.studentNumberIsOriginal,
+              shsMinimumGrade: 50,
+            })
           : null;
 
       if (
@@ -680,7 +683,7 @@ export default function InstructorGradeChanges() {
                 </h2>
                 <p>
                   Enter a requested grade only for rows that need correction.
-                  Blank rows are ignored. Requested grades must be 70-100.
+                  Blank rows are ignored. Requested grades must be 50-100.
                 </p>
               </div>
               <div className="instructor-file-modal-actions">
@@ -752,7 +755,7 @@ export default function InstructorGradeChanges() {
                           placeholder={
                             !row.currentRecord
                               ? "Unavailable"
-                              : "70-100"
+                              : "50-100"
                           }
                         />
                       </td>
