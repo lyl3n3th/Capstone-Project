@@ -510,7 +510,7 @@ export async function fetchAdmissionBranches() {
         .filter((branch) => branch.code && branch.name)
     : [];
 
-  return branches.length > 0 ? branches : [...admissionBranches];
+  return branches;
 }
 
 export const getAdmissionBranchName = (branchCode: string) => {

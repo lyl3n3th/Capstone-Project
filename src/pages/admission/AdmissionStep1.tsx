@@ -7,7 +7,6 @@ import { ToastContainer } from "../../components/common/Toast";
 import "../../styles/main.css";
 import { useAdmissionPortalOverview } from "../../hooks/useAdmissionPortalStatus";
 import {
-  admissionBranches,
   admissionStatusOptions,
   fetchAdmissionBranches,
   generateAicsTrackingNumber,
@@ -71,7 +70,7 @@ function AdmissionStep1() {
   const [loading, setLoading] = useState(false);
   const [branchOptions, setBranchOptions] = useState<
     AdmissionBranchOption[]
-  >([...admissionBranches]);
+  >([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [offerings, setOfferings] = useState<BranchOffering[]>([]);
   const [offeringsLoading, setOfferingsLoading] = useState(true);
@@ -304,16 +303,22 @@ function AdmissionStep1() {
             </p>
           )}
 
-          {branchOptions.map((branch) => (
-            <BranchCard
-              key={branch.code}
-              branch={branch}
-              helperText={getBranchHelperText(branch.code, branch.name)}
-              isSelected={activeSelectedBranch === branch.code}
-              isDisabled={isBranchDisabled(branch.code)}
-              onClick={() => handleBranchSelect(branch.code)}
-            />
-          ))}
+          {!offeringsLoading && !offeringsError && branchOptions.length > 0 &&
+            branchOptions.map((branch) => (
+              <BranchCard
+                key={branch.code}
+                branch={branch}
+                helperText={getBranchHelperText(branch.code, branch.name)}
+                isSelected={activeSelectedBranch === branch.code}
+                isDisabled={isBranchDisabled(branch.code)}
+                onClick={() => handleBranchSelect(branch.code)}
+              />
+            ))}
+          {!offeringsLoading && !offeringsError && branchOptions.length === 0 && (
+            <p className="admission-branch-load-message" role="status">
+              No active branches are available right now.
+            </p>
+          )}
 
           <ActionButtons
             onCancel={handleCancel}

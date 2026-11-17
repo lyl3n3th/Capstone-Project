@@ -1670,6 +1670,8 @@ export default function AdminEnrollees({
     SubjectAssignment[]
   >([]);
   const [showSubjectModal, setShowSubjectModal] = useState(false);
+  const [isSavingSubject, setIsSavingSubject] = useState(false);
+  const isSavingSubjectRef = useRef(false);
   const [showInstructorModal, setShowInstructorModal] = useState(false);
   const [showAssignmentModal, setShowAssignmentModal] = useState(false);
   const [assignmentAutoAssignSection, setAssignmentAutoAssignSection] =
@@ -2781,6 +2783,10 @@ export default function AdminEnrollees({
       ),
     };
 
+    if (isSavingSubjectRef.current) return;
+    isSavingSubjectRef.current = true;
+    setIsSavingSubject(true);
+
     try {
       const savedSubject = await saveAcademicSubject(currentBranch, nextSubject);
 
@@ -2803,12 +2809,19 @@ export default function AdminEnrollees({
       closeSubjectModal();
     } catch (error) {
       console.error("Failed to save shared academic subject", error);
+      const errorMessage = error instanceof Error ? error.message : "";
+      const requestMayHaveTimedOut = /failed to fetch|timeout|timed out|522|57014|gateway/i.test(
+        errorMessage,
+      );
       addToast(
-        error instanceof Error
-          ? error.message
-          : "Unable to save the subject to the shared catalog.",
+        requestMayHaveTimedOut
+          ? "The system did not confirm whether this subject was saved. Check the subject list before trying again."
+          : errorMessage || "Unable to save the subject to the shared catalog.",
         "error",
       );
+    } finally {
+      isSavingSubjectRef.current = false;
+      setIsSavingSubject(false);
     }
   };
 
@@ -12268,6 +12281,7 @@ export default function AdminEnrollees({
               <button
                 className="review-modal-close"
                 onClick={closeSubjectModal}
+                disabled={isSavingSubject}
               >
                 ✕
               </button>
@@ -12468,6 +12482,7 @@ export default function AdminEnrollees({
               <button
                 className="action-btn cancel"
                 onClick={closeSubjectModal}
+                disabled={isSavingSubject}
               >
                 Cancel
               </button>
@@ -12475,8 +12490,9 @@ export default function AdminEnrollees({
                 type="submit"
                 form="subject-config-form"
                 className="action-btn approve"
+                disabled={isSavingSubject}
               >
-                Save
+                {isSavingSubject ? "Saving..." : "Save"}
               </button>
             </div>
           </div>

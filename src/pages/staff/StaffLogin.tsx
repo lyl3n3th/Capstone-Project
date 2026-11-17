@@ -64,11 +64,7 @@ function StaffLogin() {
     title: string;
     message: string;
   } | null>(null);
-  const [managedBranches, setManagedBranches] = useState<string[]>([
-    "Bacoor",
-    "Taytay",
-    "GMA",
-  ]);
+  const [managedBranches, setManagedBranches] = useState<string[]>([]);
 
   const [loginData, setLoginData] = useState({
     branch: "",
@@ -654,7 +650,7 @@ function StaffLogin() {
                     </p>
                   ) : branchesLoadError ? (
                     <p className="staff-connection-status is-error" role="alert">
-                      Could not refresh the branch list. The saved branch options are shown, but sign-in may still be unavailable.
+                      Could not load the branch list. Please refresh the page and try again.
                     </p>
                   ) : null}
                 </div>
