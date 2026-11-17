@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
+import ConnectionLoadingState from "../common/ConnectionLoadingState";
 
 interface PublicOnlyRouteProps {
   children?: ReactNode;
@@ -14,7 +15,7 @@ export default function PublicOnlyRoute({
   const { currentUser, isReady, getDefaultRouteForRole } = useAuth();
 
   if (!isReady) {
-    return null;
+    return <ConnectionLoadingState message="Checking your sign-in session..." />;
   }
 
   if (currentUser && !allowAuthenticated) {

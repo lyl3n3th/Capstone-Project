@@ -189,6 +189,18 @@
   gap: 1.2rem;
 }
 
+.staff-login-page .staff-connection-status {
+  margin: 4px 0 0;
+  color: #526273;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.staff-login-page .staff-connection-status.is-error {
+  color: #a12c2c;
+}
+
 /* Dropdown Styles */
 .staff-login-page .dropdownlog {
   position: relative;

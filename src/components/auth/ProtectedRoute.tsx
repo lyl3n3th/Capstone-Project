@@ -5,6 +5,7 @@ import {
   getLoginRouteForRoles,
   type AppRole,
 } from "../../types/user";
+import ConnectionLoadingState from "../common/ConnectionLoadingState";
 
 interface ProtectedRouteProps {
   allowedRoles: AppRole[];
@@ -21,7 +22,7 @@ export default function ProtectedRoute({
   const { currentUser, isReady, getDefaultRouteForRole } = useAuth();
 
   if (!isReady) {
-    return null;
+    return <ConnectionLoadingState message="Loading your account..." />;
   }
 
   if (!currentUser) {

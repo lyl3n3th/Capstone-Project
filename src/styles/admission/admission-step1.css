@@ -268,6 +268,18 @@
   text-align: center;
 }
 
+.admission-step1-page .admission-branch-load-message {
+  margin: 12px 0;
+  color: #526273;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.admission-step1-page .admission-branch-load-message.is-error {
+  color: #a12c2c;
+}
+
 .admission-step1-card .choices {
   box-sizing: border-box;
   width: 100%;

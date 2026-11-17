@@ -33,6 +33,10 @@ function StaffLogin() {
   const { loginStaff, getDefaultRouteForRole } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmissionTakingLong, setIsSubmissionTakingLong] = useState(false);
+  const [branchesLoading, setBranchesLoading] = useState(true);
+  const [branchesTakingLong, setBranchesTakingLong] = useState(false);
+  const [branchesLoadError, setBranchesLoadError] = useState(false);
 
   const [isSetupModalOpen, setIsSetupModalOpen] = useState(false);
   const [showSetupPassword, setShowSetupPassword] = useState(false);
@@ -93,20 +97,48 @@ function StaffLogin() {
 
   const isAreaManager = loginData.role === "manager";
   useEffect(() => {
+    let cancelled = false;
+    const timeoutId = window.setTimeout(
+      () => setBranchesTakingLong(true),
+      12_000,
+    );
+
     const loadBranches = async () => {
       try {
         const branches = await fetchManagedBranches();
         const branchNames = branches.map((branch) => branch.name).filter(Boolean);
         if (branchNames.length > 0) {
-          setManagedBranches(branchNames.sort());
+          if (!cancelled) setManagedBranches(branchNames.sort());
+        } else if (!cancelled) {
+          setBranchesLoadError(true);
         }
       } catch (error) {
         console.error("Unable to load staff branches", error);
+        if (!cancelled) setBranchesLoadError(true);
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (!cancelled) {
+          setBranchesLoading(false);
+          setBranchesTakingLong(false);
+        }
       }
     };
 
     void loadBranches();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!isSubmitting) return;
+    const timeoutId = window.setTimeout(
+      () => setIsSubmissionTakingLong(true),
+      12_000,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [isSubmitting]);
 
   const resolveRedirectPath = (role: StaffRole) => {
     const redirectPath = (
@@ -157,6 +189,7 @@ function StaffLogin() {
     }
 
     try {
+      setIsSubmissionTakingLong(false);
       setIsSubmitting(true);
 
       if (isAreaManager) {
@@ -613,6 +646,17 @@ function StaffLogin() {
                       <MdKeyboardArrowDown size={18} />
                     </span>
                   </div>
+                  {branchesLoading ? (
+                    <p className="staff-connection-status" role="status">
+                      {branchesTakingLong
+                        ? "The branch list is taking longer than usual. The system may be temporarily unavailable."
+                        : "Loading branch list..."}
+                    </p>
+                  ) : branchesLoadError ? (
+                    <p className="staff-connection-status is-error" role="alert">
+                      Could not refresh the branch list. The saved branch options are shown, but sign-in may still be unavailable.
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -681,6 +725,11 @@ function StaffLogin() {
               >
                 {isSubmitting ? "Signing in..." : "Login"}
               </button>
+              {isSubmitting && isSubmissionTakingLong && (
+                <p className="staff-connection-status" role="status">
+                  Sign-in is taking longer than usual. The system may be temporarily unavailable.
+                </p>
+              )}
             </form>
           </div>
         </div>

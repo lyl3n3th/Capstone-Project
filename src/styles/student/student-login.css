@@ -624,6 +624,14 @@
   box-shadow: none;
 }
 
+.student-login-page .student-login-connection-status {
+  margin-top: 0.75rem;
+  color: #8a3b12;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .student-login-page .google-login-icon {
   width: 24px;
   height: 24px;

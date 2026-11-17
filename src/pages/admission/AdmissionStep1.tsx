@@ -75,11 +75,16 @@ function AdmissionStep1() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [offerings, setOfferings] = useState<BranchOffering[]>([]);
   const [offeringsLoading, setOfferingsLoading] = useState(true);
+  const [offeringsTakingLong, setOfferingsTakingLong] = useState(false);
   const [offeringsError, setOfferingsError] = useState("");
   const { branches: branchStatuses } = useAdmissionPortalOverview();
 
   useEffect(() => {
     let cancelled = false;
+    const timeoutId = window.setTimeout(
+      () => setOfferingsTakingLong(true),
+      12_000,
+    );
     const loadBranches = async () => {
       try {
         const [branches, available] = await Promise.all([fetchAdmissionBranches(), fetchBranchOfferings()]);
@@ -88,14 +93,24 @@ function AdmissionStep1() {
         setOfferings(available);
       } catch (error) {
         console.error("Unable to load admission branches", error);
-        if (!cancelled) setOfferingsError("Unable to load branch offerings. Please refresh and try again.");
+        if (!cancelled) {
+          setOfferingsError(
+            "Unable to load branch and course information. The system may be temporarily unavailable. Please refresh and try again.",
+          );
+        }
       } finally {
-        if (!cancelled) setOfferingsLoading(false);
+        if (!cancelled) {
+          setOfferingsLoading(false);
+          setOfferingsTakingLong(false);
+        }
       }
     };
 
     void loadBranches();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
   }, []);
 
   const addToast = (message: string, type: Toast["type"]) => {
@@ -276,7 +291,18 @@ function AdmissionStep1() {
             <p>Choose the branch you wish to enroll in</p>
           </div>
 
-          {offeringsError && <p role="alert">{offeringsError}</p>}
+          {offeringsLoading && (
+            <p className="admission-branch-load-message" role="status" aria-live="polite">
+              {offeringsTakingLong
+                ? "Branch information is taking longer than usual. The system may be temporarily unavailable."
+                : "Loading branch list and available courses. Please wait..."}
+            </p>
+          )}
+          {offeringsError && (
+            <p className="admission-branch-load-message is-error" role="alert">
+              {offeringsError}
+            </p>
+          )}
 
           {branchOptions.map((branch) => (
             <BranchCard

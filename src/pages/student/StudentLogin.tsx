@@ -15,6 +15,7 @@ function StudentLogin() {
   const { currentUser, isReady, loginStudentWithGoogle } = useAuth();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmissionTakingLong, setIsSubmissionTakingLong] = useState(false);
   const [systemMessage, setSystemMessage] = useState<{
     title: string;
     message: string;
@@ -56,6 +57,15 @@ function StudentLogin() {
     }
   }, [currentUser, isReady, navigate]);
 
+  useEffect(() => {
+    if (!isSubmitting) return;
+    const timeoutId = window.setTimeout(
+      () => setIsSubmissionTakingLong(true),
+      12_000,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [isSubmitting]);
+
   const goToPrevious = () => {
     setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
   };
@@ -70,6 +80,7 @@ function StudentLogin() {
 
   const handleGoogleLogin = async () => {
     try {
+      setIsSubmissionTakingLong(false);
       setIsSubmitting(true);
       await loginStudentWithGoogle();
     } catch (error) {
@@ -137,6 +148,11 @@ function StudentLogin() {
               </span>
               {isSubmitting ? "Redirecting..." : "Login using email"}
             </button>
+            {isSubmitting && isSubmissionTakingLong && (
+              <p className="student-login-connection-status" role="status">
+                Sign-in is taking longer than usual. The system may be temporarily unavailable.
+              </p>
+            )}
           </div>
         </div>
       </div>
