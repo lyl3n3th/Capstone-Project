@@ -324,7 +324,12 @@ function AdmissionStep1() {
             onCancel={handleCancel}
             onContinue={handleContinue}
             isContinueDisabled={
+              offeringsLoading ||
+              Boolean(offeringsError) ||
               !activeSelectedBranch ||
+              !branchOptions.some(
+                (branch) => branch.code === activeSelectedBranch,
+              ) ||
               status === "Select Status" ||
               isBranchDisabled(activeSelectedBranch)
             }
