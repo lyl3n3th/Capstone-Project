@@ -2,7 +2,7 @@ import { isCollegeTransferee } from "../../services/adminStorage";
 import { buildEvaluationSummaryReport } from "../../services/evaluationSummaryReport";
 import TablePagination from "../../components/common/TablePagination";
 import { useConfirmation } from "../../hooks/useConfirmation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FaUserPlus,
   FaUserGraduate,
@@ -1471,17 +1471,27 @@ export default function AdminEnrollees({
   const currentBranch = normalizeBranchName(currentUser?.branch);
   const [offeringDirectory, setOfferingDirectory] = useState<{ branch: string; items: BranchOffering[] } | null>(null);
 
-  useEffect(() => {
-    if (instructorManagementOnly) {
-      return;
-    }
-
-    let cancelled = false;
+  const refreshBranchOfferings = useCallback(() => {
+    if (instructorManagementOnly) return;
     void fetchBranchOfferings(currentBranch)
-      .then((items) => { if (!cancelled) setOfferingDirectory({ branch: currentBranch, items }); })
+      .then((items) => setOfferingDirectory({ branch: currentBranch, items }))
       .catch((error) => console.warn("Unable to load branch courses and strands.", error));
-    return () => { cancelled = true; };
   }, [currentBranch, instructorManagementOnly]);
+
+  useEffect(() => {
+    if (instructorManagementOnly) return;
+
+    refreshBranchOfferings();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshBranchOfferings();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [refreshBranchOfferings, instructorManagementOnly]);
 
   const branchOfferings = offeringDirectory?.branch === currentBranch ? offeringDirectory.items : [];
   const hasCollegeOfferings = branchOfferings.some((item) => item.program_name === "College");
@@ -1682,6 +1692,37 @@ export default function AdminEnrollees({
   const [subjectForm, setSubjectForm] = useState<SubjectFormState>(
     createDefaultSubjectForm(),
   );
+
+  useEffect(() => {
+    if (!showSubjectModal) return;
+
+    const currentOfferings = offeringDirectory?.branch === currentBranch ? offeringDirectory.items : [];
+    const availableTracks = Array.from(new Set(
+      currentOfferings
+        .filter((item) => item.program_name === (subjectForm.program === "SHS" ? "Senior High School" : "College"))
+        .map((item) => subjectForm.program === "SHS" ? item.track_name.split(/\s+-\s+/)[0] : item.track_name),
+    ));
+    const selectionIsAvailable =
+      subjectForm.strand === "All" ||
+      availableTracks.includes(subjectForm.strand) ||
+      (editingSubject?.program === subjectForm.program && editingSubject.strand === subjectForm.strand);
+
+    if (!selectionIsAvailable) {
+      setSubjectForm((current) =>
+        ({
+          ...current,
+          strand: current.program === "SHS" ? "All" : availableTracks[0] || "All",
+          prerequisiteSubjectIds: [],
+        }),
+      );
+    }
+  }, [currentBranch, offeringDirectory, editingSubject, showSubjectModal, subjectForm.program, subjectForm.strand]);
+
+  useEffect(() => {
+    if (!showSubjectModal || instructorManagementOnly) return;
+    const refreshInterval = window.setInterval(refreshBranchOfferings, 30_000);
+    return () => window.clearInterval(refreshInterval);
+  }, [instructorManagementOnly, refreshBranchOfferings, showSubjectModal]);
   const [editingInstructor, setEditingInstructor] = useState<Instructor | null>(
     null,
   );
@@ -2727,6 +2768,7 @@ export default function AdminEnrollees({
     const unchangedTrack = editingSubject?.program === subjectForm.program &&
       (editingSubject.strand || (editingSubject.program === "College" ? DEFAULT_COLLEGE_COURSE : "All")) === subjectForm.strand;
     const configuredTrack = getBranchTrackOptions(subjectForm.program).includes(subjectForm.strand) ||
+      (subjectForm.program === "College" && subjectForm.strand === "All" && getBranchTrackOptions("College").length > 0) ||
       (subjectForm.program === "SHS" && subjectForm.strand === "All" && getBranchTrackOptions("SHS").length > 0);
     if (!unchangedTrack && !configuredTrack) {
       addToast("Choose a course or strand offered by this branch.", "warning");
@@ -8933,6 +8975,7 @@ export default function AdminEnrollees({
                                         <tr>
                                           <th>Subject Code</th>
                                           <th>Subject Title</th>
+                                          <th>Course</th>
                                           <th>Units</th>
                                           <th>Type</th>
                                           <th>Prerequisites</th>
@@ -8948,6 +8991,7 @@ export default function AdminEnrollees({
                                                   {subject.code}
                                                 </td>
                                                 <td>{subject.name}</td>
+                                                <td>{resolveSubjectStrandOrCourse(subject) === "All" ? "All Courses" : resolveSubjectStrandOrCourse(subject)}</td>
                                                 <td>{subject.units || 3}</td>
                                                 <td>{getSubjectTypeLabel(subject)}</td>
                                               <td className="subject-prerequisite-cell">
@@ -8981,7 +9025,7 @@ export default function AdminEnrollees({
                                         )
                                       ) : (
                                         <tr>
-                                          <td colSpan={6} className="empty-row">
+                                          <td colSpan={7} className="empty-row">
                                             No subjects added yet
                                           </td>
                                         </tr>
@@ -12395,6 +12439,7 @@ export default function AdminEnrollees({
                     }
                   >
                     {subjectForm.program === "SHS" && <option value="All">All</option>}
+                    {subjectForm.program === "College" && <option value="All">All Courses</option>}
                     {subjectForm.program === "College" && !subjectForm.strand && <option value="">Select course</option>}
                     {editingSubject?.strand && !getBranchTrackOptions(subjectForm.program).includes(editingSubject.strand) &&
                       subjectForm.program === editingSubject.program && editingSubject.strand !== "All" && (
