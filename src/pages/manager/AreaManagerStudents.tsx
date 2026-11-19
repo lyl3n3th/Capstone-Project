@@ -177,7 +177,7 @@ const AreaManagerStudents: React.FC = () => {
   } | null>(null);
 
   const [requestedPage, setCurrentPage] = useState(1);
-  const studentsPerPage = 2;
+  const studentsPerPage = 10;
 
   const uniqueCourses = Array.from(
     new Set(students.map((s) => s.course)),

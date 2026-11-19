@@ -965,7 +965,7 @@ export default function AdminStudents({
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterAcademicStanding, setFilterAcademicStanding] = useState("All");
   const [requestedStudentPage, setRequestedStudentPage] = useState(1);
-  const studentsPerPage = 2;
+  const studentsPerPage = 10;
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
