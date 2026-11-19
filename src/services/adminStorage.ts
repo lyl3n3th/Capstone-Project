@@ -841,27 +841,25 @@ const drainBranchScopedSyncQueue = () => {
     activeBranchScopedSyncs += 1;
     const payload = sync.payload;
 
-    void supabase
-      .rpc("upsert_branch_local_storage_record", {
-        p_branch: sync.branch,
-        p_scope: sync.scope,
-        p_payload: payload,
-      })
-      .then(({ error }) => {
+    void (async () => {
+      try {
+        const { error } = await supabase.rpc("upsert_branch_local_storage_record", {
+          p_branch: sync.branch,
+          p_scope: sync.scope,
+          p_payload: payload,
+        });
         if (error) {
           console.warn(
             `Unable to sync ${sync.scope} to Supabase; local cache was updated.`,
             error,
           );
         }
-      })
-      .catch((error) => {
+      } catch (error) {
         console.warn(
           `Unable to sync ${sync.scope} to Supabase; local cache was updated.`,
           error,
         );
-      })
-      .finally(() => {
+      } finally {
         sync.inFlight = false;
         activeBranchScopedSyncs -= 1;
 
@@ -869,7 +867,8 @@ const drainBranchScopedSyncQueue = () => {
           pendingBranchScopedSyncs.delete(key);
         }
         drainBranchScopedSyncQueue();
-      });
+      }
+    })();
   }
 };
 
