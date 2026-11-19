@@ -71,7 +71,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
   } | null>(null);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 15;
+  const itemsPerPage = 10;
 
   const [formData, setFormData] = useState<StaffMember>({
     staff_id: "",

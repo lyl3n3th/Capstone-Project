@@ -526,7 +526,7 @@ export default function AdminAlumni({
     return 0;
   });
 
-  const ITEMS_PER_PAGE = 15;
+  const ITEMS_PER_PAGE = 10;
   const totalPages = Math.max(
     1,
     Math.ceil(sortedAlumni.length / ITEMS_PER_PAGE),

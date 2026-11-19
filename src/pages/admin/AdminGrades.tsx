@@ -211,9 +211,9 @@ const TEMPLATE_FIRST_DATA_ROW_INDEX = 6;
 const TEMPLATE_DATA_CAPACITY = 19;
 const TEMPLATE_FILE_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const PREVIEW_PAGE_SIZE = 15;
-const UPLOAD_HISTORY_PAGE_SIZE = 15;
-const INSTRUCTOR_APPROVAL_PAGE_SIZE = 15;
+const PREVIEW_PAGE_SIZE = 10;
+const UPLOAD_HISTORY_PAGE_SIZE = 10;
+const INSTRUCTOR_APPROVAL_PAGE_SIZE = 10;
 const XML_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const XML_REL_NS =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships";

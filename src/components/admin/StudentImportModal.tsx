@@ -12,6 +12,8 @@ import {
 } from "../../services/studentImport";
 import "../../styles/admin/student-import.css";
 
+const IMPORT_PREVIEW_PAGE_SIZE = 10;
+
 interface Props { branch: string; onClose: () => void; onImported: () => Promise<void> }
 
 const reviewKey = (error: StudentImportError) => `${error.rowNumber}:${error.field ?? error.cell}`;
@@ -72,9 +74,9 @@ export default function StudentImportModal({ branch, onClose, onImported }: Prop
   const correctedCount = reviewItems.filter((error) => error.field && !activeErrorKeys.has(reviewKey(error))).length;
   const errorRows = new Set(errors.map((error) => error.rowNumber));
   const visible = errorsOnly ? rows.filter((row) => reviewRows.has(row.rowNumber)) : rows;
-  const pageCount = Math.max(1, Math.ceil(visible.length / 15));
+  const pageCount = Math.max(1, Math.ceil(visible.length / IMPORT_PREVIEW_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
-  const displayed = visible.slice(currentPage * 15, currentPage * 15 + 15);
+  const displayed = visible.slice(currentPage * IMPORT_PREVIEW_PAGE_SIZE, currentPage * IMPORT_PREVIEW_PAGE_SIZE + IMPORT_PREVIEW_PAGE_SIZE);
   const validCount = rows.filter((row) => !errorRows.has(row.rowNumber)).length;
 
   const change = (rowNumber: number, field: StudentImportField, value: string) => {
@@ -134,7 +136,7 @@ export default function StudentImportModal({ branch, onClose, onImported }: Prop
   const focusError = (error: StudentImportError) => {
     const index = rows.findIndex((row) => row.rowNumber === error.rowNumber);
     if (index < 0) return;
-    setErrorsOnly(false); setPage(Math.floor(index / 15));
+    setErrorsOnly(false); setPage(Math.floor(index / IMPORT_PREVIEW_PAGE_SIZE));
     requestAnimationFrame(() => document.getElementById(`student-import-${error.cell}`)?.focus());
   };
 
@@ -222,7 +224,7 @@ export default function StudentImportModal({ branch, onClose, onImported }: Prop
                 </tr>)}</tbody>
               </table>
             </div>
-            <TablePagination page={currentPage + 1} pageSize={15} totalItems={visible.length} onPageChange={(nextPage) => setPage(nextPage - 1)} disabled={busy} label="Student import preview pages" />
+            <TablePagination page={currentPage + 1} pageSize={IMPORT_PREVIEW_PAGE_SIZE} totalItems={visible.length} onPageChange={(nextPage) => setPage(nextPage - 1)} disabled={busy} label="Student import preview pages" />
           </>}
         </div>
         <footer className="student-import-footer"><span>No existing students will be overwritten.</span>

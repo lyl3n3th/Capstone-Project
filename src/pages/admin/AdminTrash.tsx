@@ -94,7 +94,7 @@ interface Toast {
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
-const ITEMS_PER_PAGE = 15;
+const ITEMS_PER_PAGE = 10;
 
 export default function AdminTrash({
   onLogout,

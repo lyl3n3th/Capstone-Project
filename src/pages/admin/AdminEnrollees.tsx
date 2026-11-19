@@ -345,7 +345,7 @@ interface AssignmentFormState {
 
 const DEFAULT_COLLEGE_COURSE = "BSE - Bachelor of Entrepreneurship";
 const DEFAULT_SECTION_SEMESTER = "1st Semester";
-const ENROLLEES_PER_PAGE = 15;
+const ENROLLEES_PER_PAGE = 10;
 
 const getCourseStrandDisplay = ({
   program,
@@ -6936,7 +6936,7 @@ export default function AdminEnrollees({
     return matchesSearch && matchesStatus;
   });
   const enrollmentPageScope = JSON.stringify([currentBranch, searchTerm, enrollmentStatusFilter, activeTab]);
-  const enrollmentPageSize = 15;
+  const enrollmentPageSize = 10;
   const totalEnrollmentPages = Math.max(1, Math.ceil(filteredRequests.length / enrollmentPageSize));
   const currentEnrollmentPage = requestedEnrollmentPage.scope === enrollmentPageScope
     ? Math.min(requestedEnrollmentPage.page, totalEnrollmentPages)

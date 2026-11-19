@@ -60,7 +60,7 @@ interface Toast {
 }
 
 const POLLABLE_STATUSES: BackupHistoryRecord["status"][] = ["pending", "in_progress"];
-const BACKUP_HISTORY_PAGE_SIZE = 15;
+const BACKUP_HISTORY_PAGE_SIZE = 10;
 
 interface LoadBackupDataOptions {
   showErrorToast?: boolean;

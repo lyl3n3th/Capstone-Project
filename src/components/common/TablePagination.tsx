@@ -16,7 +16,7 @@ export default function TablePagination({
   totalItems,
   onPageChange,
   disabled = false,
-  showPageNumbers = true,
+  showPageNumbers = false,
   label = "Table pages",
 }: TablePaginationProps) {
   if (totalItems === 0) return null;
