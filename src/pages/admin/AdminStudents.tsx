@@ -1077,32 +1077,17 @@ export default function AdminStudents({
       setStudentRecoveryMessage(null);
 
       try {
-        const [fetchedBranchStudentsResult, applicantsResult] = await Promise.all([
-          Promise.all([
-            fetchEnrollmentRequests(currentBranch).catch((error) => {
-              console.warn("Unable to fetch shared enrollment requests.", error);
-            }),
-            fetchAdminStudents(currentBranch),
-          ]).then(([, students]) => students as Student[]),
-          fetchSupabaseAdmissionApplicants(currentBranch).catch((error) => {
-            console.warn("Unable to fetch linked admission records.", error);
-            return null;
+        const fetchedBranchStudentsResult = await Promise.all([
+          fetchEnrollmentRequests(currentBranch).catch((error) => {
+            console.warn("Unable to fetch shared enrollment requests.", error);
           }),
-        ]);
+          fetchAdminStudents(currentBranch),
+        ]).then(([, students]) => students as Student[]);
 
         let fetchedBranchStudents = fetchedBranchStudentsResult;
 
         if (!isCurrentLoad()) {
           return;
-        }
-
-        if (applicantsResult && isCurrentLoad()) {
-          writeBranchScopedData(
-            ENROLLEE_STORAGE_SCOPE,
-            currentBranch,
-            applicantsResult,
-            { skipSupabaseSync: true },
-          );
         }
 
         fetchedBranchStudents = fetchedBranchStudents.map(
@@ -1120,12 +1105,32 @@ export default function AdminStudents({
           // branch's cache prevents an old browser tab from reviving a student
           // who was permanently deleted elsewhere.
           writeStoredStudents([...studentsFromOtherBranches, ...fetchedBranchStudents]);
-          await Promise.all(fetchedBranchStudents.filter(isImportedStudent).map(student =>
-            fetchImportedStudentCredentials(currentBranch, student.id).catch(error => {
-              console.warn("Unable to refresh imported student requirements.", error);
-            }),
-          ));
           if (isCurrentLoad()) setStudents(removeHiddenStudentsFromAdminList(fetchedBranchStudents));
+
+          // Admission records and imported credentials supplement the roster.
+          // Load admission data after the roster is visible, and fetch imported
+          // credentials only when an individual student's details are opened.
+          void fetchSupabaseAdmissionApplicants(currentBranch)
+            .then(() => {
+              if (!isCurrentLoad()) return;
+
+              const refreshedStudents = fetchedBranchStudents.map(
+                resolveStudentWithApprovedEnrollment,
+              );
+              const studentsFromOtherBranches = readStoredStudents().filter(
+                (student) =>
+                  normalizeBranchName(student.branch) !==
+                  normalizeBranchName(currentBranch),
+              );
+              writeStoredStudents([
+                ...studentsFromOtherBranches,
+                ...refreshedStudents,
+              ]);
+              setStudents(removeHiddenStudentsFromAdminList(refreshedStudents));
+            })
+            .catch((error) => {
+              console.warn("Unable to refresh linked admission records.", error);
+            });
         }
       } catch (error) {
         console.error("Failed to load branch students", error);
