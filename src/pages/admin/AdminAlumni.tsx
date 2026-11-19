@@ -286,11 +286,18 @@ export default function AdminAlumni({
     nextStatus: NonNullable<StudentRecord["status"]>,
   ) => {
     const storedStudents = readStoredStudents();
+    const normalizedStudentId = studentId.trim().toUpperCase();
+    const restoredBranch = normalizeBranchName(
+      alumniStudent.branch || alumniStudent.studentSnapshot?.branch || getCurrentBranch(),
+    );
+    const isTargetStudent = (student: StudentStorageRecord) =>
+      student.id.trim().toUpperCase() === normalizedStudentId &&
+      normalizeBranchName(student.branch) === restoredBranch;
     const existingStoredStudent = storedStudents.find(
-      (student) => student.id === studentId,
+      isTargetStudent,
     );
     forgetDeletedStoredStudent({
-      branch: existingStoredStudent?.branch || getCurrentBranch(),
+      branch: existingStoredStudent?.branch || restoredBranch,
       id: studentId,
       trackingNumber: existingStoredStudent?.trackingNumber,
       name: existingStoredStudent?.name || alumniStudent.fullName,
@@ -298,7 +305,7 @@ export default function AdminAlumni({
     let didUpdate = false;
 
     const nextStoredStudents = storedStudents.map((student) => {
-      if (student.id !== studentId) {
+      if (!isTargetStudent(student)) {
         return student;
       }
 
@@ -327,7 +334,7 @@ export default function AdminAlumni({
           contact: alumniStudent.studentSnapshot.contact || alumniStudent.contact || "",
           email: alumniStudent.studentSnapshot.email || alumniStudent.email || "",
           status: nextStatus,
-          branch: alumniStudent.studentSnapshot.branch || getCurrentBranch(),
+          branch: alumniStudent.studentSnapshot.branch || restoredBranch,
         }
       : {
           id: studentId,
@@ -344,7 +351,7 @@ export default function AdminAlumni({
           email: alumniStudent.email || "",
           address: "",
           status: nextStatus,
-          branch: getCurrentBranch(),
+          branch: restoredBranch,
           studentStatus: "Continuing",
         };
 
@@ -683,6 +690,17 @@ export default function AdminAlumni({
           ? "Complete"
           : rememberedStatus || "Complete";
       const linkedStudent = students.find((student) => student.id === alumniStudent.id);
+      const restoredBranch =
+        alumniStudent.branch || alumniStudent.studentSnapshot?.branch || currentBranch;
+
+      // The Student List is backed by Supabase. Update the existing student
+      // profile there before removing the alumni record so the profile and its
+      // linked credentials remain attached and become visible again.
+      const restoredStoredStudent = await updateAdminStudentStatus({
+        branch: restoredBranch,
+        studentNumber: alumniStudent.id,
+        status: restoredStatus,
+      });
 
       if (SHOULD_USE_ALUMNI_BACKEND && linkedStudent?.recordId) {
         const response = await fetch(`${STUDENTS_API_URL}${linkedStudent.recordId}/`, {
@@ -713,37 +731,25 @@ export default function AdminAlumni({
       const nextAlumni = alumni.filter((record) => record.id !== alumniStudent.id);
       persistAlumniBackupCacheForBranch(nextAlumni, currentBranch);
       setAlumni(nextAlumni);
+      updateStoredStudentStatus(alumniStudent, alumniStudent.id, restoredStatus);
+      const restoredStudentSnapshot = readStoredStudents().find(
+        (student) =>
+          student.id.trim().toUpperCase() === alumniStudent.id.trim().toUpperCase() &&
+          normalizeBranchName(student.branch) === normalizeBranchName(restoredBranch),
+      );
+      const restoredStudentForUi = {
+        ...mapStoredStudentToUi(restoredStudentSnapshot || restoredStoredStudent),
+        recordId: linkedStudent?.recordId ?? restoredStudentSnapshot?.recordId,
+      };
       setStudents((prev) =>
         prev.some((student) => student.id === alumniStudent.id)
           ? prev.map((student) =>
               student.id === alumniStudent.id
-                ? { ...student, status: restoredStatus }
+                ? { ...student, ...restoredStudentForUi }
                 : student,
             )
-          : [
-              {
-                id: alumniStudent.id,
-                name: alumniStudent.fullName,
-                program:
-                  alumniStudent.program === "SHS" ||
-                  alumniStudent.program === "College"
-                    ? alumniStudent.program
-                    : "College",
-                yearLevel:
-                  alumniStudent.program === "SHS" ? "Grade 11" : "1st Year",
-                strandOrCourse:
-                  alumniStudent.program !== "SHS" &&
-                  alumniStudent.program !== "College"
-                    ? alumniStudent.program
-                    : "",
-                contact: alumniStudent.contact || "",
-                email: alumniStudent.email || "",
-                status: restoredStatus,
-              },
-              ...prev,
-            ],
+          : [restoredStudentForUi, ...prev],
       );
-      updateStoredStudentStatus(alumniStudent, alumniStudent.id, restoredStatus);
       forgetRememberedAlumniStudentStatus(alumniStudent.id);
 
       if (viewingAlumni?.id === alumniStudent.id) {
