@@ -805,12 +805,105 @@ const SUPABASE_MIRRORED_BRANCH_SCOPES = new Set([
   "section-assignments",
   "transferee-evaluations",
   "instructor-departments",
-  "student-subject-plans",
-  "student-schedule-requests",
   "instructor-grade-change-requests",
   "instructor-grade-change-error-history",
   "grade-change-request-settings",
 ]);
+
+// Student plans and schedule requests have normalized Supabase tables of their
+// own. Keep their branch-scoped cache in local storage without also writing a
+// second, whole-snapshot copy to branch_local_storage_records.
+const MAX_CONCURRENT_BRANCH_SCOPED_SYNCS = 4;
+
+type PendingBranchScopedSync = {
+  branch: string;
+  scope: string;
+  payload: unknown;
+  queued: boolean;
+  inFlight: boolean;
+};
+
+const pendingBranchScopedSyncs = new Map<string, PendingBranchScopedSync>();
+let activeBranchScopedSyncs = 0;
+let branchScopedSyncDrainScheduled = false;
+
+const drainBranchScopedSyncQueue = () => {
+  for (const [key, sync] of pendingBranchScopedSyncs) {
+    if (activeBranchScopedSyncs >= MAX_CONCURRENT_BRANCH_SCOPED_SYNCS) {
+      return;
+    }
+    if (!sync.queued || sync.inFlight) {
+      continue;
+    }
+
+    sync.queued = false;
+    sync.inFlight = true;
+    activeBranchScopedSyncs += 1;
+    const payload = sync.payload;
+
+    void supabase
+      .rpc("upsert_branch_local_storage_record", {
+        p_branch: sync.branch,
+        p_scope: sync.scope,
+        p_payload: payload,
+      })
+      .then(({ error }) => {
+        if (error) {
+          console.warn(
+            `Unable to sync ${sync.scope} to Supabase; local cache was updated.`,
+            error,
+          );
+        }
+      })
+      .catch((error) => {
+        console.warn(
+          `Unable to sync ${sync.scope} to Supabase; local cache was updated.`,
+          error,
+        );
+      })
+      .finally(() => {
+        sync.inFlight = false;
+        activeBranchScopedSyncs -= 1;
+
+        if (!sync.queued && pendingBranchScopedSyncs.get(key) === sync) {
+          pendingBranchScopedSyncs.delete(key);
+        }
+        drainBranchScopedSyncQueue();
+      });
+  }
+};
+
+const scheduleBranchScopedSyncDrain = () => {
+  if (branchScopedSyncDrainScheduled) {
+    return;
+  }
+  branchScopedSyncDrainScheduled = true;
+  queueMicrotask(() => {
+    branchScopedSyncDrainScheduled = false;
+    drainBranchScopedSyncQueue();
+  });
+};
+
+const queueBranchScopedSync = (scope: string, branch: string, payload: unknown) => {
+  const key = JSON.stringify([branch, scope]);
+  let sync = pendingBranchScopedSyncs.get(key);
+
+  if (!sync) {
+    sync = {
+      branch,
+      scope,
+      payload,
+      queued: true,
+      inFlight: false,
+    };
+    pendingBranchScopedSyncs.set(key, sync);
+  } else {
+    sync.payload = payload;
+    sync.queued = true;
+  }
+
+  scheduleBranchScopedSyncDrain();
+};
 
 const getBranchScopeSupabaseErrorMessage = (error: {
   details?: string | null;
@@ -858,20 +951,7 @@ export const writeBranchScopedData = (
     return;
   }
 
-  void supabase
-    .rpc("upsert_branch_local_storage_record", {
-      p_branch: resolvedBranch,
-      p_scope: scope,
-      p_payload: value,
-    })
-    .then(({ error }) => {
-      if (error) {
-        console.warn(
-          `Unable to sync ${scope} to Supabase; local cache was updated.`,
-          error,
-        );
-      }
-    });
+  queueBranchScopedSync(scope, resolvedBranch, value);
 };
 
 const INSTRUCTOR_EVALUATION_STATUS_SCOPE = "instructor-evaluations";
