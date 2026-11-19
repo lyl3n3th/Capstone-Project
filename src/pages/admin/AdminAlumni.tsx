@@ -22,6 +22,8 @@ import {
   getBranchFromStudentNumber,
   getCurrentBranch,
   getStudentCredentialOverview,
+  fetchImportedStudentCredentials,
+  isImportedStudent,
   readStoredStudents,
   normalizeBranchName,
   writeStoredStudents,
@@ -190,6 +192,7 @@ export default function AdminAlumni({
   const [students, setStudents] = useState<StudentRecord[]>([]);
   const [alumni, setAlumni] = useState<AlumniStudent[]>([]);
   const [restoringAlumniId, setRestoringAlumniId] = useState<string | null>(null);
+  const [credentialRefreshVersion, setCredentialRefreshVersion] = useState(0);
   const currentBranch = getCurrentBranch();
 
   const belongsToCurrentBranch = (id: string, branch?: string | null) => {
@@ -225,42 +228,57 @@ export default function AdminAlumni({
     branch: apiAlumni.branch || undefined,
   });
 
-  const mapApiStudentToUi = (apiStudent: ApiStudent): StudentRecord => ({
-    recordId: apiStudent.id,
-    id: apiStudent.student_id,
-    name: apiStudent.full_name,
-    program: apiStudent.program,
-    yearLevel: apiStudent.year_level,
-    strandOrCourse: apiStudent.strand_or_course || "",
-    contact: apiStudent.contact || "",
-    email: apiStudent.email,
-    branch: apiStudent.branch || undefined,
-    status:
-      apiStudent.status === "Inactive"
-        ? "Archived"
-        : (apiStudent.status as StudentRecord["status"]),
-  });
+  const mapApiStudentToUi = (
+    apiStudent: ApiStudent,
+    storedStudents: StudentStorageRecord[],
+  ): StudentRecord => {
+    const branch = apiStudent.branch || getCurrentBranch();
+    const studentSnapshot = storedStudents.find(
+      (student) =>
+        student.id.trim().toUpperCase() === apiStudent.student_id.trim().toUpperCase() &&
+        normalizeBranchName(student.branch) === normalizeBranchName(branch),
+    );
+
+    return {
+      recordId: apiStudent.id,
+      id: apiStudent.student_id,
+      name: apiStudent.full_name,
+      program: apiStudent.program,
+      yearLevel: apiStudent.year_level,
+      strandOrCourse: apiStudent.strand_or_course || "",
+      contact: apiStudent.contact || "",
+      email: apiStudent.email,
+      branch,
+      status:
+        apiStudent.status === "Inactive"
+          ? "Archived"
+          : (apiStudent.status as StudentRecord["status"]),
+      studentSnapshot,
+    };
+  };
 
   const buildAlumniUiRecord = (
     student: StudentRecord,
     apiAlumni?: ApiAlumniRecord | null,
-  ): AlumniStudent => ({
-    recordId: typeof apiAlumni?.id === "number" ? apiAlumni.id : undefined,
-    id: apiAlumni?.student_id || student.id,
-    fullName: apiAlumni?.full_name || student.name,
-    program: apiAlumni?.program || student.strandOrCourse || student.program,
-    yearGraduated: apiAlumni?.year_graduated || getCurrentGraduationYear(),
-    contact: apiAlumni?.contact || student.contact || "",
-    email: apiAlumni?.email || student.email || undefined,
-    becameAlumniOn: apiAlumni?.became_alumni_on || "",
-    branch:
-      apiAlumni?.branch || student.branch || student.studentSnapshot?.branch || currentBranch,
-    studentSnapshot:
-      "studentSnapshot" in student
-        ? (student as StudentRecord & { studentSnapshot?: StudentStorageRecord })
-            .studentSnapshot
+  ): AlumniStudent => {
+    const studentSnapshot = student.studentSnapshot;
+
+    return {
+      recordId: typeof apiAlumni?.id === "number" ? apiAlumni.id : undefined,
+      id: apiAlumni?.student_id || student.id,
+      fullName: apiAlumni?.full_name || student.name,
+      program: apiAlumni?.program || student.strandOrCourse || student.program,
+      yearGraduated: apiAlumni?.year_graduated || getCurrentGraduationYear(),
+      contact: apiAlumni?.contact || student.contact || "",
+      email: apiAlumni?.email || student.email || undefined,
+      becameAlumniOn: apiAlumni?.became_alumni_on || "",
+      branch:
+        apiAlumni?.branch || student.branch || studentSnapshot?.branch || currentBranch,
+      studentSnapshot: studentSnapshot
+        ? { ...studentSnapshot, status: "Graduated" }
         : undefined,
-  });
+    };
+  };
 
   const updateStoredStudentStatus = (
     alumniStudent: AlumniStudent,
@@ -331,23 +349,6 @@ export default function AdminAlumni({
         };
 
     writeStoredStudents([restoredStudent, ...storedStudents]);
-  };
-
-  const removeStoredStudent = (studentId: string) => {
-    const storedStudents = readStoredStudents();
-    const existingStoredStudent = storedStudents.find(
-      (student) => student.id === studentId,
-    );
-
-    forgetDeletedStoredStudent({
-      branch: existingStoredStudent?.branch || getCurrentBranch(),
-      id: studentId,
-      trackingNumber: existingStoredStudent?.trackingNumber,
-      name: existingStoredStudent?.name || studentId,
-    });
-    writeStoredStudents(
-      storedStudents.filter((student) => student.id !== studentId),
-    );
   };
 
   const loadPaginated = async <T,>(url: string): Promise<T[]> => {
@@ -426,12 +427,13 @@ export default function AdminAlumni({
         loadOptionalPaginated<ApiStudent>(STUDENTS_API_URL),
       ]);
 
+      const storedStudents = readStoredStudents();
       const mappedStudents = apiStudents
         ? apiStudents
             .filter((student) =>
               belongsToCurrentBranch(student.student_id, student.branch),
             )
-            .map(mapApiStudentToUi)
+            .map((student) => mapApiStudentToUi(student, storedStudents))
         : localStudents;
       const mappedAlumni = apiAlumni
         ? addMissingAlumniEmails(
@@ -574,6 +576,7 @@ export default function AdminAlumni({
   const availableStudents = students.filter(
     (student) =>
       student.status !== "Archived" &&
+      student.status !== "Graduated" &&
       isStudentEligibleForAlumniTransfer(student) &&
       !alumni.some((alum) => alum.id === student.id),
   );
@@ -642,7 +645,7 @@ export default function AdminAlumni({
       persistAlumniBackupCacheForBranch(nextAlumni, currentBranch);
       setAlumni(nextAlumni);
       setStudents((prev) => prev.filter((record) => record.id !== student.id));
-      removeStoredStudent(student.id);
+      updateStoredStudentStatus(nextAlumniRecord, student.id, "Graduated");
       setIsAddModalOpen(false);
       addToast(
         savedLocallyOnly
@@ -800,13 +803,52 @@ export default function AdminAlumni({
         studentId: viewingAlumni.id,
       })
     : null;
-  const viewingStudentCredentials = viewingAlumni
-    ? getStudentCredentialOverview({
-        branch: viewingStudentBranch,
-        studentNumber: viewingAlumni.id,
-        trackingNumber: viewingStudentSnapshot?.trackingNumber,
+  const viewingStudentCredentials = useMemo(
+    () =>
+      viewingAlumni
+        ? getStudentCredentialOverview({
+            branch: viewingStudentBranch,
+            studentNumber: viewingAlumni.id,
+            trackingNumber: viewingStudentSnapshot?.trackingNumber,
+            studentSnapshot: viewingStudentSnapshot,
+          })
+        : null,
+    [
+      viewingAlumni,
+      viewingStudentBranch,
+      viewingStudentSnapshot,
+      credentialRefreshVersion,
+    ],
+  );
+
+  useEffect(() => {
+    if (
+      !viewingAlumni ||
+      !viewingStudentSnapshot ||
+      !isImportedStudent(viewingStudentSnapshot)
+    ) {
+      return;
+    }
+
+    let isCurrentView = true;
+    void fetchImportedStudentCredentials(
+      viewingStudentBranch,
+      viewingAlumni.id,
+      viewingStudentSnapshot,
+    )
+      .then(() => {
+        if (isCurrentView) {
+          setCredentialRefreshVersion((version) => version + 1);
+        }
       })
-    : null;
+      .catch((error) => {
+        console.warn("Unable to refresh alumni credential links.", error);
+      });
+
+    return () => {
+      isCurrentView = false;
+    };
+  }, [viewingAlumni, viewingStudentBranch, viewingStudentSnapshot]);
   const viewingStudentGradeTerms = useMemo(() => {
     const termMap = new Map<string, StoredStudentGradeRecord[]>();
     viewingStudentGrades.forEach((record) => {

@@ -2875,11 +2875,22 @@ export const isImportedStudent = (
   student?: Pick<StudentStorageRecord, "importAcademicYear" | "studentStatus"> | null,
 ) => Boolean(student?.importAcademicYear || student?.studentStatus?.trim().toLowerCase() === "existing student");
 
-export const getImportedStudentRequirementRecord = (branch?: string | null, studentNumber?: string | null): AdminEnrolleeRecord | null => {
+export const getImportedStudentRequirementRecord = (
+  branch?: string | null,
+  studentNumber?: string | null,
+  studentSnapshot?: StudentStorageRecord | null,
+): AdminEnrolleeRecord | null => {
   if (!studentNumber) return null;
-  const student = readStoredStudents().find(item =>
-    item.id.trim().toUpperCase() === studentNumber.trim().toUpperCase()
-    && normalizeBranchName(item.branch) === normalizeBranchName(branch));
+  const normalizedStudentNumber = studentNumber.trim().toUpperCase();
+  const normalizedBranch = normalizeBranchName(branch);
+  const snapshotMatches =
+    studentSnapshot?.id.trim().toUpperCase() === normalizedStudentNumber &&
+    normalizeBranchName(studentSnapshot.branch) === normalizedBranch;
+  const student = snapshotMatches
+    ? studentSnapshot
+    : readStoredStudents().find(item =>
+      item.id.trim().toUpperCase() === normalizedStudentNumber
+      && normalizeBranchName(item.branch) === normalizedBranch);
   if (!student || !isImportedStudent(student)) return null;
   const studentStatus = student.program === "SHS" ? "Junior High Completer" : "Senior High Graduate";
   const requirements = getAdmissionRequirements(studentStatus, mapAdminProgramToAdmissionProgram(student.program), "No Honor");
@@ -2901,8 +2912,12 @@ export const getImportedStudentRequirementRecord = (branch?: string | null, stud
   };
 };
 
-export const fetchImportedStudentCredentials = async (branch: string, studentNumber: string) => {
-  const student = getImportedStudentRequirementRecord(branch, studentNumber);
+export const fetchImportedStudentCredentials = async (
+  branch: string,
+  studentNumber: string,
+  studentSnapshot?: StudentStorageRecord | null,
+) => {
+  const student = getImportedStudentRequirementRecord(branch, studentNumber, studentSnapshot);
   if (!student) return;
   const requirements = getAdmissionRequirements(student.studentStatus, mapAdminProgramToAdmissionProgram(student.program), "No Honor");
   const files = await Promise.all(requirements.map(async requirement => {
@@ -2964,16 +2979,18 @@ export const getStudentRequirementSnapshot = ({
   branch,
   studentNumber,
   trackingNumber,
+  studentSnapshot,
 }: {
   branch?: string | null;
   studentNumber?: string | null;
   trackingNumber?: string | null;
+  studentSnapshot?: StudentStorageRecord | null;
 }) => {
   const storedEnrollees =
     readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", branch) ?? [];
   // Use the same source as imported-student uploads, even when an admission
   // record also exists. Existing Student has no admission requirement list.
-  const sourceRecord = getImportedStudentRequirementRecord(branch, studentNumber) ?? storedEnrollees.find(
+  const sourceRecord = getImportedStudentRequirementRecord(branch, studentNumber, studentSnapshot) ?? storedEnrollees.find(
     (record) =>
       (trackingNumber && record.trackingNumber === trackingNumber) ||
       (studentNumber && record.studentNumber === studentNumber),
@@ -3032,15 +3049,18 @@ export const getStudentCredentialOverview = ({
   branch,
   studentNumber,
   trackingNumber,
+  studentSnapshot,
 }: {
   branch?: string | null;
   studentNumber?: string | null;
   trackingNumber?: string | null;
+  studentSnapshot?: StudentStorageRecord | null;
 }) => {
   const snapshot = getStudentRequirementSnapshot({
     branch,
     studentNumber,
     trackingNumber,
+    studentSnapshot,
   });
 
   if (!snapshot) {

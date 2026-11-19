@@ -2636,7 +2636,12 @@ export default function AdminStudents({
 
         rememberAlumniStudentStatus(student.id, student.status);
         movedStudentIds.push(student.id);
-        createdAlumniRecords.push(buildAlumniBackupRecord(student, createdAlumni));
+        createdAlumniRecords.push(
+          buildAlumniBackupRecord(
+            { ...student, status: "Graduated" },
+            createdAlumni,
+          ),
+        );
 
         try {
           await updateAdminStudentStatus({
@@ -2661,11 +2666,32 @@ export default function AdminStudents({
       setStudents((prev) =>
         prev.filter((student) => !movedStudentIds.includes(student.id)),
       );
-      writeStoredStudents(
-        readStoredStudents().filter(
-          (student) => !movedStudentIds.includes(student.id),
-        ),
+      const graduatedStudentsByKey = new Map(
+        studentsToMove
+          .filter((student) => movedStudentIds.includes(student.id))
+          .map((student) => [
+            `${normalizeBranchName(student.branch || currentBranch)}::${student.id.trim().toUpperCase()}`,
+            { ...student, status: "Graduated" as const },
+          ]),
       );
+      const storedStudentsWithGraduates = readStoredStudents().map(
+        (storedStudent) => {
+          const key = `${normalizeBranchName(storedStudent.branch)}::${storedStudent.id.trim().toUpperCase()}`;
+          const graduatedStudent = graduatedStudentsByKey.get(key);
+          if (!graduatedStudent) return storedStudent;
+
+          graduatedStudentsByKey.delete(key);
+          return {
+            ...storedStudent,
+            ...graduatedStudent,
+            status: "Graduated" as const,
+          };
+        },
+      );
+      writeStoredStudents([
+        ...storedStudentsWithGraduates,
+        ...graduatedStudentsByKey.values(),
+      ]);
       setSelectedStudentIds((prev) =>
         prev.filter((studentId) => !movedStudentIds.includes(studentId)),
       );
