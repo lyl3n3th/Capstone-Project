@@ -177,7 +177,7 @@ const AreaManagerStudents: React.FC = () => {
   } | null>(null);
 
   const [requestedPage, setCurrentPage] = useState(1);
-  const studentsPerPage = 15;
+  const studentsPerPage = 2;
 
   const uniqueCourses = Array.from(
     new Set(students.map((s) => s.course)),
@@ -638,7 +638,7 @@ const AreaManagerStudents: React.FC = () => {
         </div>
 
         {totalPages > 1 && (
-          <TablePagination page={currentPage} pageSize={studentsPerPage} totalItems={processedStudents.length} onPageChange={paginate} label="Area manager student pages" />
+          <TablePagination page={currentPage} pageSize={studentsPerPage} totalItems={processedStudents.length} onPageChange={paginate} showPageNumbers={false} label="Area manager student pages" />
         )}
       </div>
 

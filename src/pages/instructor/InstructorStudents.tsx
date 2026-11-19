@@ -135,7 +135,7 @@ export default function InstructorStudents() {
       });
   }, [assignments, sectionFilter, students, subjectFilter, yearLevelFilter, evaluations, evaluationScope, evaluationFilter, evaluationsReady, normalizedSearch]);
 
-  const pageSize = 15;
+  const pageSize = 2;
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const currentPage = requestedPage.scope === paginationScope ? Math.min(requestedPage.page, totalPages) : 1;
   const paginatedRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -299,7 +299,7 @@ export default function InstructorStudents() {
           </tbody>
         </table>
       </div>
-      <TablePagination page={currentPage} pageSize={pageSize} totalItems={rows.length} onPageChange={(page) => setRequestedPage({ scope: paginationScope, page })} label="Instructor student pages" />
+      <TablePagination page={currentPage} pageSize={pageSize} totalItems={rows.length} onPageChange={(page) => setRequestedPage({ scope: paginationScope, page })} showPageNumbers={false} label="Instructor student pages" />
     </div>
   );
 }
