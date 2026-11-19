@@ -24,6 +24,7 @@ from .storage import _build_headers, _storage_request, get_storage_config
 FORMAT = "branch-database-v2"
 DATA_MEMBER = "data/database.json"
 MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+DEFAULT_ATTACHMENT_STORAGE_BUCKET = "admission-requirements"
 _ARCHIVE_PROGRESS_CALLBACK = ContextVar("branch_backup_progress_callback", default=None)
 
 
@@ -97,13 +98,36 @@ def _write_object_member(archive, bucket, path, member_name):
     return digest.hexdigest()
 
 
+def _reference_key(value, snake_key, camel_key, *, default):
+    if value.get(snake_key):
+        return snake_key
+    if value.get(camel_key):
+        return camel_key
+    if snake_key in value:
+        return snake_key
+    if camel_key in value:
+        return camel_key
+    return default
+
+
 def _references(value):
     if isinstance(value, dict):
-        path_key = "storage_path" if value.get("storage_path") else "storagePath"
-        bucket_key = "storage_bucket" if value.get("storage_bucket") else "storageBucket"
+        path_key = _reference_key(
+            value, "storage_path", "storagePath", default="storage_path"
+        )
+        bucket_key = _reference_key(
+            value,
+            "storage_bucket",
+            "storageBucket",
+            default="storage_bucket" if path_key == "storage_path" else "storageBucket",
+        )
         if value.get(path_key):
             if not value.get(bucket_key):
-                raise ValueError("A saved attachment has a storage path but no bucket; repair it before backing up.")
+                # Older admission and imported-student attachment records omit
+                # the bucket; the application has always resolved those through
+                # this bucket. Materialize it so backup and restore both retain
+                # the exact object reference.
+                value[bucket_key] = DEFAULT_ATTACHMENT_STORAGE_BUCKET
             yield value, path_key, bucket_key
         for nested in value.values():
             yield from _references(nested)
