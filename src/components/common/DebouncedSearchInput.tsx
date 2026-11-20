@@ -1,8 +1,8 @@
-import { memo, useEffect, useRef, useState, type InputHTMLAttributes } from "react";
+import { memo, useEffect, useRef, type InputHTMLAttributes } from "react";
 
 type DebouncedSearchInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
-  "value" | "onChange"
+  "value" | "defaultValue" | "onChange"
 > & {
   value: string;
   onValueChange: (value: string) => void;
@@ -17,11 +17,11 @@ const DebouncedSearchInput = memo(function DebouncedSearchInput({
   debounceMs = 800,
   ...inputProps
 }: DebouncedSearchInputProps) {
-  const [draftValue, setDraftValue] = useState(value);
-  const [editRevision, setEditRevision] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
   const onValueChangeRef = useRef(onValueChange);
   const onTypingStartRef = useRef(onTypingStart);
   const isEditingRef = useRef(false);
+  const debounceTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     onValueChangeRef.current = onValueChange;
@@ -29,28 +29,36 @@ const DebouncedSearchInput = memo(function DebouncedSearchInput({
   }, [onValueChange, onTypingStart]);
 
   useEffect(() => {
-    if (!isEditingRef.current) return;
+    if (isEditingRef.current || !inputRef.current) return;
+    if (inputRef.current.value !== value) inputRef.current.value = value;
+  }, [value]);
 
-    const timer = window.setTimeout(() => {
-      isEditingRef.current = false;
-      onValueChangeRef.current(draftValue);
-    }, debounceMs);
-
-    return () => window.clearTimeout(timer);
-  }, [draftValue, editRevision, debounceMs]);
+  useEffect(() => () => {
+    if (debounceTimerRef.current !== null) {
+      window.clearTimeout(debounceTimerRef.current);
+    }
+  }, []);
 
   return (
     <input
       {...inputProps}
-      value={draftValue}
+      ref={inputRef}
+      defaultValue={value}
       onChange={(event) => {
-        const nextValue = event.target.value;
         if (!isEditingRef.current) {
           isEditingRef.current = true;
           onTypingStartRef.current?.();
         }
-        setDraftValue(nextValue);
-        setEditRevision((revision) => revision + 1);
+
+        if (debounceTimerRef.current !== null) {
+          window.clearTimeout(debounceTimerRef.current);
+        }
+
+        debounceTimerRef.current = window.setTimeout(() => {
+          debounceTimerRef.current = null;
+          isEditingRef.current = false;
+          onValueChangeRef.current(inputRef.current?.value ?? "");
+        }, debounceMs);
       }}
     />
   );
