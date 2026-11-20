@@ -1212,7 +1212,11 @@ export default function AdminAlumni({
                           </div>
                           <div className="alumni-grade-table-wrapper">
                             <table
-                              className="alumni-grade-table student-details-grade-table"
+                              className={[
+                                "alumni-grade-table",
+                                "student-details-grade-table",
+                                "student-details-alumni-grade-table",
+                              ].join(" ")}
                             >
                               <thead>
                                 <tr>

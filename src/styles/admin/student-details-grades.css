@@ -25,3 +25,73 @@
 .student-details-grade-table td {
   overflow-wrap: anywhere;
 }
+
+.student-details-college-grade-table,
+.student-details-alumni-grade-table {
+  min-width: 900px;
+}
+
+.student-details-college-grade-table th:nth-child(1),
+.student-details-college-grade-table td:nth-child(1) {
+  width: 13%;
+}
+
+.student-details-college-grade-table th:nth-child(2),
+.student-details-college-grade-table td:nth-child(2) {
+  width: 28%;
+}
+
+.student-details-college-grade-table th:nth-child(3),
+.student-details-college-grade-table td:nth-child(3) {
+  width: 14%;
+}
+
+.student-details-college-grade-table th:nth-child(4),
+.student-details-college-grade-table td:nth-child(4) {
+  width: 8%;
+}
+
+.student-details-college-grade-table th:nth-child(5),
+.student-details-college-grade-table td:nth-child(5) {
+  width: 7%;
+}
+
+.student-details-college-grade-table th:nth-child(6),
+.student-details-college-grade-table td:nth-child(6) {
+  width: 14%;
+}
+
+.student-details-college-grade-table th:nth-child(7),
+.student-details-college-grade-table td:nth-child(7) {
+  width: 16%;
+}
+
+.student-details-alumni-grade-table th:nth-child(1),
+.student-details-alumni-grade-table td:nth-child(1) {
+  width: 13%;
+}
+
+.student-details-alumni-grade-table th:nth-child(2),
+.student-details-alumni-grade-table td:nth-child(2) {
+  width: 28%;
+}
+
+.student-details-alumni-grade-table th:nth-child(3),
+.student-details-alumni-grade-table td:nth-child(3) {
+  width: 17%;
+}
+
+.student-details-alumni-grade-table th:nth-child(4),
+.student-details-alumni-grade-table td:nth-child(4) {
+  width: 10%;
+}
+
+.student-details-alumni-grade-table th:nth-child(5),
+.student-details-alumni-grade-table td:nth-child(5) {
+  width: 8%;
+}
+
+.student-details-alumni-grade-table th:nth-child(6),
+.student-details-alumni-grade-table td:nth-child(6) {
+  width: 24%;
+}

@@ -5329,7 +5329,11 @@ export default function AdminStudents({
                                     </div>
                                     <div className="students-grade-table-wrapper">
                                       <table
-                                        className="students-grade-table student-details-grade-table"
+                                        className={[
+                                          "students-grade-table",
+                                          "student-details-grade-table",
+                                          "student-details-college-grade-table",
+                                        ].join(" ")}
                                       >
                                         <thead>
                                           <tr>
