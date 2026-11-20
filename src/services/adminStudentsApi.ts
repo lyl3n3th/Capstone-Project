@@ -325,42 +325,61 @@ export async function fetchAdminStudentsPage(
 
   const students = ((Array.isArray(data) ? data : []) as AdminStudentApiRecord[]).map(mapAdminStudentRow);
   forgetDeletedStoredStudents(students);
-  const studentNumbers = students.map((student) => student.id);
-  if (studentNumbers.length > 0) {
-    try {
-      const imported = await fetchStudentImportDetails(branch || undefined, studentNumbers);
-      const byNumber = new Map(imported.map((item) => [item.student_number, item]));
-      students.forEach((student) => {
-        const detail = byNumber.get(student.id);
-        if (detail) {
-          student.importAcademicYear = detail.academic_year;
-          student.importSemester = detail.semester;
-          student.importAcademicStanding = detail.academic_standing;
-          student.lastSchoolAttended = detail.last_school_attended || "";
-          student.yearCompletion = detail.year_completion == null ? "" : String(detail.year_completion);
-        }
-      });
-    } catch (error) {
-      console.warn("Unable to load imported-student enrollment details for this page.", error);
-    }
-
-    if (branch) {
-      try {
-        const planningStates = await fetchStudentPlanningStates(branch, studentNumbers);
-        return {
-          students: mergeStudentPlanningStatesIntoStudents(students, planningStates)
-            .map(applyImportedScheduleDefaults),
-          totalItems: count ?? 0,
-        };
-      } catch (planningError) {
-        console.warn("Unable to load planning states for this student page.", planningError);
-      }
-    }
-  }
-
   return {
     students: students.map(applyImportedScheduleDefaults),
     totalItems: count ?? 0,
+  };
+}
+
+export async function fetchAdminStudentPageSupplemental(
+  branch: string | null | undefined,
+  students: StudentStorageRecord[],
+): Promise<StudentStorageRecord[]> {
+  if (students.length === 0) return students;
+
+  const studentNumbers = [...new Set(students.map((student) => student.id).filter(Boolean))];
+  const [importResult, planningResult] = await Promise.allSettled([
+    fetchStudentImportDetails(branch || undefined, studentNumbers),
+    branch ? fetchStudentPlanningStates(branch, studentNumbers) : Promise.resolve(null),
+  ]);
+
+  let enrichedStudents = students.map((student) => ({ ...student }));
+  if (importResult.status === "fulfilled") {
+    const byNumber = new Map(importResult.value.map((item) => [item.student_number, item]));
+    enrichedStudents = enrichedStudents.map((student) => {
+      const detail = byNumber.get(student.id);
+      return detail ? {
+        ...student,
+        importAcademicYear: detail.academic_year,
+        importSemester: detail.semester,
+        importAcademicStanding: detail.academic_standing,
+        lastSchoolAttended: detail.last_school_attended || "",
+        yearCompletion: detail.year_completion == null ? "" : String(detail.year_completion),
+      } : student;
+    });
+  } else {
+    console.warn("Unable to load imported-student enrollment details for this page.", importResult.reason);
+  }
+
+  if (planningResult.status === "fulfilled" && planningResult.value) {
+    enrichedStudents = mergeStudentPlanningStatesIntoStudents(enrichedStudents, planningResult.value);
+  } else if (planningResult.status === "rejected") {
+    console.warn("Unable to load planning states for this student page.", planningResult.reason);
+  }
+
+  return enrichedStudents.map(applyImportedScheduleDefaults);
+}
+
+export async function fetchAdminStudentsPageWithSupplemental(
+  branch: string | null | undefined,
+  page: number,
+  pageSize = 10,
+  filters: AdminStudentPageFilters = {},
+): Promise<AdminStudentPage> {
+  const result = await fetchAdminStudentsPage(branch, page, pageSize, filters);
+  return {
+    ...result,
+    students: await fetchAdminStudentPageSupplemental(branch, result.students),
   };
 }
 

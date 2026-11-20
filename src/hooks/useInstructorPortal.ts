@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "./useAuth";
 import {
   getInstructorScopedData,
@@ -14,8 +14,9 @@ import type {
 } from "../services/academicData";
 import type { StudentStorageRecord } from "../services/adminStorage";
 
-export function useInstructorPortal(options: { includeStudents?: boolean } = {}) {
+export function useInstructorPortal(options: { includeStudents?: boolean; deferSupplemental?: boolean } = {}) {
   const includeStudents = options.includeStudents ?? true;
+  const deferSupplemental = options.deferSupplemental ?? false;
   const { currentUser } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [instructor, setInstructor] = useState<AcademicInstructorRecord | null>(
@@ -28,6 +29,10 @@ export function useInstructorPortal(options: { includeStudents?: boolean } = {})
   const [subjects, setSubjects] = useState<AcademicSubjectRecord[]>([]);
   const [students, setStudents] = useState<StudentStorageRecord[]>([]);
   const [submissionsVersion, setSubmissionsVersion] = useState(0);
+  const supplementalLoaderRef = useRef<(() => Promise<void>) | null>(null);
+  const supplementalLoadPromiseRef = useRef<Promise<void> | null>(null);
+  const supplementalLoadedRef = useRef(false);
+  const supplementalRevisionRef = useRef(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -46,6 +51,7 @@ export function useInstructorPortal(options: { includeStudents?: boolean } = {})
           branch: currentUser.branch,
           instructorId: currentUser.id,
           includeStudents,
+          deferSupplemental,
         });
 
         if (!isMounted || requestRevision !== revision) {
@@ -57,15 +63,30 @@ export function useInstructorPortal(options: { includeStudents?: boolean } = {})
         setSections(data.sections);
         setSubjects(data.snapshot.subjects);
         setStudents(data.students);
-        void fetchAndCacheInstructorGradeSubmissions(currentUser.branch)
-          .then(() => {
-            if (isMounted) {
-              setSubmissionsVersion((previousValue) => previousValue + 1);
+        supplementalRevisionRef.current += 1;
+        supplementalLoadedRef.current = false;
+        supplementalLoadPromiseRef.current = null;
+        supplementalLoaderRef.current = deferSupplemental
+          ? async () => {
+            await data.loadSupplementalData();
+            try {
+              await fetchAndCacheInstructorGradeSubmissions(currentUser.branch);
+            } catch (error) {
+              console.warn("Unable to load instructor submissions from Supabase.", error);
             }
-          })
-          .catch((error) => {
-            console.warn("Unable to load instructor submissions from Supabase.", error);
-          });
+          }
+          : data.loadSupplementalData;
+        if (!deferSupplemental) {
+          void fetchAndCacheInstructorGradeSubmissions(currentUser.branch)
+            .then(() => {
+              if (isMounted) {
+                setSubmissionsVersion((previousValue) => previousValue + 1);
+              }
+            })
+            .catch((error) => {
+              console.warn("Unable to load instructor submissions from Supabase.", error);
+            });
+        }
       } finally {
         if (isMounted && requestRevision === revision) {
           setIsLoading(false);
@@ -81,7 +102,31 @@ export function useInstructorPortal(options: { includeStudents?: boolean } = {})
       isMounted = false;
       window.removeEventListener("focus", onFocus);
     };
-  }, [currentUser?.branch, currentUser?.id, includeStudents]);
+  }, [currentUser?.branch, currentUser?.id, includeStudents, deferSupplemental]);
+
+  const loadSupplementalData = useCallback(async () => {
+    if (supplementalLoadedRef.current) return;
+    if (supplementalLoadPromiseRef.current) {
+      await supplementalLoadPromiseRef.current;
+      return;
+    }
+    const loader = supplementalLoaderRef.current;
+    if (!loader) return;
+    const revision = supplementalRevisionRef.current;
+    const pending = loader().then(() => {
+      if (revision !== supplementalRevisionRef.current) return;
+      supplementalLoadedRef.current = true;
+      setSubmissionsVersion((previousValue) => previousValue + 1);
+    });
+    supplementalLoadPromiseRef.current = pending;
+    try {
+      await pending;
+    } finally {
+      if (supplementalLoadPromiseRef.current === pending) {
+        supplementalLoadPromiseRef.current = null;
+      }
+    }
+  }, []);
 
   const submissions = useMemo<InstructorGradeSubmission[]>(() => {
     void submissionsVersion;
@@ -99,6 +144,7 @@ export function useInstructorPortal(options: { includeStudents?: boolean } = {})
     students,
     submissions,
     isLoading,
+    loadSupplementalData,
     refreshSubmissions: () =>
       setSubmissionsVersion((previousValue) => previousValue + 1),
   };

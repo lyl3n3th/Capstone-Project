@@ -47,6 +47,8 @@ import {
 } from "../../services/adminStorage";
 import {
   fetchAdminStudentsPage,
+  fetchAdminStudentPageSupplemental,
+  fetchAdminStudentsPageWithSupplemental,
   getNextAdminStudentNumber,
   saveAdminStudent,
   updateAdminStudentEmail,
@@ -1061,6 +1063,8 @@ export default function AdminStudents({
   );
   const [serverStudentPage, setServerStudentPage] = useState<Student[]>([]);
   const [serverStudentTotal, setServerStudentTotal] = useState(0);
+  const [loadedStudentRosterBranch, setLoadedStudentRosterBranch] = useState<string | null>(null);
+  const [supplementalSourcePage, setSupplementalSourcePage] = useState<Student[]>([]);
   const [studentListRefreshVersion, setStudentListRefreshVersion] = useState(0);
   const [isExportingStudents, setIsExportingStudents] = useState(false);
   const studentDataRevisionRef = useRef(0);
@@ -1076,12 +1080,8 @@ export default function AdminStudents({
     setRequestedStudentPage(1);
     setServerStudentPage([]);
     setServerStudentTotal(0);
-    void fetchEnrollmentRequests(currentBranch).catch((error) => {
-      console.warn("Unable to fetch shared enrollment requests.", error);
-    });
-    void fetchSupabaseAdmissionApplicants(currentBranch).catch((error) => {
-      console.warn("Unable to refresh linked admission records.", error);
-    });
+    setSupplementalSourcePage([]);
+    setLoadedStudentRosterBranch(null);
   }, [currentBranch]);
 
   useEffect(() => {
@@ -1104,7 +1104,9 @@ export default function AdminStudents({
         if (!isCurrentLoad()) return;
         const pageStudents = result.students.map(resolveStudentWithApprovedEnrollment) as Student[];
         setServerStudentPage(pageStudents);
+        setSupplementalSourcePage(pageStudents);
         setServerStudentTotal(result.totalItems);
+        setLoadedStudentRosterBranch(currentBranch);
         setStudents((previous) => {
           const byId = new Map(previous.map((student) => [student.id, student]));
           pageStudents.forEach((student) => byId.set(student.id, { ...byId.get(student.id), ...student }));
@@ -1143,10 +1145,13 @@ export default function AdminStudents({
           return sortDirection === "asc" ? order : -order;
         });
         setServerStudentTotal(cached.length);
-        setServerStudentPage(cached.slice(
+        const cachedPage = cached.slice(
           (requestedStudentPage - 1) * studentsPerPage,
           requestedStudentPage * studentsPerPage,
-        ));
+        );
+        setServerStudentPage(cachedPage);
+        setSupplementalSourcePage(cachedPage);
+        setLoadedStudentRosterBranch(currentBranch);
         setStudentRecoveryMessage(
           "Unable to load this page from the shared student list. Showing cached records; no students were restored or synchronized.",
         );
@@ -1174,7 +1179,62 @@ export default function AdminStudents({
   ]);
 
   useEffect(() => {
+    if (loadedStudentRosterBranch !== currentBranch || supplementalSourcePage.length === 0) return;
     let isCancelled = false;
+    void fetchAdminStudentPageSupplemental(currentBranch, supplementalSourcePage)
+      .then((supplementalStudents) => {
+        if (isCancelled) return;
+        const pageStudents = supplementalStudents.map((student) =>
+          resolveStudentWithApprovedEnrollment(student as Student),
+        );
+        setServerStudentPage((current) => current.map((student) => {
+          const supplemental = pageStudents.find((candidate) => candidate.id === student.id);
+          return supplemental ? { ...student, ...supplemental } : student;
+        }));
+        setStudents((previous) => {
+          const byId = new Map(previous.map((student) => [student.id, student]));
+          pageStudents.forEach((student) => byId.set(student.id, { ...byId.get(student.id), ...student }));
+          return removeHiddenStudentsFromAdminList(Array.from(byId.values()));
+        });
+
+        const storedStudents = readStoredStudents();
+        const otherBranches = storedStudents.filter(
+          (student) => normalizeBranchName(student.branch) !== currentBranch,
+        );
+        const currentBranchStudents = storedStudents.filter(
+          (student) => normalizeBranchName(student.branch) === currentBranch,
+        );
+        const byId = new Map(currentBranchStudents.map((student) => [student.id, student]));
+        pageStudents.forEach((student) => byId.set(student.id, { ...byId.get(student.id), ...student }));
+        writeStoredStudents([...otherBranches, ...Array.from(byId.values())]);
+      })
+      .catch((error) => {
+        console.warn("Unable to load supplemental details for this student page.", error);
+      });
+    return () => { isCancelled = true; };
+  }, [currentBranch, loadedStudentRosterBranch, supplementalSourcePage]);
+
+  useEffect(() => {
+    if (loadedStudentRosterBranch !== currentBranch) return;
+    let isCancelled = false;
+    void Promise.allSettled([
+      fetchEnrollmentRequests(currentBranch),
+      fetchSupabaseAdmissionApplicants(currentBranch),
+    ]).then(() => {
+      if (isCancelled) return;
+      setServerStudentPage((current) => current.map(resolveStudentWithApprovedEnrollment));
+      setStudents((current) => current.map(resolveStudentWithApprovedEnrollment));
+    });
+    return () => { isCancelled = true; };
+  }, [currentBranch, loadedStudentRosterBranch]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (loadedStudentRosterBranch !== currentBranch) {
+      setHasLoadedStudentPlanData(false);
+      setSelectedStudentIds([]);
+      return () => { isCancelled = true; };
+    }
     setHasLoadedStudentPlanData(false);
     setSelectedStudentIds([]);
 
@@ -1221,7 +1281,7 @@ export default function AdminStudents({
     return () => {
       isCancelled = true;
     };
-  }, [currentBranch]);
+  }, [currentBranch, loadedStudentRosterBranch]);
 
   useEffect(() => {
     const handleBackupRestoreApplied = () => {
@@ -3582,7 +3642,7 @@ export default function AdminStudents({
       const exportStudents: Student[] = [];
       let totalItems = serverStudentTotal;
       for (let page = 1; page <= Math.ceil(totalItems / studentsPerPage); page += 1) {
-        const result = await fetchAdminStudentsPage(currentBranch, page, studentsPerPage, {
+        const result = await fetchAdminStudentsPageWithSupplemental(currentBranch, page, studentsPerPage, {
           search: searchTerm,
           program: filterProgram === "All Programs" ? undefined : filterProgram,
           yearLevel: filterYearLevel || undefined,

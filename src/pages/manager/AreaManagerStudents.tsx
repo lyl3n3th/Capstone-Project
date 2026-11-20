@@ -6,6 +6,7 @@ import {
   normalizeBranchName,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
+import { fetchAdminStudentPageSupplemental } from "../../services/adminStudentsApi";
 import { hasLatestApprovedIrregularEnrollmentRequestForStudent } from "../../services/enrollmentRequests";
 import {
   fetchAdminStudentCounts,
@@ -164,9 +165,11 @@ const getManagerBranchLabel = (branch: string) =>
 const AreaManagerStudents: React.FC = () => {
   const [managedBranches, setManagedBranches] = useState<string[]>([]);
   const [studentRecords, setStudentRecords] = useState<StudentStorageRecord[]>([]);
+  const [supplementalSourcePage, setSupplementalSourcePage] = useState<StudentStorageRecord[]>([]);
   const [facetRecords, setFacetRecords] = useState<StudentStorageRecord[]>([]);
   const [pageTotalItems, setPageTotalItems] = useState(0);
   const [summaryCounts, setSummaryCounts] = useState({ total: 0, female: 0, male: 0 });
+  const [loadedRosterBranchScope, setLoadedRosterBranchScope] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [pageLoading, setPageLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -196,18 +199,14 @@ const AreaManagerStudents: React.FC = () => {
     let cancelled = false;
     setLoading(true);
     setStudentLoadError("");
+    setLoadedRosterBranchScope(null);
+    setSummaryCounts({ total: 0, female: 0, male: 0 });
     void fetchManagedStudentBranches()
-      .then(async (branches) => {
+      .then((branches) => {
         if (cancelled) return;
         setManagedBranches(branches);
         setHasLoaded(true);
         setLoading(false);
-        try {
-          const counts = await fetchAdminStudentCounts(branches);
-          if (!cancelled) setSummaryCounts(counts);
-        } catch (error) {
-          if (!cancelled) setStudentLoadError(error instanceof Error ? error.message : "Unable to load student totals.");
-        }
       })
       .catch((error) => {
         if (cancelled) return;
@@ -235,23 +234,29 @@ const AreaManagerStudents: React.FC = () => {
                 : sortConfig?.key === "email" ? "email" as const : "student_number" as const,
     sortAscending: sortConfig?.direction !== "desc",
   }), [managedBranches, searchTerm, filterCourse, filterBranch, filterYear, filterStrand, filterGender, sortConfig]);
+  const managedBranchScope = managedBranches.join("::");
 
   useEffect(() => {
     if (loading) return;
     if (managedBranches.length === 0) {
       setStudentRecords([]);
+      setSupplementalSourcePage([]);
+      setLoadedRosterBranchScope(managedBranchScope);
       return;
     }
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setPageLoading(true);
       setStudentLoadError("");
+      setSupplementalSourcePage([]);
       void fetchManagedStudentPage(managedBranches, requestedPage, serverFilters)
         .then(({ students: pageStudents, totalItems }) => {
           if (cancelled) return;
           const visibleStudents = pageStudents.filter(isVisibleManagerStudentRecord);
           setStudentRecords(visibleStudents);
+          setSupplementalSourcePage(visibleStudents);
           setPageTotalItems(totalItems);
+          setLoadedRosterBranchScope(managedBranchScope);
           const lastPage = Math.max(1, Math.ceil(totalItems / studentsPerPage));
           if (requestedPage > lastPage) setCurrentPage(lastPage);
           setFacetRecords((existing) => {
@@ -267,7 +272,42 @@ const AreaManagerStudents: React.FC = () => {
         .finally(() => { if (!cancelled) setPageLoading(false); });
     }, 200);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [loading, managedBranches, requestedPage, serverFilters, refreshVersion]);
+  }, [loading, managedBranches, managedBranchScope, requestedPage, serverFilters, refreshVersion]);
+
+  useEffect(() => {
+    if (loadedRosterBranchScope !== managedBranchScope) return;
+    let cancelled = false;
+    void fetchAdminStudentCounts(managedBranches)
+      .then((counts) => {
+        if (!cancelled) setSummaryCounts(counts);
+      })
+      .catch((error) => {
+        if (!cancelled) setStudentLoadError(error instanceof Error ? error.message : "Unable to load student totals.");
+      });
+    return () => { cancelled = true; };
+  }, [loadedRosterBranchScope, managedBranchScope, managedBranches]);
+
+  useEffect(() => {
+    if (supplementalSourcePage.length === 0) return;
+    let cancelled = false;
+    void fetchAdminStudentPageSupplemental(null, supplementalSourcePage)
+      .then((supplementalStudents) => {
+        if (cancelled) return;
+        const byId = new Map(supplementalStudents.map((student) => [student.id, student]));
+        setStudentRecords((current) => current.map((student) => ({
+          ...student,
+          ...(byId.get(student.id) ?? {}),
+        })));
+        setFacetRecords((current) => current.map((student) => ({
+          ...student,
+          ...(byId.get(student.id) ?? {}),
+        })));
+      })
+      .catch((error) => {
+        console.warn("Unable to load supplemental manager roster details.", error);
+      });
+    return () => { cancelled = true; };
+  }, [supplementalSourcePage]);
 
   const uniqueCourses = Array.from(
     new Set(facetStudents.map((s) => s.course)),

@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { FiDownload, FiSearch } from "react-icons/fi";
 import { useInstructorPortal } from "../../hooks/useInstructorPortal";
 import { getCurrentStudentInstructorAssignments } from "../../services/instructorRoster";
-import { fetchAdminStudentsPage } from "../../services/adminStudentsApi";
+import {
+  fetchAdminStudentPageSupplemental,
+  fetchAdminStudentsPage,
+} from "../../services/adminStudentsApi";
 import { getInstructorScopedData } from "../../services/instructorPortal";
 import type { StudentStorageRecord } from "../../services/adminStorage";
 import SkeletonPage from "../../components/common/SkeletonPage";
@@ -18,8 +21,15 @@ import {
 } from "../../services/instructorEvaluationStatus";
 
 export default function InstructorStudents() {
-  const { currentUser, assignments, sections, isLoading } = useInstructorPortal({ includeStudents: false });
+  const {
+    currentUser,
+    assignments,
+    sections,
+    isLoading,
+    loadSupplementalData,
+  } = useInstructorPortal({ includeStudents: false, deferSupplemental: true });
   const [studentRecords, setStudentRecords] = useState<StudentStorageRecord[]>([]);
+  const [supplementalSourcePage, setSupplementalSourcePage] = useState<StudentStorageRecord[]>([]);
   const [pageTotalItems, setPageTotalItems] = useState(0);
   const [pageLoading, setPageLoading] = useState(false);
   const [pageError, setPageError] = useState("");
@@ -30,6 +40,8 @@ export default function InstructorStudents() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
   const evaluationScope = `${currentUser?.branch ?? ""}::${currentUser?.id ?? ""}`;
+  const [loadedRosterScope, setLoadedRosterScope] = useState("");
+  const hasLoadedStudentPage = Boolean(currentUser?.branch && currentUser.id) && loadedRosterScope === evaluationScope;
   const [evaluations, setEvaluations] = useState<{
     scope: string;
     loading: boolean;
@@ -61,7 +73,7 @@ export default function InstructorStudents() {
   }), [assignments, sections, sectionFilter, subjectFilter, yearLevelFilter]);
 
   useEffect(() => {
-    if (!currentUser?.branch || !currentUser.id) return;
+    if (!hasLoadedStudentPage || !currentUser?.branch || !currentUser.id) return;
     const branch = currentUser.branch;
     const instructorId = currentUser.id;
     const scope = `${branch}::${instructorId}`;
@@ -90,7 +102,7 @@ export default function InstructorStudents() {
       window.removeEventListener("focus", onRefresh);
       window.removeEventListener(INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT, onRefresh);
     };
-  }, [currentUser?.branch, currentUser?.id]);
+  }, [currentUser?.branch, currentUser?.id, hasLoadedStudentPage]);
 
   const subjectOptions = useMemo(
     () =>
@@ -135,6 +147,7 @@ export default function InstructorStudents() {
     let cancelled = false;
     setPageLoading(true);
     setStudentRecords([]);
+    setSupplementalSourcePage([]);
     setPageError("");
     void fetchAdminStudentsPage(currentUser.branch, currentPage, pageSize, {
       sectionCodes,
@@ -145,7 +158,9 @@ export default function InstructorStudents() {
       .then(({ students: pageStudents, totalItems }) => {
         if (cancelled) return;
         setStudentRecords(pageStudents);
+        setSupplementalSourcePage(pageStudents);
         setPageTotalItems(totalItems);
+        setLoadedRosterScope(evaluationScope);
         const lastPage = Math.max(1, Math.ceil(totalItems / pageSize));
         if (currentPage > lastPage) setRequestedPage({ scope: paginationScope, page: lastPage });
       })
@@ -158,7 +173,24 @@ export default function InstructorStudents() {
       })
       .finally(() => { if (!cancelled) setPageLoading(false); });
     return () => { cancelled = true; };
-  }, [isLoading, currentUser?.branch, currentUser?.id, currentPage, pageSize, scopedAssignments, sections, debouncedSearch, yearLevelFilter, paginationScope]);
+  }, [isLoading, currentUser?.branch, currentUser?.id, currentPage, pageSize, scopedAssignments, sections, debouncedSearch, yearLevelFilter, paginationScope, evaluationScope]);
+
+  useEffect(() => {
+    if (!currentUser?.branch || supplementalSourcePage.length === 0) return;
+    let cancelled = false;
+    void Promise.allSettled([
+      loadSupplementalData(),
+      fetchAdminStudentPageSupplemental(currentUser.branch, supplementalSourcePage),
+    ]).then(([, pageSupplementResult]) => {
+      if (cancelled || pageSupplementResult.status !== "fulfilled") return;
+      const byId = new Map(pageSupplementResult.value.map((student) => [student.id, student]));
+      setStudentRecords((current) => current.map((student) => ({
+        ...student,
+        ...(byId.get(student.id) ?? {}),
+      })));
+    });
+    return () => { cancelled = true; };
+  }, [currentUser?.branch, loadSupplementalData, supplementalSourcePage]);
 
   const buildRows = (sourceStudents: StudentStorageRecord[]) => {
     const assignmentSubjectCodes = new Set(

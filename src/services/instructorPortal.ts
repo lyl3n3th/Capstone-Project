@@ -720,10 +720,12 @@ export const getInstructorScopedData = async ({
   branch,
   instructorId,
   includeStudents = true,
+  deferSupplemental = false,
 }: {
   branch?: string | null;
   instructorId: string;
   includeStudents?: boolean;
+  deferSupplemental?: boolean;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
   const [snapshot, remoteStudentsResult] = await Promise.all([
@@ -737,18 +739,22 @@ export const getInstructorScopedData = async ({
     }) : Promise.resolve([]),
   ]);
 
-  try {
-    await Promise.all([
-      fetchStudentSubjectPlans(resolvedBranch, { authoritative: true }),
-      fetchStudentScheduleRequests(resolvedBranch, { authoritative: true }),
-      fetchEnrollmentRequests(resolvedBranch, { syncLocal: false }),
-    ]);
-  } catch (error) {
-    console.warn(
-      "Unable to load approved individual schedules from Supabase; using cached schedules.",
-      error,
-    );
-  }
+  const loadSupplementalData = async () => {
+    try {
+      await Promise.all([
+        fetchStudentSubjectPlans(resolvedBranch, { authoritative: true }),
+        fetchStudentScheduleRequests(resolvedBranch, { authoritative: true }),
+        fetchEnrollmentRequests(resolvedBranch, { syncLocal: false }),
+      ]);
+    } catch (error) {
+      console.warn(
+        "Unable to load approved individual schedules from Supabase; using cached schedules.",
+        error,
+      );
+    }
+  };
+
+  if (!deferSupplemental) await loadSupplementalData();
 
   if (includeStudents) {
     writeStoredStudents([
@@ -779,6 +785,7 @@ export const getInstructorScopedData = async ({
     assignments,
     sections,
     students,
+    loadSupplementalData,
   };
 };
 
