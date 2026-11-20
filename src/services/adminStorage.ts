@@ -4814,8 +4814,12 @@ export const fetchSupabaseAdmissionApplicants = async (
   );
   const persisted = await fetchAndCacheBranchScopedData<AdminEnrolleeRecord[]>("enrollees", branch);
   const merged = mergeAdminEnrolleeRecords(applicantRecords, persisted ?? []);
-  const reviewed = await Promise.all(merged.map(record => fetchStudentCredentialReviewDecisions(record, branch)));
-  const records = reviewed.map(normalizeAdminEnrolleeCapitalization);
+  // Keep list loading to the admission queue and cached records. Fetching each
+  // uploaded document's review decision here creates an RPC burst; details
+  // refresh those decisions when an administrator opens an applicant.
+  const records = merged.map(record =>
+    normalizeAdminEnrolleeCapitalization(applyCredentialReviewDecisions(record, branch)),
+  );
   writeBranchScopedData("enrollees", branch, records, { skipSupabaseSync: true });
   return records;
 };

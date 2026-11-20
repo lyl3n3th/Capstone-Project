@@ -44,6 +44,7 @@ import {
   fetchEvaluationQuestionnaire,
   fetchInstructorEvaluationSubmissions,
   fetchSupabaseAdmissionApplicants,
+  fetchStudentCredentialReviewDecisions,
   getStudentSectionChoices,
   getStudentPortalSubjects,
   getStudentsForBranch,
@@ -1507,6 +1508,7 @@ export default function AdminEnrollees({
   const [selectedRequest, setSelectedRequest] = useState<
     EnrollmentRequest | Enrollee | null
   >(null);
+  const credentialReviewRequestsInFlight = useRef(new Set<string>());
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [systemAlert, setSystemAlert] = useState<{
     title: string;
@@ -6212,6 +6214,30 @@ export default function AdminEnrollees({
 
   const handleReviewRequirements = (request: EnrollmentRequest | Enrollee) => {
     setSelectedRequest(request);
+    if (!isEnrollmentRequest(request)) {
+      const requestKey = `${currentBranch}:${request.id}`;
+      if (!credentialReviewRequestsInFlight.current.has(requestKey)) {
+        credentialReviewRequestsInFlight.current.add(requestKey);
+        void fetchStudentCredentialReviewDecisions(request, currentBranch)
+          .then((reviewed) => {
+            setSelectedRequest((previous) =>
+              previous?.id === request.id && !isEnrollmentRequest(previous)
+                ? { ...previous, attachments: reviewed.attachments }
+                : previous,
+            );
+          })
+          .catch((error) => {
+            console.error("Failed to refresh applicant document review statuses", error);
+            addToast(
+              "Could not refresh document review statuses. Showing saved statuses.",
+              "warning",
+            );
+          })
+          .finally(() => {
+            credentialReviewRequestsInFlight.current.delete(requestKey);
+          });
+      }
+    }
     if (!isEnrollmentRequest(request) && isTransfereeAdmission(request)) {
       setTransfereeEvaluations((prev) => ({
         ...prev,
