@@ -1,27 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-  Label,
-} from "recharts";
 import { FaFileAlt, FaUsers } from "react-icons/fa";
 import { FiMenu, FiX } from "react-icons/fi";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import AdmissionPortalAccessCard from "../../components/common/AdmissionPortalAccessCard";
-import ChartNote from "../../components/common/ChartNote";
+import StudentProgramDistribution, {
+  type ProgramDistributionItem,
+} from "../../components/common/StudentProgramDistribution";
 import { useAuth } from "../../hooks/useAuth";
 import { getStudentsForBranch, normalizeBranchName } from "../../services/adminStorage";
 import { fetchAdminStudents } from "../../services/adminStudentsApi";
 import "../../styles/admin/admin-dashboard.css";
-
-interface ProgramData {
-  name: string;
-  value: number;
-  academicLevel: "SHS" | "College" | "Other";
-}
 
 interface StudentRecord {
   program: string;
@@ -30,15 +18,6 @@ interface StudentRecord {
   shsTrackType?: string;
   branch?: string;
 }
-
-const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884D8"];
-
-const formatProgramLabel = (name: string) => {
-  if (name === "ICT SUPPORT AND PROGRAMMING TECHNOLOGIES") {
-    return "ICT Support and Programming Technologies";
-  }
-  return name;
-};
 
 interface DashboardProps {
   onLogout: () => void;
@@ -84,16 +63,16 @@ export default function AdminDashboard({
   const completeRequirements = activeStudents.filter((student) => student.status === "Complete").length;
   const incompleteRequirements = activeStudents.filter((student) => student.status === "Incomplete").length;
 
-  const programData = useMemo<ProgramData[]>(() => {
+  const programData = useMemo<ProgramDistributionItem[]>(() => {
     const counts = new Map<
       string,
-      { count: number; academicLevel: ProgramData["academicLevel"] }
+      { count: number; academicLevel: ProgramDistributionItem["academicLevel"] }
     >();
 
     activeStudents.forEach((student) => {
       const normalizedProgram = (student.program || "").trim();
       let categoryName = normalizedProgram || "Others";
-      let academicLevel: ProgramData["academicLevel"] = "Other";
+      let academicLevel: ProgramDistributionItem["academicLevel"] = "Other";
 
       if (normalizedProgram === "SHS") {
         categoryName = (
@@ -123,21 +102,6 @@ export default function AdminDashboard({
       }))
       .sort((left, right) => right.value - left.value);
   }, [activeStudents]);
-
-  const shsPrograms = programData.filter(
-    (item) => item.academicLevel === "SHS",
-  );
-  const collegePrograms = programData.filter(
-    (item) => item.academicLevel === "College",
-  );
-
-  const programColor = useMemo(() => {
-    const colorMap = new Map<string, string>();
-    programData.forEach((program, index) => {
-      colorMap.set(program.name, COLORS[index % COLORS.length]);
-    });
-    return colorMap;
-  }, [programData]);
 
   const handleSidebarClose = () => {
     setIsSidebarOpen(false);
@@ -236,171 +200,10 @@ export default function AdminDashboard({
           </div>
         </div>
 
-        <div className="content-grid">
-          <div className="card pie-card">
-            <h3>Student Distribution by Program</h3>
-            <ChartNote variant="compact">
-              Each slice represents active students in a strand or course.
-              Hover a slice to view the exact count, and use the center total as
-              the branch-wide summary.
-            </ChartNote>
-            <div className="pie-container">
-              {totalStudents === 0 ? (
-                <div className="dashboard-empty-distribution" role="status">
-                  <strong className="pie-center-value">0</strong>
-                  <span>Active Students</span>
-                  <p>No students enrolled in this branch yet.</p>
-                </div>
-              ) : (
-              <ResponsiveContainer
-                width="100%"
-                height="100%"
-                minWidth={1}
-                minHeight={280}
-                initialDimension={{ width: 360, height: 360 }}
-              >
-                <PieChart>
-                  <Pie
-                    data={programData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius="38%"
-                    outerRadius="70%"
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    <Label
-                      content={({ viewBox }) => {
-                        const pieViewBox = viewBox as
-                          | { cx?: number; cy?: number }
-                          | undefined;
-                        const centerX = pieViewBox?.cx;
-                        const centerY = pieViewBox?.cy;
-
-                        if (
-                          typeof centerX !== "number" ||
-                          typeof centerY !== "number"
-                        ) {
-                          return null;
-                        }
-
-                        return (
-                          <text
-                            x={centerX}
-                            y={centerY}
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                          >
-                            <tspan
-                              x={centerX}
-                              y={centerY - 6}
-                              className="pie-center-value"
-                            >
-                              {totalStudents.toLocaleString()}
-                            </tspan>
-                            <tspan
-                              x={centerX}
-                              y={centerY + 18}
-                              className="pie-center-label"
-                            >
-                              Active Students
-                            </tspan>
-                          </text>
-                        );
-                      }}
-                    />
-                    {programData.map((_entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={COLORS[index % COLORS.length]}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-              )}
-            </div>
-            <div
-              className="dashboard-program-legend"
-              aria-label="Program distribution legend"
-            >
-              {programData.map((program) => (
-                <div
-                  key={program.name}
-                  className="dashboard-program-legend-item"
-                >
-                  <span
-                    className="dashboard-program-legend-swatch"
-                    style={{
-                      backgroundColor:
-                        programColor.get(program.name) || COLORS[0],
-                    }}
-                    aria-hidden="true"
-                  />
-                  <div className="dashboard-program-legend-copy">
-                    <span className="dashboard-program-legend-label">
-                      {formatProgramLabel(program.name)}
-                    </span>
-                    <span className="dashboard-program-legend-value">
-                      {program.value} Students
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="card details-card">
-            <h3>Program Details</h3>
-            <div className="program-section">
-              <h4>Senior High School</h4>
-              <ul>
-                {shsPrograms.length > 0 ? (
-                  shsPrograms.map((program) => (
-                    <li key={program.name}>
-                      <span
-                        className="dot"
-                        style={{
-                          backgroundColor: programColor.get(program.name),
-                        }}
-                      ></span>
-                      <span className="program-section-copy">
-                        {formatProgramLabel(program.name)} - {program.value}{" "}
-                        Students
-                      </span>
-                    </li>
-                  ))
-                ) : (
-                  <li>0 Students</li>
-                )}
-              </ul>
-            </div>
-            <div className="program-section">
-              <h4>College</h4>
-              <ul>
-                {collegePrograms.length > 0 ? (
-                  collegePrograms.map((program) => (
-                    <li key={program.name}>
-                      <span
-                        className="dot"
-                        style={{
-                          backgroundColor: programColor.get(program.name),
-                        }}
-                      ></span>
-                      <span className="program-section-copy">
-                        {formatProgramLabel(program.name)} - {program.value}{" "}
-                        Students
-                      </span>
-                    </li>
-                  ))
-                ) : (
-                  <li>0 Students</li>
-                )}
-              </ul>
-            </div>
-          </div>
-        </div>
+        <StudentProgramDistribution
+          programs={programData}
+          totalStudents={totalStudents}
+        />
       </main>
     </div>
   );

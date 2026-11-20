@@ -189,6 +189,7 @@ export const mapStudentIdentityToAuthUser = (
 
 export const activateApprovedStudent = async (
   trackingNumber: string,
+  preferredStudentNumber?: string | null,
 ) => {
   let lastRetriableError: string | null = null;
 
@@ -196,6 +197,8 @@ export const activateApprovedStudent = async (
     const { data, error } = await supabase
       .rpc("activate_approved_student", {
         p_tracking_number: trackingNumber.trim().toUpperCase(),
+        p_preferred_student_number:
+          preferredStudentNumber?.trim().toUpperCase() || null,
       })
       .returns<StudentPortalSnapshotRow[]>();
 

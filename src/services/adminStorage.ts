@@ -4,7 +4,11 @@ import type {
   AdmissionDraft,
 } from "../types/application";
 import { supabase } from "../lib/supabase";
-import { findRegisteredBranch, findBranchByStudentPrefix } from "./branchDirectory";
+import {
+  fetchBranchDirectory,
+  findRegisteredBranch,
+  findBranchByStudentPrefix,
+} from "./branchDirectory";
 import {
   getAdmissionRequirements,
   getEstimatedCollegeTuition,
@@ -4771,7 +4775,10 @@ const mapSupabaseApplicantToAdminRecord = async (
 export const fetchSupabaseAdmissionApplicants = async (
   branch: string | null | undefined,
 ) => {
-  const branchCode = normalizeBranchCode(normalizeBranchName(branch));
+  await fetchBranchDirectory();
+  const branchName = normalizeBranchName(branch);
+  const branchCode =
+    findRegisteredBranch(branchName)?.code ?? normalizeBranchCode(branchName);
   const [queueResult, academicYearResult] = await Promise.all([
     supabase
       .rpc("get_admin_admission_queue", {
@@ -5024,6 +5031,12 @@ export const promoteApplicantToStoredStudent = (
     contact: normalizedApplicant.personalInfo.contactNumber,
     email: normalizedApplicant.personalInfo.email,
     address: normalizedApplicant.personalInfo.address,
+    lastSchoolAttended:
+      normalizedApplicant.personalInfo.lastSchoolAttended ||
+      existingStudent?.lastSchoolAttended,
+    yearCompletion:
+      normalizedApplicant.personalInfo.yearCompletion ||
+      existingStudent?.yearCompletion,
     status:
       normalizedApplicant.documentsSubmitted >= normalizedApplicant.totalDocuments
         ? "Complete"

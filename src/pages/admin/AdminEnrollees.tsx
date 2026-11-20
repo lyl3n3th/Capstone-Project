@@ -511,11 +511,15 @@ const getAdmissionPersonalInfoItems = (
       value: info.lastSchoolAttended,
       isWide: true,
     },
-    {
-      label: "Year Completion",
-      value: info.yearCompletion,
-      spanClassName: "personal-info-item-span-3",
-    },
+    ...(!isCollegeTransferee(enrollee)
+      ? [
+          {
+            label: "Year Completion",
+            value: info.yearCompletion,
+            spanClassName: "personal-info-item-span-3",
+          },
+        ]
+      : []),
   ];
 
   const optionalItems: ReviewInfoItem[] = [
@@ -3202,6 +3206,25 @@ export default function AdminEnrollees({
 
     if (!draftSlot.day || !draftSlot.startTime || !draftSlot.endTime) {
       addToast("Fill in the schedule fields before adding a day.", "warning");
+      return;
+    }
+
+    const selectedSubject = subjects.find((subject) =>
+      assignmentForm.subjectIds.includes(subject.id),
+    );
+    const scheduleError = getClassAssignmentScheduleError(
+      {
+        id: editingAssignment?.id || "",
+        sectionId: assignmentForm.sectionId,
+        subjectCode: selectedSubject?.code || "Selected subject",
+        academicYear: assignmentForm.academicYear.trim() || "2026-2027",
+        semester: normalizeSectionSemester(assignmentForm.semester),
+        schedule: [...assignmentForm.schedule, draftSlot],
+      },
+      [],
+    );
+    if (scheduleError) {
+      addToast(scheduleError, "warning");
       return;
     }
 
@@ -6521,6 +6544,13 @@ export default function AdminEnrollees({
           let syncedStudentNumber = enrolleeForApproval.studentNumber;
 
           if (isApprove) {
+            const activatedStudent = await activateApprovedStudent(
+              enrolleeForApproval.trackingNumber,
+              enrolleeForApproval.studentNumber,
+            );
+            syncedStudentNumber =
+              activatedStudent.studentNumber || syncedStudentNumber;
+
             try {
               await updateAdmissionProgress({
                 trackingNumber: enrolleeForApproval.trackingNumber,
@@ -6531,21 +6561,8 @@ export default function AdminEnrollees({
               });
             } catch (progressError) {
               console.warn(
-                "Unable to save admission approval details to Supabase before activation.",
+                "Unable to save supplemental admission approval details to Supabase after student activation.",
                 progressError,
-              );
-            }
-
-            try {
-              const activatedStudent = await activateApprovedStudent(
-                enrolleeForApproval.trackingNumber,
-              );
-              syncedStudentNumber =
-                activatedStudent.studentNumber || syncedStudentNumber;
-            } catch (activationError) {
-              console.warn(
-                "Unable to activate the approved student in Supabase, keeping local admin state.",
-                activationError,
               );
             }
           } else {
@@ -6883,7 +6900,12 @@ export default function AdminEnrollees({
       }
     } catch (error) {
       console.error("Failed to process enrollment request:", error);
-      addToast("Failed to process enrollment request.", "error");
+      addToast(
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "Failed to process enrollment request.",
+        "error",
+      );
     } finally {
       decisionInFlight.current = false;
       setIsProcessingDecision(false);

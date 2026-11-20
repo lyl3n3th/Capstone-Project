@@ -277,7 +277,7 @@ const fetchRemoteStudentRecordForCurrentSession = async (
 
   const [planningStates, scheduleRequests] = await Promise.all([
     fetchStudentPlanningStates(sessionUser.branch),
-    fetchStudentScheduleRequests(sessionUser.branch),
+    fetchStudentScheduleRequests(sessionUser.branch, { authoritative: true }),
   ]);
   const matchingPlanningState =
     planningStates.find(
@@ -287,25 +287,33 @@ const fetchRemoteStudentRecordForCurrentSession = async (
           state.trackingNumber === remoteStudent.trackingNumber),
     ) ?? null;
   const approvedScheduleRequest =
-    scheduleRequests.find(
-      (request) =>
-        request.status === "Approved" &&
-        (request.studentNumber === remoteStudent.id ||
-          (remoteStudent.trackingNumber &&
-            request.trackingNumber === remoteStudent.trackingNumber)),
-    ) ?? null;
-  const remoteStudentWithPlanning = matchingPlanningState
+    scheduleRequests
+      .filter(
+        (request) =>
+          request.status === "Approved" &&
+          (request.studentNumber === remoteStudent.id ||
+            (remoteStudent.trackingNumber &&
+              request.trackingNumber === remoteStudent.trackingNumber)),
+      )
+      .sort(
+        (left, right) =>
+          Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+      )[0] ?? null;
+  const studentWithPlanningState = matchingPlanningState
     ? mergeStudentPlanningStateIntoStudent(remoteStudent, matchingPlanningState)
-    : approvedScheduleRequest
-      ? {
-          ...remoteStudent,
-          requestedOwnSchedule: true,
-          ownScheduleRequestStatus: "Approved" as const,
-          ownScheduleAcademicYear: approvedScheduleRequest.academicYear,
-          ownScheduleSemester: approvedScheduleRequest.semester,
-          ownScheduleSelectionStatus: "Approved" as const,
-        }
-      : remoteStudent;
+    : remoteStudent;
+  // An approved request is the server-confirmed source for the official
+  // schedule. It must take precedence over a stale planning-state row.
+  const remoteStudentWithPlanning = approvedScheduleRequest
+    ? {
+        ...studentWithPlanningState,
+        requestedOwnSchedule: true,
+        ownScheduleRequestStatus: "Approved" as const,
+        ownScheduleAcademicYear: approvedScheduleRequest.academicYear,
+        ownScheduleSemester: approvedScheduleRequest.semester,
+        ownScheduleSelectionStatus: "Approved" as const,
+      }
+    : studentWithPlanningState;
   const cachedRemoteStudent = mergeStudentIntoLocalCache(
     remoteStudentWithPlanning,
   );

@@ -460,6 +460,19 @@ const getErrorMessage = (error: SupabaseErrorLike) =>
       ? `${error.message} ${error.hint}`.trim()
       : error.message;
 
+const getAdmissionApplicationSaveErrorMessage = (error: SupabaseErrorLike) => {
+  const message = getErrorMessage(error);
+  const isDuplicateContact =
+    /matching application already exists|existing tracking number/i.test(message) ||
+    /duplicate key value violates unique constraint.*admission_applications_active_contact_unique_idx/i.test(
+      message,
+    );
+
+  return isDuplicateContact
+    ? "The email or contact number already exists."
+    : message;
+};
+
 const getSingleRow = <T>(data: unknown): T | null => {
   if (Array.isArray(data)) {
     return data.length > 0 ? (data[0] as T) : null;
@@ -628,7 +641,7 @@ export const saveAdmissionApplication = async (
     .returns<AdmissionSummaryRow[]>();
 
   if (error) {
-    throw new Error(getErrorMessage(error));
+    throw new Error(getAdmissionApplicationSaveErrorMessage(error));
   }
 
   const row = getSingleRow<AdmissionSummaryRow>(data);

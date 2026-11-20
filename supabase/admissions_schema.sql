@@ -670,7 +670,7 @@ declare
   v_program_id uuid;
   v_track_id uuid;
   v_honor_id uuid;
-  v_duplicate_tracking text;
+  v_duplicate_exists boolean;
 begin
   select id
   into v_branch_id
@@ -736,24 +736,20 @@ begin
     v_honor_id := null;
   end if;
 
-  select app.tracking_number
-  into v_duplicate_tracking
-  from public.admission_applications app
-  where app.tracking_number <> coalesce(upper(trim(p_tracking_number)), '')
-    and app.application_status <> 'cancelled'
-    and (
-      app.email = trim(lower(p_email))::citext
-      or app.phone_number = regexp_replace(trim(p_phone_number), '\D', '', 'g')
-    )
-  order by app.updated_at desc
-  limit 1;
+  select exists (
+    select 1
+    from public.admission_applications app
+    where app.tracking_number <> coalesce(upper(trim(p_tracking_number)), '')
+      and app.application_status <> 'cancelled'
+      and (
+        app.email = trim(lower(p_email))::citext
+        or app.phone_number = regexp_replace(trim(p_phone_number), '\D', '', 'g')
+      )
+  ) into v_duplicate_exists;
 
-  if v_duplicate_tracking is not null then
+  if v_duplicate_exists then
     raise exception using
-      message = format(
-        'A matching application already exists for this email or phone number. Existing tracking number: %s',
-        v_duplicate_tracking
-      ),
+      message = 'The email or contact number already exists.',
       errcode = 'P0001';
   end if;
 

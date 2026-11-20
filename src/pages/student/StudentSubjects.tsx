@@ -3,7 +3,6 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import {
   FaCalendarAlt,
   FaDownload,
-  FaFilter,
   FaGraduationCap,
 } from "react-icons/fa";
 import Sidebar from "../../components/common/Sidebar";
@@ -933,9 +932,6 @@ function StudentSubjects() {
     isLoading,
     refreshStudent,
   } = useStudent();
-  const [selectedAcademicYear, setSelectedAcademicYear] = useState("");
-  const [selectedSemester, setSelectedSemester] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
   const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
   const scheduleDraftTermRef = useRef("");
   const scheduleDraftEditedRef = useRef(false);
@@ -1007,7 +1003,7 @@ function StudentSubjects() {
       })
     : isMissingSyncedAcademicData
       ? "No official subjects are posted yet for your current term."
-      : "No subjects found for the selected academic year and semester.";
+      : "No subjects found for the current academic year and semester.";
   const studentGradeRecords = useMemo(
     () => {
       void gradeRecordsVersion;
@@ -1153,12 +1149,10 @@ function StudentSubjects() {
   ]);
 
   const effectiveAcademicYear =
-    selectedAcademicYear && availableAcademicYears.includes(selectedAcademicYear)
-      ? selectedAcademicYear
-      : currentTerm?.academicYear &&
-          availableAcademicYears.includes(currentTerm.academicYear)
-        ? currentTerm.academicYear
-        : availableAcademicYears[0] || ownScheduleAcademicYear;
+    currentTerm?.academicYear &&
+      availableAcademicYears.includes(currentTerm.academicYear)
+      ? currentTerm.academicYear
+      : availableAcademicYears[0] || ownScheduleAcademicYear;
 
   const availableSemesters = useMemo(() => {
     const semesters = new Set(
@@ -1191,15 +1185,13 @@ function StudentSubjects() {
   ]);
 
   const effectiveSemester =
-    selectedSemester && availableSemesters.includes(selectedSemester)
-      ? selectedSemester
-      : currentTerm?.academicYear === effectiveAcademicYear &&
-          currentTerm?.semester &&
-          availableSemesters.includes(currentTerm.semester)
-        ? currentTerm.semester
-        : availableSemesters[0] || ownScheduleSemester;
+    currentTerm?.academicYear === effectiveAcademicYear &&
+      currentTerm?.semester &&
+      availableSemesters.includes(currentTerm.semester)
+      ? currentTerm.semester
+      : availableSemesters[0] || ownScheduleSemester;
 
-  const filteredSubjects: StudentPortalSubject[] = useMemo(
+  const currentTermSubjects: StudentPortalSubject[] = useMemo(
     () =>
       allSubjects.filter(
         (subject) =>
@@ -1231,7 +1223,7 @@ function StudentSubjects() {
       );
     }
 
-    filteredSubjects.forEach((subject) => {
+    currentTermSubjects.forEach((subject) => {
       const existingGroup =
         groupsBySubject.get(subject.id) || groupsBySubject.get(subject.code);
 
@@ -1256,7 +1248,7 @@ function StudentSubjects() {
         left.subjectCode.localeCompare(right.subjectCode) ||
         left.subjectName.localeCompare(right.subjectName),
     );
-  }, [filteredSubjects, scheduleChoiceGroups, supportsOwnSchedule]);
+  }, [currentTermSubjects, scheduleChoiceGroups, supportsOwnSchedule]);
 
   const selectedOwnScheduleAssignments = useMemo(
     () =>
@@ -1301,11 +1293,6 @@ function StudentSubjects() {
 
   const handleLogout = () => {
     addToast("Logging out...", "info");
-  };
-
-  const handleFilter = () => {
-    setShowFilters(!showFilters);
-    addToast(showFilters ? "Filter panel closed" : "Filter panel opened", "info");
   };
 
   const handleOwnScheduleSelectionChange = (
@@ -1405,7 +1392,7 @@ function StudentSubjects() {
   };
 
   const handleDownloadSchedule = async () => {
-    if (filteredSubjects.length === 0) {
+    if (currentTermSubjects.length === 0) {
       addToast("No official subjects are available to download yet.", "warning");
       return;
     }
@@ -1421,7 +1408,7 @@ function StudentSubjects() {
         yearLevel: currentTerm?.yearLevel || student?.yearLevel || "",
         academicYear: effectiveAcademicYear,
         semester: effectiveSemester,
-        subjects: filteredSubjects,
+        subjects: currentTermSubjects,
         isSHS,
       });
       const url = URL.createObjectURL(schedulePdf);
@@ -1789,9 +1776,6 @@ function StudentSubjects() {
             </div>
 
             <div className="s-grades-banner-actions">
-              <button className="s-filter-btn" onClick={handleFilter}>
-                <FaFilter /> Filter
-              </button>
               <button
                 className="s-download-btn"
                 onClick={() => void handleDownloadSchedule()}
@@ -1801,57 +1785,9 @@ function StudentSubjects() {
             </div>
           </div>
 
-          {showFilters && (
-            <div className="s-filter-panel">
-              <h3>Filter Subjects</h3>
-              <div className="s-filter-row">
-                <div className="s-filter-group">
-                  <label>Academic Year</label>
-                  <select
-                    value={effectiveAcademicYear}
-                    onChange={(event) => {
-                      setSelectedAcademicYear(event.target.value);
-                      addToast(
-                        `Filtered by academic year: ${event.target.value}`,
-                        "info",
-                      );
-                    }}
-                    className="s-filter-select"
-                  >
-                    {availableAcademicYears.map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="s-filter-group">
-                  <label>Semester</label>
-                  <select
-                    value={effectiveSemester}
-                    onChange={(event) => {
-                      setSelectedSemester(event.target.value);
-                      addToast(
-                        `Filtered by semester: ${event.target.value}`,
-                        "info",
-                      );
-                    }}
-                    className="s-filter-select"
-                  >
-                    {availableSemesters.map((semester) => (
-                      <option key={semester} value={semester}>
-                        {semester}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
           <div className="s-subjects-grid">
-            {filteredSubjects.length > 0 ? (
-              filteredSubjects.map((subject) => (
+            {currentTermSubjects.length > 0 ? (
+              currentTermSubjects.map((subject) => (
                 <div key={subject.id} className="s-subject-card">
                   <div className="s-subject-header">
                     <div className="s-subject-code">{subject.code}</div>
@@ -1891,17 +1827,17 @@ function StudentSubjects() {
             )}
           </div>
 
-          {filteredSubjects.length > 0 ? (
+          {currentTermSubjects.length > 0 ? (
             <div className="s-subjects-summary">
               <div className="s-summary-card">
                 <h4>Total Subjects</h4>
-                <div className="s-summary-value">{filteredSubjects.length}</div>
+                <div className="s-summary-value">{currentTermSubjects.length}</div>
               </div>
-              {!isSHS && filteredSubjects.some((subject) => subject.units) ? (
+              {!isSHS && currentTermSubjects.some((subject) => subject.units) ? (
                 <div className="s-summary-card">
                   <h4>Total Units</h4>
                   <div className="s-summary-value">
-                    {filteredSubjects.reduce(
+                    {currentTermSubjects.reduce(
                       (sum, subject) => sum + (subject.units || 0),
                       0,
                     )}

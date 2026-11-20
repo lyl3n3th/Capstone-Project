@@ -203,6 +203,29 @@ const getApprovedOwnScheduleSubjects = ({
     );
   });
 
+  // The approved request carries the assignments the student selected. Use it
+  // before a derived plan, which may exist locally without its schedule slots.
+  if (
+    approvedScheduleRequest?.status === "Approved" &&
+    approvedScheduleRequest.academicYear.trim() === academicYear.trim() &&
+    normalizeSemesterValue(approvedScheduleRequest.semester) ===
+      normalizeSemesterValue(semester) &&
+    approvedScheduleRequest.selections.length > 0
+  ) {
+    return getStudentPortalSubjectsFromScheduledAssignments({
+      branch,
+      assignments: approvedScheduleRequest.selections,
+      plannedSubjects: approvedScheduleRequest.selections.map((selection) => ({
+        subjectId: selection.subjectId || selection.subjectCode,
+        subjectCode: selection.subjectCode,
+        subjectName: selection.subjectName,
+        units: selection.units,
+      })),
+      academicYear,
+      semester,
+    });
+  }
+
   if (resolvedStudentRecord.ownScheduleSelectionStatus !== "Approved") {
     // College transferees have no official load until their schedule is approved.
     if (isCollegeTransferee(resolvedStudentRecord)) return [];
@@ -238,28 +261,7 @@ const getApprovedOwnScheduleSubjects = ({
       });
     }
 
-    if (
-      approvedScheduleRequest?.status !== "Approved" ||
-      approvedScheduleRequest.academicYear.trim() !== academicYear.trim() ||
-      normalizeSemesterValue(approvedScheduleRequest.semester) !==
-        normalizeSemesterValue(semester) ||
-      approvedScheduleRequest.selections.length === 0
-    ) {
-      return [];
-    }
-
-    return getStudentPortalSubjectsFromScheduledAssignments({
-      branch,
-      assignments: approvedScheduleRequest.selections,
-      plannedSubjects: approvedScheduleRequest.selections.map((selection) => ({
-        subjectId: selection.subjectId || selection.subjectCode,
-        subjectCode: selection.subjectCode,
-        subjectName: selection.subjectName,
-        units: selection.units,
-      })),
-      academicYear,
-      semester,
-    });
+    return [];
   }
 
   return getStudentPortalSubjectsFromScheduledAssignments({

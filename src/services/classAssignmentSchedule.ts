@@ -32,6 +32,33 @@ export const getClassAssignmentScheduleError = (
     }
   }
 
+  for (let slotIndex = 0; slotIndex < candidate.schedule.length; slotIndex += 1) {
+    const slot = candidate.schedule[slotIndex];
+    const start = clockMinutes(slot.startTime);
+    const end = clockMinutes(slot.endTime);
+
+    for (
+      let otherIndex = slotIndex + 1;
+      otherIndex < candidate.schedule.length;
+      otherIndex += 1
+    ) {
+      const other = candidate.schedule[otherIndex];
+      if (slot.day.trim().toLowerCase() !== other.day.trim().toLowerCase()) {
+        continue;
+      }
+
+      const otherStart = clockMinutes(other.startTime);
+      const otherEnd = clockMinutes(other.endTime);
+      if (
+        start !== null && end !== null &&
+        otherStart !== null && otherEnd !== null &&
+        start < otherEnd && otherStart < end
+      ) {
+        return `Cannot save: ${candidate.subjectCode} has overlapping schedule entries on ${slot.day} (${slot.startTime}-${slot.endTime} overlaps ${other.startTime}-${other.endTime}).`;
+      }
+    }
+  }
+
   for (const existing of existingAssignments) {
     if (
       existing.id === candidate.id ||

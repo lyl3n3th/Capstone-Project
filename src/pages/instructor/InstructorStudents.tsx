@@ -7,7 +7,10 @@ import {
   fetchAdminStudentsPage,
 } from "../../services/adminStudentsApi";
 import { getInstructorScopedData } from "../../services/instructorPortal";
-import type { StudentStorageRecord } from "../../services/adminStorage";
+import type {
+  StudentScheduleSelectionRequestRecord,
+  StudentStorageRecord,
+} from "../../services/adminStorage";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import SearchOnEnterInput from "../../components/common/SearchOnEnterInput";
 import TablePagination from "../../components/common/TablePagination";
@@ -15,11 +18,14 @@ import { INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT } from "../../services/
 import { buildInstructorGradeMasterlist } from "../../services/instructorGradeMasterlist";
 import { downloadStyledGradeTemplate } from "../../services/gradeTemplateBuilder";
 import { fetchAndCacheStudentGradeRecordsForBranch } from "../../services/studentGrades";
+import { fetchStudentScheduleRequests } from "../../services/studentPlanningApi";
 import {
   fetchInstructorEvaluationCompletions,
   getStudentInstructorEvaluationStatus,
   type InstructorEvaluationCompletion,
 } from "../../services/instructorEvaluationStatus";
+
+const normalizeRosterValue = (value?: string | null) => value?.trim().toLowerCase() || "";
 
 export default function InstructorStudents() {
   const {
@@ -138,36 +144,92 @@ export default function InstructorStudents() {
     const sectionCodes = [...new Set(scopedAssignments.map((assignment) => assignment.sectionCode).filter(Boolean))];
     const sectionIds = new Set(scopedAssignments.map((assignment) => assignment.sectionId));
     const assignmentCodes = new Set(sectionCodes);
-    const studentNumbers = [...new Set(sections
+    const sectionStudentNumbers = sections
       .filter((section) => sectionIds.has(section.id) || assignmentCodes.has(section.code))
       .flatMap((section) => section.enrolleeIds)
-      .filter(Boolean))];
+      .filter(Boolean);
     let cancelled = false;
     setPageLoading(true);
     setStudentRecords([]);
     setSupplementalSourcePage([]);
     setPageError("");
-    void fetchAdminStudentsPage(currentUser.branch, currentPage, pageSize, {
-      sectionCodes,
-      studentNumbers,
-      search: normalizedSearchQuery,
-      yearLevel: yearLevelFilter === "all" ? undefined : yearLevelFilter,
-    })
-      .then(({ students: pageStudents, totalItems }) => {
-        if (cancelled) return;
-        setStudentRecords(pageStudents);
-        setSupplementalSourcePage(pageStudents);
+    const loadRosterPage = async () => {
+      let approvedScheduleRequests: StudentScheduleSelectionRequestRecord[] = [];
+      try {
+        approvedScheduleRequests = await fetchStudentScheduleRequests(
+          branch,
+          { authoritative: true },
+        );
+      } catch (error) {
+        console.warn("Unable to load approved own-schedule requests for the instructor roster.", error);
+      }
+
+      const requestsForInstructorAssignments = approvedScheduleRequests.filter((request) =>
+        request.status === "Approved" &&
+        request.selections.some((selection) =>
+          scopedAssignments.some((assignment) =>
+            normalizeRosterValue(selection.assignmentId) === normalizeRosterValue(assignment.id) &&
+            normalizeRosterValue(assignment.instructorId) === normalizeRosterValue(instructorId) &&
+            normalizeRosterValue(assignment.academicYear) === normalizeRosterValue(request.academicYear) &&
+            normalizeRosterValue(assignment.semester) === normalizeRosterValue(request.semester),
+          ),
+        ),
+      );
+      const studentNumbers = [...new Set([
+        ...sectionStudentNumbers,
+        ...requestsForInstructorAssignments.map((request) => request.studentNumber).filter(Boolean),
+      ])];
+
+      const { students: pageStudents, totalItems } = await fetchAdminStudentsPage(
+        branch,
+        currentPage,
+        pageSize,
+        {
+          sectionCodes,
+          studentNumbers,
+          search: normalizedSearchQuery,
+          yearLevel: yearLevelFilter === "all" ? undefined : yearLevelFilter,
+        },
+      );
+      const studentsWithApprovedSchedules = pageStudents.map((student) => {
+        const request = requestsForInstructorAssignments
+          .filter((candidate) =>
+            normalizeRosterValue(candidate.studentNumber) === normalizeRosterValue(student.id) ||
+            Boolean(
+              candidate.trackingNumber && student.trackingNumber &&
+              normalizeRosterValue(candidate.trackingNumber) === normalizeRosterValue(student.trackingNumber),
+            ),
+          )
+          .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
+
+        return request
+          ? {
+              ...student,
+              requestedOwnSchedule: true,
+              ownScheduleRequestStatus: "Approved" as const,
+              ownScheduleAcademicYear: request.academicYear,
+              ownScheduleSemester: request.semester,
+              ownScheduleSelectionStatus: "Approved" as const,
+            }
+          : student;
+      });
+
+      if (!cancelled) {
+        setStudentRecords(studentsWithApprovedSchedules);
+        setSupplementalSourcePage(studentsWithApprovedSchedules);
         setPageTotalItems(totalItems);
         setLoadedRosterScope(evaluationScope);
         const lastPage = Math.max(1, Math.ceil(totalItems / pageSize));
         if (currentPage > lastPage) setRequestedPage({ scope: paginationScope, page: lastPage });
-      })
+      }
+    };
+
+    void loadRosterPage()
       .catch((error) => {
-        if (!cancelled) {
-          setStudentRecords([]);
-          setPageTotalItems(0);
-          setPageError(error instanceof Error ? error.message : "Unable to load students.");
-        }
+        if (cancelled) return;
+        setStudentRecords([]);
+        setPageTotalItems(0);
+        setPageError(error instanceof Error ? error.message : "Unable to load students.");
       })
       .finally(() => { if (!cancelled) setPageLoading(false); });
     return () => { cancelled = true; };
@@ -182,10 +244,24 @@ export default function InstructorStudents() {
     ]).then(([, pageSupplementResult]) => {
       if (cancelled || pageSupplementResult.status !== "fulfilled") return;
       const byId = new Map(pageSupplementResult.value.map((student) => [student.id, student]));
-      setStudentRecords((current) => current.map((student) => ({
-        ...student,
-        ...(byId.get(student.id) ?? {}),
-      })));
+      setStudentRecords((current) => current.map((student) => {
+        const supplementalStudent = byId.get(student.id);
+        if (!supplementalStudent) return student;
+
+        return {
+          ...student,
+          ...supplementalStudent,
+          ...(student.requestedOwnSchedule && student.ownScheduleSelectionStatus === "Approved"
+            ? {
+                requestedOwnSchedule: student.requestedOwnSchedule,
+                ownScheduleRequestStatus: student.ownScheduleRequestStatus,
+                ownScheduleAcademicYear: student.ownScheduleAcademicYear,
+                ownScheduleSemester: student.ownScheduleSemester,
+                ownScheduleSelectionStatus: student.ownScheduleSelectionStatus,
+              }
+            : {}),
+        };
+      }));
     });
     return () => { cancelled = true; };
   }, [isSearchTyping, currentUser?.branch, loadSupplementalData, supplementalSourcePage]);
