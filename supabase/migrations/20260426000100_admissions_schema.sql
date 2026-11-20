@@ -1213,7 +1213,14 @@ values (
   'admission-requirements',
   false,
   5242880,
-  array['application/pdf', 'image/png', 'image/jpeg', 'image/jpg']::text[]
+  array[
+    'application/pdf',
+    'image/png',
+    'image/jpeg',
+    'image/jpg',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  ]::text[]
 )
 on conflict (id) do update
 set public = excluded.public,
