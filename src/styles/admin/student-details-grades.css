@@ -1,0 +1,27 @@
+.student-details-grade-table {
+  min-width: 740px;
+  table-layout: fixed;
+}
+
+.student-details-grade-table th:first-child,
+.student-details-grade-table td:first-child {
+  width: 16%;
+}
+
+.student-details-grade-table th:nth-child(2),
+.student-details-grade-table td:nth-child(2) {
+  width: 34%;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.students-grade-table.student-details-grade-table th:last-child,
+.students-grade-table.student-details-grade-table td:last-child {
+  width: 16%;
+}
+
+.student-details-grade-table th,
+.student-details-grade-table td {
+  overflow-wrap: anywhere;
+}

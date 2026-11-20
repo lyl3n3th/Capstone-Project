@@ -36,6 +36,7 @@ import {
 } from "../../services/studentGrades";
 import { updateAdminStudentStatus } from "../../services/adminStudentsApi";
 import "../../styles/admin/admin-alumni.css";
+import "../../styles/admin/student-details-grades.css";
 
 interface AlumniProps {
   onLogout: () => void;
@@ -1210,7 +1211,9 @@ export default function AdminAlumni({
                             <span>{term.academicYear}</span>
                           </div>
                           <div className="alumni-grade-table-wrapper">
-                            <table className="alumni-grade-table">
+                            <table
+                              className="alumni-grade-table student-details-grade-table"
+                            >
                               <thead>
                                 <tr>
                                   <th>Subject Code</th>

@@ -101,6 +101,7 @@ import {
   getStudentRecordProtectionMessage,
 } from "../../services/studentRecordProtection";
 import "../../styles/admin/admin-students.css";
+import "../../styles/admin/student-details-grades.css";
 
 interface StudentsProps {
   onLogout: () => void;
@@ -5327,7 +5328,9 @@ export default function AdminStudents({
                                       </span>
                                     </div>
                                     <div className="students-grade-table-wrapper">
-                                      <table className="students-grade-table">
+                                      <table
+                                        className="students-grade-table student-details-grade-table"
+                                      >
                                         <thead>
                                           <tr>
                                             <th>Subject Code</th>
@@ -5433,7 +5436,9 @@ export default function AdminStudents({
                                     </div>
                                   </div>
                                   <div className="students-grade-table-wrapper">
-                                    <table className="students-grade-table">
+                                    <table
+                                      className="students-grade-table student-details-grade-table"
+                                    >
                                       <thead>
                                         <tr>
                                           <th>Subject Code</th>
