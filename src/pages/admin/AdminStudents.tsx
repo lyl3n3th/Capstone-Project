@@ -959,6 +959,8 @@ export default function AdminStudents({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const normalizedSearchTerm = searchTerm.trim();
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [filterProgram, setFilterProgram] = useState("All Programs");
   const [filterYearLevel, setFilterYearLevel] = useState("");
   const [filterSection, setFilterSection] = useState("");
@@ -985,6 +987,23 @@ export default function AdminStudents({
   const [studentRecoveryMessage, setStudentRecoveryMessage] = useState<
     string | null
   >(null);
+
+  useEffect(() => {
+    if (normalizedSearchTerm === debouncedSearchTerm) return;
+    if (!normalizedSearchTerm) {
+      setDebouncedSearchTerm("");
+      setRequestedStudentPage(1);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchTerm(normalizedSearchTerm);
+      setRequestedStudentPage(1);
+    }, 3000);
+
+    return () => window.clearTimeout(timer);
+  }, [normalizedSearchTerm, debouncedSearchTerm]);
+
   const [studentSubjectPlans, setStudentSubjectPlans] = useState<
     Record<string, StudentSubjectPlanRecord>
   >({});
@@ -1085,6 +1104,8 @@ export default function AdminStudents({
   }, [currentBranch]);
 
   useEffect(() => {
+    if (normalizedSearchTerm !== debouncedSearchTerm) return;
+
     let isCancelled = false;
     const loadRevision = studentDataRevisionRef.current;
     const isCurrentLoad = () =>
@@ -1093,7 +1114,7 @@ export default function AdminStudents({
       setIsLoading(true);
       setStudentRecoveryMessage(null);
       void fetchAdminStudentsPage(currentBranch, requestedStudentPage, studentsPerPage, {
-        search: searchTerm,
+        search: debouncedSearchTerm,
         program: filterProgram === "All Programs" ? undefined : filterProgram,
         yearLevel: filterYearLevel || undefined,
         section: filterSection || undefined,
@@ -1130,7 +1151,7 @@ export default function AdminStudents({
         if (!isCurrentLoad()) return;
         console.error("Failed to load the requested student page", error);
         const cached = getActiveStudentsForAdminList(currentBranch).filter((student) => {
-          const search = searchTerm.trim().toLowerCase();
+          const search = debouncedSearchTerm.trim().toLowerCase();
           return (!search || student.name.toLowerCase().includes(search) || student.id.toLowerCase().includes(search)) &&
             (filterProgram === "All Programs" || student.program === filterProgram) &&
             (!filterYearLevel || student.yearLevel === filterYearLevel) &&
@@ -1158,7 +1179,7 @@ export default function AdminStudents({
       }).finally(() => {
         if (isCurrentLoad()) setIsLoading(false);
       });
-    }, searchTerm.trim() ? 250 : 0);
+    }, 0);
 
     return () => {
       isCancelled = true;
@@ -1168,7 +1189,8 @@ export default function AdminStudents({
     currentBranch,
     requestedStudentPage,
     studentsPerPage,
-    searchTerm,
+    normalizedSearchTerm,
+    debouncedSearchTerm,
     filterProgram,
     filterYearLevel,
     filterSection,
@@ -3808,7 +3830,6 @@ export default function AdminStudents({
             placeholder="Search by full name or student ID..."
             value={searchTerm}
             onChange={(e) => {
-              setRequestedStudentPage(1);
               setSearchTerm(e.target.value);
             }}
             className="students-search-input"

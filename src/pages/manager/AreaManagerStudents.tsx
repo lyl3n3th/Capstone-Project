@@ -178,6 +178,8 @@ const AreaManagerStudents: React.FC = () => {
   const students = useMemo(() => studentRecords.map(mapStoredStudentToDirectoryRow), [studentRecords]);
   const facetStudents = useMemo(() => facetRecords.map(mapStoredStudentToDirectoryRow), [facetRecords]);
   const [searchTerm, setSearchTerm] = useState("");
+  const normalizedSearchTerm = searchTerm.trim();
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
   const [filterCourse, setFilterCourse] = useState("");
@@ -194,6 +196,22 @@ const AreaManagerStudents: React.FC = () => {
 
   const [requestedPage, setCurrentPage] = useState(1);
   const studentsPerPage = 10;
+
+  useEffect(() => {
+    if (normalizedSearchTerm === debouncedSearchTerm) return;
+    if (!normalizedSearchTerm) {
+      setDebouncedSearchTerm("");
+      setCurrentPage(1);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchTerm(normalizedSearchTerm);
+      setCurrentPage(1);
+    }, 3000);
+
+    return () => window.clearTimeout(timer);
+  }, [normalizedSearchTerm, debouncedSearchTerm]);
 
   useEffect(() => {
     let cancelled = false;
@@ -217,7 +235,7 @@ const AreaManagerStudents: React.FC = () => {
   }, [refreshVersion]);
 
   const serverFilters = useMemo(() => ({
-    search: searchTerm,
+    search: debouncedSearchTerm,
     course: filterCourse || undefined,
     branches: filterBranch
       ? [managedBranches.find((branch) => getManagerBranchLabel(branch) === filterBranch) ?? filterBranch.replace(/\s+Branch$/i, "")]
@@ -233,10 +251,11 @@ const AreaManagerStudents: React.FC = () => {
               : sortConfig?.key === "year_level" ? "year_level" as const
                 : sortConfig?.key === "email" ? "email" as const : "student_number" as const,
     sortAscending: sortConfig?.direction !== "desc",
-  }), [managedBranches, searchTerm, filterCourse, filterBranch, filterYear, filterStrand, filterGender, sortConfig]);
+  }), [managedBranches, debouncedSearchTerm, filterCourse, filterBranch, filterYear, filterStrand, filterGender, sortConfig]);
   const managedBranchScope = managedBranches.join("::");
 
   useEffect(() => {
+    if (normalizedSearchTerm !== debouncedSearchTerm) return;
     if (loading) return;
     if (managedBranches.length === 0) {
       setStudentRecords([]);
@@ -272,7 +291,7 @@ const AreaManagerStudents: React.FC = () => {
         .finally(() => { if (!cancelled) setPageLoading(false); });
     }, 200);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [loading, managedBranches, managedBranchScope, requestedPage, serverFilters, refreshVersion]);
+  }, [loading, managedBranches, managedBranchScope, requestedPage, serverFilters, refreshVersion, normalizedSearchTerm, debouncedSearchTerm]);
 
   useEffect(() => {
     if (loadedRosterBranchScope !== managedBranchScope) return;
@@ -446,7 +465,6 @@ const AreaManagerStudents: React.FC = () => {
               value={searchTerm}
               onChange={(event) => {
                 setSearchTerm(event.target.value);
-                setCurrentPage(1);
               }}
             />
           </div>

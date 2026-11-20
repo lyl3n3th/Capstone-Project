@@ -52,13 +52,20 @@ export default function InstructorStudents() {
   const [requestedPage, setRequestedPage] = useState({ scope: "", page: 1 });
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const normalizedSearchQuery = searchQuery.trim();
+  const normalizedSearch = debouncedSearch.trim().toLowerCase();
   const paginationScope = JSON.stringify([evaluationScope, sectionFilter, yearLevelFilter, subjectFilter, evaluationFilter, normalizedSearch]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 250);
+    if (normalizedSearchQuery === debouncedSearch) return;
+    if (!normalizedSearchQuery) {
+      setDebouncedSearch("");
+      return;
+    }
+
+    const timer = window.setTimeout(() => setDebouncedSearch(normalizedSearchQuery), 3000);
     return () => window.clearTimeout(timer);
-  }, [searchQuery]);
+  }, [normalizedSearchQuery, debouncedSearch]);
 
   const scopedAssignments = useMemo(() => assignments.filter((assignment) => {
     if (subjectFilter !== "all" && assignment.subjectCode !== subjectFilter) return false;
@@ -136,6 +143,7 @@ export default function InstructorStudents() {
   const currentPage = requestedPage.scope === paginationScope ? Math.max(1, requestedPage.page) : 1;
 
   useEffect(() => {
+    if (normalizedSearchQuery !== debouncedSearch) return;
     if (isLoading || !currentUser?.branch || !currentUser.id) return;
     const sectionCodes = [...new Set(scopedAssignments.map((assignment) => assignment.sectionCode).filter(Boolean))];
     const sectionIds = new Set(scopedAssignments.map((assignment) => assignment.sectionId));
@@ -173,7 +181,7 @@ export default function InstructorStudents() {
       })
       .finally(() => { if (!cancelled) setPageLoading(false); });
     return () => { cancelled = true; };
-  }, [isLoading, currentUser?.branch, currentUser?.id, currentPage, pageSize, scopedAssignments, sections, debouncedSearch, yearLevelFilter, paginationScope, evaluationScope]);
+  }, [isLoading, currentUser?.branch, currentUser?.id, currentPage, pageSize, scopedAssignments, sections, debouncedSearch, yearLevelFilter, paginationScope, evaluationScope, normalizedSearchQuery]);
 
   useEffect(() => {
     if (!currentUser?.branch || supplementalSourcePage.length === 0) return;
@@ -280,7 +288,7 @@ export default function InstructorStudents() {
             aria-label="Search students by name or student number"
             placeholder="Search by name or student number..."
             value={searchQuery}
-            onChange={(event) => { setSearchQuery(event.target.value); setRequestedPage({ scope: "", page: 1 }); }}
+            onChange={(event) => setSearchQuery(event.target.value)}
           />
         </label>
         <div className="instructor-section-actions">
