@@ -114,7 +114,13 @@ function AdmissionStep4() {
   };
 
   const persistOwnScheduleRequest = async (nextValue: boolean) => {
-    if (nextValue && applicationData?.programLevel !== "college") {
+    const isCollegeTransferee =
+      applicationData?.programLevel === "college" &&
+      applicationData.studentStatus.trim().toLowerCase() === "transferee";
+    if (
+      nextValue &&
+      (applicationData?.programLevel !== "college" || isCollegeTransferee)
+    ) {
       setRequestOwnSchedule(false);
       mergeAdmissionDraft({
         requestOwnSchedule: false,
@@ -242,8 +248,12 @@ function AdmissionStep4() {
           Boolean(storedStudent?.requestedOwnSchedule) ||
           getStoredOwnScheduleRequest(application.trackingNumber) ||
           (draftMatchesTrackingNumber && Boolean(draft?.requestOwnSchedule));
+        const isCollegeTransferee =
+          application.programLevel === "college" &&
+          application.studentStatus.trim().toLowerCase() === "transferee";
         const restoredOwnScheduleRequest =
           application.programLevel === "college" &&
+          !isCollegeTransferee &&
           (savedOwnScheduleRequest ?? locallyStoredOwnScheduleRequest);
 
         if (draftMatchesTrackingNumber && draft?.apply_scholarship !== undefined) {
@@ -252,7 +262,26 @@ function AdmissionStep4() {
           setApplyScholarship(application.appliedForScholarship);
         }
         setRequestOwnSchedule(restoredOwnScheduleRequest);
-        if (restoredOwnScheduleRequest) {
+        if (isCollegeTransferee) {
+          mergeAdmissionDraft({
+            trackingNumber: application.trackingNumber,
+            requestOwnSchedule: false,
+          });
+          setStoredOwnScheduleRequest(application.trackingNumber, false);
+          if (savedOwnScheduleRequest || locallyStoredOwnScheduleRequest) {
+            try {
+              await setAdmissionOwnScheduleRequest({
+                trackingNumber: application.trackingNumber,
+                requested: false,
+              });
+            } catch (error) {
+              console.warn(
+                "Unable to clear an own schedule request for a college transferee",
+                error,
+              );
+            }
+          }
+        } else if (restoredOwnScheduleRequest) {
           mergeAdmissionDraft({
             trackingNumber: application.trackingNumber,
             requestOwnSchedule: true,
@@ -296,9 +325,12 @@ function AdmissionStep4() {
     }
 
     const isCollege = applicationData.programLevel === "college";
+    const isCollegeTransferee =
+      applicationData.studentStatus.trim().toLowerCase() === "transferee";
     const shouldProceedToScholarshipExam = isCollege && applyScholarship;
     const effectiveRequestOwnSchedule =
       isCollege &&
+      !isCollegeTransferee &&
       (requestOwnSchedule ||
         getStoredOwnScheduleRequest(applicationData.trackingNumber));
 
@@ -533,16 +565,25 @@ function AdmissionStep4() {
   }, [applicationData, resolvedStudentNumber]);
 
   const isCollege = applicationData?.programLevel === "college";
+  const isCollegeTransferee =
+    isCollege &&
+    applicationData?.studentStatus.trim().toLowerCase() === "transferee";
+  const supportsOwnScheduleAdmissionRequest =
+    isCollege && !isCollegeTransferee;
   const canEdit = applicationData?.applicationStatus === "draft";
-  const canRequestOwnSchedule = canEdit && isCollege;
+  const canRequestOwnSchedule = canEdit && supportsOwnScheduleAdmissionRequest;
 
   useEffect(() => {
-    if (applicationData && !isCollege && requestOwnSchedule) {
+    if (
+      applicationData &&
+      !supportsOwnScheduleAdmissionRequest &&
+      requestOwnSchedule
+    ) {
       void persistOwnScheduleRequest(false).catch((error) => {
         console.warn("Unable to clear an invalid own schedule request", error);
       });
     }
-  }, [applicationData, isCollege, requestOwnSchedule]);
+  }, [applicationData, supportsOwnScheduleAdmissionRequest, requestOwnSchedule]);
 
   const tuitionEstimate = getEstimatedCollegeTuition({
     honorLabel: applicationData?.honorLabel ?? null,
@@ -787,7 +828,7 @@ function AdmissionStep4() {
                   {applicationData.programName}
                 </span>
               </div>
-              {isCollege ? (
+              {supportsOwnScheduleAdmissionRequest ? (
                 <div className="conf-summary-item">
                   <span className="conf-summary-label">Own Schedule:</span>
                   <span className="conf-summary-value">

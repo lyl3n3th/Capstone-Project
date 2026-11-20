@@ -4870,9 +4870,13 @@ export const upsertSubmittedApplicant = ({
   );
   const existingApplicant =
     existingApplicantIndex >= 0 ? existingApplicants[existingApplicantIndex] : null;
+  const isCollegeTransfereeApplicant =
+    application.programLevel === "college" &&
+    application.studentStatus.trim().toLowerCase() === "transferee";
   const requestedOwnSchedule =
-    Boolean(draft?.requestOwnSchedule) ||
-    Boolean(existingApplicant?.requestedOwnSchedule);
+    !isCollegeTransfereeApplicant &&
+    (Boolean(draft?.requestOwnSchedule) ||
+      Boolean(existingApplicant?.requestedOwnSchedule));
   const ownScheduleRequestStatus = requestedOwnSchedule
     ? existingApplicant?.ownScheduleRequestStatus || "Pending"
     : undefined;
