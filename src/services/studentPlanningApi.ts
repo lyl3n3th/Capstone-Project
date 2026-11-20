@@ -362,13 +362,15 @@ export const mergeStudentPlanningStatesIntoStudents = <
 
 export const fetchStudentPlanningStates = async (
   branch?: string | null,
+  studentNumbers?: string[],
 ): Promise<StudentPlanningStateRecord[]> => {
+  if (studentNumbers && studentNumbers.length === 0) return [];
   const resolvedBranch = normalizeBranchName(branch);
-  const { data, error } = await supabase
-    .rpc("list_student_planning_states", {
+  let query = supabase.rpc("list_student_planning_states", {
       p_branch: resolvedBranch,
-    })
-    .returns<StudentPlanningStateRow[]>();
+    });
+  if (studentNumbers) query = query.in("student_number", studentNumbers);
+  const { data, error } = await query.returns<StudentPlanningStateRow[]>();
 
   if (error) {
     throw new Error(getErrorMessage(error));

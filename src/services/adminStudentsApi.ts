@@ -223,6 +223,173 @@ const buildStudentPayload = (
   };
 };
 
+export type AdminStudentPageFilters = {
+  branches?: string[];
+  sectionCodes?: string[];
+  studentNumbers?: string[];
+  search?: string;
+  program?: string;
+  course?: string;
+  strand?: string;
+  yearLevel?: string;
+  section?: string;
+  gender?: string;
+  requirementStatus?: string;
+  sortBy?: "student_number" | "full_name" | "program" | "year_level" | "strand_or_course" | "section" | "branch" | "email";
+  sortAscending?: boolean;
+};
+
+export type AdminStudentPage = {
+  students: StudentStorageRecord[];
+  totalItems: number;
+};
+
+const escapePostgrestOrValue = (value: string) =>
+  `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+
+const applyActiveStudentFilter = <T extends { in: (column: string, values: string[]) => T }>(query: T) =>
+  query.in("status", ["Complete", "Incomplete"]);
+
+const applyAdminStudentPageFilters = (
+  initialQuery: any,
+  filters: AdminStudentPageFilters,
+) => {
+  let query = applyActiveStudentFilter(initialQuery);
+  const branchNames = filters.branches?.map((branch) => branch.trim()).filter(Boolean);
+  if (branchNames) {
+    if (branchNames.length === 0) return null;
+    query = query.in("branch", branchNames);
+  }
+  if (filters.sectionCodes || filters.studentNumbers) {
+    const sections = Array.from(new Set((filters.sectionCodes ?? []).filter(Boolean)));
+    const studentNumbers = Array.from(new Set((filters.studentNumbers ?? []).filter(Boolean)));
+    if (sections.length === 0 && studentNumbers.length === 0) return null;
+    const conditions = [
+      sections.length > 0
+        ? `section.in.(${sections.map(escapePostgrestOrValue).join(",")})`
+        : "",
+      studentNumbers.length > 0
+        ? `student_number.in.(${studentNumbers.map(escapePostgrestOrValue).join(",")})`
+        : "",
+    ].filter(Boolean);
+    query = query.or(conditions.join(","));
+  }
+  if (filters.search?.trim()) {
+    const search = filters.search.trim().replace(/[%,*(),\\]/g, " ").replace(/\s+/g, " ");
+    if (search) {
+      query = query.or(`full_name.ilike.%${search}%,student_number.ilike.%${search}%`);
+    }
+  }
+  if (filters.program) query = query.eq("program", filters.program);
+  if (filters.course) {
+    if (filters.course === "SHS") {
+      query = query.eq("program", "SHS");
+    } else if (filters.course !== "College") {
+      query = query.eq("program", "College").eq("strand_or_course", filters.course);
+    } else {
+      query = query.eq("program", "College");
+    }
+  }
+  if (filters.strand) query = query.eq("strand_or_course", filters.strand);
+  if (filters.yearLevel) query = query.eq("year_level", filters.yearLevel);
+  if (filters.section) query = query.eq("section", filters.section);
+  if (filters.gender) query = query.eq("sex", filters.gender);
+  if (filters.requirementStatus) query = query.eq("status", filters.requirementStatus);
+  return query;
+};
+
+export async function fetchAdminStudentsPage(
+  branch: string | null | undefined,
+  page: number,
+  pageSize = 10,
+  filters: AdminStudentPageFilters = {},
+): Promise<AdminStudentPage> {
+  const resolvedPageSize = Math.max(1, Math.min(10, Math.floor(pageSize)));
+  const resolvedPage = Math.max(1, Math.floor(page));
+  const query = applyAdminStudentPageFilters(
+    supabase.rpc(
+      "list_admin_students",
+      { p_branch: branch ? normalizeBranchName(branch) : null },
+      { count: "exact" },
+    ),
+    filters,
+  );
+  if (!query) return { students: [], totalItems: 0 };
+
+  const { data, error, count } = await query
+    .order(filters.sortBy || "student_number", { ascending: filters.sortAscending ?? true })
+    .order("student_number", { ascending: true })
+    .range((resolvedPage - 1) * resolvedPageSize, resolvedPage * resolvedPageSize - 1);
+
+  if (error) throw new Error(getErrorMessage(error));
+
+  const students = ((Array.isArray(data) ? data : []) as AdminStudentApiRecord[]).map(mapAdminStudentRow);
+  forgetDeletedStoredStudents(students);
+  const studentNumbers = students.map((student) => student.id);
+  if (studentNumbers.length > 0) {
+    try {
+      const imported = await fetchStudentImportDetails(branch || undefined, studentNumbers);
+      const byNumber = new Map(imported.map((item) => [item.student_number, item]));
+      students.forEach((student) => {
+        const detail = byNumber.get(student.id);
+        if (detail) {
+          student.importAcademicYear = detail.academic_year;
+          student.importSemester = detail.semester;
+          student.importAcademicStanding = detail.academic_standing;
+          student.lastSchoolAttended = detail.last_school_attended || "";
+          student.yearCompletion = detail.year_completion == null ? "" : String(detail.year_completion);
+        }
+      });
+    } catch (error) {
+      console.warn("Unable to load imported-student enrollment details for this page.", error);
+    }
+
+    if (branch) {
+      try {
+        const planningStates = await fetchStudentPlanningStates(branch, studentNumbers);
+        return {
+          students: mergeStudentPlanningStatesIntoStudents(students, planningStates)
+            .map(applyImportedScheduleDefaults),
+          totalItems: count ?? 0,
+        };
+      } catch (planningError) {
+        console.warn("Unable to load planning states for this student page.", planningError);
+      }
+    }
+  }
+
+  return {
+    students: students.map(applyImportedScheduleDefaults),
+    totalItems: count ?? 0,
+  };
+}
+
+export async function fetchAdminStudentCounts(
+  branchNames: string[],
+): Promise<{ total: number; female: number; male: number }> {
+  const branches = Array.from(new Set(branchNames.map((branch) => branch.trim()).filter(Boolean)));
+  if (branches.length === 0) return { total: 0, female: 0, male: 0 };
+
+  const fetchCount = async (gender?: "Female" | "Male") => {
+    let query = supabase.rpc(
+      "list_admin_students",
+      { p_branch: null },
+      { count: "exact", head: true },
+    ).in("status", ["Complete", "Incomplete"]).in("branch", branches);
+    if (gender) query = query.eq("sex", gender);
+    const { count, error } = await query;
+    if (error) throw new Error(getErrorMessage(error));
+    return count ?? 0;
+  };
+
+  const [total, female, male] = await Promise.all([
+    fetchCount(),
+    fetchCount("Female"),
+    fetchCount("Male"),
+  ]);
+  return { total, female, male };
+}
+
 export async function fetchAdminStudents(branch?: string | null) {
   const { data, error } = await supabase
     .rpc("list_admin_students", {

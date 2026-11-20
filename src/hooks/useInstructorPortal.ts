@@ -14,7 +14,8 @@ import type {
 } from "../services/academicData";
 import type { StudentStorageRecord } from "../services/adminStorage";
 
-export function useInstructorPortal() {
+export function useInstructorPortal(options: { includeStudents?: boolean } = {}) {
+  const includeStudents = options.includeStudents ?? true;
   const { currentUser } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [instructor, setInstructor] = useState<AcademicInstructorRecord | null>(
@@ -44,6 +45,7 @@ export function useInstructorPortal() {
         const data = await getInstructorScopedData({
           branch: currentUser.branch,
           instructorId: currentUser.id,
+          includeStudents,
         });
 
         if (!isMounted || requestRevision !== revision) {
@@ -79,7 +81,7 @@ export function useInstructorPortal() {
       isMounted = false;
       window.removeEventListener("focus", onFocus);
     };
-  }, [currentUser?.branch, currentUser?.id]);
+  }, [currentUser?.branch, currentUser?.id, includeStudents]);
 
   const submissions = useMemo<InstructorGradeSubmission[]>(() => {
     void submissionsVersion;

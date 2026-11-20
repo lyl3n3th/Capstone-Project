@@ -46,7 +46,7 @@ import {
   type StudentSubjectPlanRecord,
 } from "../../services/adminStorage";
 import {
-  fetchAdminStudents,
+  fetchAdminStudentsPage,
   getNextAdminStudentNumber,
   saveAdminStudent,
   updateAdminStudentEmail,
@@ -1059,106 +1059,119 @@ export default function AdminStudents({
   const [students, setStudents] = useState<Student[]>(() =>
     getActiveStudentsForAdminList(currentBranch),
   );
+  const [serverStudentPage, setServerStudentPage] = useState<Student[]>([]);
+  const [serverStudentTotal, setServerStudentTotal] = useState(0);
+  const [studentListRefreshVersion, setStudentListRefreshVersion] = useState(0);
+  const [isExportingStudents, setIsExportingStudents] = useState(false);
   const studentDataRevisionRef = useRef(0);
 
   const invalidateStudentDataLoad = () => {
     studentDataRevisionRef.current += 1;
   };
 
+  const refreshStudentPage = () =>
+    setStudentListRefreshVersion((revision) => revision + 1);
+
+  useEffect(() => {
+    setRequestedStudentPage(1);
+    setServerStudentPage([]);
+    setServerStudentTotal(0);
+    void fetchEnrollmentRequests(currentBranch).catch((error) => {
+      console.warn("Unable to fetch shared enrollment requests.", error);
+    });
+    void fetchSupabaseAdmissionApplicants(currentBranch).catch((error) => {
+      console.warn("Unable to refresh linked admission records.", error);
+    });
+  }, [currentBranch]);
+
   useEffect(() => {
     let isCancelled = false;
     const loadRevision = studentDataRevisionRef.current;
     const isCurrentLoad = () =>
       !isCancelled && studentDataRevisionRef.current === loadRevision;
-
-    const loadStudentsForBranch = async () => {
-      setRequestedStudentPage(1);
+    const timer = window.setTimeout(() => {
       setIsLoading(true);
       setStudentRecoveryMessage(null);
+      void fetchAdminStudentsPage(currentBranch, requestedStudentPage, studentsPerPage, {
+        search: searchTerm,
+        program: filterProgram === "All Programs" ? undefined : filterProgram,
+        yearLevel: filterYearLevel || undefined,
+        section: filterSection || undefined,
+        requirementStatus: filterStatus === "All" ? undefined : filterStatus,
+        sortBy: "student_number",
+        sortAscending: sortDirection === "asc",
+      }).then((result) => {
+        if (!isCurrentLoad()) return;
+        const pageStudents = result.students.map(resolveStudentWithApprovedEnrollment) as Student[];
+        setServerStudentPage(pageStudents);
+        setServerStudentTotal(result.totalItems);
+        setStudents((previous) => {
+          const byId = new Map(previous.map((student) => [student.id, student]));
+          pageStudents.forEach((student) => byId.set(student.id, { ...byId.get(student.id), ...student }));
+          return removeHiddenStudentsFromAdminList(Array.from(byId.values()));
+        });
 
-      try {
-        const fetchedBranchStudentsResult = await Promise.all([
-          fetchEnrollmentRequests(currentBranch).catch((error) => {
-            console.warn("Unable to fetch shared enrollment requests.", error);
-          }),
-          fetchAdminStudents(currentBranch),
-        ]).then(([, students]) => students as Student[]);
-
-        let fetchedBranchStudents = fetchedBranchStudentsResult;
-
-        if (!isCurrentLoad()) {
-          return;
-        }
-
-        fetchedBranchStudents = fetchedBranchStudents.map(
-          resolveStudentWithApprovedEnrollment,
+        const storedStudents = readStoredStudents();
+        const otherBranches = storedStudents.filter(
+          (student) => normalizeBranchName(student.branch) !== currentBranch,
         );
+        const currentBranchStudents = storedStudents.filter(
+          (student) => normalizeBranchName(student.branch) === currentBranch,
+        );
+        const byId = new Map(currentBranchStudents.map((student) => [student.id, student]));
+        pageStudents.forEach((student) => byId.set(student.id, { ...byId.get(student.id), ...student }));
+        writeStoredStudents([...otherBranches, ...Array.from(byId.values())]);
 
-        if (isCurrentLoad()) {
-          const studentsFromOtherBranches = readStoredStudents().filter(
-            (student) =>
-              normalizeBranchName(student.branch) !==
-              normalizeBranchName(currentBranch),
-          );
-
-          // The shared database is the source of truth. Replacing only this
-          // branch's cache prevents an old browser tab from reviving a student
-          // who was permanently deleted elsewhere.
-          writeStoredStudents([...studentsFromOtherBranches, ...fetchedBranchStudents]);
-          if (isCurrentLoad()) setStudents(removeHiddenStudentsFromAdminList(fetchedBranchStudents));
-
-          // Admission records and imported credentials supplement the roster.
-          // Load admission data after the roster is visible, and fetch imported
-          // credentials only when an individual student's details are opened.
-          void fetchSupabaseAdmissionApplicants(currentBranch)
-            .then(() => {
-              if (!isCurrentLoad()) return;
-
-              const refreshedStudents = fetchedBranchStudents.map(
-                resolveStudentWithApprovedEnrollment,
-              );
-              const studentsFromOtherBranches = readStoredStudents().filter(
-                (student) =>
-                  normalizeBranchName(student.branch) !==
-                  normalizeBranchName(currentBranch),
-              );
-              writeStoredStudents([
-                ...studentsFromOtherBranches,
-                ...refreshedStudents,
-              ]);
-              setStudents(removeHiddenStudentsFromAdminList(refreshedStudents));
-            })
-            .catch((error) => {
-              console.warn("Unable to refresh linked admission records.", error);
-            });
-        }
-      } catch (error) {
-        console.error("Failed to load branch students", error);
-
-        if (!isCurrentLoad()) {
-          return;
-        }
-
-        const branchStudents = getActiveStudentsForAdminList(currentBranch);
-        if (isCurrentLoad()) {
-          setStudents(branchStudents);
-          setStudentRecoveryMessage(
-            "Unable to load the shared student list. Showing this device's cached records; no students were restored or synchronized.",
-          );
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    void loadStudentsForBranch();
+        const totalPages = Math.max(1, Math.ceil(result.totalItems / studentsPerPage));
+        if (requestedStudentPage > totalPages) setRequestedStudentPage(totalPages);
+      }).catch((error) => {
+        if (!isCurrentLoad()) return;
+        console.error("Failed to load the requested student page", error);
+        const cached = getActiveStudentsForAdminList(currentBranch).filter((student) => {
+          const search = searchTerm.trim().toLowerCase();
+          return (!search || student.name.toLowerCase().includes(search) || student.id.toLowerCase().includes(search)) &&
+            (filterProgram === "All Programs" || student.program === filterProgram) &&
+            (!filterYearLevel || student.yearLevel === filterYearLevel) &&
+            (!filterSection || student.section === filterSection) &&
+            (filterStatus === "All" || getStudentRequirementStatus(student) === filterStatus);
+        }).sort((left, right) => {
+          const leftNumber = Number(left.id);
+          const rightNumber = Number(right.id);
+          const order = Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+            ? leftNumber - rightNumber
+            : left.id.localeCompare(right.id);
+          return sortDirection === "asc" ? order : -order;
+        });
+        setServerStudentTotal(cached.length);
+        setServerStudentPage(cached.slice(
+          (requestedStudentPage - 1) * studentsPerPage,
+          requestedStudentPage * studentsPerPage,
+        ));
+        setStudentRecoveryMessage(
+          "Unable to load this page from the shared student list. Showing cached records; no students were restored or synchronized.",
+        );
+      }).finally(() => {
+        if (isCurrentLoad()) setIsLoading(false);
+      });
+    }, searchTerm.trim() ? 250 : 0);
 
     return () => {
       isCancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [currentBranch]);
+  }, [
+    currentBranch,
+    requestedStudentPage,
+    studentsPerPage,
+    searchTerm,
+    filterProgram,
+    filterYearLevel,
+    filterSection,
+    filterStatus,
+    filterAcademicStanding,
+    sortDirection,
+    studentListRefreshVersion,
+  ]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1386,85 +1399,22 @@ export default function AdminStudents({
     [studentAcademicStandingById],
   );
 
-  const filteredStudents = useMemo(
-    () =>
-      students.filter((student) => {
-        const search = searchTerm.trim().toLowerCase();
-        const academicStanding = getStudentAcademicStandingLabel(student);
-        const lifecycleStatus = getStudentLifecycleStatus(student);
-        const matchesSearch =
-          student.name.toLowerCase().includes(search) ||
-          student.id.toLowerCase().includes(search);
-
-        const matchesProgram =
-          filterProgram === "All Programs" || student.program === filterProgram;
-        const matchesYearLevel =
-          filterYearLevel === "" || student.yearLevel === filterYearLevel;
-        const matchesSection =
-          filterSection === "" || (student.section || "") === filterSection;
-        const matchesStudentLifecycleStatus =
-          lifecycleStatus === filterStudentLifecycleStatus;
-        const matchesStatus =
-          filterStatus === "All" || getStudentRequirementStatus(student) === filterStatus;
-        const matchesAcademicStanding =
-          filterAcademicStanding === "All" ||
-          academicStanding === filterAcademicStanding;
-
-        return (
-          matchesSearch &&
-          matchesProgram &&
-          matchesYearLevel &&
-          matchesSection &&
-          matchesStudentLifecycleStatus &&
-          matchesStatus &&
-          matchesAcademicStanding
-        );
-      }),
-    [
-      students,
-      searchTerm,
-      filterProgram,
-      filterYearLevel,
-      filterSection,
-      filterStudentLifecycleStatus,
-      filterStatus,
-      filterAcademicStanding,
-      getStudentAcademicStandingLabel,
-    ],
-  );
-
-  const sortedStudents = useMemo(
-    () =>
-      [...filteredStudents].sort((left, right) => {
-        const leftValue = String(left[sortField] ?? "").toLowerCase();
-        const rightValue = String(right[sortField] ?? "").toLowerCase();
-
-        if (sortField === "id") {
-          const leftNumber = Number(left.id);
-          const rightNumber = Number(right.id);
-          if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
-            return sortDirection === "asc"
-              ? leftNumber - rightNumber
-              : rightNumber - leftNumber;
-          }
-      }
-
-        if (leftValue < rightValue) return sortDirection === "asc" ? -1 : 1;
-        if (leftValue > rightValue) return sortDirection === "asc" ? 1 : -1;
-        return 0;
-      }),
-    [filteredStudents, sortField, sortDirection],
-  );
-
   const totalStudentPages = Math.max(
     1,
-    Math.ceil(sortedStudents.length / studentsPerPage),
+    Math.ceil(serverStudentTotal / studentsPerPage),
   );
   const currentStudentPage = Math.min(requestedStudentPage, totalStudentPages);
-  const currentPageStudents = sortedStudents.slice(
-    (currentStudentPage - 1) * studentsPerPage,
-    currentStudentPage * studentsPerPage,
-  );
+  const currentPageStudents = serverStudentPage
+    .map((pageStudent) => {
+      const latestStudent = students.find((student) => student.id === pageStudent.id);
+      return latestStudent ? { ...latestStudent, ...pageStudent } : pageStudent;
+    })
+    .filter((student) =>
+      isActiveStudentListRecord(student) &&
+      getStudentLifecycleStatus(student) === filterStudentLifecycleStatus &&
+      (filterAcademicStanding === "All" ||
+        getStudentAcademicStandingLabel(student) === filterAcademicStanding),
+    );
 
   const toggleSort = (field: "id") => {
     setRequestedStudentPage(1);
@@ -1846,6 +1796,7 @@ export default function AdminStudents({
       } else {
         setStudentRecoveryMessage(null);
       }
+      refreshStudentPage();
     } catch (error) {
       console.error("Failed to save student", error);
       const message =
@@ -1919,6 +1870,7 @@ export default function AdminStudents({
       setStudentRecoveryMessage(
         `Moved ${archivedStudentIds.length} student${archivedStudentIds.length === 1 ? "" : "s"} to archive.`,
       );
+      refreshStudentPage();
     }
 
     if (protectedRecordReasons.size > 0 || failedStudents.length > 0) {
@@ -2152,6 +2104,7 @@ export default function AdminStudents({
     const status = getStudentRequirementStatus(student);
     setStudents(previous => previous.map(item => studentsMatch(item, student) ? { ...item, status } : item));
     setViewingStudent(previous => previous && studentsMatch(previous, student) ? { ...previous, status } : previous);
+      refreshStudentPage();
     if (status === student.status) return;
     try {
       await updateAdminStudentStatus({ branch: student.branch || currentBranch, studentNumber: student.id, status });
@@ -2663,6 +2616,7 @@ export default function AdminStudents({
     }
 
     if (movedStudentIds.length > 0) {
+      refreshStudentPage();
       setStudents((prev) =>
         prev.filter((student) => !movedStudentIds.includes(student.id)),
       );
@@ -3617,15 +3571,41 @@ export default function AdminStudents({
     return student.yearLevel || "—";
   };
 
-  const handleExportStudents = () => {
-    if (sortedStudents.length === 0) {
+  const handleExportStudents = async () => {
+    if (serverStudentTotal === 0) {
       showSystemAlert("Nothing to Export", "No students match the current filters.");
       return;
     }
 
+    setIsExportingStudents(true);
     try {
+      const exportStudents: Student[] = [];
+      let totalItems = serverStudentTotal;
+      for (let page = 1; page <= Math.ceil(totalItems / studentsPerPage); page += 1) {
+        const result = await fetchAdminStudentsPage(currentBranch, page, studentsPerPage, {
+          search: searchTerm,
+          program: filterProgram === "All Programs" ? undefined : filterProgram,
+          yearLevel: filterYearLevel || undefined,
+          section: filterSection || undefined,
+          requirementStatus: filterStatus === "All" ? undefined : filterStatus,
+          sortBy: sortField === "id" ? "student_number" : "student_number",
+          sortAscending: sortDirection === "asc",
+        });
+        totalItems = result.totalItems;
+        exportStudents.push(...result.students.map(resolveStudentWithApprovedEnrollment) as Student[]);
+      }
+      const visibleExportStudents = exportStudents.filter((student) =>
+        isActiveStudentListRecord(student) &&
+        getStudentLifecycleStatus(student) === filterStudentLifecycleStatus &&
+        (filterAcademicStanding === "All" ||
+          getStudentAcademicStandingLabel(student) === filterAcademicStanding),
+      );
+      if (visibleExportStudents.length === 0) {
+        showSystemAlert("Nothing to Export", "No students match the current filters.");
+        return;
+      }
       const exportedAt = new Date();
-      const exportRows = sortedStudents.map((student) => {
+      const exportRows = visibleExportStudents.map((student) => {
         const requirementSnapshot = getStudentRequirementSnapshot({
           branch: student.branch || currentBranch,
           studentNumber: student.id,
@@ -3675,7 +3655,7 @@ export default function AdminStudents({
         ["Branch", currentBranch],
         ["Exported By", `${loggedInUsername} (${loggedInRole})`],
         ["Exported At", exportedAt.toLocaleString()],
-        ["Visible Students", sortedStudents.length],
+        ["Visible Students", exportRows.length],
         ["Search", searchTerm.trim() || "All"],
         ["Academic Level Filter", filterProgram],
         ["Year Level Filter", filterYearLevel || "All"],
@@ -3717,6 +3697,8 @@ export default function AdminStudents({
         "Unable to Export",
         "Unable to export the current student list right now.",
       );
+    } finally {
+      setIsExportingStudents(false);
     }
   };
 
@@ -3797,11 +3779,11 @@ export default function AdminStudents({
           <button
             type="button"
             className="students-export-btn"
-            onClick={handleExportStudents}
-            disabled={isLoading || sortedStudents.length === 0}
-            title="Export the currently visible students to Excel"
+            onClick={() => void handleExportStudents()}
+            disabled={isLoading || isExportingStudents || serverStudentTotal === 0}
+            title="Export all students matching the current filters to Excel"
           >
-            Export Excel
+            {isExportingStudents ? "Exporting..." : "Export Excel"}
           </button>
         </div>
 
@@ -3888,12 +3870,12 @@ export default function AdminStudents({
           <div className="students-bulk-action-buttons students-selection-entry">
             <button type="button" className="students-bulk-archive-btn"
               onClick={() => { setSelectedStudentIds([]); setStudentSelectionMode("archive"); }}
-              disabled={isLoading || sortedStudents.length === 0}>
+              disabled={isLoading || currentPageStudents.length === 0}>
               <MdArchive /> Archive
             </button>
             <button type="button" className="students-bulk-move-btn"
               onClick={() => { setSelectedStudentIds([]); setStudentSelectionMode("alumni"); }}
-              disabled={isLoading || sortedStudents.length === 0}>
+              disabled={isLoading || currentPageStudents.length === 0}>
               Move to Alumni
             </button>
           </div>
@@ -4058,18 +4040,16 @@ export default function AdminStudents({
           </table>
         </div>
 
-        {sortedStudents.length > 0 && totalStudentPages > 1 ? (
-          <TablePagination page={currentStudentPage} pageSize={studentsPerPage} totalItems={sortedStudents.length} onPageChange={setRequestedStudentPage} showPageNumbers={false} label="Student list pages" />
+        {serverStudentTotal > 0 && totalStudentPages > 1 ? (
+          <TablePagination page={currentStudentPage} pageSize={studentsPerPage} totalItems={serverStudentTotal} onPageChange={setRequestedStudentPage} showPageNumbers={false} label="Student list pages" />
         ) : null}
 
         {isImportModalOpen && <StudentImportModal key={currentBranch} branch={currentBranch}
           onClose={() => setIsImportModalOpen(false)}
           onImported={async () => {
             invalidateStudentDataLoad();
-            const importedStudents = await fetchAdminStudents(currentBranch);
-            const refreshed = importedStudents.map(resolveStudentWithApprovedEnrollment);
-            writeStoredStudents([...readStoredStudents().filter((student) => normalizeBranchName(student.branch) !== currentBranch), ...refreshed]);
-            setStudents(removeHiddenStudentsFromAdminList(refreshed));
+            setRequestedStudentPage(1);
+            refreshStudentPage();
           }} />}
 
         {/* Add/Edit Modal - Keep same modal structure but update class names */}

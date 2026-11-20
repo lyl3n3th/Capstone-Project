@@ -719,20 +719,22 @@ export const studentHasAssignedInstructorSubject = (
 export const getInstructorScopedData = async ({
   branch,
   instructorId,
+  includeStudents = true,
 }: {
   branch?: string | null;
   instructorId: string;
+  includeStudents?: boolean;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
   const [snapshot, remoteStudentsResult] = await Promise.all([
     fetchAndCacheAcademicSnapshot(resolvedBranch),
-    fetchAdminStudents(resolvedBranch).catch((error) => {
+    includeStudents ? fetchAdminStudents(resolvedBranch).catch((error) => {
       console.warn(
         "Unable to load the current instructor roster from Supabase; using the local roster.",
         error,
       );
       return getStudentsForBranch(resolvedBranch);
-    }),
+    }) : Promise.resolve([]),
   ]);
 
   try {
@@ -748,10 +750,12 @@ export const getInstructorScopedData = async ({
     );
   }
 
-  writeStoredStudents([
-    ...readStoredStudents().filter((student) => normalizeBranchName(student.branch) !== resolvedBranch),
-    ...remoteStudentsResult,
-  ]);
+  if (includeStudents) {
+    writeStoredStudents([
+      ...readStoredStudents().filter((student) => normalizeBranchName(student.branch) !== resolvedBranch),
+      ...remoteStudentsResult,
+    ]);
+  }
 
   const assignments = snapshot.subjectAssignments.filter(
     (assignment) => assignment.instructorId === instructorId,

@@ -274,8 +274,14 @@ export async function importExistingStudents(branch: string, rows: StudentImport
   return result;
 }
 
-export async function fetchStudentImportDetails(branch?: string): Promise<StudentImportDetails[]> {
-  const { data, error } = await supabase.rpc("list_student_import_details", { p_branch: branch || null }).returns<StudentImportDetails[]>();
+export async function fetchStudentImportDetails(
+  branch?: string,
+  studentNumbers?: string[],
+): Promise<StudentImportDetails[]> {
+  if (studentNumbers && studentNumbers.length === 0) return [];
+  let query = supabase.rpc("list_student_import_details", { p_branch: branch || null });
+  if (studentNumbers) query = query.in("student_number", studentNumbers);
+  const { data, error } = await query.returns<StudentImportDetails[]>();
   if (error) throw new Error(error.message);
   return Array.isArray(data) ? data : [];
 }

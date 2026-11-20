@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { FiDownload, FiSearch } from "react-icons/fi";
 import { useInstructorPortal } from "../../hooks/useInstructorPortal";
 import { getCurrentStudentInstructorAssignments } from "../../services/instructorRoster";
+import { fetchAdminStudentsPage } from "../../services/adminStudentsApi";
+import { getInstructorScopedData } from "../../services/instructorPortal";
+import type { StudentStorageRecord } from "../../services/adminStorage";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import TablePagination from "../../components/common/TablePagination";
 import { INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT } from "../../services/adminStorage";
@@ -15,7 +18,11 @@ import {
 } from "../../services/instructorEvaluationStatus";
 
 export default function InstructorStudents() {
-  const { currentUser, students, assignments, isLoading } = useInstructorPortal();
+  const { currentUser, assignments, sections, isLoading } = useInstructorPortal({ includeStudents: false });
+  const [studentRecords, setStudentRecords] = useState<StudentStorageRecord[]>([]);
+  const [pageTotalItems, setPageTotalItems] = useState(0);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [pageError, setPageError] = useState("");
   const [sectionFilter, setSectionFilter] = useState("all");
   const [yearLevelFilter, setYearLevelFilter] = useState("all");
   const [subjectFilter, setSubjectFilter] = useState("all");
@@ -32,8 +39,26 @@ export default function InstructorStudents() {
   const evaluationsReady = evaluations.scope === evaluationScope && !evaluations.loading && !evaluations.error;
   const [requestedPage, setRequestedPage] = useState({ scope: "", page: 1 });
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const paginationScope = JSON.stringify([evaluationScope, sectionFilter, yearLevelFilter, subjectFilter, evaluationFilter, normalizedSearch]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  const scopedAssignments = useMemo(() => assignments.filter((assignment) => {
+    if (subjectFilter !== "all" && assignment.subjectCode !== subjectFilter) return false;
+    if (sectionFilter !== "all" && (assignment.sectionCode || "Unassigned") !== sectionFilter) return false;
+    if (yearLevelFilter !== "all") {
+      const section = sections.find((candidate) =>
+        candidate.id === assignment.sectionId || candidate.code === assignment.sectionCode,
+      );
+      if (section && section.yearLevel !== yearLevelFilter) return false;
+    }
+    return true;
+  }), [assignments, sections, sectionFilter, subjectFilter, yearLevelFilter]);
 
   useEffect(() => {
     if (!currentUser?.branch || !currentUser.id) return;
@@ -82,27 +107,65 @@ export default function InstructorStudents() {
 
   const sectionOptions = useMemo(
     () =>
-      Array.from(
-        new Set(students.flatMap(student =>
-          getCurrentStudentInstructorAssignments(student, assignments).map(assignment => assignment.sectionCode || "Unassigned"))),
-      ).sort((left, right) => left.localeCompare(right)),
-    [students, assignments],
+      Array.from(new Set(assignments.map((assignment) => assignment.sectionCode || "Unassigned")))
+        .sort((left, right) => left.localeCompare(right)),
+    [assignments],
   );
 
   const yearLevelOptions = useMemo(
     () =>
-      Array.from(new Set(students.map((student) => student.yearLevel))).sort(
+      Array.from(new Set(sections.map((section) => section.yearLevel).filter(Boolean))).sort(
         (left, right) => left.localeCompare(right),
       ),
-    [students],
+    [sections],
   );
 
-  const rows = useMemo(() => {
+  const pageSize = 10;
+  const currentPage = requestedPage.scope === paginationScope ? Math.max(1, requestedPage.page) : 1;
+
+  useEffect(() => {
+    if (isLoading || !currentUser?.branch || !currentUser.id) return;
+    const sectionCodes = [...new Set(scopedAssignments.map((assignment) => assignment.sectionCode).filter(Boolean))];
+    const sectionIds = new Set(scopedAssignments.map((assignment) => assignment.sectionId));
+    const assignmentCodes = new Set(sectionCodes);
+    const studentNumbers = [...new Set(sections
+      .filter((section) => sectionIds.has(section.id) || assignmentCodes.has(section.code))
+      .flatMap((section) => section.enrolleeIds)
+      .filter(Boolean))];
+    let cancelled = false;
+    setPageLoading(true);
+    setStudentRecords([]);
+    setPageError("");
+    void fetchAdminStudentsPage(currentUser.branch, currentPage, pageSize, {
+      sectionCodes,
+      studentNumbers,
+      search: debouncedSearch,
+      yearLevel: yearLevelFilter === "all" ? undefined : yearLevelFilter,
+    })
+      .then(({ students: pageStudents, totalItems }) => {
+        if (cancelled) return;
+        setStudentRecords(pageStudents);
+        setPageTotalItems(totalItems);
+        const lastPage = Math.max(1, Math.ceil(totalItems / pageSize));
+        if (currentPage > lastPage) setRequestedPage({ scope: paginationScope, page: lastPage });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setStudentRecords([]);
+          setPageTotalItems(0);
+          setPageError(error instanceof Error ? error.message : "Unable to load students.");
+        }
+      })
+      .finally(() => { if (!cancelled) setPageLoading(false); });
+    return () => { cancelled = true; };
+  }, [isLoading, currentUser?.branch, currentUser?.id, currentPage, pageSize, scopedAssignments, sections, debouncedSearch, yearLevelFilter, paginationScope]);
+
+  const buildRows = (sourceStudents: StudentStorageRecord[]) => {
     const assignmentSubjectCodes = new Set(
       assignments.map((assignment) => assignment.subjectCode),
     );
 
-    return students
+    return sourceStudents
       .map((student) => {
         const studentAssignments = getCurrentStudentInstructorAssignments(student, assignments)
           .filter(assignment => sectionFilter === "all" || (assignment.sectionCode || "Unassigned") === sectionFilter);
@@ -133,20 +196,21 @@ export default function InstructorStudents() {
           (evaluationFilter === "all" || (evaluationsReady && evaluation.status === evaluationFilter))
         );
       });
-  }, [assignments, sectionFilter, students, subjectFilter, yearLevelFilter, evaluations, evaluationScope, evaluationFilter, evaluationsReady, normalizedSearch]);
+  };
 
-  const pageSize = 10;
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
-  const currentPage = requestedPage.scope === paginationScope ? Math.min(requestedPage.page, totalPages) : 1;
-  const paginatedRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const rows = buildRows(studentRecords);
+
+  const paginatedRows = rows;
 
   const handleDownloadMasterlist = async () => {
     if (!currentUser?.branch || isDownloading) return;
     setIsDownloading(true);
     setDownloadError("");
     try {
+      const allRoster = await getInstructorScopedData({ branch: currentUser.branch, instructorId: currentUser.id });
+      const exportRows = buildRows(allRoster.students);
       const grades = await fetchAndCacheStudentGradeRecordsForBranch(currentUser.branch);
-      const sheets = buildInstructorGradeMasterlist({ rows, grades, instructorId: currentUser.id, branch: currentUser.branch });
+      const sheets = buildInstructorGradeMasterlist({ rows: exportRows, grades, instructorId: currentUser.id, branch: currentUser.branch });
       const filename = `grades-masterlist-${currentUser.id}`.replace(/[\\/:*?"<>|]/g, "-");
       await downloadStyledGradeTemplate({ branch: currentUser.branch, fileName: `${filename}.xlsx`, templateType: "College", sheets });
     } catch (error) {
@@ -189,7 +253,7 @@ export default function InstructorStudents() {
         </label>
         <div className="instructor-section-actions">
           <button type="button" onClick={() => void handleDownloadMasterlist()}
-            disabled={isDownloading || rows.length === 0 || !currentUser?.branch}>
+          disabled={isDownloading || pageTotalItems === 0 || !currentUser?.branch}>
             <FiDownload aria-hidden="true" /> {isDownloading ? "Preparing..." : "Download Grades Masterlist"}
           </button>
         </div>
@@ -254,6 +318,8 @@ export default function InstructorStudents() {
       {evaluations.scope === evaluationScope && evaluations.error && (
         <p className="instructor-evaluation-error" role="alert">{evaluations.error}</p>
       )}
+      {pageError && <p className="instructor-evaluation-error" role="alert">{pageError}</p>}
+      {pageLoading && <p aria-live="polite">Loading this page…</p>}
       <div className="instructor-table-wrap">
         <table className="instructor-table">
           <thead>
@@ -289,7 +355,7 @@ export default function InstructorStudents() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 ? (
+            {rows.length === 0 && !pageLoading ? (
               <tr>
                 <td colSpan={7}>{evaluationFilter !== "all" && !evaluationsReady
                   ? evaluations.error ? "Evaluation status is unavailable. Select All evaluation statuses to view the roster." : "Loading evaluation statuses..."

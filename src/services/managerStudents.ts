@@ -1,11 +1,33 @@
 import { normalizeBranchName, type StudentStorageRecord } from "./adminStorage";
-import { fetchAdminStudents } from "./adminStudentsApi";
+import {
+  fetchAdminStudentCounts,
+  fetchAdminStudents,
+  fetchAdminStudentsPage,
+  type AdminStudentPage,
+  type AdminStudentPageFilters,
+} from "./adminStudentsApi";
 import { fetchManagedBranches } from "./staffApi";
 
 export interface ManagedStudentSnapshot {
   branches: string[];
   students: StudentStorageRecord[];
 }
+
+export const fetchManagedStudentBranches = async () => {
+  const managedBranches = await fetchManagedBranches();
+  return [...new Set(managedBranches
+    .map((branch) => branch.name.trim())
+    .filter(Boolean))].sort((left, right) => left.localeCompare(right));
+};
+
+export const fetchManagedStudentPage = (
+  branches: string[],
+  page: number,
+  filters: AdminStudentPageFilters = {},
+): Promise<AdminStudentPage> =>
+  fetchAdminStudentsPage(null, page, 10, { ...filters, branches });
+
+export { fetchAdminStudentCounts };
 
 export const isVisibleManagerStudentRecord = (
   student: Pick<StudentStorageRecord, "status">,

@@ -1,5 +1,5 @@
 import TablePagination from "../../components/common/TablePagination";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { BsSearch, BsCaretDownFill, BsCaretUpFill } from "react-icons/bs";
 import {
   getStudentCredentialOverview,
@@ -7,8 +7,12 @@ import {
   type StudentStorageRecord,
 } from "../../services/adminStorage";
 import { hasLatestApprovedIrregularEnrollmentRequestForStudent } from "../../services/enrollmentRequests";
-import { useManagedStudents } from "../../hooks/useManagedStudents";
-import { isVisibleManagerStudentRecord } from "../../services/managerStudents";
+import {
+  fetchAdminStudentCounts,
+  fetchManagedStudentBranches,
+  fetchManagedStudentPage,
+  isVisibleManagerStudentRecord,
+} from "../../services/managerStudents";
 import {
   getStudentAcademicStanding,
   type StudentAcademicStandingLabel,
@@ -158,9 +162,18 @@ const getManagerBranchLabel = (branch: string) =>
   `${normalizeBranchName(branch)} Branch`;
 
 const AreaManagerStudents: React.FC = () => {
-  const { students: studentRecords, branches: managedBranches,
-    isLoading: loading, hasLoaded, error: studentLoadError, retry } = useManagedStudents();
+  const [managedBranches, setManagedBranches] = useState<string[]>([]);
+  const [studentRecords, setStudentRecords] = useState<StudentStorageRecord[]>([]);
+  const [facetRecords, setFacetRecords] = useState<StudentStorageRecord[]>([]);
+  const [pageTotalItems, setPageTotalItems] = useState(0);
+  const [summaryCounts, setSummaryCounts] = useState({ total: 0, female: 0, male: 0 });
+  const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [studentLoadError, setStudentLoadError] = useState("");
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const students = useMemo(() => studentRecords.map(mapStoredStudentToDirectoryRow), [studentRecords]);
+  const facetStudents = useMemo(() => facetRecords.map(mapStoredStudentToDirectoryRow), [facetRecords]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
@@ -179,111 +192,111 @@ const AreaManagerStudents: React.FC = () => {
   const [requestedPage, setCurrentPage] = useState(1);
   const studentsPerPage = 10;
 
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setStudentLoadError("");
+    void fetchManagedStudentBranches()
+      .then(async (branches) => {
+        if (cancelled) return;
+        setManagedBranches(branches);
+        setHasLoaded(true);
+        setLoading(false);
+        try {
+          const counts = await fetchAdminStudentCounts(branches);
+          if (!cancelled) setSummaryCounts(counts);
+        } catch (error) {
+          if (!cancelled) setStudentLoadError(error instanceof Error ? error.message : "Unable to load student totals.");
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setStudentLoadError(error instanceof Error ? error.message : "Unable to load student records.");
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [refreshVersion]);
+
+  const serverFilters = useMemo(() => ({
+    search: searchTerm,
+    course: filterCourse || undefined,
+    branches: filterBranch
+      ? [managedBranches.find((branch) => getManagerBranchLabel(branch) === filterBranch) ?? filterBranch.replace(/\s+Branch$/i, "")]
+      : undefined,
+    yearLevel: filterYear || undefined,
+    strand: filterStrand || undefined,
+    gender: filterGender || undefined,
+    sortBy: sortConfig?.key === "student_id" ? "student_number" as const
+      : sortConfig?.key === "full_name" ? "full_name" as const
+        : sortConfig?.key === "course" ? "strand_or_course" as const
+          : sortConfig?.key === "section" ? "section" as const
+            : sortConfig?.key === "branch" ? "branch" as const
+              : sortConfig?.key === "year_level" ? "year_level" as const
+                : sortConfig?.key === "email" ? "email" as const : "student_number" as const,
+    sortAscending: sortConfig?.direction !== "desc",
+  }), [managedBranches, searchTerm, filterCourse, filterBranch, filterYear, filterStrand, filterGender, sortConfig]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (managedBranches.length === 0) {
+      setStudentRecords([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setPageLoading(true);
+      setStudentLoadError("");
+      void fetchManagedStudentPage(managedBranches, requestedPage, serverFilters)
+        .then(({ students: pageStudents, totalItems }) => {
+          if (cancelled) return;
+          const visibleStudents = pageStudents.filter(isVisibleManagerStudentRecord);
+          setStudentRecords(visibleStudents);
+          setPageTotalItems(totalItems);
+          const lastPage = Math.max(1, Math.ceil(totalItems / studentsPerPage));
+          if (requestedPage > lastPage) setCurrentPage(lastPage);
+          setFacetRecords((existing) => {
+            const merged = new Map(existing.map((student) => [student.id, student]));
+            visibleStudents.forEach((student) => merged.set(student.id, student));
+            return [...merged.values()];
+          });
+          setHasLoaded(true);
+        })
+        .catch((error) => {
+          if (!cancelled) setStudentLoadError(error instanceof Error ? error.message : "Unable to refresh student records.");
+        })
+        .finally(() => { if (!cancelled) setPageLoading(false); });
+    }, 200);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [loading, managedBranches, requestedPage, serverFilters, refreshVersion]);
+
   const uniqueCourses = Array.from(
-    new Set(students.map((s) => s.course)),
+    new Set(facetStudents.map((s) => s.course)),
   ).sort();
   const uniqueBranches = Array.from(
     new Set([
       ...managedBranches.map(getManagerBranchLabel),
-      ...students.map((s) => s.branch),
+      ...facetStudents.map((s) => s.branch),
     ]),
   ).sort();
   const uniqueYears = Array.from(
-    new Set(students.map((s) => s.year_level)),
+    new Set(facetStudents.map((s) => s.year_level)),
   ).sort();
   const uniqueStrands = Array.from(
-    new Set(students.map((s) => s.strand).filter(Boolean)),
+    new Set(facetStudents.map((s) => s.strand).filter(Boolean)),
   ).sort();
 
-  const totalStudents = students.length;
-  const femaleStudents = students.filter((student) => student.gender === "Female").length;
-  const maleStudents = students.filter((student) => student.gender === "Male").length;
+  const totalStudents = summaryCounts.total;
+  const femaleStudents = summaryCounts.female;
+  const maleStudents = summaryCounts.male;
   const isCollegeCourseFilterSelected =
     filterCourse !== "" && filterCourse !== "SHS";
 
-  const processedStudents = useMemo(() => {
-    const filtered = students.filter((student) => {
-      const fullName =
-        `${student.first_name} ${student.last_name}`.toLowerCase();
-      const normalizedSearchTerm = searchTerm.toLowerCase();
-      const matchesSearch =
-        fullName.includes(normalizedSearchTerm) ||
-        student.student_id.toLowerCase().includes(normalizedSearchTerm) ||
-        student.gender.toLowerCase().includes(normalizedSearchTerm) ||
-        student.academic_standing
-          .toLowerCase()
-          .includes(normalizedSearchTerm);
-      const matchesCourse = filterCourse ? student.course === filterCourse : true;
-      const matchesAcademicStanding = filterAcademicStanding
-        ? student.academic_standing === filterAcademicStanding
-        : true;
-      const matchesBranch = filterBranch ? student.branch === filterBranch : true;
-      const matchesYear = filterYear ? student.year_level === filterYear : true;
-      const matchesStrand = filterStrand ? student.strand === filterStrand : true;
-      const matchesGender = filterGender ? student.gender === filterGender : true;
-
-      return (
-        matchesSearch &&
-        matchesCourse &&
-        matchesAcademicStanding &&
-        matchesBranch &&
-        matchesYear &&
-        matchesStrand &&
-        matchesGender
-      );
-    });
-
-    if (!sortConfig) {
-      return filtered;
-    }
-
-    return [...filtered].sort((left, right) => {
-      let leftValue: string;
-      let rightValue: string;
-
-      if (sortConfig.key === "full_name") {
-        leftValue = `${left.first_name} ${left.last_name}`.toLowerCase();
-        rightValue = `${right.first_name} ${right.last_name}`.toLowerCase();
-      } else {
-        leftValue = (left[sortConfig.key as keyof Student] || "")
-          .toString()
-          .toLowerCase();
-        rightValue = (right[sortConfig.key as keyof Student] || "")
-          .toString()
-          .toLowerCase();
-      }
-
-      if (
-        sortConfig.key === "student_id" &&
-        !Number.isNaN(Number(leftValue)) &&
-        !Number.isNaN(Number(rightValue))
-      ) {
-        return sortConfig.direction === "asc"
-          ? Number(leftValue) - Number(rightValue)
-          : Number(rightValue) - Number(leftValue);
-      }
-
-      if (leftValue < rightValue) {
-        return sortConfig.direction === "asc" ? -1 : 1;
-      }
-
-      if (leftValue > rightValue) {
-        return sortConfig.direction === "asc" ? 1 : -1;
-      }
-
-      return 0;
-    });
-  }, [
-    students,
-    searchTerm,
-    filterCourse,
-    filterAcademicStanding,
-    filterBranch,
-    filterYear,
-    filterStrand,
-    filterGender,
-    sortConfig,
-  ]);
+  const processedStudents = useMemo(
+    () => students.filter((student) =>
+      !filterAcademicStanding || student.academic_standing === filterAcademicStanding,
+    ),
+    [students, filterAcademicStanding],
+  );
 
   const requestSort = (key: SortKeys) => {
     let direction: "asc" | "desc" = "asc";
@@ -297,6 +310,7 @@ const AreaManagerStudents: React.FC = () => {
     }
 
     setSortConfig({ key, direction });
+    setCurrentPage(1);
   };
 
   const getSortIcon = (key: SortKeys) => {
@@ -323,14 +337,9 @@ const AreaManagerStudents: React.FC = () => {
     }
   };
 
-  const totalPages = Math.ceil(processedStudents.length / studentsPerPage);
+  const totalPages = Math.ceil(pageTotalItems / studentsPerPage);
   const currentPage = Math.min(requestedPage, Math.max(1, totalPages));
-  const indexOfLastStudent = currentPage * studentsPerPage;
-  const indexOfFirstStudent = indexOfLastStudent - studentsPerPage;
-  const currentStudents = processedStudents.slice(
-    indexOfFirstStudent,
-    indexOfLastStudent,
-  );
+  const currentStudents = processedStudents;
 
   const paginate = (pageNumber: number) => {
     setCurrentPage(pageNumber);
@@ -352,7 +361,7 @@ const AreaManagerStudents: React.FC = () => {
     return <div className="am-students-root" role="alert">
       <h1>Student Management</h1>
       <p>Unable to load current student records. {studentLoadError}</p>
-      <button type="button" onClick={retry}>Try Again</button>
+      <button type="button" onClick={() => setRefreshVersion((value) => value + 1)}>Try Again</button>
     </div>;
   }
 
@@ -360,7 +369,7 @@ const AreaManagerStudents: React.FC = () => {
     <div className="am-students-root">
       {studentLoadError && <p role="alert">
         Unable to refresh student records. Showing the last loaded records. {studentLoadError}{" "}
-        <button type="button" onClick={retry}>Try Again</button>
+        <button type="button" onClick={() => setRefreshVersion((value) => value + 1)}>Try Again</button>
       </p>}
       <div className="am-students-page-header">
         <div className="am-students-header-title-group">
@@ -492,8 +501,7 @@ const AreaManagerStudents: React.FC = () => {
         </div>
 
         <p className="am-students-results-count">
-          Showing <strong>{currentStudents.length}</strong> of{" "}
-          <strong>{processedStudents.length}</strong> students
+          Showing <strong>{currentStudents.length ? (currentPage - 1) * studentsPerPage + 1 : 0}-{(currentPage - 1) * studentsPerPage + currentStudents.length}</strong> of <strong>{pageTotalItems}</strong> students
         </p>
 
         <div className="am-students-table-wrapper">
@@ -637,8 +645,8 @@ const AreaManagerStudents: React.FC = () => {
           )}
         </div>
 
-        {totalPages > 1 && (
-          <TablePagination page={currentPage} pageSize={studentsPerPage} totalItems={processedStudents.length} onPageChange={paginate} showPageNumbers={false} label="Area manager student pages" />
+        {(totalPages > 1 || pageLoading) && (
+          <TablePagination page={currentPage} pageSize={studentsPerPage} totalItems={pageTotalItems} onPageChange={paginate} showPageNumbers={false} label="Area manager student pages" />
         )}
       </div>
 
