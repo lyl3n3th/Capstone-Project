@@ -9,6 +9,7 @@ import {
 import { getInstructorScopedData } from "../../services/instructorPortal";
 import type { StudentStorageRecord } from "../../services/adminStorage";
 import SkeletonPage from "../../components/common/SkeletonPage";
+import DebouncedSearchInput from "../../components/common/DebouncedSearchInput";
 import TablePagination from "../../components/common/TablePagination";
 import { INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT } from "../../services/adminStorage";
 import { buildInstructorGradeMasterlist } from "../../services/instructorGradeMasterlist";
@@ -51,21 +52,9 @@ export default function InstructorStudents() {
   const evaluationsReady = evaluations.scope === evaluationScope && !evaluations.loading && !evaluations.error;
   const [requestedPage, setRequestedPage] = useState({ scope: "", page: 1 });
   const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
   const normalizedSearchQuery = searchQuery.trim();
-  const normalizedSearch = debouncedSearch.trim().toLowerCase();
+  const normalizedSearch = normalizedSearchQuery.toLowerCase();
   const paginationScope = JSON.stringify([evaluationScope, sectionFilter, yearLevelFilter, subjectFilter, evaluationFilter, normalizedSearch]);
-
-  useEffect(() => {
-    if (normalizedSearchQuery === debouncedSearch) return;
-    if (!normalizedSearchQuery) {
-      setDebouncedSearch("");
-      return;
-    }
-
-    const timer = window.setTimeout(() => setDebouncedSearch(normalizedSearchQuery), 3000);
-    return () => window.clearTimeout(timer);
-  }, [normalizedSearchQuery, debouncedSearch]);
 
   const scopedAssignments = useMemo(() => assignments.filter((assignment) => {
     if (subjectFilter !== "all" && assignment.subjectCode !== subjectFilter) return false;
@@ -143,7 +132,6 @@ export default function InstructorStudents() {
   const currentPage = requestedPage.scope === paginationScope ? Math.max(1, requestedPage.page) : 1;
 
   useEffect(() => {
-    if (normalizedSearchQuery !== debouncedSearch) return;
     if (isLoading || !currentUser?.branch || !currentUser.id) return;
     const sectionCodes = [...new Set(scopedAssignments.map((assignment) => assignment.sectionCode).filter(Boolean))];
     const sectionIds = new Set(scopedAssignments.map((assignment) => assignment.sectionId));
@@ -160,7 +148,7 @@ export default function InstructorStudents() {
     void fetchAdminStudentsPage(currentUser.branch, currentPage, pageSize, {
       sectionCodes,
       studentNumbers,
-      search: debouncedSearch,
+      search: normalizedSearchQuery,
       yearLevel: yearLevelFilter === "all" ? undefined : yearLevelFilter,
     })
       .then(({ students: pageStudents, totalItems }) => {
@@ -181,7 +169,7 @@ export default function InstructorStudents() {
       })
       .finally(() => { if (!cancelled) setPageLoading(false); });
     return () => { cancelled = true; };
-  }, [isLoading, currentUser?.branch, currentUser?.id, currentPage, pageSize, scopedAssignments, sections, debouncedSearch, yearLevelFilter, paginationScope, evaluationScope, normalizedSearchQuery]);
+  }, [isLoading, currentUser?.branch, currentUser?.id, currentPage, pageSize, scopedAssignments, sections, yearLevelFilter, paginationScope, evaluationScope, normalizedSearchQuery]);
 
   useEffect(() => {
     if (!currentUser?.branch || supplementalSourcePage.length === 0) return;
@@ -283,12 +271,12 @@ export default function InstructorStudents() {
       <div className="instructor-student-toolbar">
         <label className="instructor-student-search">
           <FiSearch aria-hidden="true" />
-          <input
+          <DebouncedSearchInput
             type="search"
             aria-label="Search students by name or student number"
             placeholder="Search by name or student number..."
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
+            onValueChange={setSearchQuery}
           />
         </label>
         <div className="instructor-section-actions">

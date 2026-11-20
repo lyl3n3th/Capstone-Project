@@ -1,4 +1,5 @@
 import TablePagination from "../../components/common/TablePagination";
+import DebouncedSearchInput from "../../components/common/DebouncedSearchInput";
 import React, { useEffect, useMemo, useState } from "react";
 import { BsSearch, BsCaretDownFill, BsCaretUpFill } from "react-icons/bs";
 import {
@@ -179,7 +180,6 @@ const AreaManagerStudents: React.FC = () => {
   const facetStudents = useMemo(() => facetRecords.map(mapStoredStudentToDirectoryRow), [facetRecords]);
   const [searchTerm, setSearchTerm] = useState("");
   const normalizedSearchTerm = searchTerm.trim();
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
   const [filterCourse, setFilterCourse] = useState("");
@@ -196,22 +196,6 @@ const AreaManagerStudents: React.FC = () => {
 
   const [requestedPage, setCurrentPage] = useState(1);
   const studentsPerPage = 10;
-
-  useEffect(() => {
-    if (normalizedSearchTerm === debouncedSearchTerm) return;
-    if (!normalizedSearchTerm) {
-      setDebouncedSearchTerm("");
-      setCurrentPage(1);
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setDebouncedSearchTerm(normalizedSearchTerm);
-      setCurrentPage(1);
-    }, 3000);
-
-    return () => window.clearTimeout(timer);
-  }, [normalizedSearchTerm, debouncedSearchTerm]);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,7 +219,7 @@ const AreaManagerStudents: React.FC = () => {
   }, [refreshVersion]);
 
   const serverFilters = useMemo(() => ({
-    search: debouncedSearchTerm,
+    search: normalizedSearchTerm,
     course: filterCourse || undefined,
     branches: filterBranch
       ? [managedBranches.find((branch) => getManagerBranchLabel(branch) === filterBranch) ?? filterBranch.replace(/\s+Branch$/i, "")]
@@ -251,11 +235,10 @@ const AreaManagerStudents: React.FC = () => {
               : sortConfig?.key === "year_level" ? "year_level" as const
                 : sortConfig?.key === "email" ? "email" as const : "student_number" as const,
     sortAscending: sortConfig?.direction !== "desc",
-  }), [managedBranches, debouncedSearchTerm, filterCourse, filterBranch, filterYear, filterStrand, filterGender, sortConfig]);
+  }), [managedBranches, normalizedSearchTerm, filterCourse, filterBranch, filterYear, filterStrand, filterGender, sortConfig]);
   const managedBranchScope = managedBranches.join("::");
 
   useEffect(() => {
-    if (normalizedSearchTerm !== debouncedSearchTerm) return;
     if (loading) return;
     if (managedBranches.length === 0) {
       setStudentRecords([]);
@@ -291,7 +274,7 @@ const AreaManagerStudents: React.FC = () => {
         .finally(() => { if (!cancelled) setPageLoading(false); });
     }, 200);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [loading, managedBranches, managedBranchScope, requestedPage, serverFilters, refreshVersion, normalizedSearchTerm, debouncedSearchTerm]);
+  }, [loading, managedBranches, managedBranchScope, requestedPage, serverFilters, refreshVersion]);
 
   useEffect(() => {
     if (loadedRosterBranchScope !== managedBranchScope) return;
@@ -459,12 +442,14 @@ const AreaManagerStudents: React.FC = () => {
         <div className="am-students-controls-grid">
           <div className="am-students-search-wrapper">
             <BsSearch />
-            <input
+            <DebouncedSearchInput
               type="text"
+              aria-label="Search students by name or student ID"
               placeholder="Search by name or student ID..."
               value={searchTerm}
-              onChange={(event) => {
-                setSearchTerm(event.target.value);
+              onValueChange={(value) => {
+                setSearchTerm(value);
+                setCurrentPage(1);
               }}
             />
           </div>

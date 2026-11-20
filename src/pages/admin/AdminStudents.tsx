@@ -1,6 +1,7 @@
 import { isCollegeTransferee } from "../../services/adminStorage";
 import { getIrregularScheduleUnitError } from "../../services/studentScheduleUnitLimit";
 import TablePagination from "../../components/common/TablePagination";
+import DebouncedSearchInput from "../../components/common/DebouncedSearchInput";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MdArchive } from "react-icons/md";
@@ -960,7 +961,6 @@ export default function AdminStudents({
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const normalizedSearchTerm = searchTerm.trim();
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [filterProgram, setFilterProgram] = useState("All Programs");
   const [filterYearLevel, setFilterYearLevel] = useState("");
   const [filterSection, setFilterSection] = useState("");
@@ -987,22 +987,6 @@ export default function AdminStudents({
   const [studentRecoveryMessage, setStudentRecoveryMessage] = useState<
     string | null
   >(null);
-
-  useEffect(() => {
-    if (normalizedSearchTerm === debouncedSearchTerm) return;
-    if (!normalizedSearchTerm) {
-      setDebouncedSearchTerm("");
-      setRequestedStudentPage(1);
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setDebouncedSearchTerm(normalizedSearchTerm);
-      setRequestedStudentPage(1);
-    }, 3000);
-
-    return () => window.clearTimeout(timer);
-  }, [normalizedSearchTerm, debouncedSearchTerm]);
 
   const [studentSubjectPlans, setStudentSubjectPlans] = useState<
     Record<string, StudentSubjectPlanRecord>
@@ -1104,8 +1088,6 @@ export default function AdminStudents({
   }, [currentBranch]);
 
   useEffect(() => {
-    if (normalizedSearchTerm !== debouncedSearchTerm) return;
-
     let isCancelled = false;
     const loadRevision = studentDataRevisionRef.current;
     const isCurrentLoad = () =>
@@ -1114,7 +1096,7 @@ export default function AdminStudents({
       setIsLoading(true);
       setStudentRecoveryMessage(null);
       void fetchAdminStudentsPage(currentBranch, requestedStudentPage, studentsPerPage, {
-        search: debouncedSearchTerm,
+        search: normalizedSearchTerm,
         program: filterProgram === "All Programs" ? undefined : filterProgram,
         yearLevel: filterYearLevel || undefined,
         section: filterSection || undefined,
@@ -1151,7 +1133,7 @@ export default function AdminStudents({
         if (!isCurrentLoad()) return;
         console.error("Failed to load the requested student page", error);
         const cached = getActiveStudentsForAdminList(currentBranch).filter((student) => {
-          const search = debouncedSearchTerm.trim().toLowerCase();
+          const search = normalizedSearchTerm.toLowerCase();
           return (!search || student.name.toLowerCase().includes(search) || student.id.toLowerCase().includes(search)) &&
             (filterProgram === "All Programs" || student.program === filterProgram) &&
             (!filterYearLevel || student.yearLevel === filterYearLevel) &&
@@ -1190,7 +1172,6 @@ export default function AdminStudents({
     requestedStudentPage,
     studentsPerPage,
     normalizedSearchTerm,
-    debouncedSearchTerm,
     filterProgram,
     filterYearLevel,
     filterSection,
@@ -3825,12 +3806,14 @@ export default function AdminStudents({
         </header>
 
         <div className="students-controls">
-          <input
+          <DebouncedSearchInput
             type="text"
+            aria-label="Search students by full name or student ID"
             placeholder="Search by full name or student ID..."
             value={searchTerm}
-            onChange={(e) => {
-              setSearchTerm(e.target.value);
+            onValueChange={(value) => {
+              setSearchTerm(value);
+              setRequestedStudentPage(1);
             }}
             className="students-search-input"
           />
