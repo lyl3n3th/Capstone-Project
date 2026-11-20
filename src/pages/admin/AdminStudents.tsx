@@ -1,7 +1,7 @@
 import { isCollegeTransferee } from "../../services/adminStorage";
 import { getIrregularScheduleUnitError } from "../../services/studentScheduleUnitLimit";
 import TablePagination from "../../components/common/TablePagination";
-import DebouncedSearchInput from "../../components/common/DebouncedSearchInput";
+import SearchOnEnterInput from "../../components/common/SearchOnEnterInput";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MdArchive } from "react-icons/md";
@@ -3809,10 +3809,10 @@ export default function AdminStudents({
         </header>
 
         <div className="students-controls">
-          <DebouncedSearchInput
+          <SearchOnEnterInput
             type="text"
             aria-label="Search students by full name or student ID"
-            placeholder="Search by full name or student ID..."
+            placeholder="Search by name or student ID, then press Enter..."
             value={searchTerm}
             onTypingStart={() => {
               setIsSearchTyping(true);

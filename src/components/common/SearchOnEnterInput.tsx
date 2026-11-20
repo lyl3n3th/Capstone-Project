@@ -1,27 +1,24 @@
 import { memo, useEffect, useRef, type InputHTMLAttributes } from "react";
 
-type DebouncedSearchInputProps = Omit<
+type SearchOnEnterInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
   "value" | "defaultValue" | "onChange"
 > & {
   value: string;
   onValueChange: (value: string) => void;
   onTypingStart?: () => void;
-  debounceMs?: number;
 };
 
-const DebouncedSearchInput = memo(function DebouncedSearchInput({
+const SearchOnEnterInput = memo(function SearchOnEnterInput({
   value,
   onValueChange,
   onTypingStart,
-  debounceMs = 800,
   ...inputProps
-}: DebouncedSearchInputProps) {
+}: SearchOnEnterInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const onValueChangeRef = useRef(onValueChange);
   const onTypingStartRef = useRef(onTypingStart);
   const isEditingRef = useRef(false);
-  const debounceTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     onValueChangeRef.current = onValueChange;
@@ -33,12 +30,6 @@ const DebouncedSearchInput = memo(function DebouncedSearchInput({
     if (inputRef.current.value !== value) inputRef.current.value = value;
   }, [value]);
 
-  useEffect(() => () => {
-    if (debounceTimerRef.current !== null) {
-      window.clearTimeout(debounceTimerRef.current);
-    }
-  }, []);
-
   return (
     <input
       {...inputProps}
@@ -49,21 +40,23 @@ const DebouncedSearchInput = memo(function DebouncedSearchInput({
           isEditingRef.current = true;
           onTypingStartRef.current?.();
         }
+      }}
+      onKeyDown={(event) => {
+        inputProps.onKeyDown?.(event);
+        if (
+          event.defaultPrevented ||
+          event.key !== "Enter" ||
+          event.nativeEvent.isComposing
+        ) return;
 
-        if (debounceTimerRef.current !== null) {
-          window.clearTimeout(debounceTimerRef.current);
-        }
-
-        debounceTimerRef.current = window.setTimeout(() => {
-          debounceTimerRef.current = null;
-          isEditingRef.current = false;
-          onValueChangeRef.current(inputRef.current?.value ?? "");
-        }, debounceMs);
+        event.preventDefault();
+        isEditingRef.current = false;
+        onValueChangeRef.current(inputRef.current?.value ?? value);
       }}
     />
   );
 });
 
-DebouncedSearchInput.displayName = "DebouncedSearchInput";
+SearchOnEnterInput.displayName = "SearchOnEnterInput";
 
-export default DebouncedSearchInput;
+export default SearchOnEnterInput;

@@ -9,7 +9,7 @@ import {
 import { getInstructorScopedData } from "../../services/instructorPortal";
 import type { StudentStorageRecord } from "../../services/adminStorage";
 import SkeletonPage from "../../components/common/SkeletonPage";
-import DebouncedSearchInput from "../../components/common/DebouncedSearchInput";
+import SearchOnEnterInput from "../../components/common/SearchOnEnterInput";
 import TablePagination from "../../components/common/TablePagination";
 import { INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT } from "../../services/adminStorage";
 import { buildInstructorGradeMasterlist } from "../../services/instructorGradeMasterlist";
@@ -273,10 +273,10 @@ export default function InstructorStudents() {
       <div className="instructor-student-toolbar">
         <label className="instructor-student-search">
           <FiSearch aria-hidden="true" />
-          <DebouncedSearchInput
+          <SearchOnEnterInput
             type="search"
             aria-label="Search students by name or student number"
-            placeholder="Search by name or student number..."
+            placeholder="Search by name or student number, then press Enter..."
             value={searchQuery}
             onTypingStart={() => {
               setIsSearchTyping(true);

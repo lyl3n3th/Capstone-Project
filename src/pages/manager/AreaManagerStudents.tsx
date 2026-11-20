@@ -1,5 +1,5 @@
 import TablePagination from "../../components/common/TablePagination";
-import DebouncedSearchInput from "../../components/common/DebouncedSearchInput";
+import SearchOnEnterInput from "../../components/common/SearchOnEnterInput";
 import React, { useEffect, useMemo, useState } from "react";
 import { BsSearch, BsCaretDownFill, BsCaretUpFill } from "react-icons/bs";
 import {
@@ -444,10 +444,10 @@ const AreaManagerStudents: React.FC = () => {
         <div className="am-students-controls-grid">
           <div className="am-students-search-wrapper">
             <BsSearch />
-            <DebouncedSearchInput
+            <SearchOnEnterInput
               type="text"
               aria-label="Search students by name or student ID"
-              placeholder="Search by name or student ID..."
+              placeholder="Search by name or student ID, then press Enter..."
               value={searchTerm}
               onTypingStart={() => {
                 setIsSearchTyping(true);
