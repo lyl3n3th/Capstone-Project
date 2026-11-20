@@ -44,7 +44,7 @@ const DebouncedSearchInput = memo(function DebouncedSearchInput({
       {...inputProps}
       ref={inputRef}
       defaultValue={value}
-      onChange={(event) => {
+      onChange={() => {
         if (!isEditingRef.current) {
           isEditingRef.current = true;
           onTypingStartRef.current?.();
