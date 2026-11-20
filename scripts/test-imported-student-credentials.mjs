@@ -8,6 +8,10 @@ globalThis.window={localStorage:{getItem:key=>cache.get(key)??null,setItem:(key,
 const supabase={rpc:async(name,args)=>{
   const key=args.p_branch+'|'+args.p_scope;
   if(name==='get_branch_local_storage_record') return {data:remote.get(key)??null,error:failLoad?{message:'Load failed'}:null};
+  if(name==='delete_branch_local_storage_record'){
+    if(failSave)return {error:{message:'Save failed'}};
+    remote.delete(key);return {error:null};
+  }
   assert.equal(name,'upsert_branch_local_storage_record');
   if(failSave)return {error:{message:'Save failed'}};
   remote.set(key,args.p_payload);return {error:null};

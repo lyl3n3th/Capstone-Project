@@ -2968,8 +2968,8 @@ export const removeImportedStudentCredential = async (branch: string, studentNum
   if (!student || !getAdmissionRequirements(student.studentStatus, mapAdminProgramToAdmissionProgram(student.program), "No Honor")
     .some(item => item.code === requirementCode)) throw new Error("This credential is not required for the selected student.");
   const scope = importedCredentialScope(studentNumber, requirementCode);
-  const { error } = await supabase.rpc("upsert_branch_local_storage_record", {
-    p_branch: normalizeBranchName(branch), p_scope: scope, p_payload: null,
+  const { error } = await supabase.rpc("delete_branch_local_storage_record", {
+    p_branch: normalizeBranchName(branch), p_scope: scope,
   });
   if (error) throw new Error(error.message);
   writeBranchScopedData(scope, branch, null, { skipSupabaseSync: true });
