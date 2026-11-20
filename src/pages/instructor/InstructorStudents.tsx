@@ -141,6 +141,8 @@ export default function InstructorStudents() {
   useEffect(() => {
     if (isSearchTyping) return;
     if (isLoading || !currentUser?.branch || !currentUser.id) return;
+    const branch = currentUser.branch;
+    const instructorId = currentUser.id;
     const sectionCodes = [...new Set(scopedAssignments.map((assignment) => assignment.sectionCode).filter(Boolean))];
     const sectionIds = new Set(scopedAssignments.map((assignment) => assignment.sectionId));
     const assignmentCodes = new Set(sectionCodes);
