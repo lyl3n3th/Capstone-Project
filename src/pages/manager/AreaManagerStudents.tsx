@@ -179,6 +179,7 @@ const AreaManagerStudents: React.FC = () => {
   const students = useMemo(() => studentRecords.map(mapStoredStudentToDirectoryRow), [studentRecords]);
   const facetStudents = useMemo(() => facetRecords.map(mapStoredStudentToDirectoryRow), [facetRecords]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [isSearchTyping, setIsSearchTyping] = useState(false);
   const normalizedSearchTerm = searchTerm.trim();
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
@@ -239,6 +240,7 @@ const AreaManagerStudents: React.FC = () => {
   const managedBranchScope = managedBranches.join("::");
 
   useEffect(() => {
+    if (isSearchTyping) return;
     if (loading) return;
     if (managedBranches.length === 0) {
       setStudentRecords([]);
@@ -274,7 +276,7 @@ const AreaManagerStudents: React.FC = () => {
         .finally(() => { if (!cancelled) setPageLoading(false); });
     }, 200);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [loading, managedBranches, managedBranchScope, requestedPage, serverFilters, refreshVersion]);
+  }, [isSearchTyping, loading, managedBranches, managedBranchScope, requestedPage, serverFilters, refreshVersion]);
 
   useEffect(() => {
     if (loadedRosterBranchScope !== managedBranchScope) return;
@@ -290,7 +292,7 @@ const AreaManagerStudents: React.FC = () => {
   }, [loadedRosterBranchScope, managedBranchScope, managedBranches]);
 
   useEffect(() => {
-    if (supplementalSourcePage.length === 0) return;
+    if (isSearchTyping || supplementalSourcePage.length === 0) return;
     let cancelled = false;
     void fetchAdminStudentPageSupplemental(null, supplementalSourcePage)
       .then((supplementalStudents) => {
@@ -309,7 +311,7 @@ const AreaManagerStudents: React.FC = () => {
         console.warn("Unable to load supplemental manager roster details.", error);
       });
     return () => { cancelled = true; };
-  }, [supplementalSourcePage]);
+  }, [isSearchTyping, supplementalSourcePage]);
 
   const uniqueCourses = Array.from(
     new Set(facetStudents.map((s) => s.course)),
@@ -447,9 +449,15 @@ const AreaManagerStudents: React.FC = () => {
               aria-label="Search students by name or student ID"
               placeholder="Search by name or student ID..."
               value={searchTerm}
+              onTypingStart={() => {
+                setIsSearchTyping(true);
+                setPageLoading(false);
+                setSupplementalSourcePage([]);
+              }}
               onValueChange={(value) => {
                 setSearchTerm(value);
                 setCurrentPage(1);
+                setIsSearchTyping(false);
               }}
             />
           </div>

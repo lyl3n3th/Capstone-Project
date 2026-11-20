@@ -6,31 +6,38 @@ type DebouncedSearchInputProps = Omit<
 > & {
   value: string;
   onValueChange: (value: string) => void;
+  onTypingStart?: () => void;
   debounceMs?: number;
 };
 
 const DebouncedSearchInput = memo(function DebouncedSearchInput({
   value,
   onValueChange,
-  debounceMs = 400,
+  onTypingStart,
+  debounceMs = 800,
   ...inputProps
 }: DebouncedSearchInputProps) {
   const [draftValue, setDraftValue] = useState(value);
+  const [editRevision, setEditRevision] = useState(0);
   const onValueChangeRef = useRef(onValueChange);
+  const onTypingStartRef = useRef(onTypingStart);
+  const isEditingRef = useRef(false);
 
   useEffect(() => {
     onValueChangeRef.current = onValueChange;
-  }, [onValueChange]);
+    onTypingStartRef.current = onTypingStart;
+  }, [onValueChange, onTypingStart]);
 
   useEffect(() => {
-    if (!draftValue.trim() || draftValue === value) return;
+    if (!isEditingRef.current) return;
 
     const timer = window.setTimeout(() => {
+      isEditingRef.current = false;
       onValueChangeRef.current(draftValue);
     }, debounceMs);
 
     return () => window.clearTimeout(timer);
-  }, [draftValue, value, debounceMs]);
+  }, [draftValue, editRevision, debounceMs]);
 
   return (
     <input
@@ -38,8 +45,12 @@ const DebouncedSearchInput = memo(function DebouncedSearchInput({
       value={draftValue}
       onChange={(event) => {
         const nextValue = event.target.value;
+        if (!isEditingRef.current) {
+          isEditingRef.current = true;
+          onTypingStartRef.current?.();
+        }
         setDraftValue(nextValue);
-        if (!nextValue.trim()) onValueChangeRef.current("");
+        setEditRevision((revision) => revision + 1);
       }}
     />
   );

@@ -52,6 +52,7 @@ export default function InstructorStudents() {
   const evaluationsReady = evaluations.scope === evaluationScope && !evaluations.loading && !evaluations.error;
   const [requestedPage, setRequestedPage] = useState({ scope: "", page: 1 });
   const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchTyping, setIsSearchTyping] = useState(false);
   const normalizedSearchQuery = searchQuery.trim();
   const normalizedSearch = normalizedSearchQuery.toLowerCase();
   const paginationScope = JSON.stringify([evaluationScope, sectionFilter, yearLevelFilter, subjectFilter, evaluationFilter, normalizedSearch]);
@@ -132,6 +133,7 @@ export default function InstructorStudents() {
   const currentPage = requestedPage.scope === paginationScope ? Math.max(1, requestedPage.page) : 1;
 
   useEffect(() => {
+    if (isSearchTyping) return;
     if (isLoading || !currentUser?.branch || !currentUser.id) return;
     const sectionCodes = [...new Set(scopedAssignments.map((assignment) => assignment.sectionCode).filter(Boolean))];
     const sectionIds = new Set(scopedAssignments.map((assignment) => assignment.sectionId));
@@ -169,10 +171,10 @@ export default function InstructorStudents() {
       })
       .finally(() => { if (!cancelled) setPageLoading(false); });
     return () => { cancelled = true; };
-  }, [isLoading, currentUser?.branch, currentUser?.id, currentPage, pageSize, scopedAssignments, sections, yearLevelFilter, paginationScope, evaluationScope, normalizedSearchQuery]);
+  }, [isSearchTyping, isLoading, currentUser?.branch, currentUser?.id, currentPage, pageSize, scopedAssignments, sections, yearLevelFilter, paginationScope, evaluationScope, normalizedSearchQuery]);
 
   useEffect(() => {
-    if (!currentUser?.branch || supplementalSourcePage.length === 0) return;
+    if (isSearchTyping || !currentUser?.branch || supplementalSourcePage.length === 0) return;
     let cancelled = false;
     void Promise.allSettled([
       loadSupplementalData(),
@@ -186,7 +188,7 @@ export default function InstructorStudents() {
       })));
     });
     return () => { cancelled = true; };
-  }, [currentUser?.branch, loadSupplementalData, supplementalSourcePage]);
+  }, [isSearchTyping, currentUser?.branch, loadSupplementalData, supplementalSourcePage]);
 
   const buildRows = (sourceStudents: StudentStorageRecord[]) => {
     const assignmentSubjectCodes = new Set(
@@ -276,7 +278,15 @@ export default function InstructorStudents() {
             aria-label="Search students by name or student number"
             placeholder="Search by name or student number..."
             value={searchQuery}
-            onValueChange={setSearchQuery}
+            onTypingStart={() => {
+              setIsSearchTyping(true);
+              setPageLoading(false);
+              setSupplementalSourcePage([]);
+            }}
+            onValueChange={(value) => {
+              setSearchQuery(value);
+              setIsSearchTyping(false);
+            }}
           />
         </label>
         <div className="instructor-section-actions">

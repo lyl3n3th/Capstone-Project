@@ -960,6 +960,7 @@ export default function AdminStudents({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [isSearchTyping, setIsSearchTyping] = useState(false);
   const normalizedSearchTerm = searchTerm.trim();
   const [filterProgram, setFilterProgram] = useState("All Programs");
   const [filterYearLevel, setFilterYearLevel] = useState("");
@@ -1088,6 +1089,7 @@ export default function AdminStudents({
   }, [currentBranch]);
 
   useEffect(() => {
+    if (isSearchTyping) return;
     let isCancelled = false;
     const loadRevision = studentDataRevisionRef.current;
     const isCurrentLoad = () =>
@@ -1171,6 +1173,7 @@ export default function AdminStudents({
     currentBranch,
     requestedStudentPage,
     studentsPerPage,
+    isSearchTyping,
     normalizedSearchTerm,
     filterProgram,
     filterYearLevel,
@@ -1182,7 +1185,7 @@ export default function AdminStudents({
   ]);
 
   useEffect(() => {
-    if (loadedStudentRosterBranch !== currentBranch || supplementalSourcePage.length === 0) return;
+    if (isSearchTyping || loadedStudentRosterBranch !== currentBranch || supplementalSourcePage.length === 0) return;
     let isCancelled = false;
     void fetchAdminStudentPageSupplemental(currentBranch, supplementalSourcePage)
       .then((supplementalStudents) => {
@@ -1215,7 +1218,7 @@ export default function AdminStudents({
         console.warn("Unable to load supplemental details for this student page.", error);
       });
     return () => { isCancelled = true; };
-  }, [currentBranch, loadedStudentRosterBranch, supplementalSourcePage]);
+  }, [currentBranch, loadedStudentRosterBranch, supplementalSourcePage, isSearchTyping]);
 
   useEffect(() => {
     if (loadedStudentRosterBranch !== currentBranch) return;
@@ -3811,9 +3814,15 @@ export default function AdminStudents({
             aria-label="Search students by full name or student ID"
             placeholder="Search by full name or student ID..."
             value={searchTerm}
+            onTypingStart={() => {
+              setIsSearchTyping(true);
+              setIsLoading(false);
+              setSupplementalSourcePage([]);
+            }}
             onValueChange={(value) => {
               setSearchTerm(value);
               setRequestedStudentPage(1);
+              setIsSearchTyping(false);
             }}
             className="students-search-input"
           />
