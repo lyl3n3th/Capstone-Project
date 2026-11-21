@@ -163,6 +163,8 @@ def format_sms_destination(value):
 def is_email_delivery_configured():
     return bool(
         getattr(settings, "DEFAULT_FROM_EMAIL", "")
+        and getattr(settings, "EMAIL_BACKEND", "")
+        == "django.core.mail.backends.smtp.EmailBackend"
         and getattr(settings, "EMAIL_HOST", "")
     )
 
@@ -177,7 +179,7 @@ def is_sms_delivery_configured():
 
 def send_delivery_email(*, destination_email, subject, message):
     try:
-        send_mail(
+        sent_count = send_mail(
             subject=subject,
             message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
@@ -188,6 +190,13 @@ def send_delivery_email(*, destination_email, subject, message):
         raise TrackingRecoveryDeliveryError(
             "Unable to send the admission email right now."
         ) from exc
+
+    if not isinstance(sent_count, int) or sent_count < 1:
+        raise TrackingRecoveryDeliveryError(
+            "The email service did not accept the admission email."
+        )
+
+    return sent_count
 
 
 def send_delivery_sms(*, destination_phone_number, message):
