@@ -6,6 +6,7 @@ import {
   type AdminAttachment,
 } from "./adminStorage";
 import { supabase } from "../lib/supabase";
+import { withSignedUrlRequestLimit } from "./storageRequestLimiter";
 import type { EnrollmentRequestedLoadRecord } from "./enrollmentLoadPlanner";
 import { stripLegacyMockEnrollmentRequestRecords } from "./legacyMockData";
 import { verifyStudentEnrollmentBalance, type StudentBillingContext } from "./studentBilling";
@@ -132,12 +133,14 @@ const createEnrollmentRequestAttachmentUrl = async (
   storagePath: string,
   storageBucket = ENROLLMENT_REQUEST_ATTACHMENT_BUCKET,
 ) => {
-  const { data, error } = await supabase.storage
-    .from(storageBucket)
-    .createSignedUrl(
-      storagePath,
-      ENROLLMENT_REQUEST_ATTACHMENT_URL_TTL_SECONDS,
-    );
+  const { data, error } = await withSignedUrlRequestLimit(() =>
+    supabase.storage
+      .from(storageBucket)
+      .createSignedUrl(
+        storagePath,
+        ENROLLMENT_REQUEST_ATTACHMENT_URL_TTL_SECONDS,
+      ),
+  );
 
   if (error || !data?.signedUrl) {
     console.warn("Failed to sign enrollment request attachment URL", error);
@@ -764,3 +767,4 @@ export const saveEnrollmentRequest = async (
   writeEnrollmentRequestsForBranch(resolvedBranch, nextRequests);
   return nextRequest;
 };
+

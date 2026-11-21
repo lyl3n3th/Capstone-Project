@@ -6,7 +6,9 @@ import {
 } from "../../services/backupApi";
 
 const BACKUP_SCHEDULER_LOCK_KEY = "aics-backup-scheduler-lock";
-const BACKUP_SCHEDULER_INTERVAL_MS = 60_000;
+// Backups are scheduled within a 10-minute window; a 5-minute poll keeps
+// snapshots current while avoiding a full database sync every minute.
+const BACKUP_SCHEDULER_INTERVAL_MS = 5 * 60_000;
 const BACKUP_SCHEDULER_LEASE_MS = 90_000;
 
 type BackupSchedulerLock = {
@@ -153,3 +155,4 @@ export default function BackupScheduler() {
 
   return null;
 }
+
