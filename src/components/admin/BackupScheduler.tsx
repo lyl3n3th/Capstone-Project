@@ -6,6 +6,9 @@ import {
 } from "../../services/backupApi";
 
 const BACKUP_SCHEDULER_LOCK_KEY = "aics-backup-scheduler-lock";
+// Temporary incident mitigation: avoid periodic database requests while the
+// Supabase connection path is timing out. Manual backup actions remain enabled.
+const BACKUP_SCHEDULER_ENABLED = false;
 // Backups are scheduled within a 10-minute window; a 5-minute poll keeps
 // snapshots current while avoiding a full database sync every minute.
 const BACKUP_SCHEDULER_INTERVAL_MS = 5 * 60_000;
@@ -103,6 +106,15 @@ export default function BackupScheduler() {
   const ownerIdRef = useRef(createSchedulerOwnerId());
 
   useEffect(() => {
+    if (!BACKUP_SCHEDULER_ENABLED) {
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      releaseSchedulerLock(ownerIdRef.current);
+      return;
+    }
+
     if (currentUser?.role !== "admin" || !currentUser.branch) {
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
