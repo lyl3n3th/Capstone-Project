@@ -455,21 +455,27 @@ function AdmissionStep4() {
       return {
         type: "success",
         message:
-          "Application submitted. Tracking number sent by email and SMS.",
+          "Application submitted. The email service accepted the tracking email, and the tracking number was sent by SMS.",
       };
     }
 
     if (sentChannels.length === 1 && failedChannels.length > 0) {
       return {
         type: "success",
-        message: `Application submitted. Tracking number sent by ${sentChannels[0]}.`,
+        message:
+          sentChannels[0] === "email"
+            ? "Application submitted. The email service accepted the tracking email for delivery."
+            : "Application submitted. Tracking number sent by SMS.",
       };
     }
 
     if (sentChannels.length === 1) {
       return {
         type: "success",
-        message: `Application submitted. Tracking number sent by ${sentChannels[0]}.`,
+        message:
+          sentChannels[0] === "email"
+            ? "Application submitted. The email service accepted the tracking email for delivery."
+            : "Application submitted. Tracking number sent by SMS.",
       };
     }
 

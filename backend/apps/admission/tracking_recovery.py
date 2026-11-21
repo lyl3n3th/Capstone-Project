@@ -399,7 +399,19 @@ def build_decision_notification_email_message(target, *, decision_status, decisi
     if reference_lines:
         lines.extend(["", *reference_lines])
 
-    if normalized_status == "accepted" and target.portal_link:
+    if (
+        normalized_status == "accepted"
+        and target.record_type == "enrollment"
+        and target.portal_link
+    ):
+        lines.extend(
+            [
+                "",
+                "Sign in to the student portal to review your enrollment details:",
+                target.portal_link,
+            ]
+        )
+    elif normalized_status == "accepted" and target.portal_link:
         lines.extend(
             [
                 "",
@@ -408,6 +420,13 @@ def build_decision_notification_email_message(target, *, decision_status, decisi
                 "",
                 "Important: You may now log in to the student portal using the email address you used in your admission application.",
                 "Your assigned student number is included above for your school records.",
+            ]
+        )
+    elif normalized_status == "accepted" and target.record_type == "enrollment":
+        lines.extend(
+            [
+                "",
+                "Please sign in to the student portal to review your enrollment details.",
             ]
         )
     elif normalized_status == "accepted":

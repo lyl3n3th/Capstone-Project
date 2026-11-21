@@ -365,7 +365,7 @@ const getDecisionNotificationFeedback = (
     case "sent":
       return {
         type: "success",
-        message: `${recordLabel} rejected. Email notice sent successfully.`,
+        message: `${recordLabel} rejected. The email service accepted the notice for delivery.`,
       };
     case "failed":
       return {
@@ -382,22 +382,23 @@ const getDecisionNotificationFeedback = (
 
 const getApprovalNotificationFeedback = (
   notificationResult: AdmissionDecisionNotificationResponse,
+  recordLabel = "Admission",
 ): { message: string; type: Toast["type"] } => {
   switch (notificationResult.deliveries.email.status) {
     case "sent":
       return {
         type: "success",
-        message: "Approval email sent with the student portal link.",
+        message: `${recordLabel} approval email accepted by the email service for delivery.`,
       };
     case "failed":
       return {
         type: "warning",
-        message: "Approval email could not be sent right now.",
+        message: `${recordLabel} approval email could not be sent right now.`,
       };
     default:
       return {
         type: "warning",
-        message: "Approval email delivery is not configured yet.",
+        message: `${recordLabel} approval email delivery is not configured yet.`,
       };
   }
 };
@@ -6827,26 +6828,65 @@ export default function AdminEnrollees({
           ),
         );
 
-        if (selectedAction.action === "reject") {
-          const storedStudents = readStoredStudents();
-          const matchedStudent = storedStudents.find((student) => {
-            const matchesBranch =
-              normalizeBranchName(student.branch) === currentBranch;
+        const storedStudents = readStoredStudents();
+        const requestBranch = normalizeBranchName(
+          savedRequest.branch || currentBranch,
+        );
+        const matchedStudent = storedStudents.find((student) => {
+          if (normalizeBranchName(student.branch) !== requestBranch) {
+            return false;
+          }
 
-            if (!matchesBranch) {
-              return false;
-            }
+          if (
+            savedRequest.trackingNumber &&
+            student.trackingNumber === savedRequest.trackingNumber
+          ) {
+            return true;
+          }
 
-            if (
-              requestToUpdate.trackingNumber &&
-              student.trackingNumber === requestToUpdate.trackingNumber
-            ) {
-              return true;
-            }
+          return student.id === savedRequest.studentNumber;
+        });
 
-            return student.id === requestToUpdate.studentNumber;
-          });
-
+        if (selectedAction.action === "approve") {
+          if (matchedStudent?.email?.trim()) {
+            void sendAdmissionDecisionNotification({
+              trackingNumber: savedRequest.trackingNumber,
+              studentNumber: savedRequest.studentNumber,
+              email: matchedStudent.email,
+              fullName: savedRequest.fullName || matchedStudent.name,
+              recordType: "enrollment",
+              decisionStatus: "accepted",
+              portalLink: buildStudentPortalLoginLink({
+                branch: savedRequest.branch,
+                email: matchedStudent.email,
+                studentNumber: savedRequest.studentNumber,
+              }),
+            })
+              .then((notificationResult) => {
+                const feedback = getApprovalNotificationFeedback(
+                  notificationResult,
+                  "Enrollment",
+                );
+                addToast(feedback.message, feedback.type);
+              })
+              .catch((notificationError) => {
+                console.warn(
+                  "Unable to send the enrollment approval email notification.",
+                  notificationError,
+                );
+                addToast(
+                  "Enrollment request approved, but the student email could not be sent right now.",
+                  "warning",
+                );
+              });
+          } else {
+            decisionNotificationFeedback = {
+              type: "warning",
+              message:
+                "Enrollment request approved, but no student email is on file.",
+            };
+          }
+        } else {
           if (matchedStudent?.email) {
             try {
               const notificationResult = await sendAdmissionDecisionNotification(
@@ -6886,11 +6926,12 @@ export default function AdminEnrollees({
 
         addToast(
           selectedAction.action === "approve"
-            ? "Enrollment request approved successfully!"
+            ? decisionNotificationFeedback?.message ||
+                "Enrollment request approved successfully!"
             : decisionNotificationFeedback?.message ||
                 "Enrollment request rejected successfully!",
           selectedAction.action === "approve"
-            ? "success"
+            ? decisionNotificationFeedback?.type || "success"
             : decisionNotificationFeedback?.type || "warning",
         );
       }
