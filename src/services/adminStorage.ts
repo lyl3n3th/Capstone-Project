@@ -4,6 +4,7 @@ import type {
   AdmissionDraft,
 } from "../types/application";
 import { supabase } from "../lib/supabase";
+import { withSignedUrlRequestLimit } from "./storageRequestLimiter";
 import {
   fetchBranchDirectory,
   findRegisteredBranch,
@@ -4637,9 +4638,11 @@ const getSignedRequirementUrl = async (
   storageBucket?: string | null,
 ) => {
   const bucketName = storageBucket || REQUIREMENTS_BUCKET;
-  const { data, error } = await supabase.storage
-    .from(bucketName)
-    .createSignedUrl(storagePath, 60 * 60);
+  const { data, error } = await withSignedUrlRequestLimit(() =>
+    supabase.storage
+      .from(bucketName)
+      .createSignedUrl(storagePath, 60 * 60),
+  );
 
   if (error) {
     console.warn("Failed to sign requirement file URL", error);
