@@ -384,7 +384,22 @@ export default function InstructorGrades() {
   };
 
   const handleUpload = async (file?: File) => {
-    if (!file || !instructor || !currentUser?.branch) {
+    if (!file) {
+      return;
+    }
+
+    if (!instructor) {
+      setMessage("Instructor profile is still loading. Please try again shortly.");
+      return;
+    }
+
+    if (!currentUser?.branch) {
+      setMessage("Your branch is not available. Sign in again before uploading grades.");
+      return;
+    }
+
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      setMessage("Choose an Excel grade file ending in .xlsx or .xls.");
       return;
     }
 
@@ -401,7 +416,7 @@ export default function InstructorGrades() {
       ]);
       const hasErrors = result.errorRows.length > 0;
 
-      saveInstructorGradeSubmission(currentUser.branch, {
+      await saveInstructorGradeSubmission(currentUser.branch, {
         id: `grade-submission-${Date.now()}`,
         branch: currentUser.branch,
         instructorId: instructor.id,
@@ -426,6 +441,7 @@ export default function InstructorGrades() {
       setMessage(
         error instanceof Error ? error.message : "Unable to parse grade file.",
       );
+      refreshSubmissions();
     } finally {
       setIsParsing(false);
     }
@@ -612,11 +628,16 @@ export default function InstructorGrades() {
 
       <section className="instructor-actions-panel">
         <label>
-          <FiUpload /> {isParsing ? "Reading..." : "Upload Grades"}
+          <FiUpload /> {isParsing ? "Submitting..." : "Upload Grades"}
           <input
             type="file"
             accept=".xlsx,.xls"
-            onChange={(event) => void handleUpload(event.target.files?.[0])}
+            disabled={isParsing}
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = "";
+              void handleUpload(file);
+            }}
           />
         </label>
       </section>

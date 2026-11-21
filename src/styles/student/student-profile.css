@@ -9,6 +9,10 @@
   box-sizing: border-box;
 }
 
+.s-profile-balance {
+  margin-bottom: 25px;
+}
+
 
 .s-profile-header-card {
   background: linear-gradient(135deg, #1A3D5C, #066287);

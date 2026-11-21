@@ -7,6 +7,7 @@ import { MdArchive } from "react-icons/md";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
 import { useAuth } from "../../hooks/useAuth";
+import { formatContactNumber } from "../../utils/contactNumber";
 import { deleteAdmissionApplication } from "../../services/admission";
 import {
   getStudentsForBranch,
@@ -1032,7 +1033,7 @@ export default function AdminTrash({
                     <td className="student-name-cell">{record.name}</td>
                     <td>{record.program}</td>
                     <td>{record.yearLevel}</td>
-                    <td>{record.contact || "-"}</td>
+                    <td>{formatContactNumber(record.contact) || "-"}</td>
                     <td>
                       <div className="archive-actions">
                         <button

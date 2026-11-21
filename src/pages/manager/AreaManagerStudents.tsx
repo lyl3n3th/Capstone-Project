@@ -20,6 +20,7 @@ import {
   type StudentAcademicStandingLabel,
 } from "../../services/studentGrades";
 import SkeletonPage from "../../components/common/SkeletonPage";
+import { formatContactNumber } from "../../utils/contactNumber";
 import "../../styles/manager/area-manageStudents.css";
 
 interface Student {
@@ -796,7 +797,7 @@ const AreaManagerStudents: React.FC = () => {
                 <div className="am-students-field full">
                   <label>Contact Number</label>
                   <div className="am-students-value-box">
-                    {selectedStudent.contact_no || "N/A"}
+                    {formatContactNumber(selectedStudent.contact_no) || "N/A"}
                   </div>
                 </div>
                 <div className="am-students-field full">

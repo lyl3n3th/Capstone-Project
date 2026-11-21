@@ -481,7 +481,7 @@ export default function InstructorStudents() {
           </tbody>
         </table>
       </div>
-      <TablePagination page={currentPage} pageSize={pageSize} totalItems={rows.length} onPageChange={(page) => setRequestedPage({ scope: paginationScope, page })} showPageNumbers={false} label="Instructor student pages" />
+      <TablePagination page={currentPage} pageSize={pageSize} totalItems={pageTotalItems} onPageChange={(page) => setRequestedPage({ scope: paginationScope, page })} showPageNumbers={false} label="Instructor student pages" />
     </div>
   );
 }

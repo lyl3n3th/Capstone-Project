@@ -22,6 +22,10 @@ import {
   setInstructorPassword,
 } from "../../services/instructorPortal";
 import { STAFF_ROLE_LABELS, type StaffRole } from "../../types/user";
+import {
+  formatContactNumber,
+  getContactNumberDigits,
+} from "../../utils/contactNumber";
 import "../../styles/staff/staff-login.css";
 
 type StaffLoginAccessRole = StaffRole;
@@ -500,6 +504,15 @@ function StaffLogin() {
       return;
     }
 
+    const contactNumberDigits = getContactNumberDigits(resetData.contactNumber);
+    if (contactNumberDigits.length !== 11) {
+      setResetFeedback({
+        type: "error",
+        message: "Enter an 11-digit mobile number.",
+      });
+      return;
+    }
+
     if (resetData.newPassword.length < 8) {
       setResetFeedback({
         type: "error",
@@ -522,7 +535,7 @@ function StaffLogin() {
       const resetPayload = {
         branch: resetData.branch as StaffBranch,
         email: resetData.email,
-        contactNumber: resetData.contactNumber,
+        contactNumber: contactNumberDigits,
         newPassword: resetData.newPassword,
       };
       const result = resetData.role === "instructor"
@@ -965,15 +978,17 @@ function StaffLogin() {
             <label htmlFor="reset-contact">Mobile Number</label>
             <input
               id="reset-contact"
-              type="text"
+              type="tel"
+              inputMode="numeric"
+              maxLength={13}
               value={resetData.contactNumber}
               onChange={(event) =>
                 setResetData((current) => ({
                   ...current,
-                  contactNumber: event.target.value,
+                  contactNumber: formatContactNumber(event.target.value),
                 }))
               }
-              placeholder="Enter the registered mobile number"
+              placeholder="0912 345 6789"
               autoComplete="tel"
             />
           </div>

@@ -17,6 +17,10 @@ import {
 } from "../../services/adminStorage";
 import "../../styles/student/student-regis.css";
 import { fetchBranchDirectory } from "../../services/branchDirectory";
+import {
+  formatContactNumber,
+  getContactNumberDigits,
+} from "../../utils/contactNumber";
 
 function StudentRegistration() {
   const navigate = useNavigate();
@@ -33,7 +37,6 @@ function StudentRegistration() {
     studentNumber: "",
     email: "",
     mobile: "",
-    birthDate: "",
     password: "",
     confirmPassword: "",
   });
@@ -50,29 +53,11 @@ function StudentRegistration() {
     setFormData((prev) => ({ ...prev, studentNumber: normalizedStudentNumber }));
   };
 
-  const formatPhoneNumber = (value: string) => {
-    const cleaned = value.replace(/\D/g, "");
-    const limited = cleaned.slice(0, 11);
-
-    if (limited.length <= 4) {
-      return limited;
-    }
-
-    if (limited.length <= 7) {
-      return `${limited.slice(0, 4)} ${limited.slice(4)}`;
-    }
-
-    return `${limited.slice(0, 4)} ${limited.slice(4, 7)} ${limited.slice(7, 11)}`;
-  };
-
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rawValue = e.target.value;
-    const formatted = formatPhoneNumber(rawValue);
-    setFormData((prev) => ({ ...prev, mobile: formatted }));
-  };
-
-  const getRawPhoneNumber = (formatted: string) => {
-    return formatted.replace(/\D/g, "");
+    setFormData((prev) => ({
+      ...prev,
+      mobile: formatContactNumber(e.target.value),
+    }));
   };
 
   const showSystemAlert = (
@@ -111,8 +96,8 @@ function StudentRegistration() {
       return;
     }
 
-    const rawPhone = getRawPhoneNumber(formData.mobile);
-    if (rawPhone.length < 11) {
+    const rawPhone = getContactNumberDigits(formData.mobile);
+    if (rawPhone.length !== 11) {
       showSystemAlert(
         "Check Mobile Number",
         "Invalid Mobile number. Please enter 11 digits (e.g., 09123456789)",
@@ -151,7 +136,6 @@ function StudentRegistration() {
           studentNumber,
           email: formData.email,
           mobile: rawPhone,
-          birthDate: formData.birthDate,
           password: formData.password,
         });
       let registeredIdentity;
@@ -291,7 +275,8 @@ function StudentRegistration() {
                       value={formData.mobile}
                       onChange={handlePhoneChange}
                       placeholder="0912 123 1234"
-                      maxLength={14}
+                      maxLength={13}
+                      inputMode="numeric"
                       required
                     />
                     <small className="field-hint">
@@ -301,18 +286,6 @@ function StudentRegistration() {
                 </div>
 
                 <div className="registration-grid-column">
-                  <div className="form-field">
-                    <label htmlFor="birthDate">Date of Birth</label>
-                    <input
-                      id="birthDate"
-                      type="date"
-                      name="birthDate"
-                      value={formData.birthDate}
-                      onChange={handleChange}
-                      required
-                    />
-                  </div>
-
                   <div className="form-field">
                     <label htmlFor="password">Password</label>
                     <div className="password-input-wrapper">

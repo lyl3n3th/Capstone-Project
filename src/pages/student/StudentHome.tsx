@@ -10,20 +10,9 @@ import { useStudent } from "../../hooks/useStudent";
 import { useAuth } from "../../hooks/useAuth";
 import { useStoredProfileImage } from "../../hooks/useStoredProfileImage";
 import {
-  getStudentCredentialOverview,
   syncStudentCredentialUpload,
 } from "../../services/adminStorage";
-import {
-  getAdmissionDiscountSource,
-  getAdmissionDiscountSourceLabel,
-  getEffectiveAdmissionDiscountPercentage,
-  uploadAdmissionRequirementFile,
-} from "../../services/admission";
-import {
-  buildStudentBalanceSummary,
-  STUDENT_PAYMENTS_UPDATED_EVENT,
-} from "../../services/studentPayments";
-import { getStudentBillingSummary } from "../../services/studentBilling";
+import { uploadAdmissionRequirementFile } from "../../services/admission";
 import "../../styles/main.css";
 import { ToastContainer } from "../../components/common/Toast";
 
@@ -139,8 +128,6 @@ function StudentHome() {
   const [selectingCredentialCode, setSelectingCredentialCode] = useState<
     string | null
   >(null);
-  const [paymentRecordsVersion, setPaymentRecordsVersion] = useState(0);
-
   const handleMenuClick = () => {
     setSidebarOpen(!sidebarOpen);
   };
@@ -319,24 +306,6 @@ function StudentHome() {
     };
   }, [sidebarOpen]);
 
-  useEffect(() => {
-    const handleStudentPaymentsUpdated = () => {
-      setPaymentRecordsVersion((previousValue) => previousValue + 1);
-    };
-
-    window.addEventListener(
-      STUDENT_PAYMENTS_UPDATED_EVENT,
-      handleStudentPaymentsUpdated,
-    );
-
-    return () => {
-      window.removeEventListener(
-        STUDENT_PAYMENTS_UPDATED_EVENT,
-        handleStudentPaymentsUpdated,
-      );
-    };
-  }, []);
-
   const handleLogout = () => {
     console.log("Logging out...");
     addToast("Logging out...", "info");
@@ -371,63 +340,9 @@ function StudentHome() {
     subjects[0]?.semester ||
     student?.ownScheduleSemester ||
     "1st Semester";
-  const currentTermSubjects = subjects.filter(
-    (subject) =>
-      subject.academicYear === currentAcademicYear &&
-      subject.semester === currentSemester,
-  );
   const pendingUploadCount = credentialItems.filter(
     (item) => selectedCredentialFiles[item.code],
   ).length;
-  const credentialOverview = student
-    ? getStudentCredentialOverview({
-        branch: student.branch,
-        studentNumber: student.studentNumber,
-        trackingNumber: student.trackingNumber,
-      })
-    : null;
-  const honorCertificateApproved = Boolean(
-    credentialOverview?.items.some(
-      (item) =>
-        item.name.trim().toLowerCase() === "honor certificate" &&
-        item.reviewStatus === "Approved",
-      ),
-  );
-  const tuitionPerUnit = 600;
-  const balanceFormatter = new Intl.NumberFormat("en-PH", {
-    style: "currency",
-    currency: "PHP",
-    maximumFractionDigits: 0,
-  });
-  const effectiveDiscountPercentage = getEffectiveAdmissionDiscountPercentage({
-    honorLabel: credentialOverview?.applicantRecord.honorLabel || "No Honor",
-    honorCertificateApproved,
-    appliedForScholarship: Boolean(
-      credentialOverview?.applicantRecord.appliedForScholarship ||
-        typeof credentialOverview?.applicantRecord.scholarshipExamScore ===
-          "number",
-    ),
-    scholarshipExamScore:
-      credentialOverview?.applicantRecord.scholarshipExamScore ?? null,
-  });
-  const effectiveDiscountSourceLabel = getAdmissionDiscountSourceLabel(
-    getAdmissionDiscountSource({
-      honorLabel: credentialOverview?.applicantRecord.honorLabel || "No Honor",
-      honorCertificateApproved,
-      appliedForScholarship: Boolean(
-        credentialOverview?.applicantRecord.appliedForScholarship ||
-          typeof credentialOverview?.applicantRecord.scholarshipExamScore ===
-            "number",
-      ),
-      scholarshipExamScore:
-        credentialOverview?.applicantRecord.scholarshipExamScore ?? null,
-    }),
-  );
-  void paymentRecordsVersion;
-  const studentBalanceSummary = student
-    ? getStudentBillingSummary({ student, subjects, academicYear: currentAcademicYear, semester: currentSemester })
-    : { ...buildStudentBalanceSummary({ totalAssessment: 0, payments: [] }), totalUnits: 0 };
-
   const getStatusClass = (status: string) => {
     switch (status) {
       case "pending":
@@ -563,7 +478,7 @@ function StudentHome() {
             </div>
           )}
 
-          <div className="s-dashboard-grid s-home-overview-grid">
+          <div className="s-dashboard-grid s-home-overview-grid s-home-overview-grid-single">
             <section className="s-home-credentials" aria-label="Credential uploading">
               <div className="s-credential-header">
                 <div className="s-icon-ac">
@@ -690,47 +605,6 @@ function StudentHome() {
                 )}
               </div>
             </section>
-            <div className="s-card s-home-balance">
-              <div className="s-card-header1">
-                <h3>Balance Overview</h3>
-              </div>
-              <div className="s-balance-content">
-                <div className="s-balance-amount">
-                  {student?.programType !== "SHS" &&
-                  studentBalanceSummary.totalAssessment > 0
-                    ? balanceFormatter.format(studentBalanceSummary.currentBalance)
-                    : "Pending Assessment"}
-                </div>
-                <p>
-                  {currentTermSubjects.length > 0
-                    ? `${currentTermSubjects.length} official subject(s) loaded for ${currentSemester}.`
-                    : "No official subject load has been posted yet."}
-                </p>
-                {student?.programType !== "SHS" ? (
-                  <>
-                    <p>
-                      {balanceFormatter.format(studentBalanceSummary.totalPaid)} paid
-                      of {balanceFormatter.format(studentBalanceSummary.totalAssessment)}
-                    </p>
-                    <p>
-                      {studentBalanceSummary.totalUnits} unit(s) at{" "}
-                      {balanceFormatter.format(tuitionPerUnit)} per unit
-                    </p>
-                    {effectiveDiscountPercentage > 0 ? (
-                      <p>
-                        {effectiveDiscountPercentage}% {effectiveDiscountSourceLabel}{" "}
-                        applied
-                      </p>
-                    ) : null}
-                  </>
-                ) : (
-                  <p>
-                    SHS billing will appear here after the final subject load is
-                    confirmed.
-                  </p>
-                )}
-              </div>
-            </div>
           </div>
         </main>
       </div>

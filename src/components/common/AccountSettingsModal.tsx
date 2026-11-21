@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { BsEye, BsEyeSlash } from "react-icons/bs";
 import { MdClose } from "react-icons/md";
+import {
+  formatContactNumber,
+  getContactNumberDigits,
+} from "../../utils/contactNumber";
 import "../../styles/components/account-settings-modal.css";
 
 export interface AccountSettingsProfile {
@@ -47,7 +51,7 @@ function AccountSettingsModalContent({
   const [lastName, setLastName] = useState(values?.lastName ?? "");
   const [email, setEmail] = useState(values?.email ?? "");
   const [contactNumber, setContactNumber] = useState(
-    values?.contactNumber ?? "",
+    formatContactNumber(values?.contactNumber),
   );
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -63,7 +67,7 @@ function AccountSettingsModalContent({
     const shouldEditContactDetails =
       values?.email !== undefined || values?.contactNumber !== undefined;
     const normalizedEmail = email.trim().toLowerCase();
-    const normalizedContactNumber = contactNumber.trim();
+    const normalizedContactNumber = getContactNumberDigits(contactNumber);
     const normalizedCurrentPassword = currentPassword.trim();
     const normalizedPassword = newPassword.trim();
     const normalizedConfirmPassword = confirmPassword.trim();
@@ -81,7 +85,7 @@ function AccountSettingsModalContent({
         nextErrors.email = true;
       }
 
-      if (!normalizedContactNumber) {
+      if (normalizedContactNumber.length !== 11) {
         nextErrors.contactNumber = true;
       }
     }
@@ -102,7 +106,7 @@ function AccountSettingsModalContent({
     } else if (nextErrors.email) {
       setLocalErrorMessage("Enter a valid email address.");
     } else if (nextErrors.contactNumber) {
-      setLocalErrorMessage("Enter a contact number.");
+      setLocalErrorMessage("Enter an 11-digit contact number.");
     } else {
       setLocalErrorMessage("");
     }
@@ -201,9 +205,13 @@ function AccountSettingsModalContent({
                     <input
                       type="tel"
                       className={`account-settings-input ${fieldErrors.contactNumber ? "input-error" : ""}`}
+                      inputMode="numeric"
+                      maxLength={13}
                       value={contactNumber}
-                      onChange={(event) => setContactNumber(event.target.value)}
-                      placeholder="09123456789"
+                      onChange={(event) =>
+                        setContactNumber(formatContactNumber(event.target.value))
+                      }
+                      placeholder="0912 345 6789"
                     />
                   </div>
                 </>

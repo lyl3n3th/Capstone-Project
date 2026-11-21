@@ -19,6 +19,10 @@ import {
   getAdmissionPortalStatus,
 } from "../../services/admissionPortal";
 import { fetchBranchOfferings, getProgramsForOfferings, type BranchOffering } from "../../services/branchOfferings";
+import {
+  formatContactNumber as formatSharedContactNumber,
+  getContactNumberDigits,
+} from "../../utils/contactNumber";
 
 const EDUCATIONAL_LEVEL_PLACEHOLDER = "Educational Level";
 const TRACK_SELECTION_PLACEHOLDER = "Strand / Program";
@@ -221,7 +225,7 @@ function AdmissionStep2() {
       return "Enter a valid email address.";
     }
 
-    if (fieldId === "contact" && value.replace(/\D/g, "").length !== 11) {
+    if (fieldId === "contact" && getContactNumberDigits(value).length !== 11) {
       return "Enter an 11-digit contact number.";
     }
 
@@ -254,31 +258,14 @@ function AdmissionStep2() {
     setTouchedFields((prev) => ({ ...prev, [fieldId]: true }));
   };
 
-  // Format contact number (adds space after 4th and 7th digits)
-  const formatContactNumber = (value: string) => {
-    const cleaned = value.replace(/\D/g, "");
-    if (cleaned.length >= 4 && cleaned.length < 7) {
-      return cleaned.slice(0, 4) + " " + cleaned.slice(4);
-    } else if (cleaned.length >= 7) {
-      return (
-        cleaned.slice(0, 4) +
-        " " +
-        cleaned.slice(4, 7) +
-        " " +
-        cleaned.slice(7, 11)
-      );
-    }
-    return cleaned;
-  };
+  const formatContactNumber = (value: string) =>
+    formatSharedContactNumber(value);
 
   // Handle contact input with auto-formatting
   const handleContactChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawValue = e.target.value;
     const numbersOnly = rawValue.replace(/\s/g, "");
-    if (/^\d*$/.test(numbersOnly)) {
-      const formatted = formatContactNumber(numbersOnly);
-      setContact(formatted);
-    }
+    if (/^\d*$/.test(numbersOnly)) setContact(formatContactNumber(numbersOnly));
   };
 
   // Handle year completion (only numbers)
@@ -329,7 +316,9 @@ function AdmissionStep2() {
     setMname((current) => current || application.middleName || "");
     setAddress((current) => current || application.address || "");
     setEmail((current) => current || application.email || "");
-    setContact((current) => current || application.phoneNumber || "");
+    setContact((current) =>
+      current || formatContactNumber(application.phoneNumber || ""),
+    );
     setLastSchool((current) => current || application.lastSchoolAttended || "");
     setYearCompletion((current) => current || application.yearCompletion || "");
     setRequestedYearLevel((current) =>

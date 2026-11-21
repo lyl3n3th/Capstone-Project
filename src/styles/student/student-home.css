@@ -105,6 +105,10 @@
   align-items: start;
 }
 
+.s-home-overview-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .s-home-credentials {
   min-width: 0;
 }

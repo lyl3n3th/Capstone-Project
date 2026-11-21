@@ -3614,6 +3614,11 @@
   padding: 4px 2px 2px;
 }
 
+.subject-prerequisite-search {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
 .assignment-subject-option {
   display: flex;
   align-items: center;
@@ -3651,6 +3656,13 @@
   height: 18px;
   margin: 0;
   accent-color: #1d4ed8;
+}
+
+.assignment-subject-option input[type="radio"] {
+  box-sizing: border-box;
+  flex: 0 0 18px;
+  padding: 0;
+  border-radius: 50%;
 }
 
 .assignment-subject-details {
@@ -7164,6 +7176,75 @@
 .enrollees-content .enrollee-status-actions .enrollee-archive-entry {
   margin-bottom: 0;
   flex-shrink: 0;
+}
+
+/* Give college subjects a stable seven-column layout; keep it scoped away from SHS tables. */
+.enrollees-content .subjects-table-view .college-subjects-table {
+  min-width: 1080px !important;
+  table-layout: fixed !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table th:nth-child(1),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(1) {
+  width: 10% !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table th:nth-child(2),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(2) {
+  width: 23% !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table th:nth-child(3),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(3) {
+  width: 15% !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table th:nth-child(4),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(4) {
+  width: 7% !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table th:nth-child(5),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(5) {
+  width: 10% !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table th:nth-child(6),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(6) {
+  width: 17% !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table th:nth-child(7),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(7) {
+  width: 18% !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(1),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(4),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(7) {
+  white-space: nowrap !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell {
+  text-align: center;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell .assignment-selection-btn,
+.enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell .trash-icon-btn {
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell .assignment-selection-btn {
+  width: 68px;
+  min-width: 68px;
+  margin-right: 8px;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell .trash-icon-btn {
+  width: 82px;
+  min-width: 82px;
+  margin-left: 0 !important;
 }
 
 @media (max-width: 900px) {

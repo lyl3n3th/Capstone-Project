@@ -74,6 +74,10 @@ import type {
 import { fetchAdminStudents, saveAdminStudent } from "../../services/adminStudentsApi";
 import { fetchBranchOfferings, type BranchOffering } from "../../services/branchOfferings";
 import {
+  formatContactNumber,
+  getContactNumberDigits,
+} from "../../utils/contactNumber";
+import {
   deleteAcademicInstructor,
   deleteAcademicClassSection,
   deleteAcademicSubject,
@@ -494,7 +498,7 @@ const getAdmissionPersonalInfoItems = (
     },
     {
       label: "Mobile Number",
-      value: info.contactNumber,
+      value: formatContactNumber(info.contactNumber),
       spanClassName: "personal-info-item-span-3",
     },
     {
@@ -535,18 +539,13 @@ const getAdmissionPersonalInfoItems = (
           },
         ]),
     {
-      label: "Birth Date",
-      value: info.birthDate,
-      spanClassName: "personal-info-item-span-3",
-    },
-    {
       label: "Guardian Name",
       value: info.guardianName,
       spanClassName: "personal-info-item-span-3",
     },
     {
       label: "Guardian Contact",
-      value: info.guardianContact,
+      value: formatContactNumber(info.guardianContact),
       spanClassName: "personal-info-item-span-3",
     },
   ];
@@ -985,6 +984,27 @@ const matchesAcademicDescriptor = (leftValue?: string, rightValue?: string) => {
   return left === right || left.includes(right) || right.includes(left);
 };
 
+const matchesPrerequisiteAcademicDescriptor = (
+  candidateValue?: string,
+  targetValue?: string,
+) => {
+  const normalizePrerequisiteDescriptor = (value?: string) => {
+    const descriptor = normalizeAcademicDescriptor(value);
+    return descriptor === "bse" ? "entrepreneurship" : descriptor;
+  };
+  const candidate = normalizePrerequisiteDescriptor(candidateValue);
+  const target = normalizePrerequisiteDescriptor(targetValue);
+  const isSharedDescriptor = (value: string) =>
+    value === "all" || value === "all courses" || value === "all strands";
+
+  return (
+    !candidate ||
+    !target ||
+    isSharedDescriptor(target) ||
+    (!isSharedDescriptor(candidate) && candidate === target)
+  );
+};
+
 const resolveSubjectStrandOrCourse = (
   subject: Pick<Subject, "program" | "strand">,
 ) =>
@@ -1181,7 +1201,7 @@ const subjectCanBePrerequisiteForContext = (
   }
 
   if (
-    !matchesAcademicDescriptor(
+    !matchesPrerequisiteAcademicDescriptor(
       resolveSubjectStrandOrCourse(candidate),
       resolveSubjectStrandOrCourse(target),
     )
@@ -1699,6 +1719,8 @@ export default function AdminEnrollees({
   const [subjectForm, setSubjectForm] = useState<SubjectFormState>(
     createDefaultSubjectForm(),
   );
+  const [subjectPrerequisiteSearch, setSubjectPrerequisiteSearch] =
+    useState("");
 
   useEffect(() => {
     if (!showSubjectModal) return;
@@ -2383,7 +2405,7 @@ export default function AdminEnrollees({
       employeeId: instructor.employeeId,
       department: instructor.department,
       email: instructor.email || "",
-      contactNumber: instructor.contactNumber || "",
+      contactNumber: formatContactNumber(instructor.contactNumber),
     });
     setTemporaryInstructorPassword("");
     setShowInstructorModal(true);
@@ -2393,9 +2415,23 @@ export default function AdminEnrollees({
     const nextName = instructorForm.name.trim();
     const nextEmployeeId = instructorForm.employeeId.trim().toUpperCase();
     const nextDepartment = instructorForm.department.trim();
+    const nextEmail = instructorForm.email.trim();
 
     if (!nextName || !nextEmployeeId || !nextDepartment) {
       addToast("Instructor name, employee ID, and department are required.", "warning");
+      return;
+    }
+
+    if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      addToast("Enter a valid email address, such as name@gmail.com.", "warning");
+      return;
+    }
+
+    const contactNumberDigits = getContactNumberDigits(
+      instructorForm.contactNumber,
+    );
+    if (contactNumberDigits && contactNumberDigits.length !== 11) {
+      addToast("Contact number must contain exactly 11 digits.", "warning");
       return;
     }
 
@@ -2418,8 +2454,8 @@ export default function AdminEnrollees({
       name: nextName,
       employeeId: nextEmployeeId,
       department: nextDepartment,
-      email: instructorForm.email.trim() || undefined,
-      contactNumber: instructorForm.contactNumber.trim() || undefined,
+      email: nextEmail || undefined,
+      contactNumber: contactNumberDigits || undefined,
     };
 
     try {
@@ -2429,7 +2465,8 @@ export default function AdminEnrollees({
       );
       let temporaryPassword = "";
 
-      if (!editingInstructor) {
+      const isEditingInstructor = Boolean(editingInstructor);
+      if (!isEditingInstructor) {
         temporaryPassword = await resetInstructorTemporaryPassword({
           branch: currentBranch,
           employeeId: savedInstructor.employeeId,
@@ -2462,12 +2499,24 @@ export default function AdminEnrollees({
       }
 
       addToast(
-        editingInstructor
+        isEditingInstructor
           ? `${savedInstructor.name} updated successfully.`
-          : `${savedInstructor.name} added. Temporary password: ${temporaryPassword}`,
+          : `${savedInstructor.name} added. The temporary password is shown in this window.`,
         "success",
       );
-      closeInstructorModal();
+      if (isEditingInstructor) {
+        closeInstructorModal();
+      } else {
+        setEditingInstructor(savedInstructor);
+        setInstructorForm({
+          name: savedInstructor.name,
+          employeeId: savedInstructor.employeeId,
+          department: savedInstructor.department,
+          email: savedInstructor.email || "",
+          contactNumber: formatContactNumber(savedInstructor.contactNumber),
+        });
+        setTemporaryInstructorPassword(temporaryPassword);
+      }
     } catch (error) {
       console.error("Failed to save shared instructor", error);
       addToast(
@@ -2718,6 +2767,7 @@ export default function AdminEnrollees({
     setShowSubjectModal(false);
     setEditingSubject(null);
     setSubjectForm(createDefaultSubjectForm());
+    setSubjectPrerequisiteSearch("");
   };
 
   const openCreateSubjectModal = () => {
@@ -2727,6 +2777,7 @@ export default function AdminEnrollees({
     }
     const program = getBranchTrackOptions("College").length > 0 ? "College" : "SHS";
     setEditingSubject(null);
+    setSubjectPrerequisiteSearch("");
     setSubjectForm({ ...createDefaultSubjectForm(), program,
       yearLevel: program === "College" ? "1st Year" : "Grade 11",
       strand: program === "SHS" ? "All" : getBranchTrackOptions(program)[0] });
@@ -2735,6 +2786,7 @@ export default function AdminEnrollees({
 
   const openEditSubjectModal = (subject: Subject) => {
     setEditingSubject(subject);
+    setSubjectPrerequisiteSearch("");
     setSubjectForm(
       sanitizeSubjectForm({
         code: subject.code,
@@ -7418,23 +7470,48 @@ export default function AdminEnrollees({
     const yearLevelLabel = resolvedEvaluationYearLevel === "All"
       ? "All Year Levels" : resolvedEvaluationYearLevel;
     const classLabel = `${yearLevelLabel} - ${resolvedEvaluationSection === "All" ? "All Sections" : resolvedEvaluationSection}`;
+    const hasRatingQuestions = evaluationQuestionnaire.some((category) =>
+      category.questions.some((question) => (question.type || "rating") === "rating"),
+    );
     const reportRows =
       evaluationQuestionnaire.length > 0
         ? evaluationQuestionnaire
-            .filter((category) =>
-              category.questions.some(
-                (question) => (question.type || "rating") === "rating",
-              ),
-            )
             .map((category) => {
               const questionRows =
                 category.questions.length > 0
                   ? category.questions
-                      .filter((question) => (question.type || "rating") === "rating")
                       .map((question) => {
-                        const result = getEvaluationQuestionPercentages(
-                          question.id,
-                        );
+                        if ((question.type || "rating") === "essay") {
+                          const answers = selectedEvaluationFilteredSubmissions
+                            .map((submission) => submission.responses[question.id])
+                            .filter(
+                              (answer): answer is string =>
+                                typeof answer === "string" && answer.trim().length > 0,
+                            );
+                          const responseRows = answers.length > 0
+                            ? answers
+                                .map(
+                                  (answer) => `
+                                    <blockquote class="written-response">
+                                      <p>${escapeReportHtml(answer)}</p>
+                                      <cite>${anonymousEvaluationResponderLabel}</cite>
+                                    </blockquote>
+                                  `,
+                                )
+                                .join("")
+                            : `<p class="empty-written-responses">No written answers yet.</p>`;
+
+                          return `
+                            <tr class="written-question-row">
+                              <th colspan="6">${escapeReportHtml(question.text)} — Constructed responses (${answers.length})</th>
+                            </tr>
+                            <tr class="written-responses-row">
+                              <td colspan="6">${responseRows}</td>
+                            </tr>
+                          `;
+                        }
+
+                        const result = getEvaluationQuestionPercentages(question.id);
 
                         return `
                           <tr>
@@ -7451,15 +7528,20 @@ export default function AdminEnrollees({
                       .join("")
                   : `<tr><td colspan="6">No questions in this category.</td></tr>`;
 
+              const ratingHeader = category.questions.some(
+                (question) => (question.type || "rating") === "rating",
+              )
+                ? `
+                    <tr class="rating-header-row">
+                      <th>Rating question</th>
+                      <th>1</th><th>2</th><th>3</th><th>4</th><th>5</th>
+                    </tr>
+                  `
+                : "";
+
               return `
-                <tr class="category-row">
-                  <th>${escapeReportHtml(category.name)}</th>
-                  <th>1</th>
-                  <th>2</th>
-                  <th>3</th>
-                  <th>4</th>
-                  <th>5</th>
-                </tr>
+                <tr class="category-row"><th colspan="6">${escapeReportHtml(category.name)}</th></tr>
+                ${ratingHeader}
                 ${questionRows}
               `;
             })
@@ -7553,7 +7635,25 @@ export default function AdminEnrollees({
               color: #ffffff;
               font-size: 16px;
               font-weight: 700;
+              text-align: left;
             }
+            .rating-header-row th { background: #f3f4f6; font-weight: 700; }
+            .written-question-row th { padding-top: 18px; text-align: left; }
+            .written-responses-row td { text-align: left; vertical-align: top; }
+            .written-response {
+              margin: 0 0 12px;
+              padding: 12px;
+              border-left: 3px solid #67d7e6;
+              background: #f8fafc;
+            }
+            .written-response:last-child { margin-bottom: 0; }
+            .written-response p {
+              margin: 0 0 8px;
+              white-space: pre-wrap;
+              overflow-wrap: anywhere;
+            }
+            .written-response cite { color: #64748b; font-size: 12px; font-style: normal; }
+            .empty-written-responses { margin: 0; color: #64748b; }
             @media print {
               body { padding: 12mm; }
               button { display: none; }
@@ -7569,10 +7669,10 @@ export default function AdminEnrollees({
             <div>Subject: ${escapeReportHtml(selectedSubjectLabel)}</div>
             <div>Total Student Evaluated: ${selectedEvaluationFilteredSubmissions.length}</div>
           </section>
-          <section class="legend">
+          ${hasRatingQuestions ? `<section class="legend">
             <strong>Rating Legend</strong>
             5 = Strongly Agree, 4 = Agree, 3 = Uncertain, 2 = Disagree, 1 = Strongly Disagree
-          </section>
+          </section>` : ""}
           <table>
             <tbody>${reportRows}</tbody>
           </table>
@@ -8097,6 +8197,15 @@ export default function AdminEnrollees({
   const { shsData, collegeData } = organizeSubjectsForTable();
   const subjectPrerequisiteOptions =
     getSubjectFormPrerequisiteOptions(subjectForm);
+  const normalizedPrerequisiteSearch = subjectPrerequisiteSearch
+    .trim()
+    .toLowerCase();
+  const filteredSubjectPrerequisiteOptions = normalizedPrerequisiteSearch
+    ? subjectPrerequisiteOptions.filter((subject) =>
+        [subject.code, subject.name, subject.yearLevel, subject.semester]
+          .some((value) => value.toLowerCase().includes(normalizedPrerequisiteSearch)),
+      )
+    : subjectPrerequisiteOptions;
   const getSubjectPrerequisiteSummary = (subject: Subject) => {
     const codes = normalizeStringList(subject.prerequisiteSubjectIds)
       .map((subjectId) => subjects.find((item) => item.id === subjectId)?.code)
@@ -9059,7 +9168,7 @@ export default function AdminEnrollees({
                                     </span>
                                   </div>
                                   <div className="subjects-table-wrapper">
-                                    <table className="subjects-table">
+                                    <table className="subjects-table college-subjects-table">
                                       <thead>
                                         <tr>
                                           <th>Subject Code</th>
@@ -12451,7 +12560,8 @@ export default function AdminEnrollees({
                   <label>Program</label>
                   <select
                     value={subjectForm.program}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      setSubjectPrerequisiteSearch("");
                       updateSubjectForm({
                         program: event.target.value as SubjectFormState["program"],
                         yearLevel:
@@ -12461,8 +12571,8 @@ export default function AdminEnrollees({
                             ? "All"
                             : getBranchTrackOptions("College")[0] || "",
                         prerequisiteSubjectIds: [],
-                      })
-                    }
+                      });
+                    }}
                   >
                     {hasCollegeOfferings && <option value="College">College</option>}
                     {hasShsOfferings && <option value="SHS">SHS</option>}
@@ -12520,12 +12630,13 @@ export default function AdminEnrollees({
                   <label>{subjectForm.program === "SHS" ? "Strand" : "Course"}</label>
                   <select
                     value={subjectForm.strand}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      setSubjectPrerequisiteSearch("");
                       updateSubjectForm({
                         strand: event.target.value,
                         prerequisiteSubjectIds: [],
-                      })
-                    }
+                      });
+                    }}
                   >
                     {subjectForm.program === "SHS" && <option value="All">All</option>}
                     {subjectForm.program === "College" && <option value="All">All Courses</option>}
@@ -12571,9 +12682,19 @@ export default function AdminEnrollees({
                       </p>
                     </div>
                   </div>
+                  <input
+                    className="subject-prerequisite-search"
+                    type="search"
+                    aria-label="Search prerequisite subjects"
+                    placeholder="Search by code, subject name, year, or semester"
+                    value={subjectPrerequisiteSearch}
+                    onChange={(event) =>
+                      setSubjectPrerequisiteSearch(event.target.value)
+                    }
+                  />
                   <div className="assignment-subject-selector">
-                    {subjectPrerequisiteOptions.length > 0 ? (
-                      subjectPrerequisiteOptions.map((subject) => {
+                    {filteredSubjectPrerequisiteOptions.length > 0 ? (
+                      filteredSubjectPrerequisiteOptions.map((subject) => {
                         const isSelected =
                           subjectForm.prerequisiteSubjectIds.includes(subject.id);
 
@@ -12604,8 +12725,9 @@ export default function AdminEnrollees({
                       })
                     ) : (
                       <div className="assignment-subject-empty">
-                        No earlier matching subjects are available for this
-                        catalog entry yet.
+                        {subjectPrerequisiteOptions.length > 0
+                          ? "No prerequisite subjects match your search."
+                          : "No earlier matching subjects are available for this catalog entry yet."}
                       </div>
                     )}
                   </div>
@@ -12745,6 +12867,8 @@ export default function AdminEnrollees({
                   <label>Email</label>
                   <input
                     type="email"
+                    autoComplete="email"
+                    placeholder="name@gmail.com"
                     value={instructorForm.email}
                     onChange={(event) =>
                       setInstructorForm((prev) => ({
@@ -12757,14 +12881,17 @@ export default function AdminEnrollees({
                 <div className="form-group">
                   <label>Contact Number</label>
                   <input
-                    type="text"
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={13}
                     value={instructorForm.contactNumber}
                     onChange={(event) =>
                       setInstructorForm((prev) => ({
                         ...prev,
-                        contactNumber: event.target.value,
+                        contactNumber: formatContactNumber(event.target.value),
                       }))
                     }
+                    placeholder="0912 345 6789"
                   />
                 </div>
               </form>

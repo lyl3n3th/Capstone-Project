@@ -2,6 +2,7 @@ const KNOWN_UPPERCASE_WORDS = new Set([
   "AICS",
   "ABM",
   "BS",
+  "BSE",
   "BSCS",
   "BSHM",
   "BSIT",

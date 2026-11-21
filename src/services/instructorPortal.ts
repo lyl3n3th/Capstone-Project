@@ -436,15 +436,33 @@ export const writeInstructorGradeSubmissions = (
   });
 };
 
-export const saveInstructorGradeSubmission = (
+export const saveInstructorGradeSubmission = async (
   branch: string | null | undefined,
   submission: InstructorGradeSubmission,
-) => {
+): Promise<void> => {
   const existing = getInstructorGradeSubmissions(branch);
-  writeInstructorGradeSubmissions(branch, [
+  const submissions = [
     submission,
     ...existing.filter((item) => item.id !== submission.id),
-  ]);
+  ];
+  const resolvedBranch = normalizeBranchName(branch);
+
+  // Keep a local copy if the network is unavailable, but make the upload page
+  // wait for the shared database write before it reports a successful upload.
+  writeInstructorGradeSubmissions(branch, submissions, {
+    skipSupabaseSync: true,
+  });
+
+  const { error } = await supabase.rpc("upsert_instructor_grade_submission", {
+    p_branch: resolvedBranch,
+    p_submission: submission,
+  });
+
+  if (error) {
+    throw new Error(
+      `The submission is saved in this browser, but could not be synced to the shared system. ${getErrorMessage(error)}`,
+    );
+  }
 };
 
 export const deleteInstructorGradeSubmissions = async ({

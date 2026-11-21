@@ -2,6 +2,10 @@ import TablePagination from "../../components/common/TablePagination";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  formatContactNumber,
+  getContactNumberDigits,
+} from "../../utils/contactNumber";
+import {
   BsArrowCounterclockwise,
   BsCaretDownFill,
   BsCaretUpFill,
@@ -185,7 +189,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
       return false;
     }
 
-    if (!/^[0-9]{11}$/.test(contact_number)) {
+    if (getContactNumberDigits(contact_number).length !== 11) {
       setError("Error: Contact number must be 11 digits.");
       return false;
     }
@@ -238,14 +242,18 @@ const AreaManagerStaffAccounts: React.FC = () => {
     }
 
     const hasManagerSetPassword = Boolean(formData.password?.trim());
+    const normalizedFormData = {
+      ...formData,
+      contact_number: getContactNumberDigits(formData.contact_number),
+    };
 
     try {
       if (isEditing) {
-        await updateStaffMember(formData.staff_id, formData, {
+        await updateStaffMember(formData.staff_id, normalizedFormData, {
           requirePasswordChange: hasManagerSetPassword,
         });
       } else {
-        await createStaffMember(formData);
+        await createStaffMember(normalizedFormData);
       }
 
       await loadStaffDirectory();
@@ -307,7 +315,13 @@ const AreaManagerStaffAccounts: React.FC = () => {
         setError("Add an active branch in Manage Branches before restoring this account.");
         return;
       }
-      setFormData({ ...member, branch: "", password: "", status: "active" });
+      setFormData({
+        ...member,
+        contact_number: formatContactNumber(member.contact_number),
+        branch: "",
+        password: "",
+        status: "active",
+      });
       setSelectedStaff(member);
       setIsEditing(true);
       setEditMode(true);
@@ -622,7 +636,11 @@ const AreaManagerStaffAccounts: React.FC = () => {
       return;
     }
 
-    setFormData({ ...selectedStaff, password: "" });
+    setFormData({
+      ...selectedStaff,
+      contact_number: formatContactNumber(selectedStaff.contact_number),
+      password: "",
+    });
     setIsEditing(true);
     setEditMode(true);
     setSubmitted(false);
@@ -896,7 +914,7 @@ const AreaManagerStaffAccounts: React.FC = () => {
                 <div className="stf-field full">
                   <label>Contact Number</label>
                   <div className="stf-value-box">
-                    {selectedStaff.contact_number}
+                    {formatContactNumber(selectedStaff.contact_number)}
                   </div>
                 </div>
                 <div className="stf-field full">
@@ -1053,13 +1071,12 @@ const AreaManagerStaffAccounts: React.FC = () => {
                   <input
                     type="tel"
                     inputMode="numeric"
-                    maxLength={11}
-                    pattern="[0-9]{11}"
+                    maxLength={13}
                     value={formData.contact_number}
                     onChange={(event) =>
                       setFormData({
                         ...formData,
-                        contact_number: event.target.value.replace(/[^0-9]/g, "").slice(0, 11),
+                        contact_number: formatContactNumber(event.target.value),
                       })
                     }
                     className={getInputClass("contact_number")}

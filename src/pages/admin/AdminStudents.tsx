@@ -87,6 +87,10 @@ import {
 } from "../../services/enrollmentRequests";
 import { resolveStudentPortalContext } from "../../services/studentPortalResolver";
 import {
+  formatContactNumber,
+  getContactNumberDigits,
+} from "../../utils/contactNumber";
+import {
   buildNextReceiptNumber,
   buildStudentBalanceSummary,
   createStudentPayment,
@@ -1572,6 +1576,16 @@ export default function AdminStudents({
       errors.email = "Email is required";
     }
 
+    if (formData.contact && getContactNumberDigits(formData.contact).length !== 11) {
+      errors.contact = "Enter an 11-digit contact number.";
+    }
+    if (
+      formData.guardianContact &&
+      getContactNumberDigits(formData.guardianContact).length !== 11
+    ) {
+      errors.guardianContact = "Enter an 11-digit contact number.";
+    }
+
     if (!editingStudent) {
       if (!formData.program.trim()) errors.program = "Program is required";
       if (!formData.yearLevel.trim()) errors.yearLevel = "Year Level is required";
@@ -1607,6 +1621,11 @@ export default function AdminStudents({
   // Open add/edit modal
   const openAddEditModal = async (student?: Student) => {
     if (student) {
+      const formattedStudent = {
+        ...student,
+        contact: formatContactNumber(student.contact),
+        guardianContact: formatContactNumber(student.guardianContact),
+      };
       if (student.program === "SHS") {
         let resolvedTrackType = student.shsTrackType || "";
         let resolvedSpecialization = student.strandOrCourse || "";
@@ -1655,7 +1674,7 @@ export default function AdminStudents({
 
         setEditingStudent(student);
         setFormData({
-          ...student,
+          ...formattedStudent,
           yearLevel: resolvedYearLevel,
           shsTrackType: resolvedTrackType,
           strandOrCourse: resolvedSpecialization,
@@ -1664,7 +1683,7 @@ export default function AdminStudents({
         setProgramSpecialization(resolvedSpecialization);
       } else {
         setEditingStudent(student);
-        setFormData(student);
+        setFormData(formattedStudent);
         if (student.program === "College") {
           setShsTrackType("");
           setProgramSpecialization(
@@ -1740,7 +1759,11 @@ export default function AdminStudents({
         setProgramSpecialization("");
       }
     } else {
-      setFormData((prev) => ({ ...prev, [name]: value }));
+      const nextValue =
+        name === "contact" || name === "guardianContact"
+          ? formatContactNumber(value)
+          : value;
+      setFormData((prev) => ({ ...prev, [name]: nextValue }));
     }
     setFormErrors((prev) => {
       const next = { ...prev };
@@ -1790,6 +1813,8 @@ export default function AdminStudents({
 
     const normalizedStudent: Student = {
       ...formData,
+      contact: getContactNumberDigits(formData.contact),
+      guardianContact: getContactNumberDigits(formData.guardianContact),
       branch: formData.branch || editingStudent?.branch || currentBranch,
       ...(editingStudent
         ? {
@@ -3686,7 +3711,6 @@ export default function AdminStudents({
           "First Name": student.firstName || "",
           "Middle Name": student.middleName || personalInfo?.middleName || "",
           "Last Name": student.lastName || "",
-          "Birth Date": student.birthDate || personalInfo?.birthDate || "Not provided",
           Sex: student.gender || personalInfo?.sex || "Not provided",
           "Civil Status": student.civilStatus || personalInfo?.civilStatus || "Not provided",
           "Academic Level": student.program,
@@ -3703,11 +3727,15 @@ export default function AdminStudents({
           "Academic Standing": getStudentAcademicStandingLabel(student),
           "Admission Type": getAdmissionTypeLabel(student.studentStatus),
           Branch: student.branch || currentBranch,
-          Contact: student.contact || personalInfo?.contactNumber || "Not provided",
+          Contact: formatContactNumber(
+            student.contact || personalInfo?.contactNumber || "",
+          ) || "Not provided",
           Email: student.email || personalInfo?.email || "Not provided",
           Address: student.address || personalInfo?.address || "Not provided",
           "Guardian Name": student.guardianName || personalInfo?.guardianName || "Not provided",
-          "Guardian Contact": student.guardianContact || personalInfo?.guardianContact || "Not provided",
+          "Guardian Contact": formatContactNumber(
+            student.guardianContact || personalInfo?.guardianContact || "",
+          ) || "Not provided",
           "Last School Attended": student.lastSchoolAttended || personalInfo?.lastSchoolAttended || "Not provided",
           "Year Completion": student.yearCompletion || personalInfo?.yearCompletion || "Not provided",
           "Imported Academic Year": student.importAcademicYear || "N/A",
@@ -4380,6 +4408,9 @@ export default function AdminStudents({
                   <label>Contact Number</label>
                   <input
                     name="contact"
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={13}
                     value={formData.contact}
                     onChange={handleChange}
                     className={formErrors.contact ? "students-input-error" : ""}
@@ -4412,6 +4443,9 @@ export default function AdminStudents({
                   <label>Guardian Contact</label>
                   <input
                     name="guardianContact"
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={13}
                     value={formData.guardianContact || ""}
                     onChange={handleChange}
                     className={
@@ -4644,7 +4678,7 @@ export default function AdminStudents({
                   <div className="students-profile-field">
                     <label>Contact Number</label>
                     <div className="students-profile-value">
-                      {viewingStudent.contact || "Not provided"}
+                      {formatContactNumber(viewingStudent.contact) || "Not provided"}
                     </div>
                   </div>
                   <div className="students-profile-field">
@@ -4656,7 +4690,7 @@ export default function AdminStudents({
                   <div className="students-profile-field">
                     <label>Guardian Contact</label>
                     <div className="students-profile-value">
-                      {viewingStudent.guardianContact || "Not provided"}
+                      {formatContactNumber(viewingStudent.guardianContact) || "Not provided"}
                     </div>
                   </div>
                   <div className="students-profile-field students-profile-field-full">

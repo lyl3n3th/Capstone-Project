@@ -35,6 +35,7 @@ import {
   type StoredStudentGradeRecord,
 } from "../../services/studentGrades";
 import { updateAdminStudentStatus } from "../../services/adminStudentsApi";
+import { formatContactNumber } from "../../utils/contactNumber";
 import "../../styles/admin/admin-alumni.css";
 import "../../styles/admin/student-details-grades.css";
 
@@ -968,7 +969,7 @@ export default function AdminAlumni({
                     <td className="full-name-cell">{alum.fullName}</td>
                     <td>{alum.program}</td>
                     <td>{alum.yearGraduated || "—"}</td>
-                    <td>{alum.contact || "—"}</td>
+                    <td>{formatContactNumber(alum.contact) || "—"}</td>
                     <td>
                       <div className="alumni-action-group">
                         <button
@@ -1131,13 +1132,17 @@ export default function AdminAlumni({
                       ["Email", viewingStudentSnapshot?.email || viewingAlumni.email],
                       [
                         "Contact Number",
-                        viewingStudentSnapshot?.contact || viewingAlumni.contact,
+                        formatContactNumber(
+                          viewingStudentSnapshot?.contact || viewingAlumni.contact,
+                        ),
                       ],
-                      ["Birth Date", formatStoredDate(viewingStudentSnapshot?.birthDate)],
                       ["Gender", viewingStudentSnapshot?.gender],
                       ["Civil Status", viewingStudentSnapshot?.civilStatus],
                       ["Guardian Name", viewingStudentSnapshot?.guardianName],
-                      ["Guardian Contact", viewingStudentSnapshot?.guardianContact],
+                      [
+                        "Guardian Contact",
+                        formatContactNumber(viewingStudentSnapshot?.guardianContact),
+                      ],
                       ["Home Address", viewingStudentSnapshot?.address],
                     ].map(([label, value]) => (
                       <div
