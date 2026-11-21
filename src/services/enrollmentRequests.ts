@@ -767,4 +767,3 @@ export const saveEnrollmentRequest = async (
   writeEnrollmentRequestsForBranch(resolvedBranch, nextRequests);
   return nextRequest;
 };
-
