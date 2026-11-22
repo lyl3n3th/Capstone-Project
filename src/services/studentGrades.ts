@@ -89,6 +89,7 @@ export interface StudentAcademicStandingSnapshot {
 }
 
 const STUDENT_GRADE_STORAGE_SCOPE = "student-grades";
+const STUDENT_GRADE_RECORD_PAGE_SIZE = 500;
 export const APPROVED_GRADE_CONFLICT_ERROR =
   "This student already has uploaded grades approved by the registrar/admin.";
 export const STUDENT_GRADE_RECORDS_UPDATED_EVENT = "aics-student-grades-updated";
@@ -888,18 +889,32 @@ export const fetchAndCacheStudentGradeRecordsForBranch = async (
   branch?: string | null,
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
-  const { data, error } = await supabase
-    .rpc("list_student_grade_records", {
-      p_branch: resolvedBranch,
-    })
-    .returns<StudentGradeRecordRow[]>();
+  const rows: StudentGradeRecordRow[] = [];
 
-  if (error) {
-    throw new Error(getErrorMessage(error));
+  // Supabase caps each Data API response at 1,000 rows by default. Fetch
+  // smaller ordered pages so large branches don't silently lose later grades.
+  for (let offset = 0; ; offset += STUDENT_GRADE_RECORD_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .rpc("list_student_grade_records", {
+        p_branch: resolvedBranch,
+      })
+      .range(offset, offset + STUDENT_GRADE_RECORD_PAGE_SIZE - 1)
+      .returns<StudentGradeRecordRow[]>();
+
+    if (error) {
+      throw new Error(getErrorMessage(error));
+    }
+
+    const page = Array.isArray(data) ? data : [];
+    rows.push(...page);
+
+    if (page.length < STUDENT_GRADE_RECORD_PAGE_SIZE) {
+      break;
+    }
   }
 
   const records = sortGrades(
-    (Array.isArray(data) ? data : [])
+    rows
       .map((row) => row.payload)
       .filter((record): record is StoredStudentGradeRecord => Boolean(record)),
   );
