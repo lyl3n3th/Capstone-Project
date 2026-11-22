@@ -2795,9 +2795,11 @@ export default function AdminEnrollees({
         yearLevel: subject.yearLevel,
         semester: normalizeSectionSemester(subject.semester),
         units:
-          typeof subject.units === "number" && Number.isFinite(subject.units)
+          subject.program === "College" &&
+          typeof subject.units === "number" &&
+          Number.isFinite(subject.units)
             ? String(subject.units)
-            : "3",
+            : "",
         strand: subject.strand || (subject.program === "College" ? DEFAULT_COLLEGE_COURSE : "All"),
         type: getResolvedSubjectType(subject),
         prerequisiteSubjectIds: normalizeStringList(
@@ -4918,7 +4920,9 @@ export default function AdminEnrollees({
                 subject.yearLevel,
                 normalizeSectionSemester(subject.semester),
                 getSubjectTypeLabel(subject),
-                subject.units ? `${subject.units} units` : "",
+                subject.program === "College" && subject.units
+                  ? `${subject.units} units`
+                  : "",
               ]
                 .join(" ")
                 .toLowerCase()
@@ -4968,7 +4972,9 @@ export default function AdminEnrollees({
               subject.yearLevel,
               normalizeSectionSemester(subject.semester),
               getSubjectTypeLabel(subject),
-              subject.units ? `${subject.units} units` : "",
+              subject.program === "College" && subject.units
+                ? `${subject.units} units`
+                : "",
             ]
               .join(" ")
               .toLowerCase()
@@ -11327,7 +11333,7 @@ export default function AdminEnrollees({
                                                 </strong>
                                                 <span>
                                                   {getSubjectTypeLabel(subject)}
-                                                  {subject.units
+                                                  {subject.program === "College" && subject.units
                                                     ? ` | ${subject.units} units`
                                                     : ""}
                                                 </span>
@@ -11446,7 +11452,7 @@ export default function AdminEnrollees({
                                               </strong>
                                               <span>
                                                 {getSubjectTypeLabel(subject)}
-                                                {subject.units
+                                                {subject.program === "College" && subject.units
                                                   ? ` | ${subject.units} units`
                                                   : ""}
                                               </span>
@@ -12614,18 +12620,19 @@ export default function AdminEnrollees({
                     ))}
                   </select>
                 </div>
-                <div className="form-group">
-                  <label>Units</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={subjectForm.units}
-                    onChange={(event) =>
-                      updateSubjectForm({ units: event.target.value })
-                    }
-                    disabled={subjectForm.program !== "College"}
-                  />
-                </div>
+                {subjectForm.program === "College" ? (
+                  <div className="form-group">
+                    <label>Units</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={subjectForm.units}
+                      onChange={(event) =>
+                        updateSubjectForm({ units: event.target.value })
+                      }
+                    />
+                  </div>
+                ) : null}
                 <div className="form-group">
                   <label>{subjectForm.program === "SHS" ? "Strand" : "Course"}</label>
                   <select
@@ -13109,7 +13116,7 @@ export default function AdminEnrollees({
                               </strong>
                               <span>
                                 {getSubjectTypeLabel(subject)}
-                                {subject.units
+                                {subject.program === "College" && subject.units
                                   ? ` | ${subject.units} units`
                                   : ""}
                               </span>

@@ -173,7 +173,10 @@ const mapAcademicSubject = (
   id: row.id,
   code: row.code,
   name: row.name,
-  units: typeof row.units === "number" ? row.units : undefined,
+  units:
+    row.program === "College" && typeof row.units === "number"
+      ? row.units
+      : undefined,
   program: row.program,
   yearLevel: row.year_level,
   semester: row.semester,
@@ -277,7 +280,7 @@ export const saveAcademicSubject = async (
         id: subject.id,
         code: subject.code.trim().toUpperCase(),
         name: subject.name.trim(),
-        units: subject.units ?? null,
+        units: subject.program === "College" ? subject.units ?? null : null,
         program: subject.program,
         year_level: subject.yearLevel,
         semester: subject.semester,
