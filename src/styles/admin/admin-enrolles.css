@@ -7475,7 +7475,7 @@
 
 .enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell {
   justify-content: center;
-  gap: 10px;
+  gap: 0;
 }
 
 .enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell .assignment-selection-btn,
@@ -7485,6 +7485,10 @@
   width: 72px;
   min-width: 72px;
   margin: 0;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell .trash-icon-btn {
+  margin-left: 8px !important;
 }
 
 @media (max-width: 640px) {
@@ -7499,5 +7503,14 @@
     flex: 0 0 100%;
     width: 100%;
     min-width: 0;
+  }
+
+  .enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell .trash-icon-btn {
+    margin-left: 0 !important;
   }
 }
