@@ -7383,3 +7383,30 @@
     white-space: normal;
   }
 }
+
+/* Let compact subject metadata columns size to their content. */
+.enrollees-content .subjects-table-view .subjects-table {
+  table-layout: auto !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table th:nth-child(4),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(4),
+.enrollees-content .subjects-table-view .college-subjects-table th:nth-child(5),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(5),
+.enrollees-content .subjects-table-view .subjects-table:not(.college-subjects-table) th:nth-child(4),
+.enrollees-content .subjects-table-view .subjects-table:not(.college-subjects-table) td:nth-child(4) {
+  width: 1% !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+}
+
+.enrollees-content .subjects-table-view .college-subjects-table th:nth-child(6),
+.enrollees-content .subjects-table-view .college-subjects-table td:nth-child(6),
+.enrollees-content .subjects-table-view .subjects-table:not(.college-subjects-table) th:nth-child(5),
+.enrollees-content .subjects-table-view .subjects-table:not(.college-subjects-table) td:nth-child(5) {
+  width: 1% !important;
+  min-width: 110px !important;
+  max-width: 240px;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+}
