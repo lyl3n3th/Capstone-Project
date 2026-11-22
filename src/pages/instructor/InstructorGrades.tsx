@@ -326,6 +326,7 @@ export default function InstructorGrades() {
   const [isParsing, setIsParsing] = useState(false);
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
   const [templateSubjectId, setTemplateSubjectId] = useState("");
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const templateDropdownRef = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
@@ -405,6 +406,7 @@ export default function InstructorGrades() {
 
     try {
       setIsParsing(true);
+      setMessage("Reading and validating the selected grade file...");
       const [fileDataBase64, result] = await Promise.all([
         readFileAsBase64(file),
         parseInstructorGradeWorkbook({
@@ -416,6 +418,7 @@ export default function InstructorGrades() {
       ]);
       const hasErrors = result.errorRows.length > 0;
 
+      setMessage("Saving the grade submission...");
       await saveInstructorGradeSubmission(currentUser.branch, {
         id: `grade-submission-${Date.now()}`,
         branch: currentUser.branch,
@@ -627,19 +630,25 @@ export default function InstructorGrades() {
       </section>
 
       <section className="instructor-actions-panel">
-        <label>
-          <FiUpload /> {isParsing ? "Submitting..." : "Upload Grades"}
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            disabled={isParsing}
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              event.currentTarget.value = "";
-              void handleUpload(file);
-            }}
-          />
-        </label>
+        <button
+          type="button"
+          disabled={isParsing}
+          onClick={() => uploadInputRef.current?.click()}
+        >
+          <FiUpload /> {isParsing ? "Processing..." : "Upload Grades"}
+        </button>
+        <input
+          ref={uploadInputRef}
+          className="instructor-upload-input"
+          type="file"
+          accept=".xlsx,.xls"
+          disabled={isParsing}
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            void handleUpload(file);
+          }}
+        />
       </section>
 
       {message ? <p className="instructor-message">{message}</p> : null}
