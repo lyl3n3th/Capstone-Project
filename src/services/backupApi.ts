@@ -430,6 +430,49 @@ export async function fetchBackupHistory() {
   return parseJsonResponse<BackupHistoryRecord[]>(response);
 }
 
+export interface BackupHistoryPage {
+  results: BackupHistoryRecord[];
+  count: number;
+  has_incomplete_manual_backup: boolean;
+  has_running_backup: boolean;
+}
+
+export async function fetchBackupHistoryPage(limit: number, offset: number) {
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  const response = await fetch(
+    `${API_BASE_URL}/api/admin/backup/history/?${query.toString()}`,
+    { headers: buildHeaders() },
+  );
+  const payload = await parseJsonResponse<
+    BackupHistoryPage | BackupHistoryRecord[]
+  >(response);
+
+  if (!Array.isArray(payload)) {
+    return payload;
+  }
+
+  // Keep compatibility with older backend deployments that return the full list.
+  const eligibleBackups = payload.filter(
+    (entry) =>
+      entry.backup_type === "manual" || entry.backup_type === "automated",
+  );
+  return {
+    results: eligibleBackups.slice(offset, offset + limit),
+    count: eligibleBackups.length,
+    has_incomplete_manual_backup: eligibleBackups.some(
+      (entry) =>
+        entry.backup_type === "manual" &&
+        (entry.status === "pending" || entry.status === "in_progress"),
+    ),
+    has_running_backup: eligibleBackups.some(
+      (entry) => entry.status === "pending" || entry.status === "in_progress",
+    ),
+  };
+}
+
 const getDownloadFileName = (
   response: Response,
   fallbackFileName: string,

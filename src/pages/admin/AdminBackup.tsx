@@ -19,7 +19,7 @@ import {
   createManualBackup,
   deleteBackup,
   downloadBackupArchive,
-  fetchBackupHistory,
+  fetchBackupHistoryPage,
   type BackupSettingsRecord,
   fetchBackupSnapshot,
   fetchBackupSettings,
@@ -65,6 +65,7 @@ const BACKUP_HISTORY_PAGE_SIZE = 5;
 interface LoadBackupDataOptions {
   showErrorToast?: boolean;
   preserveDirtySettings?: boolean;
+  page?: number;
 }
 
 export default function AdminBackup({
@@ -79,6 +80,7 @@ export default function AdminBackup({
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastCounterRef = useRef(0);
   const refreshTimerRef = useRef<number | null>(null);
+  const historyRequestIdRef = useRef(0);
   const hasLoadedDataRef = useRef(false);
   const isSettingsDirtyRef = useRef(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -90,6 +92,10 @@ export default function AdminBackup({
   const [backupTime, setBackupTime] = useState("");
   const [retentionDays, setRetentionDays] = useState("");
   const [backups, setBackups] = useState<BackupItem[]>([]);
+  const [backupHistoryCount, setBackupHistoryCount] = useState(0);
+  const [lastBackup, setLastBackup] = useState<BackupItem | null>(null);
+  const [hasIncompleteManualBackup, setHasIncompleteManualBackup] = useState(false);
+  const [hasRunningBackupInHistory, setHasRunningBackupInHistory] = useState(false);
   const [historyPage, setHistoryPage] = useState(0);
   const [hasLoadedData, setHasLoadedData] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -180,7 +186,11 @@ export default function AdminBackup({
   const loadBackupData = async ({
     showErrorToast = true,
     preserveDirtySettings = true,
+    page = historyPage,
   }: LoadBackupDataOptions = {}) => {
+    historyRequestIdRef.current += 1;
+    const requestId = historyRequestIdRef.current;
+
     if (hasLoadedDataRef.current) {
       setIsRefreshing(true);
     }
@@ -188,8 +198,15 @@ export default function AdminBackup({
     try {
       const [settings, history] = await Promise.all([
         fetchBackupSettings(),
-        fetchBackupHistory(),
+        fetchBackupHistoryPage(
+          BACKUP_HISTORY_PAGE_SIZE,
+          page * BACKUP_HISTORY_PAGE_SIZE,
+        ),
       ]);
+
+      if (requestId !== historyRequestIdRef.current) {
+        return;
+      }
 
       if (
         !preserveDirtySettings ||
@@ -202,14 +219,14 @@ export default function AdminBackup({
       hasLoadedDataRef.current = true;
       setHasLoadedData(true);
       setPageLoadError(null);
-      setBackups(
-        history
-          .filter(
-            (entry) =>
-              entry.backup_type === "manual" || entry.backup_type === "automated",
-          )
-          .map(mapBackupRecord),
-      );
+      const pageBackups = history.results.map(mapBackupRecord);
+      setBackups(pageBackups);
+      setBackupHistoryCount(history.count);
+      setHasIncompleteManualBackup(history.has_incomplete_manual_backup);
+      setHasRunningBackupInHistory(history.has_running_backup);
+      if (page === 0) {
+        setLastBackup(pageBackups[0] ?? null);
+      }
     } catch (error) {
       console.error(error);
       const message =
@@ -221,7 +238,9 @@ export default function AdminBackup({
         addToast(message, "error");
       }
     } finally {
-      setIsRefreshing(false);
+      if (requestId === historyRequestIdRef.current) {
+        setIsRefreshing(false);
+      }
     }
   };
   loadBackupDataRef.current = loadBackupData;
@@ -240,11 +259,7 @@ export default function AdminBackup({
   }, []);
 
   useEffect(() => {
-    const hasRunningBackup = backups.some((backup) =>
-      POLLABLE_STATUSES.includes(backup.rawStatus),
-    );
-
-    if (!hasRunningBackup) {
+    if (!hasRunningBackupInHistory) {
       if (refreshTimerRef.current) {
         window.clearInterval(refreshTimerRef.current);
         refreshTimerRef.current = null;
@@ -262,7 +277,19 @@ export default function AdminBackup({
         preserveDirtySettings: true,
       });
     }, 4000);
-  }, [backups]);
+  }, [hasRunningBackupInHistory]);
+
+  useEffect(() => {
+    if (!hasLoadedDataRef.current) {
+      return;
+    }
+
+    void loadBackupDataRef.current({
+      showErrorToast: false,
+      preserveDirtySettings: true,
+      page: historyPage,
+    });
+  }, [historyPage]);
 
   const handleSidebarToggle = () => {
     setIsSidebarOpen((prev) => !prev);
@@ -272,28 +299,15 @@ export default function AdminBackup({
     setIsSidebarOpen(false);
   };
 
-  const lastBackup = useMemo(() => {
-    return backups.length > 0 ? backups[0] : null;
-  }, [backups]);
   const totalHistoryPages = Math.max(
     1,
-    Math.ceil(backups.length / BACKUP_HISTORY_PAGE_SIZE),
+    Math.ceil(backupHistoryCount / BACKUP_HISTORY_PAGE_SIZE),
   );
-  const paginatedBackups = useMemo(() => {
-    const startIndex = historyPage * BACKUP_HISTORY_PAGE_SIZE;
-    return backups.slice(startIndex, startIndex + BACKUP_HISTORY_PAGE_SIZE);
-  }, [backups, historyPage]);
   const historyRangeStart =
-    backups.length > 0 ? historyPage * BACKUP_HISTORY_PAGE_SIZE + 1 : 0;
+    backupHistoryCount > 0 ? historyPage * BACKUP_HISTORY_PAGE_SIZE + 1 : 0;
   const historyRangeEnd = Math.min(
-    backups.length,
+    backupHistoryCount,
     historyRangeStart + BACKUP_HISTORY_PAGE_SIZE - 1,
-  );
-
-  const hasIncompleteManualBackup = backups.some(
-    (backup) =>
-      backup.type === "Manual" &&
-      POLLABLE_STATUSES.includes(backup.rawStatus),
   );
   const backupSettingsDisabled = !hasLoadedData || isSavingSettings;
 
@@ -306,8 +320,13 @@ export default function AdminBackup({
       setIsCreatingBackup(true);
       const createdBackup = await createManualBackup();
       const mappedBackup = mapBackupRecord(createdBackup);
-      setBackups((prev) => [mappedBackup, ...prev.filter((item) => item.id !== mappedBackup.id)]);
-      await loadBackupData({ showErrorToast: false, preserveDirtySettings: true });
+      setLastBackup(mappedBackup);
+      setHistoryPage(0);
+      await loadBackupData({
+        showErrorToast: false,
+        preserveDirtySettings: true,
+        page: 0,
+      });
       addToast("Manual backup started and saved to history.", "success");
     } catch (error) {
       addToast(
@@ -362,12 +381,14 @@ export default function AdminBackup({
       addToast(`Uploading ${selectedUploadFile.name}...`, "info");
       const uploadedBackup = await uploadBackupArchive(selectedUploadFile);
       const mappedBackup = mapBackupRecord(uploadedBackup);
-      setBackups((previousBackups) => [
-        mappedBackup,
-        ...previousBackups.filter((backup) => backup.id !== mappedBackup.id),
-      ]);
+      setLastBackup(mappedBackup);
+      setHistoryPage(0);
       clearSelectedUploadFile();
-      await loadBackupData({ showErrorToast: false, preserveDirtySettings: true });
+      await loadBackupData({
+        showErrorToast: false,
+        preserveDirtySettings: true,
+        page: 0,
+      });
       if (!mappedBackup.canRestore) {
         addToast("Legacy backup uploaded for download. It lacks the database records needed for a complete restore.", "warning");
         return;
@@ -756,26 +777,27 @@ export default function AdminBackup({
                 <div className="backup-table-title">
                   <h3>Backup History</h3>
                   <small>
-                    Showing {historyRangeStart}-{historyRangeEnd} of {backups.length}
+                    Showing {historyRangeStart}-{historyRangeEnd} of {backupHistoryCount}
                   </small>
                 </div>
               </div>
 
-              <table className="backup-table">
-                <thead>
-                  <tr>
-                    <th>Backup Name</th>
-                    <th>Date & Time</th>
-                    <th>Contents</th>
-                    <th>Type</th>
-                    <th>Created By</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {backups.length > 0 ? (
-                    paginatedBackups.map((backup) => (
+              <div className="backup-table-scroll">
+                <table className="backup-table">
+                  <thead>
+                    <tr>
+                      <th>Backup Name</th>
+                      <th>Date & Time</th>
+                      <th>Contents</th>
+                      <th>Type</th>
+                      <th>Created By</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {backups.length > 0 ? (
+                      backups.map((backup) => (
                       <tr key={backup.id}>
                         <td className="backup-name-cell">{backup.name}</td>
                         <td className="date-cell">{backup.date}</td>
@@ -839,17 +861,18 @@ export default function AdminBackup({
                           ) : null}
                         </td>
                       </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={7} className="no-results">
-                        No backups available yet.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-              <TablePagination page={historyPage + 1} pageSize={BACKUP_HISTORY_PAGE_SIZE} totalItems={backups.length} onPageChange={(page) => setHistoryPage(page - 1)} label="Backup history pages" />
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="no-results">
+                          No backups available yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <TablePagination page={historyPage + 1} pageSize={BACKUP_HISTORY_PAGE_SIZE} totalItems={backupHistoryCount} onPageChange={(page) => setHistoryPage(page - 1)} label="Backup history pages" />
             </div>
           </>
         )}

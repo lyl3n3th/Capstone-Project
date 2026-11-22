@@ -95,10 +95,11 @@ def expire_stale_backup_runs(branch, *, now=None):
     """Release branch backup slots left open by a stopped web/worker process."""
     now = now or timezone.now()
     expired = []
-    for history in list_backup_history(branch, include_deleted=True):
-        if history.status not in (BackupHistory.STATUS_PENDING, BackupHistory.STATUS_IN_PROGRESS):
-            continue
-
+    for history in list_backup_history(
+        branch,
+        include_deleted=True,
+        statuses=(BackupHistory.STATUS_PENDING, BackupHistory.STATUS_IN_PROGRESS),
+    ):
         metadata = history.metadata or {}
         try:
             heartbeat = parse_datetime(str(metadata.get("progress_updated_at") or ""))

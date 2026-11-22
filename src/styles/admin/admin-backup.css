@@ -567,6 +567,13 @@
   padding: 18px 16px 12px;
 }
 
+.backup-content .backup-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .backup-table-header {
   padding: 20px 24px;
   border-bottom: 1px solid #e5e7eb;
@@ -1018,12 +1025,7 @@
   }
 }
 
-/* Backup history should scroll before columns and buttons become unreadable. */
-.table-container {
-  overflow-x: auto !important;
-  -webkit-overflow-scrolling: touch;
-}
-
+/* Keep the action column reachable without making pagination scroll sideways. */
 .backup-content .backup-table {
   width: 100%;
   min-width: 980px !important;

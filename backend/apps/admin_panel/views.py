@@ -17,6 +17,7 @@ from .repository import (
     get_backup_history,
     get_or_create_backup_settings,
     list_backup_history,
+    list_backup_history_page,
     save_backup_snapshot,
     save_backup_settings,
     update_backup_history,
@@ -98,6 +99,38 @@ class BackupHistoryListView(APIView):
             return Response({"detail": "Branch context is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         expire_stale_backup_runs(branch_id)
+
+        if "limit" in request.query_params or "offset" in request.query_params:
+            try:
+                limit = int(request.query_params.get("limit", "5"))
+                offset = int(request.query_params.get("offset", "0"))
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "Backup history limit and offset must be integers."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if limit < 1 or limit > 100 or offset < 0:
+                return Response(
+                    {"detail": "Backup history limit must be 1-100 and offset must be non-negative."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            (
+                history,
+                total,
+                has_incomplete_manual_backup,
+                has_running_backup,
+            ) = list_backup_history_page(branch_id, limit=limit, offset=offset)
+            return Response(
+                {
+                    "results": BackupHistorySerializer(history, many=True).data,
+                    "count": total,
+                    "has_incomplete_manual_backup": has_incomplete_manual_backup,
+                    "has_running_backup": has_running_backup,
+                }
+            )
+
         history = list_backup_history(branch_id)
         return Response(BackupHistorySerializer(history, many=True).data)
 

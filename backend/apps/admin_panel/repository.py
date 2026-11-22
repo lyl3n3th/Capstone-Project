@@ -265,10 +265,12 @@ def save_backup_settings(branch, data, *, updated_by=None, updated_by_name=""):
     return _settings_from_model(settings_row)
 
 
-def list_backup_history(branch, *, include_deleted=False):
+def list_backup_history(branch, *, include_deleted=False, statuses=None):
     if use_supabase_backups():
         filters = {"branch": f"eq.{branch}"}
-        if not include_deleted:
+        if statuses:
+            filters["status"] = f"in.({','.join(statuses)})"
+        elif not include_deleted:
             filters["status"] = f"neq.{BackupHistory.STATUS_DELETED}"
         rows = _client().select(
             "branch_backup_history",
@@ -278,10 +280,81 @@ def list_backup_history(branch, *, include_deleted=False):
         return [_history_from_row(row) for row in rows or []]
 
     queryset = BackupHistory.objects.filter(branch=branch)
-    if not include_deleted:
+    if statuses:
+        queryset = queryset.filter(status__in=statuses)
+    elif not include_deleted:
         queryset = queryset.exclude(status=BackupHistory.STATUS_DELETED)
     queryset = queryset.select_related("created_by", "restored_from")
     return [_history_from_model(history) for history in queryset]
+
+
+def list_backup_history_page(branch, *, limit, offset=0):
+    if use_supabase_backups():
+        filters = {
+            "branch": f"eq.{branch}",
+            "status": f"neq.{BackupHistory.STATUS_DELETED}",
+            "backup_type": f"in.({BackupHistory.TYPE_MANUAL},{BackupHistory.TYPE_AUTOMATED})",
+        }
+        rows, total = _client().select_page(
+            "branch_backup_history",
+            filters=filters,
+            order="creation_date.desc,id.desc",
+            limit=limit,
+            offset=offset,
+        )
+        active_manual_backups = _client().select(
+            "branch_backup_history",
+            filters={
+                "branch": f"eq.{branch}",
+                "backup_type": f"eq.{BackupHistory.TYPE_MANUAL}",
+                "status": f"in.({BackupHistory.STATUS_PENDING},{BackupHistory.STATUS_IN_PROGRESS})",
+            },
+            select="id",
+            limit=1,
+        )
+        active_backups = _client().select(
+            "branch_backup_history",
+            filters={
+                "branch": f"eq.{branch}",
+                "backup_type": f"in.({BackupHistory.TYPE_MANUAL},{BackupHistory.TYPE_AUTOMATED})",
+                "status": f"in.({BackupHistory.STATUS_PENDING},{BackupHistory.STATUS_IN_PROGRESS})",
+            },
+            select="id",
+            limit=1,
+        )
+        return (
+            [_history_from_row(row) for row in rows or []],
+            total,
+            bool(active_manual_backups),
+            bool(active_backups),
+        )
+
+    queryset = BackupHistory.objects.filter(branch=branch).exclude(
+        status=BackupHistory.STATUS_DELETED,
+    ).filter(
+        backup_type__in=(BackupHistory.TYPE_MANUAL, BackupHistory.TYPE_AUTOMATED),
+    )
+    total = queryset.count()
+    page = queryset.select_related("created_by", "restored_from").order_by(
+        "-creation_date",
+        "-id",
+    )[offset : offset + limit]
+    has_incomplete_manual_backup = BackupHistory.objects.filter(
+        branch=branch,
+        backup_type=BackupHistory.TYPE_MANUAL,
+        status__in=(BackupHistory.STATUS_PENDING, BackupHistory.STATUS_IN_PROGRESS),
+    ).exists()
+    has_running_backup = BackupHistory.objects.filter(
+        branch=branch,
+        backup_type__in=(BackupHistory.TYPE_MANUAL, BackupHistory.TYPE_AUTOMATED),
+        status__in=(BackupHistory.STATUS_PENDING, BackupHistory.STATUS_IN_PROGRESS),
+    ).exists()
+    return (
+        [_history_from_model(history) for history in page],
+        total,
+        has_incomplete_manual_backup,
+        has_running_backup,
+    )
 
 
 def get_backup_history(history_id, *, branch=None):
