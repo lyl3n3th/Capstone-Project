@@ -465,6 +465,21 @@ export const saveInstructorGradeSubmission = async (
   }
 };
 
+export const saveInstructorGradeSubmissionToBackend = async (
+  branch: string | null | undefined,
+  submission: InstructorGradeSubmission,
+): Promise<void> => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const { error } = await supabase.rpc("upsert_instructor_grade_submission", {
+    p_branch: resolvedBranch,
+    p_submission: submission,
+  });
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+};
+
 export const deleteInstructorGradeSubmissions = async ({
   branch,
   submissionIds,

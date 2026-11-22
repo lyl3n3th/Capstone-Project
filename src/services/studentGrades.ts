@@ -40,6 +40,7 @@ export interface StoredStudentGradeRecord {
   assignmentId?: string;
   sectionId?: string;
   sectionCode?: string;
+  approvedInstructorSubmissionId?: string;
   studentNumberIsOriginal?: boolean;
   source?: "historical";
   yearLevel?: string;
@@ -772,14 +773,20 @@ const deleteStudentGradeRecordFromSupabase = async (
 const syncStudentGradeOperationsToSupabase = (
   branch: string,
   operations: StudentGradeUploadOperation[],
-) => {
-  void Promise.all(
+) =>
+  Promise.all(
     operations.map((operation) =>
       operation.type === "upsert"
         ? syncStudentGradeRecordToSupabase(branch, operation.record)
         : deleteStudentGradeRecordFromSupabase(branch, operation.identity),
     ),
-  ).catch((error) => {
+  ).then(() => undefined);
+
+const syncStudentGradeOperationsInBackground = (
+  branch: string,
+  operations: StudentGradeUploadOperation[],
+) => {
+  void syncStudentGradeOperationsToSupabase(branch, operations).catch((error) => {
     console.warn(
       "Unable to sync student grade records to Supabase; local cache was updated.",
       error,
@@ -923,7 +930,7 @@ export const writeStudentGradeRecordsForBranch = (
   }
 
   if (!options.skipSupabaseSync) {
-    syncStudentGradeOperationsToSupabase(
+    syncStudentGradeOperationsInBackground(
       resolvedBranch,
       sortGrades(records).map((record) => ({ type: "upsert", record })),
     );
@@ -939,7 +946,7 @@ export const upsertStudentGradeRecordsForBranch = (
     records.map((record) => ({ type: "upsert" as const, record })),
   );
 
-export const applyStudentGradeUploadOperationsForBranch = (
+const mergeStudentGradeUploadOperations = (
   branch: string | null | undefined,
   operations: StudentGradeUploadOperation[],
 ) => {
@@ -965,12 +972,34 @@ export const applyStudentGradeUploadOperationsForBranch = (
     );
   });
 
-  const nextRecords = Array.from(recordMap.values());
+  return sortGrades(Array.from(recordMap.values()));
+};
+
+export const applyStudentGradeUploadOperationsForBranch = (
+  branch: string | null | undefined,
+  operations: StudentGradeUploadOperation[],
+) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const nextRecords = mergeStudentGradeUploadOperations(resolvedBranch, operations);
   writeStudentGradeRecordsForBranch(resolvedBranch, nextRecords, {
     skipSupabaseSync: true,
   });
-  syncStudentGradeOperationsToSupabase(resolvedBranch, operations);
-  return sortGrades(nextRecords);
+  syncStudentGradeOperationsInBackground(resolvedBranch, operations);
+  return nextRecords;
+};
+
+export const applyStudentGradeUploadOperationsForBranchAndWait = async (
+  branch: string | null | undefined,
+  operations: StudentGradeUploadOperation[],
+) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  await syncStudentGradeOperationsToSupabase(resolvedBranch, operations);
+
+  const nextRecords = mergeStudentGradeUploadOperations(resolvedBranch, operations);
+  writeStudentGradeRecordsForBranch(resolvedBranch, nextRecords, {
+    skipSupabaseSync: true,
+  });
+  return nextRecords;
 };
 
 export const getStudentGradeRecords = ({

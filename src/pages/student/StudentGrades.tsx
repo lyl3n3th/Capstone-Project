@@ -1328,11 +1328,37 @@ function StudentGrades() {
       return;
     }
 
-    void fetchAndCacheStudentGradeRecordsForBranch(student.branch)
-      .then(() => setGradeRecordsVersion((previousValue) => previousValue + 1))
-      .catch((error) => {
-        console.warn("Unable to load student grades from Supabase.", error);
-      });
+    let active = true;
+    let loadingGrades = false;
+    const syncStudentGrades = () => {
+      if (!active || loadingGrades || document.visibilityState === "hidden") {
+        return;
+      }
+
+      loadingGrades = true;
+      void fetchAndCacheStudentGradeRecordsForBranch(student.branch)
+        .then(() => {
+          if (active) {
+            setGradeRecordsVersion((previousValue) => previousValue + 1);
+          }
+        })
+        .catch((error) => {
+          console.warn("Unable to load student grades from Supabase.", error);
+        })
+        .finally(() => {
+          loadingGrades = false;
+        });
+    };
+
+    syncStudentGrades();
+    window.addEventListener("focus", syncStudentGrades);
+    document.addEventListener("visibilitychange", syncStudentGrades);
+
+    return () => {
+      active = false;
+      window.removeEventListener("focus", syncStudentGrades);
+      document.removeEventListener("visibilitychange", syncStudentGrades);
+    };
   }, [student?.branch]);
 
   const studentGradeRecords = useMemo(
