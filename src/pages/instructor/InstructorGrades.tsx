@@ -346,6 +346,8 @@ export default function InstructorGrades() {
   }, [assignments]);
   const templateSubject = templateSubjects.find((subject) => subject.id === templateSubjectId);
   const [filePreview, setFilePreview] = useState<GradeFilePreview | null>(null);
+  const [isReviewingUpload, setIsReviewingUpload] = useState(false);
+  const [uploadReviewError, setUploadReviewError] = useState("");
   const [errorPreviewSubmission, setErrorPreviewSubmission] =
     useState<InstructorGradeSubmission | null>(null);
   const [isDeleteMode, setIsDeleteMode] = useState(false);
@@ -406,6 +408,7 @@ export default function InstructorGrades() {
 
     try {
       setIsParsing(true);
+      setUploadReviewError("");
       setMessage("Reading and validating the selected grade file...");
       const [fileDataBase64, result] = await Promise.all([
         readFileAsBase64(file),
@@ -417,9 +420,7 @@ export default function InstructorGrades() {
         }),
       ]);
       const hasErrors = result.errorRows.length > 0;
-
-      setMessage("Saving the grade submission...");
-      await saveInstructorGradeSubmission(currentUser.branch, {
+      const submission: InstructorGradeSubmission = {
         id: `grade-submission-${Date.now()}`,
         branch: currentUser.branch,
         instructorId: instructor.id,
@@ -433,12 +434,16 @@ export default function InstructorGrades() {
         records: result.records,
         errors: result.errors,
         errorRows: result.errorRows,
-      });
-      refreshSubmissions();
+      };
+
+      setFilePreview({ submission, rows: buildGradeFilePreview(submission) });
+      setIsReviewingUpload(true);
       setMessage(
         hasErrors
-          ? `${result.errorRows.length} row(s) have errors. Open Errors from Actions to review the rows.`
-          : `${result.records.length} grade row(s) submitted for approval.`,
+          ? "Review the grade rows and errors before confirming the submission."
+          : result.records.length === 0
+            ? "No grade rows were found. Review the file; an empty workbook cannot be submitted."
+            : "Review the grade rows before confirming the submission.",
       );
     } catch (error) {
       setMessage(
@@ -450,12 +455,65 @@ export default function InstructorGrades() {
     }
   };
 
+  const handleConfirmUpload = async () => {
+    if (!filePreview || !isReviewingUpload || !currentUser?.branch) {
+      return;
+    }
+
+    if (filePreview.rows.length === 0) {
+      setUploadReviewError("This file has no grade rows to submit.");
+      return;
+    }
+
+    try {
+      setIsParsing(true);
+      setUploadReviewError("");
+      setMessage("Saving the grade submission...");
+      await saveInstructorGradeSubmission(
+        currentUser.branch,
+        filePreview.submission,
+      );
+      refreshSubmissions();
+      setFilePreview(null);
+      setIsReviewingUpload(false);
+      const hasErrors = (filePreview.submission.errorRows?.length ?? 0) > 0;
+      setMessage(
+        hasErrors
+          ? `${filePreview.submission.errorRows?.length ?? 0} row(s) have errors. Open Errors from Actions to review them.`
+          : `${filePreview.submission.records.length} grade row(s) submitted for approval.`,
+      );
+    } catch (error) {
+      setUploadReviewError(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the grade submission.",
+      );
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleCloseFilePreview = () => {
+    if (isParsing) {
+      return;
+    }
+
+    if (isReviewingUpload) {
+      setMessage("Upload cancelled. No grades were submitted.");
+    }
+    setFilePreview(null);
+    setIsReviewingUpload(false);
+    setUploadReviewError("");
+  };
+
   const handleOpenFilePreview = (submission: InstructorGradeSubmission) => {
     try {
       setFilePreview({
         submission,
         rows: buildGradeFilePreview(submission),
       });
+      setIsReviewingUpload(false);
+      setUploadReviewError("");
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -633,7 +691,10 @@ export default function InstructorGrades() {
         <button
           type="button"
           disabled={isParsing}
-          onClick={() => uploadInputRef.current?.click()}
+          onClick={() => {
+            setMessage("Choose a grade workbook to review before submitting.");
+            uploadInputRef.current?.click();
+          }}
         >
           <FiUpload /> {isParsing ? "Processing..." : "Upload Grades"}
         </button>
@@ -746,7 +807,7 @@ export default function InstructorGrades() {
         <div
           className="instructor-file-modal-overlay"
           role="presentation"
-          onClick={() => setFilePreview(null)}
+          onClick={handleCloseFilePreview}
         >
           <section
             className="instructor-file-modal"
@@ -757,7 +818,7 @@ export default function InstructorGrades() {
           >
             <div className="instructor-file-modal-header">
               <div>
-                <span>Uploaded file preview</span>
+                <span>{isReviewingUpload ? "Review before submitting" : "Uploaded file preview"}</span>
                 <h2 id="instructor-file-modal-title">
                   {filePreview.submission.fileName}
                 </h2>
@@ -766,25 +827,61 @@ export default function InstructorGrades() {
                   correct row(s),{" "}
                   {filePreview.rows.filter((row) => row.status === "Error").length.toLocaleString()}{" "}
                   row(s) with errors.
+                  {isReviewingUpload && filePreview.rows.length > 0 &&
+                    filePreview.rows.some((row) => row.status === "Error")
+                    ? " Rows with errors will be saved as Error and need correction before approval."
+                    : ""}
                 </p>
               </div>
               <div className="instructor-file-modal-actions">
-                <button
-                  type="button"
-                  onClick={() => handleDownloadOriginal(filePreview.submission)}
-                >
-                  <FiDownload /> Download
-                </button>
+                {isReviewingUpload ? (
+                  <>
+                    <button
+                      type="button"
+                      className="instructor-review-cancel"
+                      disabled={isParsing}
+                      onClick={handleCloseFilePreview}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="instructor-review-submit"
+                      disabled={isParsing || filePreview.rows.length === 0}
+                      onClick={() => void handleConfirmUpload()}
+                    >
+                      {isParsing
+                        ? "Saving..."
+                        : filePreview.rows.some((row) => row.status === "Error")
+                          ? "Confirm submission"
+                          : "Submit for approval"}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadOriginal(filePreview.submission)}
+                  >
+                    <FiDownload /> Download
+                  </button>
+                )}
                 <button
                   type="button"
                   className="instructor-file-modal-close"
-                  aria-label="Close file preview"
-                  onClick={() => setFilePreview(null)}
+                  aria-label={isReviewingUpload ? "Cancel grade review" : "Close file preview"}
+                  disabled={isParsing}
+                  onClick={handleCloseFilePreview}
                 >
                   <FiX />
                 </button>
               </div>
             </div>
+
+            {isReviewingUpload && uploadReviewError ? (
+              <p className="instructor-review-error" role="alert">
+                {uploadReviewError}
+              </p>
+            ) : null}
 
             <div className="instructor-file-table-wrap">
               <table className="instructor-file-table">
@@ -862,7 +959,9 @@ export default function InstructorGrades() {
                   ))}
                   {filePreview.rows.length === 0 ? (
                     <tr>
-                      <td colSpan={15}>No grade rows were found in this file.</td>
+                      <td colSpan={15}>
+                        No grade rows were found in this file. Choose a workbook with grade rows before submitting.
+                      </td>
                     </tr>
                   ) : null}
                 </tbody>
