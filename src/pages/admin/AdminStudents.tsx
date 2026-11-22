@@ -1492,6 +1492,15 @@ export default function AdminStudents({
       ),
     [studentAcademicStandingById],
   );
+  const studentById = useMemo(() => {
+    const lookup = new Map<string, Student>();
+    students.forEach((student) => {
+      if (!lookup.has(student.id)) {
+        lookup.set(student.id, student);
+      }
+    });
+    return lookup;
+  }, [students]);
 
   const totalStudentPages = Math.max(
     1,
@@ -1500,7 +1509,7 @@ export default function AdminStudents({
   const currentStudentPage = Math.min(requestedStudentPage, totalStudentPages);
   const currentPageStudents = serverStudentPage
     .map((pageStudent) => {
-      const latestStudent = students.find((student) => student.id === pageStudent.id);
+      const latestStudent = studentById.get(pageStudent.id);
       return latestStudent ? { ...latestStudent, ...pageStudent } : pageStudent;
     })
     .filter((student) =>
