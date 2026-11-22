@@ -4,6 +4,7 @@ export interface ConfirmationOptions {
   title: string;
   confirmLabel: string;
   destructive?: boolean;
+  requiredText?: string;
 }
 
 export interface ConfirmationControls {

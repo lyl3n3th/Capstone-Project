@@ -5062,6 +5062,19 @@
   white-space: nowrap;
 }
 
+.add-btn.evaluation-clear-btn {
+  background: #b91c1c;
+}
+
+.add-btn.evaluation-clear-btn:hover:not(:disabled) {
+  background: #991b1b;
+}
+
+.evaluation-clear-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .evaluation-admin-stat,
 .evaluation-admin-card {
   border: 1px solid #dbe5ef;

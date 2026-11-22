@@ -43,6 +43,7 @@ import { useAuth } from "../../hooks/useAuth";
 import {
   fetchEvaluationQuestionnaire,
   fetchInstructorEvaluationSubmissions,
+  clearInstructorEvaluationSubmissions,
   fetchSupabaseAdmissionApplicants,
   fetchStudentCredentialReviewDecisions,
   getStudentSectionChoices,
@@ -1832,6 +1833,8 @@ export default function AdminEnrollees({
   const [evaluationSubmissions, setEvaluationSubmissions] = useState<
     InstructorEvaluationSubmissionRecord[]
   >(() => readInstructorEvaluationSubmissions(currentBranch));
+  const [clearingEvaluationSubmissions, setClearingEvaluationSubmissions] =
+    useState(false);
   const [showQuestionnaireModal, setShowQuestionnaireModal] = useState(false);
   const [selectedEvaluationDetailsInstructorId, setSelectedEvaluationDetailsInstructorId] =
     useState("");
@@ -7464,6 +7467,43 @@ export default function AdminEnrollees({
     reportWindow.document.close();
   };
 
+  const clearBranchEvaluationSubmissions = async () => {
+    if (clearingEvaluationSubmissions) {
+      return;
+    }
+
+    const confirmed = await requestConfirmation(
+      `Permanently delete every submitted instructor evaluation record for ${currentBranch}? This will remove all evaluation responses for every instructor in this branch and cannot be undone.`,
+      {
+        title: "Clear Branch Evaluations",
+        confirmLabel: "Permanently clear evaluations",
+        destructive: true,
+        requiredText: "DELETE",
+      },
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setClearingEvaluationSubmissions(true);
+    try {
+      const deletedCount = await clearInstructorEvaluationSubmissions(currentBranch);
+      setEvaluationSubmissions([]);
+      addToast(
+        deletedCount > 0
+          ? `Cleared ${deletedCount} evaluation record${deletedCount === 1 ? "" : "s"} for ${currentBranch}.`
+          : `There were no evaluation records to clear for ${currentBranch}.`,
+        "success",
+      );
+    } catch (error) {
+      console.error("Failed to clear branch instructor evaluations.", error);
+      addToast("Unable to clear evaluations. Please try again.", "error");
+    } finally {
+      setClearingEvaluationSubmissions(false);
+    }
+  };
+
   const downloadEvaluationReport = () => {
     if (!selectedEvaluationSummary) {
       return;
@@ -9658,6 +9698,14 @@ export default function AdminEnrollees({
                       disabled={instructorEvaluationSummaries.length === 0}
                     >
                       <FaFileAlt /> Download Summary Report
+                    </button>
+                    <button
+                      type="button"
+                      className="add-btn evaluation-questionnaire-btn evaluation-clear-btn"
+                      onClick={() => void clearBranchEvaluationSubmissions()}
+                      disabled={clearingEvaluationSubmissions}
+                    >
+                      <FaTrash /> {clearingEvaluationSubmissions ? "Clearing Evaluations…" : "Clear Evaluations"}
                     </button>
                   <button
                     type="button"

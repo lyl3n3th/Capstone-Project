@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MdClose } from "react-icons/md";
 import type { ConfirmationOptions } from "../../contexts/confirmation";
@@ -11,18 +11,25 @@ interface ConfirmationModalProps extends ConfirmationOptions {
 }
 
 export default function ConfirmationModal({
-  title, message, confirmLabel, destructive, onConfirm, onCancel,
+  title, message, confirmLabel, destructive, requiredText, onConfirm, onCancel,
 }: ConfirmationModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const requiredTextRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
   const messageId = useId();
+  const requiredTextId = useId();
+  const [typedText, setTypedText] = useState("");
 
   useEffect(() => {
     const dialog = dialogRef.current;
     const previousOverflow = document.body.style.overflow;
     dialog?.showModal();
-    cancelRef.current?.focus();
+    if (requiredText) {
+      requiredTextRef.current?.focus();
+    } else {
+      cancelRef.current?.focus();
+    }
     document.body.style.overflow = "hidden";
     return () => {
       dialog?.close();
@@ -58,12 +65,31 @@ export default function ConfirmationModal({
         </div>
         <div className="auth-modal-body">
           <p id={messageId} className="system-alert-modal-message">{message}</p>
+          {requiredText && (
+            <div className="confirmation-required-text">
+              <label htmlFor={requiredTextId}>Type <strong>{requiredText}</strong> to confirm</label>
+              <input
+                ref={requiredTextRef}
+                id={requiredTextId}
+                type="text"
+                value={typedText}
+                onChange={(event) => setTypedText(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+          )}
         </div>
         <div className="auth-modal-footer">
           <button ref={cancelRef} type="button" className="system-alert-modal-btn confirmation-modal-cancel" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className={`system-alert-modal-btn${destructive ? " confirmation-modal-danger" : ""}`} onClick={onConfirm}>
+          <button
+            type="button"
+            className={`system-alert-modal-btn${destructive ? " confirmation-modal-danger" : ""}`}
+            onClick={onConfirm}
+            disabled={Boolean(requiredText && typedText !== requiredText)}
+          >
             {confirmLabel}
           </button>
         </div>

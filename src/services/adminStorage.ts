@@ -1290,6 +1290,31 @@ export const fetchInstructorEvaluationSubmissions = async (
   return submissions;
 };
 
+export const clearInstructorEvaluationSubmissions = async (
+  branch?: string | null,
+): Promise<number> => {
+  const normalizedBranch = normalizeBranchName(branch);
+  const { data, error } = await supabase
+    .from("instructor_evaluation_submissions")
+    .delete()
+    .eq("branch", normalizedBranch)
+    .select("id");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  writeBranchScopedData(EVALUATION_SUBMISSIONS_SCOPE, normalizedBranch, []);
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT),
+    );
+  }
+
+  return data?.length ?? 0;
+};
+
 export const saveInstructorEvaluationSubmissionToBackend = async (
   branch: string | null | undefined,
   submission: InstructorEvaluationSubmissionRecord,
