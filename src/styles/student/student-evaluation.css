@@ -119,49 +119,6 @@
   box-shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
 }
 
-/* Center evaluation card content so it stays balanced across wide cards. */
-.s-evaluation-card {
-  align-items: center;
-  text-align: center;
-}
-
-.s-evaluation-card-top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-}
-
-.s-evaluation-card-copy {
-  flex: 0 1 640px;
-  text-align: center;
-}
-
-.s-evaluation-state {
-  align-self: center;
-  justify-self: auto;
-}
-
-.s-evaluation-subject-list {
-  width: 100%;
-  justify-content: center;
-}
-
-.s-evaluation-card-note {
-  width: 100%;
-}
-
-.s-evaluation-progress {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.s-evaluation-action,
-.s-evaluation-submitted {
-  align-self: center;
-}
-
 .s-evaluation-card-open {
   border-color: #bfdbfe;
 }
@@ -177,7 +134,7 @@
 .s-evaluation-card-top {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: flex-start;
+  align-items: center;
   gap: 14px;
   min-width: 0;
 }
@@ -711,8 +668,8 @@
   }
 
   .s-evaluation-card-copy {
-    flex: 0 1 640px;
-    width: auto;
+    flex: 1 1 auto;
+    width: 100%;
   }
 
   .s-evaluation-card {
@@ -720,14 +677,11 @@
   }
 
   .s-evaluation-card-top {
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
   .s-evaluation-state {
-    justify-self: auto;
-    align-self: center;
+    justify-self: flex-start;
   }
 
   .s-evaluation-action {
