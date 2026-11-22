@@ -334,7 +334,7 @@ function AdmissionStep3() {
     if (file) {
       if (
         requirementCode === "transcript_of_records" &&
-        !/\.(xls|xlsx)$/i.test(file.name)
+        !/\.(pdf|jpe?g|png|webp)$/i.test(file.name)
       ) {
         const previousPreviewUrl = previewUrlsRef.current[requirementCode];
         if (previousPreviewUrl) {
@@ -347,7 +347,7 @@ function AdmissionStep3() {
           return nextFiles;
         });
         e.target.value = "";
-        addToast("TOR must be an Excel file (.xls or .xlsx).", "error");
+        addToast("TOR must be a PDF or image file (JPG, PNG, or WebP).", "error");
         return;
       }
 
@@ -700,7 +700,7 @@ function AdmissionStep3() {
                         disabled={!isEditable}
                         accept={
                           requirement.code === "transcript_of_records"
-                            ? ".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            ? ".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
                             : ".pdf,.jpg,.jpeg,.png"
                         }
                         onChange={(e) =>
@@ -756,7 +756,7 @@ function AdmissionStep3() {
                   {currentRequirements.some(
                     (requirement) => requirement.code === "transcript_of_records",
                   )
-                    ? "Accepted formats: PDF, JPG, and PNG. TOR files must be Excel (.xls or .xlsx)."
+                    ? "Accepted formats: PDF, JPG, PNG, and WebP."
                     : "Accepted formats: PDF, JPG, and PNG."}
                 </p>
                 <p className="notice-text">

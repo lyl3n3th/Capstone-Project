@@ -2224,7 +2224,7 @@ export default function AdminStudents({
     input.type = "file";
     input.accept =
       requirement.code === "transcript_of_records"
-        ? ".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ? ".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
         : ".pdf,.jpg,.jpeg,.png,.doc,.docx";
 
     input.onchange = async () => {
@@ -2235,11 +2235,11 @@ export default function AdminStudents({
 
       if (
         requirement.code === "transcript_of_records" &&
-        !/\.(xls|xlsx)$/i.test(file.name)
+        !/\.(pdf|jpe?g|png|webp)$/i.test(file.name)
       ) {
         setCredentialActionFeedback({
           type: "error",
-          message: "TOR must be an Excel file (.xls or .xlsx).",
+          message: "TOR must be a PDF or image file (JPG, PNG, or WebP).",
         });
         return;
       }

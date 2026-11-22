@@ -155,7 +155,7 @@ function StudentHome() {
     input.type = "file";
     input.accept =
       requirementCode === "transcript_of_records"
-        ? ".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ? ".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
         : ".pdf,.jpg,.jpeg,.png,.doc,.docx";
 
     input.onchange = (event) => {
@@ -166,9 +166,9 @@ function StudentHome() {
 
       if (
         requirementCode === "transcript_of_records" &&
-        !/\.(xls|xlsx)$/i.test(file.name)
+        !/\.(pdf|jpe?g|png|webp)$/i.test(file.name)
       ) {
-        addToast("TOR must be an Excel file (.xls or .xlsx).", "error");
+        addToast("TOR must be a PDF or image file (JPG, PNG, or WebP).", "error");
         return;
       }
 
