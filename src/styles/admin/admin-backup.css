@@ -558,6 +558,15 @@
   margin-bottom: 40px;
 }
 
+.backup-content .table-container > .app-table-pagination {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  justify-content: center;
+  padding: 18px 16px 12px;
+}
+
 .backup-table-header {
   padding: 20px 24px;
   border-bottom: 1px solid #e5e7eb;
