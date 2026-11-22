@@ -15,6 +15,9 @@ const getResolvedInstructorName = (subject: StudentPortalSubject) => {
   return subject.instructorId ? "Assigned Instructor" : "Instructor TBA";
 };
 
+const normalizeEvaluationMatchValue = (value: string) =>
+  value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+
 export const getEvaluationSubmissionId = ({
   studentId,
   instructorId,
@@ -63,11 +66,6 @@ export const getCurrentTermEvaluationLockStatus = ({
       subject.academicYear === academicYear && subject.semester === semester,
   );
 
-  const submittedIds = new Set(
-    submissions
-      .filter((submission) => submission.studentNumber === studentId)
-      .map((submission) => submission.id),
-  );
   const requiredEntries = currentTermSubjects
     .map((subject) => {
       const instructorId = subject.instructorId?.trim();
@@ -77,22 +75,51 @@ export const getCurrentTermEvaluationLockStatus = ({
         return null;
       }
 
+      const submissionId = getEvaluationSubmissionId({
+        studentId,
+        instructorId,
+        academicYear,
+        semester,
+        subjectIds: [subject.id],
+      });
+      const evaluationSubmitted = submissions.some((submission) => {
+        if (
+          normalizeEvaluationMatchValue(submission.studentNumber) !==
+          normalizeEvaluationMatchValue(studentId)
+        ) {
+          return false;
+        }
+
+        if (submission.id === submissionId) {
+          return true;
+        }
+
+        return (
+          normalizeEvaluationMatchValue(submission.instructorId) ===
+            normalizeEvaluationMatchValue(instructorId) &&
+          normalizeEvaluationMatchValue(submission.academicYear) ===
+            normalizeEvaluationMatchValue(academicYear) &&
+          normalizeEvaluationMatchValue(submission.semester) ===
+            normalizeEvaluationMatchValue(semester) &&
+          (submission.subjectIds ?? []).some(
+            (submittedSubjectId) =>
+              normalizeEvaluationMatchValue(submittedSubjectId) ===
+              normalizeEvaluationMatchValue(subject.id),
+          )
+        );
+      });
+
       return {
         instructorId,
         instructorName,
         pendingLabel: `${instructorName} (${subject.code})`,
-        submissionId: getEvaluationSubmissionId({
-          studentId,
-          instructorId,
-          academicYear,
-          semester,
-          subjectIds: [subject.id],
-        }),
+        submissionId,
+        evaluationSubmitted,
       };
     })
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
   const pendingEntries = requiredEntries.filter(
-    (entry) => !submittedIds.has(entry.submissionId),
+    (entry) => !entry.evaluationSubmitted,
   );
 
   return {

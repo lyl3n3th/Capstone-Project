@@ -71,6 +71,7 @@ import {
 } from "../../services/admission";
 import {
   applyStudentGradeUploadOperationsForBranch,
+  fetchAndCacheStudentGradeRecordsForBranch,
   getRequiredShsQuarterLabelsForSemester,
   getStudentAcademicStanding,
   getStudentGradeRecords,
@@ -1347,6 +1348,28 @@ export default function AdminStudents({
         STUDENT_GRADE_RECORDS_UPDATED_EVENT,
         handleStudentGradeRecordsUpdated as EventListener,
       );
+    };
+  }, [currentBranch]);
+
+  useEffect(() => {
+    if (!currentBranch) {
+      return;
+    }
+
+    let active = true;
+    void fetchAndCacheStudentGradeRecordsForBranch(currentBranch).catch(
+      (error) => {
+        if (active) {
+          console.warn(
+            "Unable to load student grades for admin student details.",
+            error,
+          );
+        }
+      },
+    );
+
+    return () => {
+      active = false;
     };
   }, [currentBranch]);
 
