@@ -98,6 +98,7 @@ export default function InstructorGradeChanges() {
   const [gradeRecordsVersion, setGradeRecordsVersion] = useState(0);
   const [settingsVersion, setSettingsVersion] = useState(0);
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
   const [requestedGrades, setRequestedGrades] = useState<Record<string, string>>({});
   const [gradeSearchTerm, setGradeSearchTerm] = useState("");
   const [viewingRequest, setViewingRequest] =
@@ -321,7 +322,11 @@ export default function InstructorGradeChanges() {
     setIsRequestModalOpen(true);
   };
 
-  const handleSubmitGradeChangeRequest = () => {
+  const handleSubmitGradeChangeRequest = async () => {
+    if (isSubmittingRequest) {
+      return;
+    }
+
     if (!instructor || !currentUser?.branch) {
       setMessage("Instructor profile is still loading.");
       return;
@@ -472,23 +477,35 @@ export default function InstructorGradeChanges() {
       return;
     }
 
-    saveInstructorGradeChangeRequest(currentUser.branch, {
-      id: `grade-change-request-${Date.now()}`,
-      branch: currentUser.branch,
-      instructorId: instructor.id,
-      instructorName: instructor.name,
-      employeeId: instructor.employeeId,
-      fileName: `Grade change request - ${new Date().toLocaleString()}`,
-      submittedAt: new Date().toISOString(),
-      status: "Pending",
-      changes,
-      errors: [],
-      errorRows: [],
-    });
-    setRequestsVersion((previousValue) => previousValue + 1);
-    setIsRequestModalOpen(false);
-    setRequestedGrades({});
-    setMessage(`${changes.length} grade change request(s) submitted.`);
+    try {
+      setIsSubmittingRequest(true);
+      setMessage("Submitting grade change request...");
+      await saveInstructorGradeChangeRequest(currentUser.branch, {
+        id: `grade-change-request-${Date.now()}`,
+        branch: currentUser.branch,
+        instructorId: instructor.id,
+        instructorName: instructor.name,
+        employeeId: instructor.employeeId,
+        fileName: `Grade change request - ${new Date().toLocaleString()}`,
+        submittedAt: new Date().toISOString(),
+        status: "Pending",
+        changes,
+        errors: [],
+        errorRows: [],
+      });
+      setRequestsVersion((previousValue) => previousValue + 1);
+      setIsRequestModalOpen(false);
+      setRequestedGrades({});
+      setMessage(`${changes.length} grade change request(s) submitted.`);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `Unable to submit the grade change request. ${error.message}`
+          : "Unable to submit the grade change request. Please try again.",
+      );
+    } finally {
+      setIsSubmittingRequest(false);
+    }
   };
 
   const handleToggleDeleteMode = () => {
@@ -690,8 +707,9 @@ export default function InstructorGradeChanges() {
                 <button
                   type="button"
                   onClick={handleSubmitGradeChangeRequest}
+                  disabled={isSubmittingRequest}
                 >
-                  Send Request
+                  {isSubmittingRequest ? "Submitting..." : "Send Request"}
                 </button>
                 <button
                   type="button"

@@ -4,8 +4,10 @@ import {
   getStudentsForBranch,
   normalizeBranchName,
   fetchAndCacheBranchScopedData,
+  getBranchStorageKey,
   readBranchScopedData,
   readInstructorEvaluationSubmissions,
+  syncBranchScopedDataAndWait,
   writeBranchScopedData,
   readStoredStudents,
   writeStoredStudents,
@@ -46,6 +48,77 @@ const INSTRUCTOR_GRADE_CHANGE_REQUESTS_SCOPE =
 const INSTRUCTOR_GRADE_CHANGE_ERROR_HISTORY_SCOPE =
   "instructor-grade-change-error-history";
 const GRADE_CHANGE_REQUEST_SETTINGS_SCOPE = "grade-change-request-settings";
+const MAX_CACHED_INSTRUCTOR_GRADE_SUBMISSIONS = 20;
+const instructorGradeSubmissionMemoryCache = new Map<
+  string,
+  InstructorGradeSubmission[]
+>();
+const instructorGradeSubmissionStateRevisions = new Map<string, number>();
+const instructorGradeSubmissionFetchRevisions = new Map<string, number>();
+
+const getInstructorGradeSubmissionsCacheKey = (
+  branch?: string | null,
+) => normalizeBranchName(branch).toLowerCase();
+
+const getInstructorGradeSubmissionStateRevision = (key: string) =>
+  instructorGradeSubmissionStateRevisions.get(key) ?? 0;
+
+const markInstructorGradeSubmissionsChanged = (key: string) => {
+  instructorGradeSubmissionStateRevisions.set(
+    key,
+    getInstructorGradeSubmissionStateRevision(key) + 1,
+  );
+};
+
+const getLocalInstructorGradeSubmissions = (
+  submissions: InstructorGradeSubmission[],
+) =>
+  submissions
+    .slice(0, MAX_CACHED_INSTRUCTOR_GRADE_SUBMISSIONS)
+    .map(({ fileDataBase64: _fileDataBase64, ...submission }) => submission);
+
+const persistInstructorGradeSubmissionsCache = (
+  branch: string | null | undefined,
+  submissions: InstructorGradeSubmission[],
+) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const storageKey = getBranchStorageKey(
+    INSTRUCTOR_GRADE_SUBMISSIONS_SCOPE,
+    branch,
+  );
+  const localSubmissions = getLocalInstructorGradeSubmissions(submissions);
+
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(localSubmissions));
+  } catch (error) {
+    // This cache is only a convenience; the shared Supabase write has already
+    // succeeded before new submissions reach this code. Clear an older,
+    // potentially oversized copy and retry with the compact cache.
+    try {
+      window.localStorage.removeItem(storageKey);
+      window.localStorage.setItem(storageKey, JSON.stringify(localSubmissions));
+    } catch (retryError) {
+      console.warn(
+        "Instructor grade submissions are saved in the shared system, but the browser cache could not be updated.",
+        retryError ?? error,
+      );
+    }
+  }
+};
+
+const cacheInstructorGradeSubmissions = (
+  branch: string | null | undefined,
+  submissions: InstructorGradeSubmission[],
+) => {
+  instructorGradeSubmissionMemoryCache.set(
+    getInstructorGradeSubmissionsCacheKey(branch),
+    submissions,
+  );
+  persistInstructorGradeSubmissionsCache(branch, submissions);
+};
 
 if (typeof window !== "undefined") {
   const legacyPasswordKeyParts = [
@@ -377,16 +450,36 @@ export const authenticateInstructor = async ({
   };
 };
 
-export const getInstructorGradeSubmissions = (branch?: string | null) =>
-  readBranchScopedData<InstructorGradeSubmission[]>(
-    INSTRUCTOR_GRADE_SUBMISSIONS_SCOPE,
-    branch,
-  ) ?? [];
+export const getInstructorGradeSubmissions = (branch?: string | null) => {
+  const cacheKey = getInstructorGradeSubmissionsCacheKey(branch);
+  const inMemorySubmissions = instructorGradeSubmissionMemoryCache.get(cacheKey);
+  if (inMemorySubmissions) {
+    return inMemorySubmissions;
+  }
+
+  try {
+    return (
+      readBranchScopedData<InstructorGradeSubmission[]>(
+        INSTRUCTOR_GRADE_SUBMISSIONS_SCOPE,
+        branch,
+      ) ?? []
+    );
+  } catch (error) {
+    console.warn("Unable to read the local instructor grade cache.", error);
+    return [];
+  }
+};
 
 export const fetchAndCacheInstructorGradeSubmissions = async (
   branch?: string | null,
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
+  const cacheKey = getInstructorGradeSubmissionsCacheKey(resolvedBranch);
+  const initialStateRevision =
+    getInstructorGradeSubmissionStateRevision(cacheKey);
+  const fetchRevision =
+    (instructorGradeSubmissionFetchRevisions.get(cacheKey) ?? 0) + 1;
+  instructorGradeSubmissionFetchRevisions.set(cacheKey, fetchRevision);
   const { data, error } = await supabase
     .rpc("list_instructor_grade_submissions", {
       p_branch: resolvedBranch,
@@ -400,58 +493,33 @@ export const fetchAndCacheInstructorGradeSubmissions = async (
   const submissions = (Array.isArray(data) ? data : []).map(
     mapInstructorSubmissionRow,
   );
-  writeInstructorGradeSubmissions(resolvedBranch, submissions, {
-    skipSupabaseSync: true,
-  });
+
+  const isOutdated =
+    getInstructorGradeSubmissionStateRevision(cacheKey) !==
+      initialStateRevision ||
+    instructorGradeSubmissionFetchRevisions.get(cacheKey) !== fetchRevision;
+  if (isOutdated) {
+    return getInstructorGradeSubmissions(resolvedBranch);
+  }
+
+  cacheInstructorGradeSubmissions(resolvedBranch, submissions);
   return submissions;
 };
 
 export const writeInstructorGradeSubmissions = (
   branch: string | null | undefined,
   submissions: InstructorGradeSubmission[],
-  options: { skipSupabaseSync?: boolean } = {},
 ) => {
-  writeBranchScopedData(INSTRUCTOR_GRADE_SUBMISSIONS_SCOPE, branch, submissions);
-
-  if (options.skipSupabaseSync) {
-    return;
-  }
-
-  const resolvedBranch = normalizeBranchName(branch);
-  void Promise.all(
-    submissions.map((submission) =>
-      supabase.rpc("upsert_instructor_grade_submission", {
-        p_branch: resolvedBranch,
-        p_submission: submission,
-      }),
-    ),
-  ).then((results) => {
-    const failedResult = results.find((result) => result.error);
-    if (failedResult?.error) {
-      console.warn(
-        "Unable to sync instructor grade submissions to Supabase; local cache was updated.",
-        failedResult.error,
-      );
-    }
-  });
+  const cacheKey = getInstructorGradeSubmissionsCacheKey(branch);
+  markInstructorGradeSubmissionsChanged(cacheKey);
+  cacheInstructorGradeSubmissions(branch, submissions);
 };
 
 export const saveInstructorGradeSubmission = async (
   branch: string | null | undefined,
   submission: InstructorGradeSubmission,
 ): Promise<void> => {
-  const existing = getInstructorGradeSubmissions(branch);
-  const submissions = [
-    submission,
-    ...existing.filter((item) => item.id !== submission.id),
-  ];
   const resolvedBranch = normalizeBranchName(branch);
-
-  // Keep a local copy if the network is unavailable, but make the upload page
-  // wait for the shared database write before it reports a successful upload.
-  writeInstructorGradeSubmissions(branch, submissions, {
-    skipSupabaseSync: true,
-  });
 
   const { error } = await supabase.rpc("upsert_instructor_grade_submission", {
     p_branch: resolvedBranch,
@@ -459,8 +527,25 @@ export const saveInstructorGradeSubmission = async (
   });
 
   if (error) {
-    throw new Error(
-      `The submission is saved in this browser, but could not be synced to the shared system. ${getErrorMessage(error)}`,
+    throw new Error(getErrorMessage(error));
+  }
+
+  // The shared database is authoritative. Keep only a bounded, compact local
+  // cache so browser storage limits cannot block or undo a successful upload.
+  const existing = getInstructorGradeSubmissions(branch);
+  writeInstructorGradeSubmissions(branch, [
+    submission,
+    ...existing.filter((item) => item.id !== submission.id),
+  ]);
+
+  // Re-read after the write to pick up existing submissions if the page's
+  // initial load was still in flight while this upload completed.
+  try {
+    await fetchAndCacheInstructorGradeSubmissions(branch);
+  } catch (error) {
+    console.warn(
+      "The new grade submission was saved, but the submission list could not be refreshed.",
+      error,
     );
   }
 };
@@ -478,6 +563,10 @@ export const saveInstructorGradeSubmissionToBackend = async (
   if (error) {
     throw new Error(getErrorMessage(error));
   }
+
+  markInstructorGradeSubmissionsChanged(
+    getInstructorGradeSubmissionsCacheKey(branch),
+  );
 };
 
 export const deleteInstructorGradeSubmissions = async ({
@@ -501,6 +590,10 @@ export const deleteInstructorGradeSubmissions = async ({
   if (failedResult?.error) {
     throw new Error(getErrorMessage(failedResult.error));
   }
+
+  markInstructorGradeSubmissionsChanged(
+    getInstructorGradeSubmissionsCacheKey(branch),
+  );
 };
 
 const sortGradeChangeRequests = (requests: InstructorGradeChangeRequest[]) =>
@@ -542,12 +635,31 @@ export const writeInstructorGradeChangeRequests = (
   return sortedRequests;
 };
 
-export const saveInstructorGradeChangeRequest = (
+export const saveInstructorGradeChangeRequestsAndWait = async (
+  branch: string | null | undefined,
+  requests: InstructorGradeChangeRequest[],
+) => {
+  const sortedRequests = sortGradeChangeRequests(requests);
+  await syncBranchScopedDataAndWait(
+    INSTRUCTOR_GRADE_CHANGE_REQUESTS_SCOPE,
+    branch,
+    sortedRequests,
+  );
+  writeBranchScopedData(
+    INSTRUCTOR_GRADE_CHANGE_REQUESTS_SCOPE,
+    branch,
+    sortedRequests,
+    { skipSupabaseSync: true },
+  );
+  return sortedRequests;
+};
+
+export const saveInstructorGradeChangeRequest = async (
   branch: string | null | undefined,
   request: InstructorGradeChangeRequest,
 ) => {
   const existing = getInstructorGradeChangeRequests(branch);
-  return writeInstructorGradeChangeRequests(branch, [
+  return saveInstructorGradeChangeRequestsAndWait(branch, [
     request,
     ...existing.filter((item) => item.id !== request.id),
   ]);

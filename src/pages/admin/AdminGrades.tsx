@@ -49,6 +49,7 @@ import {
   fetchAndCacheInstructorGradeSubmissions,
   getInstructorGradeChangeRequests,
   fetchAndCacheInstructorGradeChangeRequests,
+  saveInstructorGradeChangeRequestsAndWait,
   saveInstructorGradeSubmissionToBackend,
   writeGradeChangeRequestSettings,
   writeInstructorGradeChangeRequests,
@@ -2810,13 +2811,23 @@ export default function AdminGrades({
       return false;
     }
 
+    const latestSubmissions = getInstructorGradeSubmissions(currentBranch);
     writeInstructorGradeSubmissions(
       currentBranch,
-      instructorGradeSubmissions.map((item) =>
-        item.id === submissionId ? updatedSubmission : item,
-      ),
-      { skipSupabaseSync: true },
+      latestSubmissions.some((item) => item.id === submissionId)
+        ? latestSubmissions.map((item) =>
+            item.id === submissionId ? updatedSubmission : item,
+          )
+        : [updatedSubmission, ...latestSubmissions],
     );
+    try {
+      await fetchAndCacheInstructorGradeSubmissions(currentBranch);
+    } catch (error) {
+      console.warn(
+        "Instructor grade approval saved, but the updated submission list could not be refreshed.",
+        error,
+      );
+    }
     setInstructorSubmissionVersion((previousValue) => previousValue + 1);
     addToast(
       status === "Approved"
@@ -2831,7 +2842,7 @@ export default function AdminGrades({
     requestId: string,
     status: "Approved" | "Rejected",
   ) => {
-    const request = instructorGradeChangeRequests.find(
+    const request = getInstructorGradeChangeRequests(currentBranch).find(
       (item) => item.id === requestId,
     );
 
@@ -2840,68 +2851,78 @@ export default function AdminGrades({
       return false;
     }
 
-    if (status === "Approved") {
-      let currentGradeRecords = readStudentGradeRecordsForBranch(currentBranch);
-
-      try {
+    try {
+      if (status === "Approved") {
+        let currentGradeRecords = readStudentGradeRecordsForBranch(currentBranch);
         currentGradeRecords =
           await fetchAndCacheStudentGradeRecordsForBranch(currentBranch);
-      } catch (error) {
-        console.warn(
-          "Unable to refresh student grades before approving change request.",
-          error,
-        );
-      }
 
-      const staleChange = request.changes.find((change) => {
-        const currentRecord = findApprovedStudentGradeConflict({
-          branch: currentBranch,
-          record: change.requestedRecord,
-          existingRecords: currentGradeRecords,
+        const staleChange = request.changes.find((change) => {
+          const currentRecord = findApprovedStudentGradeConflict({
+            branch: currentBranch,
+            record: change.requestedRecord,
+            existingRecords: currentGradeRecords,
+          });
+
+          const currentGrade = currentRecord?.normalizedGrade;
+          const hasAlreadyBeenApplied =
+            normalizeApprovalGradeValue(currentGrade) ===
+            normalizeApprovalGradeValue(change.requestedGrade);
+
+          return (
+            !currentRecord ||
+            (!hasAlreadyBeenApplied &&
+              normalizeApprovalGradeValue(currentGrade) !==
+                normalizeApprovalGradeValue(change.currentGrade))
+          );
         });
 
-        return (
-          !currentRecord ||
-          normalizeApprovalGradeValue(currentRecord.normalizedGrade) !==
-            normalizeApprovalGradeValue(change.currentGrade)
-        );
-      });
+        if (staleChange) {
+          addToast(
+            `Cannot approve yet. ${staleChange.fullName}'s current ${staleChange.subjectCode} grade no longer matches this request.`,
+            "error",
+          );
+          return false;
+        }
 
-      if (staleChange) {
-        addToast(
-          `Cannot approve yet. ${staleChange.fullName}'s current ${staleChange.subjectCode} grade no longer matches this request.`,
-          "error",
+        const reviewedAt = new Date().toISOString();
+        await applyStudentGradeUploadOperationsForBranchAndWait(
+          currentBranch,
+          request.changes.map((change) => ({
+            type: "upsert" as const,
+            record: {
+              ...change.requestedRecord,
+              updatedAt: reviewedAt,
+            },
+          })),
         );
-        return false;
       }
 
-      const reviewedAt = new Date().toISOString();
-
-      applyStudentGradeUploadOperationsForBranch(
+      const latestRequests = getInstructorGradeChangeRequests(currentBranch);
+      await saveInstructorGradeChangeRequestsAndWait(
         currentBranch,
-        request.changes.map((change) => ({
-          type: "upsert" as const,
-          record: {
-            ...change.requestedRecord,
-            updatedAt: reviewedAt,
-          },
-        })),
+        latestRequests.map((item) =>
+          item.id === requestId
+            ? {
+                ...item,
+                status,
+                reviewedAt: new Date().toISOString(),
+                reviewedBy: loggedInUsername,
+              }
+            : item,
+        ),
       );
+    } catch (error) {
+      console.warn("Unable to persist instructor grade change approval.", error);
+      addToast(
+        status === "Approved"
+          ? "The grade change request could not be saved to the shared system. Please try again."
+          : "The request status could not be saved. Please try again.",
+        "error",
+      );
+      return false;
     }
 
-    writeInstructorGradeChangeRequests(
-      currentBranch,
-      instructorGradeChangeRequests.map((item) =>
-        item.id === requestId
-          ? {
-              ...item,
-              status,
-              reviewedAt: new Date().toISOString(),
-              reviewedBy: loggedInUsername,
-            }
-          : item,
-      ),
-    );
     setInstructorSubmissionVersion((previousValue) => previousValue + 1);
     addToast(
       status === "Approved"

@@ -819,11 +819,33 @@ const SUPABASE_MIRRORED_BRANCH_SCOPES = new Set([
 // own. Keep their branch-scoped cache in local storage without also writing a
 // second, whole-snapshot copy to branch_local_storage_records.
 const MAX_CONCURRENT_BRANCH_SCOPED_SYNCS = 4;
+const branchScopedDataRevisions = new Map<string, number>();
+const branchScopedDataFetchRevisions = new Map<string, number>();
+const branchScopedDataNeedsSync = new Set<string>();
+
+const getBranchScopeKey = (scope: string, branch: string) =>
+  JSON.stringify([branch, scope]);
+
+const getBranchScopeRevision = (key: string) =>
+  branchScopedDataRevisions.get(key) ?? 0;
+
+const bumpBranchScopeRevision = (key: string) => {
+  const revision = getBranchScopeRevision(key) + 1;
+  branchScopedDataRevisions.set(key, revision);
+  return revision;
+};
+
+type BranchScopedSyncWaiter = {
+  resolve: () => void;
+  reject: (error: Error) => void;
+};
 
 type PendingBranchScopedSync = {
   branch: string;
   scope: string;
   payload: unknown;
+  generation: number;
+  waiters: BranchScopedSyncWaiter[];
   queued: boolean;
   inFlight: boolean;
 };
@@ -845,8 +867,10 @@ const drainBranchScopedSyncQueue = () => {
     sync.inFlight = true;
     activeBranchScopedSyncs += 1;
     const payload = sync.payload;
+    const generation = sync.generation;
 
     void (async () => {
+      let syncError: Error | null = null;
       try {
         const { error } = await supabase.rpc("upsert_branch_local_storage_record", {
           p_branch: sync.branch,
@@ -854,17 +878,25 @@ const drainBranchScopedSyncQueue = () => {
           p_payload: payload,
         });
         if (error) {
-          console.warn(
-            `Unable to sync ${sync.scope} to Supabase; local cache was updated.`,
-            error,
-          );
+          throw new Error(getBranchScopeSupabaseErrorMessage(error));
         }
       } catch (error) {
-        console.warn(
-          `Unable to sync ${sync.scope} to Supabase; local cache was updated.`,
-          error,
-        );
+        syncError = error instanceof Error ? error : new Error(String(error));
       } finally {
+        if (sync.generation === generation) {
+          const waiters = sync.waiters.splice(0);
+          if (syncError) {
+            branchScopedDataNeedsSync.add(key);
+            waiters.forEach((waiter) => waiter.reject(syncError!));
+            console.warn(
+              `Unable to sync ${sync.scope} to Supabase; the local copy is still pending sync.`,
+              syncError,
+            );
+          } else {
+            branchScopedDataNeedsSync.delete(key);
+            waiters.forEach((waiter) => waiter.resolve());
+          }
+        }
         sync.inFlight = false;
         activeBranchScopedSyncs -= 1;
 
@@ -889,7 +921,7 @@ const scheduleBranchScopedSyncDrain = () => {
 };
 
 const queueBranchScopedSync = (scope: string, branch: string, payload: unknown) => {
-  const key = JSON.stringify([branch, scope]);
+  const key = getBranchScopeKey(scope, branch);
   let sync = pendingBranchScopedSyncs.get(key);
 
   if (!sync) {
@@ -897,6 +929,8 @@ const queueBranchScopedSync = (scope: string, branch: string, payload: unknown) 
       branch,
       scope,
       payload,
+      generation: 0,
+      waiters: [],
       queued: true,
       inFlight: false,
     };
@@ -906,7 +940,40 @@ const queueBranchScopedSync = (scope: string, branch: string, payload: unknown) 
     sync.queued = true;
   }
 
+  sync.generation += 1;
   scheduleBranchScopedSyncDrain();
+};
+
+const queueBranchScopedSyncAndWait = (
+  scope: string,
+  branch: string,
+  payload: unknown,
+) => {
+  const key = getBranchScopeKey(scope, branch);
+  let sync = pendingBranchScopedSyncs.get(key);
+
+  if (!sync) {
+    sync = {
+      branch,
+      scope,
+      payload,
+      generation: 0,
+      waiters: [],
+      queued: true,
+      inFlight: false,
+    };
+    pendingBranchScopedSyncs.set(key, sync);
+  } else {
+    sync.payload = payload;
+    sync.queued = true;
+  }
+
+  sync.generation += 1;
+  const result = new Promise<void>((resolve, reject) => {
+    sync!.waiters.push({ resolve, reject });
+  });
+  scheduleBranchScopedSyncDrain();
+  return result;
 };
 
 const getBranchScopeSupabaseErrorMessage = (error: {
@@ -925,6 +992,10 @@ export const fetchAndCacheBranchScopedData = async <T,>(
   branch?: string | null,
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
+  const key = getBranchScopeKey(scope, resolvedBranch);
+  const initialRevision = getBranchScopeRevision(key);
+  const fetchRevision = (branchScopedDataFetchRevisions.get(key) ?? 0) + 1;
+  branchScopedDataFetchRevisions.set(key, fetchRevision);
   const { data, error } = await supabase.rpc("get_branch_local_storage_record", {
     p_branch: resolvedBranch,
     p_scope: scope,
@@ -934,8 +1005,19 @@ export const fetchAndCacheBranchScopedData = async <T,>(
     throw new Error(getBranchScopeSupabaseErrorMessage(error));
   }
 
+  const localValue = () => readBranchScopedData<T>(scope, resolvedBranch);
+  const isOutdated =
+    getBranchScopeRevision(key) !== initialRevision ||
+    branchScopedDataFetchRevisions.get(key) !== fetchRevision ||
+    pendingBranchScopedSyncs.has(key) ||
+    branchScopedDataNeedsSync.has(key);
+
+  if (isOutdated) {
+    return localValue() ?? (data as T | null | undefined) ?? null;
+  }
+
   if (data === null || typeof data === "undefined") {
-    return readBranchScopedData<T>(scope, resolvedBranch);
+    return localValue();
   }
 
   writeStorageItem(getBranchStorageKey(scope, resolvedBranch), data);
@@ -949,13 +1031,27 @@ export const writeBranchScopedData = (
   options: { skipSupabaseSync?: boolean } = {},
 ) => {
   const resolvedBranch = normalizeBranchName(branch);
+  const key = getBranchScopeKey(scope, resolvedBranch);
   writeStorageItem(getBranchStorageKey(scope, resolvedBranch), value);
+  bumpBranchScopeRevision(key);
 
   if (options.skipSupabaseSync || !SUPABASE_MIRRORED_BRANCH_SCOPES.has(scope)) {
     return;
   }
 
   queueBranchScopedSync(scope, resolvedBranch, value);
+};
+
+export const syncBranchScopedDataAndWait = async (
+  scope: string,
+  branch: string | null | undefined,
+  value: unknown,
+) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  if (!SUPABASE_MIRRORED_BRANCH_SCOPES.has(scope)) {
+    throw new Error("Branch-scoped data is not configured for Supabase sync.");
+  }
+  await queueBranchScopedSyncAndWait(scope, resolvedBranch, value);
 };
 
 const INSTRUCTOR_EVALUATION_STATUS_SCOPE = "instructor-evaluations";

@@ -14,6 +14,7 @@ import { useInstructorPortal } from "../../hooks/useInstructorPortal";
 import {
   downloadInstructorGradeTemplate,
   downloadInstructorSubmittedFile,
+  deleteInstructorGradeSubmissions,
   getInstructorGradeSubmissions,
   parseInstructorGradeWorkbook,
   saveInstructorGradeSubmission,
@@ -557,22 +558,42 @@ export default function InstructorGrades() {
     );
   };
 
-  const handleDeleteSelectedSubmissions = () => {
-    if (!currentUser?.branch || selectedSubmissionIds.length === 0) {
+  const handleDeleteSelectedSubmissions = async () => {
+    if (
+      isParsing ||
+      !currentUser?.branch ||
+      selectedSubmissionIds.length === 0
+    ) {
       return;
     }
 
-    const selectedIds = new Set(selectedSubmissionIds);
-    writeInstructorGradeSubmissions(
-      currentUser.branch,
-      getInstructorGradeSubmissions(currentUser.branch).filter(
-        (submission) => !selectedIds.has(submission.id),
-      ),
-    );
-    setSelectedSubmissionIds([]);
-    setIsDeleteMode(false);
-    refreshSubmissions();
-    setMessage("Selected grade submission request(s) deleted.");
+    try {
+      setIsParsing(true);
+      setMessage("Deleting selected grade submission request(s)...");
+      await deleteInstructorGradeSubmissions({
+        branch: currentUser.branch,
+        submissionIds: selectedSubmissionIds,
+      });
+      const selectedIds = new Set(selectedSubmissionIds);
+      writeInstructorGradeSubmissions(
+        currentUser.branch,
+        getInstructorGradeSubmissions(currentUser.branch).filter(
+          (submission) => !selectedIds.has(submission.id),
+        ),
+      );
+      setSelectedSubmissionIds([]);
+      setIsDeleteMode(false);
+      refreshSubmissions();
+      setMessage("Selected grade submission request(s) deleted.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `Unable to delete the selected submissions. ${error.message}`
+          : "Unable to delete the selected submissions.",
+      );
+    } finally {
+      setIsParsing(false);
+    }
   };
 
   if (isLoading) {
@@ -726,7 +747,7 @@ export default function InstructorGrades() {
                 <button
                   type="button"
                   onClick={handleDeleteSelectedSubmissions}
-                  disabled={selectedSubmissionIds.length === 0}
+                  disabled={isParsing || selectedSubmissionIds.length === 0}
                 >
                   <FiTrash2 /> Delete Selected
                 </button>
