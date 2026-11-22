@@ -374,6 +374,30 @@
   justify-content: center;
 }
 
+.draft-recovery-panel {
+  margin-top: 20px;
+  padding: 16px 20px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.draft-recovery-panel > p {
+  margin: 0 0 10px;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.draft-recovery-panel small {
+  margin-top: 6px;
+  color: #64748b;
+}
+
+.draft-recovery-panel .choices3 {
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
 /* Scoped layout reset for the live admission form. */
 .admission-step2-page {
   min-height: 100svh;

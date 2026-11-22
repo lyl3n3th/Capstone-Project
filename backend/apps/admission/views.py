@@ -9,9 +9,14 @@ from rest_framework import status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from .models import AdmissionApplication, AdmissionRequirement
+from .draft_recovery import (
+    request_admission_draft_recovery,
+    verify_admission_draft_recovery,
+)
 from .tracking_recovery import (
     build_decision_notification_target,
     build_tracking_notification_target,
@@ -107,6 +112,49 @@ def validate_tracking_number_payload(payload):
         )
 
     return tracking_number, errors
+
+
+def validate_draft_recovery_payload(payload, *, require_code=False):
+    errors = {}
+    cleaned = {
+        "email": normalize_text(payload.get("email", "")) or "",
+        "first_name": normalize_text(
+            payload.get("first_name", payload.get("firstName", ""))
+        )
+        or "",
+        "last_name": normalize_text(
+            payload.get("last_name", payload.get("lastName", ""))
+        )
+        or "",
+        "code": normalize_text(payload.get("code", "")) or "",
+    }
+
+    if not cleaned["email"]:
+        errors.setdefault("email", []).append("Email address is required.")
+    else:
+        try:
+            validate_email(cleaned["email"])
+        except Exception:
+            errors.setdefault("email", []).append("Enter a valid email address.")
+
+    for field in ("first_name", "last_name"):
+        if not cleaned[field]:
+            errors.setdefault(field, []).append("This field is required.")
+
+    if require_code and not cleaned["code"].isdigit():
+        errors.setdefault("code", []).append("Enter the 8-digit verification code.")
+    elif require_code and len(cleaned["code"]) != 8:
+        errors.setdefault("code", []).append("Enter the 8-digit verification code.")
+
+    return cleaned, errors
+
+
+class AdmissionDraftRecoveryStartThrottle(AnonRateThrottle):
+    scope = "admission_draft_recovery_start"
+
+
+class AdmissionDraftRecoveryVerifyThrottle(AnonRateThrottle):
+    scope = "admission_draft_recovery_verify"
 
 
 def validate_submission_notification_payload(payload):
@@ -444,6 +492,79 @@ class AdmissionTrackingRecoveryView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class AdmissionDraftRecoveryStartView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser]
+    throttle_classes = [AdmissionDraftRecoveryStartThrottle]
+
+    def post(self, request):
+        cleaned, errors = validate_draft_recovery_payload(request.data)
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            request_admission_draft_recovery(
+                email=cleaned["email"],
+                first_name=cleaned["first_name"],
+                last_name=cleaned["last_name"],
+            )
+        except (ImproperlyConfigured, SupabaseRestError):
+            return Response(
+                {"detail": "Unable to start draft recovery right now. Please try again."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(
+            {
+                "message": (
+                    "If those details match an unfinished application, a "
+                    "verification code has been sent to that email address."
+                )
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class AdmissionDraftRecoveryVerifyView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    parser_classes = [JSONParser]
+    throttle_classes = [AdmissionDraftRecoveryVerifyThrottle]
+
+    def post(self, request):
+        cleaned, errors = validate_draft_recovery_payload(
+            request.data, require_code=True
+        )
+        if errors:
+            return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            tracking_number = verify_admission_draft_recovery(
+                email=cleaned["email"],
+                first_name=cleaned["first_name"],
+                last_name=cleaned["last_name"],
+                code=cleaned["code"],
+            )
+        except (ImproperlyConfigured, SupabaseRestError):
+            return Response(
+                {"detail": "Unable to verify the unfinished application right now. Please try again."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        if not tracking_number:
+            return Response(
+                {
+                    "detail": (
+                        "The verification code is invalid or expired. "
+                        "Request a new code and try again."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({"tracking_number": tracking_number}, status=status.HTTP_200_OK)
 
 
 class AdmissionSubmissionNotificationView(APIView):
