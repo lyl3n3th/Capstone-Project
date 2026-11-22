@@ -895,6 +895,33 @@
   box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
 }
 
+.instructor-request-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 16px 16px;
+  border-bottom: 1px solid #dbe5ef;
+}
+
+.instructor-request-tabs button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #cbd5e1;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  color: #475569;
+  background: #f8fbfd;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.instructor-request-tabs button.active {
+  color: #ffffff;
+  border-color: #066287;
+  background: #066287;
+}
+
 .instructor-request-delete-toolbar {
   display: flex;
   justify-content: flex-end;

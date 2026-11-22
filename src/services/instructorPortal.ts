@@ -278,6 +278,22 @@ type InstructorGradeSubmissionSummaryRow = {
   records: StoredStudentGradeRecord[] | null;
 };
 
+type InstructorGradeApprovalPageRow = Pick<
+  InstructorGradeSubmissionRow,
+  | "id"
+  | "branch"
+  | "instructor_id"
+  | "instructor_name"
+  | "employee_id"
+  | "file_name"
+  | "submitted_at"
+  | "status"
+  | "records"
+  | "errors"
+  | "reviewed_at"
+  | "reviewed_by"
+>;
+
 export type InstructorGradeSubmissionSummary = {
   id: string;
   fileName: string;
@@ -570,6 +586,76 @@ export const fetchInstructorGradeSubmissionPage = async ({
       errorCount: submission.status === "Error" ? 1 : 0,
     })),
     totalItems: count ?? 0,
+  };
+};
+
+export const fetchAdminInstructorGradeSubmissionPage = async ({
+  branch,
+  page,
+  pageSize = 5,
+}: {
+  branch?: string | null;
+  page: number;
+  pageSize?: number;
+}): Promise<{
+  submissions: InstructorGradeSubmission[];
+  totalItems: number;
+  statusCounts: Record<InstructorGradeSubmission["status"], number>;
+}> => {
+  const resolvedPage = Math.max(1, Math.floor(page));
+  const resolvedPageSize = Math.min(5, Math.max(1, Math.floor(pageSize)));
+  const offset = (resolvedPage - 1) * resolvedPageSize;
+  const resolvedBranch = normalizeBranchName(branch);
+  const listSubmissions = () =>
+    supabase.rpc("list_instructor_grade_submissions", {
+      p_branch: resolvedBranch,
+    }, { count: "exact" });
+
+  const [pageResult, ...countResults] = await Promise.all([
+    listSubmissions()
+      .select(
+        "id,branch,instructor_id,instructor_name,employee_id,file_name,submitted_at,status,records,errors,reviewed_at,reviewed_by",
+      )
+      .order("submitted_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(offset, offset + resolvedPageSize - 1)
+      .returns<InstructorGradeApprovalPageRow[]>(),
+    ...(["Pending", "Approved", "Rejected", "Error"] as const).map(
+      (status) =>
+        listSubmissions()
+          .select("id")
+          .eq("status", status)
+          .limit(1),
+    ),
+  ]);
+
+  if (pageResult.error) {
+    throw new Error(getErrorMessage(pageResult.error));
+  }
+
+  const statuses = ["Pending", "Approved", "Rejected", "Error"] as const;
+  const statusCounts = Object.fromEntries(
+    statuses.map((status, index) => {
+      const result = countResults[index];
+      if (result.error) {
+        throw new Error(getErrorMessage(result.error));
+      }
+      return [status, result.count ?? 0];
+    }),
+  ) as Record<InstructorGradeSubmission["status"], number>;
+
+  return {
+    submissions: (Array.isArray(pageResult.data) ? pageResult.data : []).map(
+      (row) =>
+        mapInstructorSubmissionRow({
+          ...row,
+          file_mime_type: null,
+          file_data_base64: null,
+          error_rows: null,
+        }),
+    ),
+    totalItems: pageResult.count ?? 0,
+    statusCounts,
   };
 };
 
