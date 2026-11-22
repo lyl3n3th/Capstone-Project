@@ -10,17 +10,19 @@ import {
   FiX,
 } from "react-icons/fi";
 import SkeletonPage from "../../components/common/SkeletonPage";
+import TablePagination from "../../components/common/TablePagination";
 import { useInstructorPortal } from "../../hooks/useInstructorPortal";
 import {
   downloadInstructorGradeTemplate,
   downloadInstructorSubmittedFile,
   deleteInstructorGradeSubmissions,
-  getInstructorGradeSubmissions,
+  fetchInstructorGradeSubmissionDetail,
+  fetchInstructorGradeSubmissionPage,
   parseInstructorGradeWorkbook,
   saveInstructorGradeSubmission,
   type InstructorGradeSubmission,
   type InstructorGradeSubmissionErrorRow,
-  writeInstructorGradeSubmissions,
+  type InstructorGradeSubmissionSummary,
 } from "../../services/instructorPortal";
 import { COLLEGE_GRADE_ERROR_MESSAGE } from "../../services/studentGrades";
 
@@ -39,6 +41,7 @@ const readFileAsBase64 = (file: File) =>
   });
 
 const COMPACT_COLLEGE_GRADE_ERROR = COLLEGE_GRADE_ERROR_MESSAGE;
+const INSTRUCTOR_SUBMISSIONS_PAGE_SIZE = 5;
 const LEGACY_COLLEGE_GRADE_ERROR_PARTS = new Set([
   "1.25",
   "1.50",
@@ -319,10 +322,11 @@ export default function InstructorGrades() {
     assignments,
     sections,
     students,
-    submissions,
-    refreshSubmissions,
     isLoading,
-  } = useInstructorPortal({ showLoadingOnFocusRefresh: false });
+  } = useInstructorPortal({
+    includeSubmissions: false,
+    showLoadingOnFocusRefresh: false,
+  });
   const [message, setMessage] = useState("");
   const [isParsing, setIsParsing] = useState(false);
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
@@ -353,6 +357,88 @@ export default function InstructorGrades() {
     useState<InstructorGradeSubmission | null>(null);
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<string[]>([]);
+  const [submissionPage, setSubmissionPage] = useState(1);
+  const [submissionPageRows, setSubmissionPageRows] = useState<
+    InstructorGradeSubmissionSummary[]
+  >([]);
+  const [submissionTotalItems, setSubmissionTotalItems] = useState(0);
+  const [isLoadingSubmissionPage, setIsLoadingSubmissionPage] = useState(false);
+  const [submissionLoadError, setSubmissionLoadError] = useState("");
+  const [submissionReloadVersion, setSubmissionReloadVersion] = useState(0);
+  const [loadingSubmissionDetailId, setLoadingSubmissionDetailId] = useState("");
+  const submissionPageRequestRevision = useRef(0);
+
+  useEffect(() => {
+    if (isLoading || !currentUser?.branch || !instructor?.id) {
+      setSubmissionPageRows([]);
+      setSubmissionTotalItems(0);
+      setIsLoadingSubmissionPage(false);
+      return;
+    }
+
+    const requestRevision = ++submissionPageRequestRevision.current;
+    let isCurrent = true;
+    setIsLoadingSubmissionPage(true);
+    setSubmissionLoadError("");
+    setSubmissionPageRows([]);
+
+    void fetchInstructorGradeSubmissionPage({
+      branch: currentUser.branch,
+      instructorId: instructor.id,
+      page: submissionPage,
+      pageSize: INSTRUCTOR_SUBMISSIONS_PAGE_SIZE,
+    })
+      .then((result) => {
+        if (!isCurrent || requestRevision !== submissionPageRequestRevision.current) {
+          return;
+        }
+
+        const lastPage = Math.max(
+          1,
+          Math.ceil(result.totalItems / INSTRUCTOR_SUBMISSIONS_PAGE_SIZE),
+        );
+        setSubmissionTotalItems(result.totalItems);
+        if (submissionPage > lastPage) {
+          setSubmissionPage(lastPage);
+          return;
+        }
+
+        setSubmissionPageRows(result.submissions);
+      })
+      .catch((error) => {
+        if (!isCurrent || requestRevision !== submissionPageRequestRevision.current) {
+          return;
+        }
+
+        setSubmissionLoadError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load grade submissions.",
+        );
+      })
+      .finally(() => {
+        if (isCurrent && requestRevision === submissionPageRequestRevision.current) {
+          setIsLoadingSubmissionPage(false);
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [
+    currentUser?.branch,
+    instructor?.id,
+    isLoading,
+    submissionPage,
+    submissionReloadVersion,
+  ]);
+
+  useEffect(() => {
+    const refreshSubmissionsOnFocus = () =>
+      setSubmissionReloadVersion((previousVersion) => previousVersion + 1);
+    window.addEventListener("focus", refreshSubmissionsOnFocus);
+    return () => window.removeEventListener("focus", refreshSubmissionsOnFocus);
+  }, []);
 
   const handleDownloadTemplate = async () => {
     if (!instructor) {
@@ -450,7 +536,6 @@ export default function InstructorGrades() {
       setMessage(
         error instanceof Error ? error.message : "Unable to parse grade file.",
       );
-      refreshSubmissions();
     } finally {
       setIsParsing(false);
     }
@@ -474,7 +559,8 @@ export default function InstructorGrades() {
         currentUser.branch,
         filePreview.submission,
       );
-      refreshSubmissions();
+      setSubmissionPage(1);
+      setSubmissionReloadVersion((previousVersion) => previousVersion + 1);
       setFilePreview(null);
       setIsReviewingUpload(false);
       const hasErrors = (filePreview.submission.errorRows?.length ?? 0) > 0;
@@ -507,8 +593,28 @@ export default function InstructorGrades() {
     setUploadReviewError("");
   };
 
-  const handleOpenFilePreview = (submission: InstructorGradeSubmission) => {
+  const loadSubmissionDetails = async (submissionId: string) => {
+    if (!currentUser?.branch || !instructor?.id) {
+      throw new Error("Instructor details are not available. Refresh and try again.");
+    }
+
+    setLoadingSubmissionDetailId(submissionId);
     try {
+      return await fetchInstructorGradeSubmissionDetail({
+        branch: currentUser.branch,
+        instructorId: instructor.id,
+        submissionId,
+      });
+    } finally {
+      setLoadingSubmissionDetailId("");
+    }
+  };
+
+  const handleOpenFilePreview = async (
+    submissionSummary: InstructorGradeSubmissionSummary,
+  ) => {
+    try {
+      const submission = await loadSubmissionDetails(submissionSummary.id);
       setFilePreview({
         submission,
         rows: buildGradeFilePreview(submission),
@@ -536,13 +642,24 @@ export default function InstructorGrades() {
     }
   };
 
-  const handleOpenErrors = (submission: InstructorGradeSubmission) => {
-    if ((submission.errorRows?.length ?? 0) === 0) {
+  const handleOpenErrors = async (
+    submissionSummary: InstructorGradeSubmissionSummary,
+  ) => {
+    if (submissionSummary.errorCount === 0) {
       setMessage("This submission does not have row errors to review.");
       return;
     }
 
-    setErrorPreviewSubmission(submission);
+    try {
+      const submission = await loadSubmissionDetails(submissionSummary.id);
+      setErrorPreviewSubmission(submission);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to load submission errors.",
+      );
+    }
   };
 
   const handleToggleDeleteMode = () => {
@@ -574,16 +691,9 @@ export default function InstructorGrades() {
         branch: currentUser.branch,
         submissionIds: selectedSubmissionIds,
       });
-      const selectedIds = new Set(selectedSubmissionIds);
-      writeInstructorGradeSubmissions(
-        currentUser.branch,
-        getInstructorGradeSubmissions(currentUser.branch).filter(
-          (submission) => !selectedIds.has(submission.id),
-        ),
-      );
       setSelectedSubmissionIds([]);
       setIsDeleteMode(false);
-      refreshSubmissions();
+      setSubmissionReloadVersion((previousVersion) => previousVersion + 1);
       setMessage("Selected grade submission request(s) deleted.");
     } catch (error) {
       setMessage(
@@ -756,7 +866,11 @@ export default function InstructorGrades() {
               <button
                 type="button"
                 onClick={handleToggleDeleteMode}
-                disabled={submissions.length === 0}
+                disabled={
+                  submissionTotalItems === 0 ||
+                  isLoadingSubmissionPage ||
+                  Boolean(submissionLoadError)
+                }
               >
                 <FiTrash2 /> Delete
               </button>
@@ -776,45 +890,76 @@ export default function InstructorGrades() {
               </tr>
             </thead>
             <tbody>
-              {submissions.map((submission) => (
-                <tr key={submission.id}>
-                  {isDeleteMode ? (
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selectedSubmissionIds.includes(submission.id)}
-                        onChange={() =>
-                          handleToggleSubmissionSelection(submission.id)
-                        }
-                        aria-label={`Select ${submission.fileName}`}
-                      />
-                    </td>
-                  ) : null}
-                  <td>{new Date(submission.submittedAt).toLocaleString()}</td>
-                  <td>{submission.fileName}</td>
-                  <td>{submission.records.length}</td>
-                  <td>{submission.status}</td>
-                  <td className="instructor-table-actions-cell">
-                    <div className="instructor-table-actions">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenFilePreview(submission)}
-                        disabled={!submission.fileDataBase64}
-                      >
-                        <FiDownload /> File
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenErrors(submission)}
-                        disabled={(submission.errorRows?.length ?? 0) === 0}
-                      >
-                        <FiAlertTriangle /> Errors
-                      </button>
-                    </div>
+              {isLoadingSubmissionPage ? (
+                <tr>
+                  <td colSpan={isDeleteMode ? 6 : 5}>Loading grade submissions...</td>
+                </tr>
+              ) : null}
+              {!isLoadingSubmissionPage && submissionLoadError ? (
+                <tr>
+                  <td colSpan={isDeleteMode ? 6 : 5}>
+                    Unable to load grade submissions. {submissionLoadError}
+                    <button
+                      type="button"
+                      onClick={() => setSubmissionReloadVersion((version) => version + 1)}
+                    >
+                      Retry
+                    </button>
                   </td>
                 </tr>
-              ))}
-              {submissions.length === 0 ? (
+              ) : null}
+              {!isLoadingSubmissionPage && !submissionLoadError
+                ? submissionPageRows.map((submission) => (
+                  <tr key={submission.id}>
+                    {isDeleteMode ? (
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selectedSubmissionIds.includes(submission.id)}
+                          onChange={() =>
+                            handleToggleSubmissionSelection(submission.id)
+                          }
+                          aria-label={`Select ${submission.fileName}`}
+                        />
+                      </td>
+                    ) : null}
+                    <td>{new Date(submission.submittedAt).toLocaleString()}</td>
+                    <td>{submission.fileName}</td>
+                    <td>{submission.rowCount}</td>
+                    <td>{submission.status}</td>
+                    <td className="instructor-table-actions-cell">
+                      <div className="instructor-table-actions">
+                        <button
+                          type="button"
+                          onClick={() => void handleOpenFilePreview(submission)}
+                          disabled={Boolean(loadingSubmissionDetailId)}
+                        >
+                          <FiDownload />{" "}
+                          {loadingSubmissionDetailId === submission.id
+                            ? "Loading..."
+                            : "File"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleOpenErrors(submission)}
+                          disabled={
+                            submission.errorCount === 0 ||
+                            Boolean(loadingSubmissionDetailId)
+                          }
+                        >
+                          <FiAlertTriangle />{" "}
+                          {loadingSubmissionDetailId === submission.id
+                            ? "Loading..."
+                            : "Errors"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+                : null}
+              {!isLoadingSubmissionPage &&
+              !submissionLoadError &&
+              submissionPageRows.length === 0 ? (
                 <tr>
                   <td colSpan={isDeleteMode ? 6 : 5}>No grade submissions yet.</td>
                 </tr>
@@ -822,6 +967,17 @@ export default function InstructorGrades() {
             </tbody>
           </table>
         </div>
+        <TablePagination
+          page={submissionPage}
+          pageSize={INSTRUCTOR_SUBMISSIONS_PAGE_SIZE}
+          totalItems={submissionTotalItems}
+          onPageChange={(page) => {
+            setSelectedSubmissionIds([]);
+            setSubmissionPage(page);
+          }}
+          disabled={isLoadingSubmissionPage || isParsing}
+          label="Instructor grade submission pages"
+        />
       </section>
 
       {filePreview ? (

@@ -16,10 +16,12 @@ import type { StudentStorageRecord } from "../services/adminStorage";
 
 export function useInstructorPortal(options: {
   includeStudents?: boolean;
+  includeSubmissions?: boolean;
   deferSupplemental?: boolean;
   showLoadingOnFocusRefresh?: boolean;
 } = {}) {
   const includeStudents = options.includeStudents ?? true;
+  const includeSubmissions = options.includeSubmissions ?? true;
   const deferSupplemental = options.deferSupplemental ?? false;
   const showLoadingOnFocusRefresh = options.showLoadingOnFocusRefresh ?? true;
   const { currentUser } = useAuth();
@@ -82,14 +84,16 @@ export function useInstructorPortal(options: {
         supplementalLoaderRef.current = deferSupplemental
           ? async () => {
             await data.loadSupplementalData();
-            try {
-              await fetchAndCacheInstructorGradeSubmissions(currentUser.branch);
-            } catch (error) {
-              console.warn("Unable to load instructor submissions from Supabase.", error);
+            if (includeSubmissions) {
+              try {
+                await fetchAndCacheInstructorGradeSubmissions(currentUser.branch);
+              } catch (error) {
+                console.warn("Unable to load instructor submissions from Supabase.", error);
+              }
             }
           }
           : data.loadSupplementalData;
-        if (!deferSupplemental) {
+        if (!deferSupplemental && includeSubmissions) {
           void fetchAndCacheInstructorGradeSubmissions(currentUser.branch)
             .then(() => {
               if (isMounted) {
@@ -119,6 +123,7 @@ export function useInstructorPortal(options: {
     currentUser?.branch,
     currentUser?.id,
     includeStudents,
+    includeSubmissions,
     deferSupplemental,
     showLoadingOnFocusRefresh,
   ]);
@@ -149,10 +154,11 @@ export function useInstructorPortal(options: {
 
   const submissions = useMemo<InstructorGradeSubmission[]>(() => {
     void submissionsVersion;
+    if (!includeSubmissions) return [];
     return getInstructorGradeSubmissions(currentUser?.branch).filter(
       (submission) => submission.instructorId === currentUser?.id,
     );
-  }, [currentUser?.branch, currentUser?.id, submissionsVersion]);
+  }, [currentUser?.branch, currentUser?.id, includeSubmissions, submissionsVersion]);
 
   return {
     currentUser,

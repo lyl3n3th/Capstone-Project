@@ -269,6 +269,24 @@ type InstructorGradeSubmissionRow = {
   reviewed_by: string | null;
 };
 
+type InstructorGradeSubmissionSummaryRow = {
+  id: string;
+  instructor_id: string;
+  file_name: string;
+  submitted_at: string;
+  status: InstructorGradeSubmission["status"];
+  records: StoredStudentGradeRecord[] | null;
+};
+
+export type InstructorGradeSubmissionSummary = {
+  id: string;
+  fileName: string;
+  submittedAt: string;
+  status: InstructorGradeSubmission["status"];
+  rowCount: number;
+  errorCount: number;
+};
+
 const getErrorMessage = (error: SupabaseErrorLike) =>
   error.details
     ? `${error.message} ${error.details}`.trim()
@@ -506,6 +524,85 @@ export const fetchAndCacheInstructorGradeSubmissions = async (
   return submissions;
 };
 
+export const fetchInstructorGradeSubmissionPage = async ({
+  branch,
+  instructorId,
+  page,
+  pageSize = 5,
+}: {
+  branch?: string | null;
+  instructorId: string;
+  page: number;
+  pageSize?: number;
+}): Promise<{
+  submissions: InstructorGradeSubmissionSummary[];
+  totalItems: number;
+}> => {
+  const resolvedPage = Math.max(1, Math.floor(page));
+  const resolvedPageSize = Math.min(5, Math.max(1, Math.floor(pageSize)));
+  const offset = (resolvedPage - 1) * resolvedPageSize;
+  const { data, error, count } = await supabase
+    .rpc(
+      "list_instructor_grade_submissions",
+      { p_branch: normalizeBranchName(branch) },
+      { count: "exact" },
+    )
+    .select("id,instructor_id,file_name,submitted_at,status,records")
+    .eq("instructor_id", instructorId)
+    .order("submitted_at", { ascending: false })
+    .order("id", { ascending: false })
+    .range(offset, offset + resolvedPageSize - 1)
+    .returns<InstructorGradeSubmissionSummaryRow[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  return {
+    submissions: (Array.isArray(data) ? data : []).map((submission) => ({
+      id: submission.id,
+      fileName: submission.file_name,
+      submittedAt: submission.submitted_at,
+      status: submission.status,
+      rowCount: Array.isArray(submission.records)
+        ? submission.records.length
+        : 0,
+      errorCount: submission.status === "Error" ? 1 : 0,
+    })),
+    totalItems: count ?? 0,
+  };
+};
+
+export const fetchInstructorGradeSubmissionDetail = async ({
+  branch,
+  instructorId,
+  submissionId,
+}: {
+  branch?: string | null;
+  instructorId: string;
+  submissionId: string;
+}): Promise<InstructorGradeSubmission> => {
+  const { data, error } = await supabase
+    .rpc("list_instructor_grade_submissions", {
+      p_branch: normalizeBranchName(branch),
+    })
+    .eq("instructor_id", instructorId)
+    .eq("id", submissionId)
+    .range(0, 0)
+    .returns<InstructorGradeSubmissionRow[]>();
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const submission = Array.isArray(data) ? data[0] ?? null : null;
+  if (!submission) {
+    throw new Error("This grade submission could not be found.");
+  }
+
+  return mapInstructorSubmissionRow(submission);
+};
+
 export const writeInstructorGradeSubmissions = (
   branch: string | null | undefined,
   submissions: InstructorGradeSubmission[],
@@ -537,17 +634,6 @@ export const saveInstructorGradeSubmission = async (
     submission,
     ...existing.filter((item) => item.id !== submission.id),
   ]);
-
-  // Re-read after the write to pick up existing submissions if the page's
-  // initial load was still in flight while this upload completed.
-  try {
-    await fetchAndCacheInstructorGradeSubmissions(branch);
-  } catch (error) {
-    console.warn(
-      "The new grade submission was saved, but the submission list could not be refreshed.",
-      error,
-    );
-  }
 };
 
 export const saveInstructorGradeSubmissionToBackend = async (
