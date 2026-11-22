@@ -4179,17 +4179,21 @@ export default function AdminEnrollees({
     sortSemesterValues(
       Array.from(
         new Set(
-          subjects
-            .filter(
-              (subject) =>
-                subject.program === enrollee.program &&
-                subject.yearLevel === resolvedYearLevel &&
-                matchesAcademicDescriptor(
-                  resolveSubjectStrandOrCourse(subject),
-                  enrollee.strandOrCourse,
-                ),
-            )
-            .map((subject) => normalizeSectionSemester(subject.semester)),
+          [
+            "1st Semester",
+            "2nd Semester",
+            ...subjects
+              .filter(
+                (subject) =>
+                  subject.program === enrollee.program &&
+                  subject.yearLevel === resolvedYearLevel &&
+                  matchesAcademicDescriptor(
+                    resolveSubjectStrandOrCourse(subject),
+                    enrollee.strandOrCourse,
+                  ),
+              )
+              .map((subject) => normalizeSectionSemester(subject.semester)),
+          ],
         ),
       ),
     );
