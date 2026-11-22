@@ -321,7 +321,7 @@ export default function InstructorGrades() {
     submissions,
     refreshSubmissions,
     isLoading,
-  } = useInstructorPortal();
+  } = useInstructorPortal({ showLoadingOnFocusRefresh: false });
   const [message, setMessage] = useState("");
   const [isParsing, setIsParsing] = useState(false);
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);

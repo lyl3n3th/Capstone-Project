@@ -14,9 +14,14 @@ import type {
 } from "../services/academicData";
 import type { StudentStorageRecord } from "../services/adminStorage";
 
-export function useInstructorPortal(options: { includeStudents?: boolean; deferSupplemental?: boolean } = {}) {
+export function useInstructorPortal(options: {
+  includeStudents?: boolean;
+  deferSupplemental?: boolean;
+  showLoadingOnFocusRefresh?: boolean;
+} = {}) {
   const includeStudents = options.includeStudents ?? true;
   const deferSupplemental = options.deferSupplemental ?? false;
+  const showLoadingOnFocusRefresh = options.showLoadingOnFocusRefresh ?? true;
   const { currentUser } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [instructor, setInstructor] = useState<AcademicInstructorRecord | null>(
@@ -33,12 +38,13 @@ export function useInstructorPortal(options: { includeStudents?: boolean; deferS
   const supplementalLoadPromiseRef = useRef<Promise<void> | null>(null);
   const supplementalLoadedRef = useRef(false);
   const supplementalRevisionRef = useRef(0);
+  const hasLoadedPortalDataRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
     let revision = 0;
 
-    const load = async () => {
+    const load = async (isFocusRefresh = false) => {
       const requestRevision = ++revision;
       if (!currentUser?.branch || !currentUser.id) {
         setIsLoading(false);
@@ -46,7 +52,13 @@ export function useInstructorPortal(options: { includeStudents?: boolean; deferS
       }
 
       try {
-        setIsLoading(true);
+        if (
+          !isFocusRefresh ||
+          showLoadingOnFocusRefresh ||
+          !hasLoadedPortalDataRef.current
+        ) {
+          setIsLoading(true);
+        }
         const data = await getInstructorScopedData({
           branch: currentUser.branch,
           instructorId: currentUser.id,
@@ -63,6 +75,7 @@ export function useInstructorPortal(options: { includeStudents?: boolean; deferS
         setSections(data.sections);
         setSubjects(data.snapshot.subjects);
         setStudents(data.students);
+        hasLoadedPortalDataRef.current = true;
         supplementalRevisionRef.current += 1;
         supplementalLoadedRef.current = false;
         supplementalLoadPromiseRef.current = null;
@@ -95,14 +108,20 @@ export function useInstructorPortal(options: { includeStudents?: boolean; deferS
     };
 
     void load();
-    const onFocus = () => { void load(); };
+    const onFocus = () => { void load(true); };
     window.addEventListener("focus", onFocus);
 
     return () => {
       isMounted = false;
       window.removeEventListener("focus", onFocus);
     };
-  }, [currentUser?.branch, currentUser?.id, includeStudents, deferSupplemental]);
+  }, [
+    currentUser?.branch,
+    currentUser?.id,
+    includeStudents,
+    deferSupplemental,
+    showLoadingOnFocusRefresh,
+  ]);
 
   const loadSupplementalData = useCallback(async () => {
     if (supplementalLoadedRef.current) return;
