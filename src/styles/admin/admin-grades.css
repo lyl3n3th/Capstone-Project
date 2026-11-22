@@ -898,7 +898,7 @@
 .instructor-request-tabs {
   display: flex;
   gap: 8px;
-  margin: 0 16px 16px;
+  margin: 0 16px 8px;
   border-bottom: 1px solid #dbe5ef;
 }
 
@@ -926,7 +926,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin: -8px 16px 12px 0;
+  margin: -8px 16px 6px 0;
 }
 
 .instructor-request-delete {
@@ -2153,6 +2153,10 @@
   overflow-x: hidden !important;
   overflow-y: hidden !important;
   -webkit-overflow-scrolling: touch;
+}
+
+.grades-content .instructor-submissions-card > .app-table-pagination {
+  padding: 8px 8px 0;
 }
 
 .grades-content .instructor-submissions-card {
