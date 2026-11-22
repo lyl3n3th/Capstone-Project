@@ -7475,7 +7475,7 @@
 
 .enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell {
   justify-content: center;
-  gap: 6px;
+  gap: 10px;
 }
 
 .enrollees-content .subjects-table-view .college-subjects-table .subject-actions-cell .assignment-selection-btn,
