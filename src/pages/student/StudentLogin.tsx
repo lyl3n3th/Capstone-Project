@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FcGoogle } from "react-icons/fc";
 import slidelog from "../../assets/images/slidelog.jpg";
 import slidelog2 from "../../assets/images/slidelog2.jpg";
 import slidelog3 from "../../assets/images/slidelog3.jpg";
@@ -143,9 +144,7 @@ function StudentLogin() {
               disabled={isSubmitting || !isReady}
               onClick={handleGoogleLogin}
             >
-              <span className="google-login-icon" aria-hidden="true">
-                G
-              </span>
+              <FcGoogle className="google-login-icon" aria-hidden="true" />
               {isSubmitting ? "Redirecting..." : "Login using email"}
             </button>
             {isSubmitting && isSubmissionTakingLong && (

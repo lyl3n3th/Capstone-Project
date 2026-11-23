@@ -635,14 +635,7 @@
 .student-login-page .google-login-icon {
   width: 24px;
   height: 24px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #ffffff;
-  background: #1a73e8;
-  font-weight: 800;
-  line-height: 1;
+  flex: 0 0 24px;
 }
 
 .student-login-page .login-divider {
