@@ -807,9 +807,9 @@ def delete_backup_artifacts(history):
     )
     if not archive_deleted or not sql_deleted:
         return False
-    update_backup_history(
+    updated_history = update_backup_history(
         history.id,
         status=BackupHistory.STATUS_DELETED,
         progress=0,
     )
-    return True
+    return updated_history is not None

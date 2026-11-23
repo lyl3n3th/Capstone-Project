@@ -508,11 +508,12 @@ export default function AdminBackup({
 
   const handleDelete = async (backupId: string, backupName: string) => {
     const confirmed = (await requestConfirmation(
-      `Delete backup "${backupName}"? This will remove it from the backup history.`,
+      `Permanently delete the ZIP for "${backupName}" and remove its history entry? This cannot be undone.`,
       {
         title: "Delete Backup",
         confirmLabel: "Delete",
         destructive: true,
+        requiredText: "DELETE",
       },
     ));
     if (!confirmed) {

@@ -14,6 +14,8 @@ export interface StudentPaymentRecord {
   studentNumber: string;
   trackingNumber?: string;
   branch: string;
+  academicYear?: string;
+  semester?: string;
   amount: number;
   receiptNumber: string;
   paidAt: string;
@@ -47,6 +49,8 @@ type StudentPaymentRow = {
   branch: string;
   student_number: string;
   tracking_number: string | null;
+  academic_year: string | null;
+  semester: string | null;
   amount: number | string;
   receipt_number: string;
   paid_at: string;
@@ -82,6 +86,8 @@ const mapStudentPaymentRow = (row: StudentPaymentRow): StudentPaymentRecord => (
   branch: row.branch,
   studentNumber: row.student_number,
   trackingNumber: row.tracking_number || undefined,
+  academicYear: row.academic_year || undefined,
+  semester: row.semester || undefined,
   amount: Number(row.amount),
   receiptNumber: row.receipt_number,
   paidAt: row.paid_at,
@@ -205,16 +211,45 @@ export const getStudentPayments = ({
   );
 };
 
+const normalizeAcademicTermValue = (value?: string | null) =>
+  (value || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+export const getStudentPaymentsForTerm = ({
+  branch,
+  studentNumber,
+  trackingNumber,
+  academicYear,
+  semester,
+}: {
+  branch?: string | null;
+  studentNumber?: string | null;
+  trackingNumber?: string | null;
+  academicYear: string;
+  semester: string;
+}) =>
+  getStudentPayments({ branch, studentNumber, trackingNumber }).filter(
+    (payment) =>
+      normalizeAcademicTermValue(payment.academicYear) ===
+        normalizeAcademicTermValue(academicYear) &&
+      normalizeAcademicTermValue(payment.semester) ===
+        normalizeAcademicTermValue(semester),
+  );
+
 export const createStudentPayment = async ({
   branch,
   studentNumber,
   trackingNumber,
+  academicYear,
+  semester,
   amount,
   paidAt,
   encodedBy,
   encodedRole,
   notes,
-}: Omit<StudentPaymentRecord, "id" | "createdAt" | "receiptNumber">) => {
+}: Omit<
+  StudentPaymentRecord,
+  "id" | "createdAt" | "receiptNumber" | "academicYear" | "semester"
+> & { academicYear: string; semester: string }) => {
   const resolvedBranch = normalizeBranchName(branch);
   const { data, error } = await supabase
     .rpc("create_student_payment", {
@@ -227,6 +262,8 @@ export const createStudentPayment = async ({
       p_amount: amount,
       p_paid_at: paidAt,
       p_encoded_by: encodedBy,
+      p_academic_year: academicYear,
+      p_semester: semester,
       p_encoded_role: encodedRole || null,
       p_notes: notes?.trim() || null,
     })
@@ -270,6 +307,40 @@ export const removeStudentPayment = async ({
   writeStudentPaymentsForBranch(
     resolvedBranch,
     payments.filter((payment) => payment.id !== paymentId),
+  );
+};
+
+export const setStudentPaymentTerm = async ({
+  branch,
+  paymentId,
+  academicYear,
+  semester,
+}: {
+  branch?: string | null;
+  paymentId: string;
+  academicYear: string;
+  semester: string;
+}) => {
+  const resolvedBranch = normalizeBranchName(branch);
+  const { error } = await supabase.rpc("set_student_payment_term", {
+    p_branch: resolvedBranch,
+    p_payment_id: paymentId,
+    p_academic_year: academicYear,
+    p_semester: semester,
+  });
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  const payments = readStudentPaymentsForBranch(resolvedBranch);
+  writeStudentPaymentsForBranch(
+    resolvedBranch,
+    payments.map((payment) =>
+      payment.id === paymentId
+        ? { ...payment, academicYear, semester }
+        : payment,
+    ),
   );
 };
 

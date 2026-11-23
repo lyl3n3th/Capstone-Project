@@ -209,21 +209,25 @@ def delete_backup_blob(*, object_path, storage_bucket=None):
     if storage_bucket == LOCAL_BACKUP_STORAGE_BUCKET:
         if default_storage.exists(object_path):
             default_storage.delete(object_path)
-            return True
-        return False
+        # Treat an already-missing file as deleted so retrying cleanup can
+        # still hide its history entry.
+        return True
 
     try:
         project_url, api_key, configured_bucket = get_storage_config()
-    except ImproperlyConfigured:
+    except ImproperlyConfigured as exc:
+        if storage_bucket:
+            raise BackupStorageError(
+                "Permanent backup storage is not configured. Ask an administrator to check the backend storage credentials."
+            ) from exc
         if default_storage.exists(object_path):
             default_storage.delete(object_path)
-            return True
-        return False
+        return True
 
     bucket = storage_bucket or configured_bucket
 
     delete_url = f"{project_url}/storage/v1/object/{parse.quote(bucket, safe='')}"
-    payload = json.dumps([object_path]).encode("utf-8")
+    payload = json.dumps({"prefixes": [object_path]}).encode("utf-8")
     delete_request = request.Request(
         delete_url,
         data=payload,

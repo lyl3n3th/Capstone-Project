@@ -26,6 +26,232 @@ DATA_MEMBER = "data/database.json"
 MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 DEFAULT_ATTACHMENT_STORAGE_BUCKET = "admission-requirements"
 _ARCHIVE_PROGRESS_CALLBACK = ContextVar("branch_backup_progress_callback", default=None)
+_ARCHIVED_REFERENCE_FIELDS = {
+    "student_id",
+    "studentid",
+    "student_number",
+    "studentnumber",
+    "tracking_number",
+    "trackingnumber",
+}
+
+
+def _normalized_backup_reference(value):
+    if value is None:
+        return ""
+    return str(value).strip().casefold()
+
+
+def _record_matches_archived_reference(record, archived_references):
+    if not isinstance(record, dict):
+        return False
+    for key, value in record.items():
+        if (
+            str(key).replace("-", "_").lower() in _ARCHIVED_REFERENCE_FIELDS
+            and _normalized_backup_reference(value) in archived_references
+        ):
+            return True
+    return False
+
+
+def _is_archived_trash_record(record):
+    if not isinstance(record, dict):
+        return False
+    if record.get("archivedAt") or record.get("archived_at"):
+        return True
+    return _normalized_backup_reference(record.get("status")) == "archived"
+
+
+def _collect_archived_record_references(record, archived_references):
+    if not isinstance(record, dict):
+        return
+    for key, value in record.items():
+        if str(key).replace("-", "_").lower() in (_ARCHIVED_REFERENCE_FIELDS | {"id"}):
+            normalized = _normalized_backup_reference(value)
+            if normalized:
+                archived_references.add(normalized)
+
+
+def _scope_matches_archived_student(scope, archived_references):
+    normalized_scope = parse.unquote(str(scope or "")).casefold()
+    for reference in archived_references:
+        if normalized_scope.startswith(
+            f"imported-student-credential-{reference}-"
+        ) or normalized_scope.startswith(f"credential-review:{reference}:"):
+            return True
+    return False
+
+
+def _exclude_archived_records(snapshot):
+    """Omit records in the Admin Archive from manual and scheduled archives."""
+    tables = snapshot.get("tables")
+    if not isinstance(tables, dict):
+        return snapshot
+
+    student_profiles = tables.get("student_profiles", [])
+    archived_profiles = [
+        row
+        for row in student_profiles
+        if _normalized_backup_reference(row.get("status")) == "archived"
+    ]
+    archived_profile_ids = {
+        _normalized_backup_reference(row.get("id"))
+        for row in archived_profiles
+        if row.get("id")
+    }
+    archived_application_ids = {
+        _normalized_backup_reference(row.get("admission_application_id"))
+        for row in archived_profiles
+        if row.get("admission_application_id")
+    }
+    archived_student_references = set(archived_profile_ids)
+    for row in archived_profiles:
+        _collect_archived_record_references(row, archived_student_references)
+
+    local_records = tables.get("branch_local_storage_records", [])
+    if not isinstance(local_records, list):
+        local_records = []
+    archived_enrollee_references = set()
+    archived_request_references = set()
+    for stored_record in local_records:
+        scope = str(stored_record.get("scope") or "").lower()
+        archived_references = (
+            archived_enrollee_references
+            if scope == "enrollees"
+            else archived_request_references
+            if scope == "enrollment-requests"
+            else None
+        )
+        payload = stored_record.get("payload")
+        if archived_references is not None and isinstance(payload, list):
+            for item in payload:
+                if _is_archived_trash_record(item):
+                    _collect_archived_record_references(item, archived_references)
+
+    archived_enrollment_rows = []
+    for row in tables.get("branch_enrollment_requests", []):
+        payload = row.get("payload")
+        if _is_archived_trash_record(payload):
+            archived_enrollment_rows.append(row)
+            _collect_archived_record_references(row, archived_request_references)
+            _collect_archived_record_references(payload, archived_request_references)
+
+    applications = tables.get("admission_applications", [])
+    for row in applications:
+        application_id = _normalized_backup_reference(row.get("id"))
+        tracking_number = _normalized_backup_reference(row.get("tracking_number"))
+        if (
+            application_id in archived_application_ids
+            or application_id in archived_student_references
+            or tracking_number in archived_student_references
+        ):
+            if application_id:
+                archived_application_ids.add(application_id)
+            if tracking_number:
+                archived_student_references.add(tracking_number)
+
+    for row in applications:
+        application_id = _normalized_backup_reference(row.get("id"))
+        tracking_number = _normalized_backup_reference(row.get("tracking_number"))
+        if (
+            application_id in archived_enrollee_references
+            or tracking_number in archived_enrollee_references
+        ):
+            if application_id:
+                archived_application_ids.add(application_id)
+            if tracking_number:
+                archived_enrollee_references.add(tracking_number)
+
+    tables["student_profiles"] = [
+        row for row in student_profiles
+        if _normalized_backup_reference(row.get("status")) != "archived"
+    ]
+
+    for table_name in (
+        "student_contact_details",
+        "student_import_details",
+        "student_portal_accounts",
+    ):
+        tables[table_name] = [
+            row for row in tables.get(table_name, [])
+            if _normalized_backup_reference(row.get("student_id"))
+            not in archived_profile_ids
+        ]
+
+    for table_name in (
+        "branch_student_planning_states",
+        "branch_student_subject_plans",
+        "branch_student_schedule_requests",
+        "branch_student_grade_records",
+        "student_payments",
+        "instructor_evaluation_submissions",
+    ):
+        tables[table_name] = [
+            row for row in tables.get(table_name, [])
+            if not _record_matches_archived_reference(
+                row, archived_student_references
+            )
+        ]
+
+    tables["admission_applications"] = [
+        row for row in applications
+        if _normalized_backup_reference(row.get("id"))
+        not in archived_application_ids
+    ]
+    tables["admission_application_requirement_files"] = [
+        row for row in tables.get("admission_application_requirement_files", [])
+        if _normalized_backup_reference(row.get("application_id"))
+        not in archived_application_ids
+    ]
+    tables["branch_enrollment_requests"] = [
+        row for row in tables.get("branch_enrollment_requests", [])
+        if row not in archived_enrollment_rows
+        and not _record_matches_archived_reference(
+            row, archived_student_references
+        )
+    ]
+
+    for stored_record in local_records:
+        scope = str(stored_record.get("scope") or "").lower()
+        if scope == "enrollees":
+            scope_references = archived_student_references | archived_enrollee_references
+            exclude_archive_marked_rows = True
+        elif scope == "enrollment-requests":
+            scope_references = archived_student_references | archived_request_references
+            exclude_archive_marked_rows = True
+        else:
+            scope_references = archived_student_references
+            exclude_archive_marked_rows = False
+
+        payload = stored_record.get("payload")
+        if isinstance(payload, list):
+            stored_record["payload"] = [
+                item
+                for item in payload
+                if not (
+                    exclude_archive_marked_rows
+                    and _is_archived_trash_record(item)
+                )
+                and not _record_matches_archived_reference(item, scope_references)
+            ]
+    tables["branch_local_storage_records"] = [
+        row for row in local_records
+        if not _scope_matches_archived_student(row.get("scope"), archived_student_references)
+        and not _scope_matches_archived_student(row.get("scope"), archived_enrollee_references)
+    ]
+
+    for row in tables.get("instructor_grade_submissions", []):
+        for key in ("records", "errorRows", "error_rows"):
+            if isinstance(row.get(key), list):
+                row[key] = [
+                    record
+                    for record in row[key]
+                    if not _record_matches_archived_reference(
+                        record, archived_student_references
+                    )
+                ]
+
+    return snapshot
 
 
 def _encode(value):
@@ -141,6 +367,7 @@ def create_archive(branch, backup_type, *, alumni=None):
     snapshot = SupabaseRestClient.from_settings().rpc("export_branch_backup_data", {"p_branch": branch})
     if not isinstance(snapshot, dict) or snapshot.get("version") != 2:
         raise ValueError("The database backup migration is missing or returned an unsupported snapshot.")
+    snapshot = _exclude_archived_records(snapshot)
     # The alumni screen still keeps its display records in the synchronized
     # browser snapshot. Preserve these separately; never use them as profiles.
     snapshot["alumni"] = alumni or []

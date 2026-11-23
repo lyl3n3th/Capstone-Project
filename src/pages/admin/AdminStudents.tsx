@@ -99,6 +99,7 @@ import {
   fetchNextStudentPaymentReceiptNumber,
   getStudentPayments,
   removeStudentPayment,
+  setStudentPaymentTerm,
   STUDENT_PAYMENTS_UPDATED_EVENT,
 } from "../../services/studentPayments";
 import {
@@ -601,6 +602,10 @@ const mergeStudentOwnScheduleState = <
 
 const buildGradeTermKey = (academicYear: string, semester: string) =>
   `${academicYear}::${semester}`;
+const UNASSIGNED_PAYMENT_TERM = "__unassigned__";
+
+const normalizePaymentTermValue = (value?: string | null) =>
+  (value || "").trim().toLowerCase().replace(/\s+/g, " ");
 
 const getGradeSearchHaystack = (
   record: Pick<
@@ -1030,6 +1035,14 @@ export default function AdminStudents({
     useState<InlineFeedback | null>(null);
   const [isSavingGradeEdit, setIsSavingGradeEdit] = useState(false);
   const [paymentRecordsVersion, setPaymentRecordsVersion] = useState(0);
+  const [paymentAcademicYearFilter, setPaymentAcademicYearFilter] = useState("");
+  const [paymentSemesterFilter, setPaymentSemesterFilter] = useState("");
+  const [legacyPaymentTermDrafts, setLegacyPaymentTermDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [assigningLegacyPaymentId, setAssigningLegacyPaymentId] = useState<
+    string | null
+  >(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentReceiptNumber, setPaymentReceiptNumber] = useState("");
   const [paymentDate, setPaymentDate] = useState(getTodayInputDate);
@@ -2028,6 +2041,11 @@ export default function AdminStudents({
     setGradeEditState(null);
     setGradeEditFeedback(null);
     setGradeManagementFeedback(null);
+    const studentCurrentTerm = resolveStudentPortalContext(student).currentTerm;
+    setPaymentAcademicYearFilter(studentCurrentTerm.academicYear);
+    setPaymentSemesterFilter(studentCurrentTerm.semester);
+    setLegacyPaymentTermDrafts({});
+    setAssigningLegacyPaymentId(null);
     setPaymentAmount("");
     setPaymentReceiptNumber(
       buildNextReceiptNumber(student.branch || currentBranch),
@@ -2078,6 +2096,10 @@ export default function AdminStudents({
     setGradeSchoolYearFilter("all");
     setGradeSemesterFilter("all");
     setGradeSearchTerm("");
+    setPaymentAcademicYearFilter("");
+    setPaymentSemesterFilter("");
+    setLegacyPaymentTermDrafts({});
+    setAssigningLegacyPaymentId(null);
     setGradeEditState(null);
     setGradeEditFeedback(null);
     setGradeManagementFeedback(null);
@@ -3114,23 +3136,6 @@ export default function AdminStudents({
     () => (viewingStudent ? resolveStudentPortalContext(viewingStudent) : null),
     [viewingStudent],
   );
-  const viewingStudentCurrentTermSubjects = useMemo(() => {
-    if (!viewingStudentPortalContext) {
-      return [];
-    }
-
-    const { currentTerm, subjects: portalSubjects } = viewingStudentPortalContext;
-
-    return portalSubjects.filter(
-      (subject) =>
-        subject.academicYear === currentTerm.academicYear &&
-        subject.semester === currentTerm.semester,
-    );
-  }, [viewingStudentPortalContext]);
-  const viewingStudentTotalUnits = viewingStudentCurrentTermSubjects.reduce(
-    (sum, subject) => sum + (subject.units || 0),
-    0,
-  );
   const viewingStudentPayments = useMemo(
     () =>
       viewingStudent
@@ -3142,6 +3147,115 @@ export default function AdminStudents({
         : [],
     [currentBranch, paymentRecordsVersion, viewingStudent],
   );
+  const viewingStudentPaymentTerms = useMemo(() => {
+    const termsByKey = new Map<string, { academicYear: string; semester: string }>();
+    const addTerm = (academicYear?: string | null, semester?: string | null) => {
+      const year = academicYear?.trim();
+      const termSemester = semester?.trim();
+      if (year && termSemester) {
+        termsByKey.set(buildGradeTermKey(year, termSemester), {
+          academicYear: year,
+          semester: termSemester,
+        });
+      }
+    };
+
+    if (viewingStudentPortalContext) {
+      addTerm(
+        viewingStudentPortalContext.currentTerm.academicYear,
+        viewingStudentPortalContext.currentTerm.semester,
+      );
+      viewingStudentPortalContext.subjects.forEach((subject) =>
+        addTerm(subject.academicYear, subject.semester),
+      );
+    }
+    if (viewingStudent) {
+      getStudentGradeRecords({
+        branch: viewingStudent.branch || currentBranch,
+        studentId: viewingStudent.id,
+      }).forEach((record) => addTerm(record.academicYear, record.semester));
+    }
+    viewingStudentPayments.forEach((payment) =>
+      addTerm(payment.academicYear, payment.semester),
+    );
+
+    return sortAcademicTerms([...termsByKey.values()]);
+  }, [
+    currentBranch,
+    gradeRecordsVersion,
+    viewingStudent,
+    viewingStudentPayments,
+    viewingStudentPortalContext,
+  ]);
+  const hasUnassignedViewingStudentPayments = viewingStudentPayments.some(
+    (payment) => !payment.academicYear || !payment.semester,
+  );
+  const viewingStudentPaymentAcademicYearOptions = [
+    ...new Set(viewingStudentPaymentTerms.map((term) => term.academicYear)),
+    ...(hasUnassignedViewingStudentPayments ? [UNASSIGNED_PAYMENT_TERM] : []),
+  ];
+  const selectedPaymentAcademicYear =
+    paymentAcademicYearFilter === UNASSIGNED_PAYMENT_TERM &&
+    hasUnassignedViewingStudentPayments
+      ? UNASSIGNED_PAYMENT_TERM
+      : viewingStudentPaymentAcademicYearOptions.includes(paymentAcademicYearFilter)
+        ? paymentAcademicYearFilter
+        : viewingStudentPortalContext?.currentTerm.academicYear ||
+          viewingStudentPaymentAcademicYearOptions[0] ||
+          "";
+  const viewingStudentPaymentSemesterOptions =
+    selectedPaymentAcademicYear === UNASSIGNED_PAYMENT_TERM
+      ? [UNASSIGNED_PAYMENT_TERM]
+      : viewingStudentPaymentTerms
+          .filter((term) => term.academicYear === selectedPaymentAcademicYear)
+          .map((term) => term.semester);
+  const selectedPaymentSemester =
+    selectedPaymentAcademicYear === UNASSIGNED_PAYMENT_TERM
+      ? UNASSIGNED_PAYMENT_TERM
+      : viewingStudentPaymentSemesterOptions.includes(paymentSemesterFilter)
+        ? paymentSemesterFilter
+        : viewingStudentPortalContext?.currentTerm.academicYear ===
+              selectedPaymentAcademicYear &&
+            viewingStudentPaymentSemesterOptions.includes(
+              viewingStudentPortalContext.currentTerm.semester,
+            )
+          ? viewingStudentPortalContext.currentTerm.semester
+          : viewingStudentPaymentSemesterOptions[0] || "";
+  const isViewingUnassignedPaymentTerm =
+    selectedPaymentAcademicYear === UNASSIGNED_PAYMENT_TERM;
+  const viewingStudentPaymentRecordsForFilter = isViewingUnassignedPaymentTerm
+    ? viewingStudentPayments.filter(
+        (payment) => !payment.academicYear || !payment.semester,
+      )
+    : viewingStudentPayments.filter(
+        (payment) =>
+          normalizePaymentTermValue(payment.academicYear) ===
+            normalizePaymentTermValue(selectedPaymentAcademicYear) &&
+          normalizePaymentTermValue(payment.semester) ===
+            normalizePaymentTermValue(selectedPaymentSemester),
+      );
+  const viewingStudentSelectedTermSubjects = useMemo(
+    () =>
+      !isViewingUnassignedPaymentTerm && viewingStudentPortalContext
+        ? viewingStudentPortalContext.subjects.filter(
+            (subject) =>
+              normalizePaymentTermValue(subject.academicYear) ===
+                normalizePaymentTermValue(selectedPaymentAcademicYear) &&
+              normalizePaymentTermValue(subject.semester) ===
+                normalizePaymentTermValue(selectedPaymentSemester),
+          )
+        : [],
+    [
+      isViewingUnassignedPaymentTerm,
+      selectedPaymentAcademicYear,
+      selectedPaymentSemester,
+      viewingStudentPortalContext,
+    ],
+  );
+  const viewingStudentTotalUnits = viewingStudentSelectedTermSubjects.reduce(
+    (sum, subject) => sum + (subject.units || 0),
+    0,
+  );
   const viewingStudentTotalAssessment =
     isViewingCollegeStudent && viewingStudentTotalUnits > 0
       ? viewingStudentTotalUnits *
@@ -3150,10 +3264,20 @@ export default function AdminStudents({
       : 0;
   const viewingStudentBalanceSummary = buildStudentBalanceSummary({
     totalAssessment: viewingStudentTotalAssessment,
-    payments: viewingStudentPayments,
+    payments: isViewingUnassignedPaymentTerm
+      ? []
+      : viewingStudentPaymentRecordsForFilter,
   });
   const canRecordViewingStudentPayment =
-    Boolean(viewingStudent) && viewingStudentTotalAssessment > 0;
+    Boolean(viewingStudent) &&
+    !isViewingUnassignedPaymentTerm &&
+    viewingStudentTotalAssessment > 0;
+  const shouldShowViewingStudentPaymentLedger =
+    isViewingCollegeStudent &&
+    Boolean(viewingStudent) &&
+    (canRecordViewingStudentPayment ||
+      isViewingUnassignedPaymentTerm ||
+      viewingStudentPayments.length > 0);
   const getPaymentStatusClassName = (
     status: typeof viewingStudentBalanceSummary.status,
   ) => {
@@ -3359,6 +3483,8 @@ export default function AdminStudents({
         branch,
         studentNumber: viewingStudent.id,
         trackingNumber: viewingStudent.trackingNumber,
+        academicYear: selectedPaymentAcademicYear,
+        semester: selectedPaymentSemester,
         amount: parsedAmount,
         paidAt: new Date(`${paymentDate}T00:00:00`).toISOString(),
         encodedBy: loggedInUsername,
@@ -3387,6 +3513,48 @@ export default function AdminStudents({
       });
     } finally {
       setIsSavingPayment(false);
+    }
+  };
+
+  const handleSetStudentPaymentTerm = async (paymentId: string) => {
+    if (!viewingStudent) return;
+
+    const selectedTerm = legacyPaymentTermDrafts[paymentId];
+    const separatorIndex = selectedTerm?.indexOf("::") ?? -1;
+    if (separatorIndex < 0) {
+      setPaymentFeedback({
+        type: "warning",
+        message: "Choose the academic year and semester for this receipt.",
+      });
+      return;
+    }
+
+    const academicYear = selectedTerm.slice(0, separatorIndex);
+    const semester = selectedTerm.slice(separatorIndex + 2);
+
+    try {
+      setAssigningLegacyPaymentId(paymentId);
+      await setStudentPaymentTerm({
+        branch: viewingStudent.branch || currentBranch,
+        paymentId,
+        academicYear,
+        semester,
+      });
+      setPaymentRecordsVersion((previousValue) => previousValue + 1);
+      setPaymentFeedback({
+        type: "success",
+        message: `Receipt term saved as ${academicYear} | ${semester}.`,
+      });
+    } catch (error) {
+      setPaymentFeedback({
+        type: "warning",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to save this receipt's academic term.",
+      });
+    } finally {
+      setAssigningLegacyPaymentId(null);
     }
   };
 
@@ -4827,84 +4995,58 @@ export default function AdminStudents({
                   <div className="students-profile-field students-profile-field-full">
                     <label>Financial Balance</label>
                     <div className="students-profile-value students-profile-list-box students-payment-ledger">
-                      {canRecordViewingStudentPayment ? (
+                      {shouldShowViewingStudentPaymentLedger ? (
                         <>
-                          <div className="students-payment-form">
+                          <div className="students-payment-period-filter">
                             <label className="students-payment-field">
-                              <span>Amount Paid</span>
-                              <input
-                                type="number"
-                                min="1"
-                                max={viewingStudentBalanceSummary.currentBalance}
-                                step="1"
-                                value={paymentAmount}
+                              <span>Academic Year</span>
+                              <select
+                                value={selectedPaymentAcademicYear}
                                 onChange={(event) => {
-                                  setPaymentAmount(event.target.value);
+                                  const nextYear = event.target.value;
+                                  const nextSemester =
+                                    nextYear === UNASSIGNED_PAYMENT_TERM
+                                      ? UNASSIGNED_PAYMENT_TERM
+                                      : viewingStudentPaymentTerms.find(
+                                          (term) => term.academicYear === nextYear,
+                                        )?.semester || "";
+                                  setPaymentAcademicYearFilter(nextYear);
+                                  setPaymentSemesterFilter(nextSemester);
                                   setPaymentFeedback(null);
                                 }}
-                                placeholder="0"
-                                disabled={
-                                  viewingStudentBalanceSummary.status ===
-                                  "Fully Paid"
-                                }
-                              />
-                            </label>
-                            <label className="students-payment-field">
-                              <span>Receipt No.</span>
-                              <input
-                                type="text"
-                                value={paymentReceiptNumber}
-                                readOnly
-                                aria-readonly="true"
-                                title="Receipt number is generated automatically"
-                              />
-                            </label>
-                            <label className="students-payment-field">
-                              <span>Date Paid</span>
-                              <input
-                                type="date"
-                                value={paymentDate}
-                                onChange={(event) => {
-                                  setPaymentDate(event.target.value);
-                                  setPaymentFeedback(null);
-                                }}
-                                disabled={
-                                  viewingStudentBalanceSummary.status ===
-                                  "Fully Paid"
-                                }
-                              />
-                            </label>
-                            <label className="students-payment-field students-payment-notes-field">
-                              <span>Notes</span>
-                              <input
-                                type="text"
-                                value={paymentNotes}
-                                onChange={(event) => {
-                                  setPaymentNotes(event.target.value);
-                                  setPaymentFeedback(null);
-                                }}
-                                placeholder="Optional"
-                                disabled={
-                                  viewingStudentBalanceSummary.status ===
-                                  "Fully Paid"
-                                }
-                              />
-                            </label>
-                            <div className="students-payment-action-field">
-                              <span aria-hidden="true">&nbsp;</span>
-                              <button
-                                type="button"
-                                className="students-save-btn students-payment-add-btn"
-                                onClick={handleAddStudentPayment}
-                                disabled={
-                                  isSavingPayment ||
-                                  viewingStudentBalanceSummary.status ===
-                                  "Fully Paid"
-                                }
                               >
-                                {isSavingPayment ? "Saving..." : "Add Payment"}
-                              </button>
-                            </div>
+                                {viewingStudentPaymentAcademicYearOptions.map(
+                                  (academicYear) => (
+                                    <option key={academicYear} value={academicYear}>
+                                      {academicYear === UNASSIGNED_PAYMENT_TERM
+                                        ? "Unassigned legacy receipts"
+                                        : academicYear}
+                                    </option>
+                                  ),
+                                )}
+                              </select>
+                            </label>
+                            <label className="students-payment-field">
+                              <span>Semester</span>
+                              <select
+                                value={selectedPaymentSemester}
+                                disabled={isViewingUnassignedPaymentTerm}
+                                onChange={(event) => {
+                                  setPaymentSemesterFilter(event.target.value);
+                                  setPaymentFeedback(null);
+                                }}
+                              >
+                                {viewingStudentPaymentSemesterOptions.map(
+                                  (semester) => (
+                                    <option key={semester} value={semester}>
+                                      {semester === UNASSIGNED_PAYMENT_TERM
+                                        ? "Unassigned"
+                                        : semester}
+                                    </option>
+                                  ),
+                                )}
+                              </select>
+                            </label>
                           </div>
 
                           {paymentFeedback ? (
@@ -4915,56 +5057,154 @@ export default function AdminStudents({
                             </p>
                           ) : null}
 
-                          <div className="students-payment-summary">
-                            <div className="students-payment-summary-card">
-                              <span>Total Assessment</span>
-                              <strong>
-                                {formatPeso(
-                                  viewingStudentBalanceSummary.totalAssessment,
-                                )}
-                              </strong>
-                            </div>
-                            <div className="students-payment-summary-card">
-                              <span>Total Paid</span>
-                              <strong>
-                                {formatPeso(viewingStudentBalanceSummary.totalPaid)}
-                              </strong>
-                            </div>
-                            <div className="students-payment-summary-card balance">
-                              <span>Current Balance</span>
-                              <strong>
-                                {formatPeso(
-                                  viewingStudentBalanceSummary.currentBalance,
-                                )}
-                              </strong>
-                            </div>
-                            <div
-                              className={`students-payment-status ${getPaymentStatusClassName(
-                                viewingStudentBalanceSummary.status,
-                              )}`}
-                            >
-                              {viewingStudentBalanceSummary.status}
-                            </div>
-                          </div>
-                          <p className="students-payment-assessment-note">
-                            {viewingStudentTotalUnits} unit(s) at{" "}
-                            {formatPeso(COLLEGE_TUITION_PER_UNIT)} per unit
-                            {viewingStudentTuitionEstimate?.effectiveDiscountPercentage
-                              ? `, less ${viewingStudentTuitionEstimate.effectiveDiscountPercentage}% ${viewingStudentTuitionEstimate.effectiveDiscountSourceLabel}`
-                              : ""}
-                          </p>
+                          {isViewingUnassignedPaymentTerm ? (
+                            <p className="students-payment-assessment-note">
+                              These older receipts have no saved academic year or
+                              semester. They are excluded from all term balances.
+                            </p>
+                          ) : viewingStudentTotalAssessment > 0 ? (
+                            <>
+                              <div className="students-payment-form">
+                                <label className="students-payment-field">
+                                  <span>Amount Paid</span>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max={viewingStudentBalanceSummary.currentBalance}
+                                    step="1"
+                                    value={paymentAmount}
+                                    onChange={(event) => {
+                                      setPaymentAmount(event.target.value);
+                                      setPaymentFeedback(null);
+                                    }}
+                                    placeholder="0"
+                                    disabled={
+                                      viewingStudentBalanceSummary.status ===
+                                      "Fully Paid"
+                                    }
+                                  />
+                                </label>
+                                <label className="students-payment-field">
+                                  <span>Receipt No.</span>
+                                  <input
+                                    type="text"
+                                    value={paymentReceiptNumber}
+                                    readOnly
+                                    aria-readonly="true"
+                                    title="Receipt number is generated automatically"
+                                  />
+                                </label>
+                                <label className="students-payment-field">
+                                  <span>Date Paid</span>
+                                  <input
+                                    type="date"
+                                    value={paymentDate}
+                                    onChange={(event) => {
+                                      setPaymentDate(event.target.value);
+                                      setPaymentFeedback(null);
+                                    }}
+                                    disabled={
+                                      viewingStudentBalanceSummary.status ===
+                                      "Fully Paid"
+                                    }
+                                  />
+                                </label>
+                                <label className="students-payment-field students-payment-notes-field">
+                                  <span>Notes</span>
+                                  <input
+                                    type="text"
+                                    value={paymentNotes}
+                                    onChange={(event) => {
+                                      setPaymentNotes(event.target.value);
+                                      setPaymentFeedback(null);
+                                    }}
+                                    placeholder="Optional"
+                                    disabled={
+                                      viewingStudentBalanceSummary.status ===
+                                      "Fully Paid"
+                                    }
+                                  />
+                                </label>
+                                <div className="students-payment-action-field">
+                                  <span aria-hidden="true">&nbsp;</span>
+                                  <button
+                                    type="button"
+                                    className="students-save-btn students-payment-add-btn"
+                                    onClick={handleAddStudentPayment}
+                                    disabled={
+                                      isSavingPayment ||
+                                      viewingStudentBalanceSummary.status ===
+                                      "Fully Paid"
+                                    }
+                                  >
+                                    {isSavingPayment ? "Saving..." : "Add Payment"}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="students-payment-summary">
+                                <div className="students-payment-summary-card">
+                                  <span>Total Assessment</span>
+                                  <strong>
+                                    {formatPeso(
+                                      viewingStudentBalanceSummary.totalAssessment,
+                                    )}
+                                  </strong>
+                                </div>
+                                <div className="students-payment-summary-card">
+                                  <span>Total Paid</span>
+                                  <strong>
+                                    {formatPeso(viewingStudentBalanceSummary.totalPaid)}
+                                  </strong>
+                                </div>
+                                <div className="students-payment-summary-card balance">
+                                  <span>Current Balance</span>
+                                  <strong>
+                                    {formatPeso(
+                                      viewingStudentBalanceSummary.currentBalance,
+                                    )}
+                                  </strong>
+                                </div>
+                                <div
+                                  className={`students-payment-status ${getPaymentStatusClassName(
+                                    viewingStudentBalanceSummary.status,
+                                  )}`}
+                                >
+                                  {viewingStudentBalanceSummary.status}
+                                </div>
+                              </div>
+                              <p className="students-payment-assessment-note">
+                                {selectedPaymentAcademicYear} | {selectedPaymentSemester}
+                                {" - "}
+                                {viewingStudentTotalUnits} unit(s) at{" "}
+                                {formatPeso(COLLEGE_TUITION_PER_UNIT)} per unit
+                                {viewingStudentTuitionEstimate?.effectiveDiscountPercentage
+                                  ? `, less ${viewingStudentTuitionEstimate.effectiveDiscountPercentage}% ${viewingStudentTuitionEstimate.effectiveDiscountSourceLabel}`
+                                  : ""}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="students-payment-assessment-note">
+                              No tuition assessment is available for{" "}
+                              {selectedPaymentAcademicYear} | {selectedPaymentSemester}.
+                              Payment receipts for this term remain visible below.
+                            </p>
+                          )}
 
                           <div className="students-payment-receipts">
                             <div className="students-payment-receipts-header">
                               <h4>Payment Receipts</h4>
-                              <span>{viewingStudentPayments.length} record(s)</span>
+                              <span>
+                                {viewingStudentPaymentRecordsForFilter.length} record(s)
+                              </span>
                             </div>
-                            {viewingStudentPayments.length > 0 ? (
+                            {viewingStudentPaymentRecordsForFilter.length > 0 ? (
                               <div className="students-payment-table-wrapper">
                                 <table className="students-payment-table">
                                   <thead>
                                     <tr>
                                       <th>Date Paid</th>
+                                      <th>Academic Term</th>
                                       <th>Receipt No.</th>
                                       <th>Amount</th>
                                       <th>Encoded By</th>
@@ -4973,12 +5213,80 @@ export default function AdminStudents({
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {viewingStudentPayments.map((payment) => (
-                                      <tr key={payment.id}>
+                                    {viewingStudentPaymentRecordsForFilter.map(
+                                      (payment) => {
+                                        const savedPaymentTerm =
+                                          payment.academicYear && payment.semester
+                                            ? buildGradeTermKey(
+                                                payment.academicYear,
+                                                payment.semester,
+                                              )
+                                            : "";
+                                        const selectedPaymentTermDraft =
+                                          Object.prototype.hasOwnProperty.call(
+                                            legacyPaymentTermDrafts,
+                                            payment.id,
+                                          )
+                                            ? legacyPaymentTermDrafts[payment.id]
+                                            : savedPaymentTerm;
+                                        const hasPaymentTermChange =
+                                          selectedPaymentTermDraft !==
+                                          savedPaymentTerm;
+
+                                        return (
+                                          <tr key={payment.id}>
                                         <td>
                                           {new Date(
                                             payment.paidAt,
                                           ).toLocaleDateString()}
+                                        </td>
+                                        <td>
+                                          <div className="students-payment-legacy-assignment">
+                                            <select
+                                              aria-label={`Academic term for receipt ${payment.receiptNumber}`}
+                                              value={selectedPaymentTermDraft}
+                                              onChange={(event) =>
+                                                setLegacyPaymentTermDrafts((previous) => ({
+                                                  ...previous,
+                                                  [payment.id]: event.target.value,
+                                                }))
+                                              }
+                                            >
+                                              <option value="">Choose term</option>
+                                              {viewingStudentPaymentTerms.map((term) => (
+                                                <option
+                                                  key={buildGradeTermKey(
+                                                    term.academicYear,
+                                                    term.semester,
+                                                  )}
+                                                  value={buildGradeTermKey(
+                                                    term.academicYear,
+                                                    term.semester,
+                                                  )}
+                                                >
+                                                  {term.academicYear} | {term.semester}
+                                                </option>
+                                              ))}
+                                            </select>
+                                            <button
+                                              type="button"
+                                              className="students-grade-action-btn"
+                                              onClick={() =>
+                                                void handleSetStudentPaymentTerm(payment.id)
+                                              }
+                                              disabled={
+                                                !selectedPaymentTermDraft ||
+                                                !hasPaymentTermChange ||
+                                                assigningLegacyPaymentId !== null
+                                              }
+                                            >
+                                              {assigningLegacyPaymentId === payment.id
+                                                ? "Saving..."
+                                                : payment.academicYear && payment.semester
+                                                  ? "Save"
+                                                  : "Assign"}
+                                            </button>
+                                          </div>
                                         </td>
                                         <td>{payment.receiptNumber}</td>
                                         <td>{formatPeso(payment.amount)}</td>
@@ -5001,8 +5309,10 @@ export default function AdminStudents({
                                             Remove
                                           </button>
                                         </td>
-                                      </tr>
-                                    ))}
+                                          </tr>
+                                        );
+                                      },
+                                    )}
                                   </tbody>
                                 </table>
                               </div>

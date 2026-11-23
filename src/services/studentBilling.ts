@@ -4,7 +4,7 @@ import { getStudentGradeRecords } from "./studentGrades";
 import {
   buildStudentBalanceSummary,
   fetchAndCacheStudentPaymentsForBranch,
-  getStudentPayments,
+  getStudentPaymentsForTerm,
   getStudentTuitionAssessment,
 } from "./studentPayments";
 import type { Student } from "../types/student";
@@ -49,7 +49,11 @@ export const getStudentBillingSummary = ({ student, subjects, academicYear, seme
   return {
     ...buildStudentBalanceSummary({
       totalAssessment: getStudentTuitionAssessment({ programType: student.programType, totalUnits, discountPercentage }),
-      payments: getStudentPayments(student),
+      payments: getStudentPaymentsForTerm({
+        ...student,
+        academicYear,
+        semester,
+      }),
     }),
     assessmentAvailable,
     totalUnits,

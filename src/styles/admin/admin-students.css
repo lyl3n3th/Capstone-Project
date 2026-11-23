@@ -1423,6 +1423,14 @@
   align-items: end;
 }
 
+.students-payment-period-filter {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  max-width: 560px;
+  margin-bottom: 16px;
+}
+
 .students-payment-field {
   display: flex;
   flex-direction: column;
@@ -1451,7 +1459,8 @@
   visibility: hidden;
 }
 
-.students-payment-field input {
+.students-payment-field input,
+.students-payment-field select {
   width: 100%;
   height: 40px;
   padding: 0 10px;
@@ -1469,16 +1478,46 @@
   cursor: default;
 }
 
-.students-payment-field input:focus {
+.students-payment-field input:focus,
+.students-payment-field select:focus {
   outline: none;
   border-color: #066287;
   box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
 }
 
 .students-payment-field input:disabled,
+.students-payment-field select:disabled,
 .students-payment-add-btn:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.students-payment-legacy-assignment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 240px;
+}
+
+.students-payment-legacy-assignment select {
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+}
+
+.students-payment-legacy-assignment select:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+}
+
+.students-payment-legacy-assignment button {
+  white-space: nowrap;
 }
 
 .students-payment-add-btn {
@@ -1564,6 +1603,10 @@
 
   .students-payment-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .students-payment-period-filter {
+    max-width: none;
   }
 
   .students-payment-add-btn {
@@ -2746,6 +2789,10 @@
   }
 
   .students-payment-form {
+    grid-template-columns: 1fr;
+  }
+
+  .students-payment-period-filter {
     grid-template-columns: 1fr;
   }
 

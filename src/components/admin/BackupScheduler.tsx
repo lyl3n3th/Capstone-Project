@@ -6,11 +6,8 @@ import {
 } from "../../services/backupApi";
 
 const BACKUP_SCHEDULER_LOCK_KEY = "aics-backup-scheduler-lock";
-// Temporary incident mitigation: avoid periodic database requests while the
-// Supabase connection path is timing out. Manual backup actions remain enabled.
-const BACKUP_SCHEDULER_ENABLED = false;
 // Backups are scheduled within a 10-minute window; a 5-minute poll keeps
-// snapshots current while avoiding a full database sync every minute.
+// scheduled dispatches inside that window if the admin app is open.
 const BACKUP_SCHEDULER_INTERVAL_MS = 5 * 60_000;
 const BACKUP_SCHEDULER_LEASE_MS = 90_000;
 
@@ -104,17 +101,9 @@ export default function BackupScheduler() {
   const timerRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
   const ownerIdRef = useRef(createSchedulerOwnerId());
+  const syncedBranchRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!BACKUP_SCHEDULER_ENABLED) {
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      releaseSchedulerLock(ownerIdRef.current);
-      return;
-    }
-
     if (currentUser?.role !== "admin" || !currentUser.branch) {
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
@@ -135,11 +124,17 @@ export default function BackupScheduler() {
 
       try {
         inFlightRef.current = true;
-        try {
-          renewSchedulerLock(ownerIdRef.current);
-          await syncBackupSnapshot();
-        } catch (error) {
-          console.error("Backup snapshot sync failed", error);
+        // Keep the supplemental browser snapshot current once per branch
+        // session. The complete backup itself is exported from the database,
+        // so repeating this full sync on every polling tick is unnecessary.
+        if (syncedBranchRef.current !== currentUser.branch) {
+          syncedBranchRef.current = currentUser.branch;
+          try {
+            renewSchedulerLock(ownerIdRef.current);
+            await syncBackupSnapshot();
+          } catch (error) {
+            console.error("Backup snapshot sync failed", error);
+          }
         }
         renewSchedulerLock(ownerIdRef.current);
         await dispatchDueAutomatedBackups();
@@ -155,12 +150,19 @@ export default function BackupScheduler() {
     timerRef.current = window.setInterval(() => {
       void tick();
     }, BACKUP_SCHEDULER_INTERVAL_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void tick();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
         timerRef.current = null;
       }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       releaseSchedulerLock(ownerIdRef.current);
     };
   }, [currentUser?.branch, currentUser?.role]);
