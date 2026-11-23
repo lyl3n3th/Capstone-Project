@@ -31,39 +31,56 @@
   min-width: 900px;
 }
 
+.student-details-college-grade-table {
+  min-width: 1050px;
+}
+
 .student-details-college-grade-table th:nth-child(1),
 .student-details-college-grade-table td:nth-child(1) {
-  width: 13%;
+  width: 11%;
 }
 
 .student-details-college-grade-table th:nth-child(2),
 .student-details-college-grade-table td:nth-child(2) {
-  width: 28%;
+  width: 23%;
 }
 
 .student-details-college-grade-table th:nth-child(3),
 .student-details-college-grade-table td:nth-child(3) {
-  width: 14%;
+  width: 11%;
 }
 
 .student-details-college-grade-table th:nth-child(4),
 .student-details-college-grade-table td:nth-child(4) {
-  width: 8%;
+  width: 7%;
 }
 
 .student-details-college-grade-table th:nth-child(5),
 .student-details-college-grade-table td:nth-child(5) {
-  width: 7%;
+  width: 6%;
 }
 
 .student-details-college-grade-table th:nth-child(6),
 .student-details-college-grade-table td:nth-child(6) {
-  width: 14%;
+  width: 10%;
 }
 
 .student-details-college-grade-table th:nth-child(7),
 .student-details-college-grade-table td:nth-child(7) {
-  width: 16%;
+  width: 17%;
+}
+
+.students-grade-table.student-details-college-grade-table th:nth-child(8),
+.students-grade-table.student-details-college-grade-table td:nth-child(8) {
+  width: 15%;
+}
+
+.student-details-grade-instructor {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .student-details-alumni-grade-table th:nth-child(1),

@@ -1797,7 +1797,8 @@
   text-transform: uppercase;
 }
 
-.students-grade-editor-field input {
+.students-grade-editor-field input,
+.students-grade-editor-field select {
   width: 100%;
   min-height: 42px;
   padding: 0 12px;
@@ -1809,7 +1810,14 @@
   box-sizing: border-box;
 }
 
-.students-grade-editor-field input:focus {
+.students-grade-editor-field small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.students-grade-editor-field input:focus,
+.students-grade-editor-field select:focus {
   outline: none;
   border-color: #066287;
   box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);

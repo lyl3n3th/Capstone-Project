@@ -13,20 +13,13 @@ import {
   BACKUP_RESTORE_APPLIED_EVENT,
   forgetRememberedAlumniStudentStatus,
   getRememberedAlumniStudentStatus,
-  persistAlumniBackupCacheForBranch,
-  readCachedAlumniForBranch,
   rememberAlumniStudentStatus,
 } from "../../services/backupApi";
 import {
-  forgetDeletedStoredStudent,
-  getBranchFromStudentNumber,
   getCurrentBranch,
   getStudentCredentialOverview,
   fetchImportedStudentCredentials,
   isImportedStudent,
-  readStoredStudents,
-  normalizeBranchName,
-  writeStoredStudents,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
 import {
@@ -34,7 +27,10 @@ import {
   getStudentGradeRecords,
   type StoredStudentGradeRecord,
 } from "../../services/studentGrades";
-import { updateAdminStudentStatus } from "../../services/adminStudentsApi";
+import {
+  fetchAdminStudents,
+  updateAdminStudentStatus,
+} from "../../services/adminStudentsApi";
 import { formatContactNumber } from "../../utils/contactNumber";
 import "../../styles/admin/admin-alumni.css";
 import "../../styles/admin/student-details-grades.css";
@@ -47,7 +43,6 @@ interface AlumniProps {
 }
 
 interface AlumniStudent {
-  recordId?: number;
   id: string;
   fullName: string;
   program: string;
@@ -60,7 +55,6 @@ interface AlumniStudent {
 }
 
 interface StudentRecord {
-  recordId?: number;
   id: string;
   name: string;
   program: string;
@@ -73,56 +67,11 @@ interface StudentRecord {
   studentSnapshot?: StudentStorageRecord;
 }
 
-interface ApiAlumni {
-  id: number;
-  student_id: string;
-  full_name: string;
-  program: string;
-  year_graduated: string;
-  contact: string;
-  email?: string | null;
-  became_alumni_on: string;
-  branch?: string | null;
-}
-
-interface ApiStudent {
-  id: number;
-  student_id: string;
-  full_name: string;
-  program: string;
-  year_level: string;
-  strand_or_course?: string | null;
-  contact?: string | null;
-  email: string;
-  status: string;
-  branch?: string | null;
-}
-
-interface ApiAlumniRecord {
-  id?: number;
-  student_id?: string;
-  full_name?: string;
-  program?: string;
-  year_graduated?: string | null;
-  contact?: string | null;
-  email?: string | null;
-  became_alumni_on?: string | null;
-  branch?: string | null;
-}
-
 interface Toast {
   id: string;
   message: string;
   type: "success" | "error" | "info" | "warning";
 }
-
-const CONFIGURED_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const API_BASE_URL = CONFIGURED_API_BASE_URL || "http://localhost:8000";
-const SHOULD_USE_ALUMNI_BACKEND = Boolean(CONFIGURED_API_BASE_URL);
-const ALUMNI_API_URL = `${API_BASE_URL}/api/alumni/`;
-const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
-
-const getCurrentGraduationYear = () => String(new Date().getFullYear());
 
 const formatDetailValue = (value?: string | number | null) => {
   if (value === null || value === undefined) {
@@ -146,21 +95,7 @@ const formatStoredDate = (value?: string | null) => {
   return parsedDate.toLocaleDateString();
 };
 
-const buildLocalAlumniRecord = (
-  student: StudentRecord,
-  branch: string,
-): ApiAlumniRecord => ({
-  student_id: student.id,
-  full_name: student.name,
-  program: student.strandOrCourse || student.program,
-  year_graduated: getCurrentGraduationYear(),
-  contact: student.contact || "",
-  became_alumni_on: new Date().toISOString(),
-  branch,
-});
-
 const mapStoredStudentToUi = (student: StudentStorageRecord): StudentRecord => ({
-  recordId: student.recordId,
   id: student.id,
   name: student.name,
   program: student.program,
@@ -172,6 +107,48 @@ const mapStoredStudentToUi = (student: StudentStorageRecord): StudentRecord => (
   branch: student.branch,
   studentSnapshot: { ...student },
 });
+
+const mapStudentToAlumni = (student: StudentRecord): AlumniStudent => ({
+  id: student.id,
+  fullName: student.name,
+  program: student.strandOrCourse || student.program,
+  yearGraduated: student.studentSnapshot?.yearCompletion || "",
+  contact: student.contact || "",
+  email: student.email || undefined,
+  becameAlumniOn: "",
+  branch: student.branch || student.studentSnapshot?.branch,
+  studentSnapshot: student.studentSnapshot
+    ? { ...student.studentSnapshot, status: "Graduated" }
+    : undefined,
+});
+
+const safelyRememberAlumniStudentStatus = (
+  studentId: string,
+  status: StudentStorageRecord["status"],
+) => {
+  try {
+    rememberAlumniStudentStatus(studentId, status);
+  } catch (error) {
+    console.warn("Unable to cache the student's previous status for restore.", error);
+  }
+};
+
+const safelyGetRememberedAlumniStudentStatus = (studentId: string) => {
+  try {
+    return getRememberedAlumniStudentStatus(studentId);
+  } catch (error) {
+    console.warn("Unable to read the cached previous student status.", error);
+    return undefined;
+  }
+};
+
+const safelyForgetRememberedAlumniStudentStatus = (studentId: string) => {
+  try {
+    forgetRememberedAlumniStudentStatus(studentId);
+  } catch (error) {
+    console.warn("Unable to clear the cached previous student status.", error);
+  }
+};
 
 export default function AdminAlumni({
   onLogout,
@@ -189,21 +166,14 @@ export default function AdminAlumni({
     null,
   );
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [students, setStudents] = useState<StudentRecord[]>([]);
   const [alumni, setAlumni] = useState<AlumniStudent[]>([]);
   const [restoringAlumniId, setRestoringAlumniId] = useState<string | null>(null);
   const [credentialRefreshVersion, setCredentialRefreshVersion] = useState(0);
   const currentBranch = getCurrentBranch();
-
-  const belongsToCurrentBranch = (id: string, branch?: string | null) => {
-    const resolvedRecordBranch = branch
-      ? normalizeBranchName(branch)
-      : getBranchFromStudentNumber(id);
-
-    return resolvedRecordBranch === currentBranch;
-  };
 
   // Toast functions
   const addToast = (message: string, type: Toast["type"]) => {
@@ -218,262 +188,28 @@ export default function AdminAlumni({
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  const mapApiAlumniToUi = (apiAlumni: ApiAlumni): AlumniStudent => ({
-    recordId: apiAlumni.id,
-    id: apiAlumni.student_id,
-    fullName: apiAlumni.full_name,
-    program: apiAlumni.program,
-    yearGraduated: apiAlumni.year_graduated || "",
-    contact: apiAlumni.contact || "",
-    email: apiAlumni.email || undefined,
-    becameAlumniOn: apiAlumni.became_alumni_on || "",
-    branch: apiAlumni.branch || undefined,
-  });
-
-  const mapApiStudentToUi = (
-    apiStudent: ApiStudent,
-    storedStudents: StudentStorageRecord[],
-  ): StudentRecord => {
-    const branch = apiStudent.branch || getCurrentBranch();
-    const studentSnapshot = storedStudents.find(
-      (student) =>
-        student.id.trim().toUpperCase() === apiStudent.student_id.trim().toUpperCase() &&
-        normalizeBranchName(student.branch) === normalizeBranchName(branch),
-    );
-
-    return {
-      recordId: apiStudent.id,
-      id: apiStudent.student_id,
-      name: apiStudent.full_name,
-      program: apiStudent.program,
-      yearLevel: apiStudent.year_level,
-      strandOrCourse: apiStudent.strand_or_course || "",
-      contact: apiStudent.contact || "",
-      email: apiStudent.email,
-      branch,
-      status:
-        apiStudent.status === "Inactive"
-          ? "Archived"
-          : (apiStudent.status as StudentRecord["status"]),
-      studentSnapshot,
-    };
-  };
-
-  const buildAlumniUiRecord = (
-    student: StudentRecord,
-    apiAlumni?: ApiAlumniRecord | null,
-  ): AlumniStudent => {
-    const studentSnapshot = student.studentSnapshot;
-
-    return {
-      recordId: typeof apiAlumni?.id === "number" ? apiAlumni.id : undefined,
-      id: apiAlumni?.student_id || student.id,
-      fullName: apiAlumni?.full_name || student.name,
-      program: apiAlumni?.program || student.strandOrCourse || student.program,
-      yearGraduated: apiAlumni?.year_graduated || getCurrentGraduationYear(),
-      contact: apiAlumni?.contact || student.contact || "",
-      email: apiAlumni?.email || student.email || undefined,
-      becameAlumniOn: apiAlumni?.became_alumni_on || "",
-      branch:
-        apiAlumni?.branch || student.branch || studentSnapshot?.branch || currentBranch,
-      studentSnapshot: studentSnapshot
-        ? { ...studentSnapshot, status: "Graduated" }
-        : undefined,
-    };
-  };
-
-  const updateStoredStudentStatus = (
-    alumniStudent: AlumniStudent,
-    studentId: string,
-    nextStatus: NonNullable<StudentRecord["status"]>,
-  ) => {
-    const storedStudents = readStoredStudents();
-    const normalizedStudentId = studentId.trim().toUpperCase();
-    const restoredBranch = normalizeBranchName(
-      alumniStudent.branch || alumniStudent.studentSnapshot?.branch || getCurrentBranch(),
-    );
-    const isTargetStudent = (student: StudentStorageRecord) =>
-      student.id.trim().toUpperCase() === normalizedStudentId &&
-      normalizeBranchName(student.branch) === restoredBranch;
-    const existingStoredStudent = storedStudents.find(
-      isTargetStudent,
-    );
-    forgetDeletedStoredStudent({
-      branch: existingStoredStudent?.branch || restoredBranch,
-      id: studentId,
-      trackingNumber: existingStoredStudent?.trackingNumber,
-      name: existingStoredStudent?.name || alumniStudent.fullName,
-    });
-    let didUpdate = false;
-
-    const nextStoredStudents = storedStudents.map((student) => {
-      if (!isTargetStudent(student)) {
-        return student;
-      }
-
-      didUpdate = true;
-      return {
-        ...student,
-        status: nextStatus,
-      };
-    });
-
-    if (didUpdate) {
-      writeStoredStudents(nextStoredStudents);
-      return;
-    }
-
-    const normalizedProgram = alumniStudent.program.trim();
-    const restoredProgram =
-      normalizedProgram === "SHS" || normalizedProgram === "College"
-        ? normalizedProgram
-        : "College";
-    const restoredStudent: StudentStorageRecord = alumniStudent.studentSnapshot
-      ? {
-          ...alumniStudent.studentSnapshot,
-          id: studentId,
-          name: alumniStudent.studentSnapshot.name || alumniStudent.fullName,
-          contact: alumniStudent.studentSnapshot.contact || alumniStudent.contact || "",
-          email: alumniStudent.studentSnapshot.email || alumniStudent.email || "",
-          status: nextStatus,
-          branch: alumniStudent.studentSnapshot.branch || restoredBranch,
-        }
-      : {
-          id: studentId,
-          name: alumniStudent.fullName,
-          program: restoredProgram,
-          yearLevel: restoredProgram === "SHS" ? "Grade 11" : "1st Year",
-          shsTrackType: "",
-          strandOrCourse:
-            normalizedProgram && normalizedProgram !== restoredProgram
-              ? normalizedProgram
-              : "",
-          documentSubmitted: new Date().toISOString().slice(0, 10),
-          contact: alumniStudent.contact || "",
-          email: alumniStudent.email || "",
-          address: "",
-          status: nextStatus,
-          branch: restoredBranch,
-          studentStatus: "Continuing",
-        };
-
-    writeStoredStudents([restoredStudent, ...storedStudents]);
-  };
-
-  const loadPaginated = async <T,>(url: string): Promise<T[]> => {
-    const collected: T[] = [];
-    let nextPageUrl: string | null = url;
-
-    while (nextPageUrl) {
-      const response = await fetch(nextPageUrl);
-      if (!response.ok) {
-        throw new Error(`Request failed: ${nextPageUrl}`);
-      }
-
-      const payload = await response.json();
-      if (Array.isArray(payload)) {
-        collected.push(...payload);
-        nextPageUrl = null;
-      } else {
-        const results = Array.isArray(payload.results) ? payload.results : [];
-        collected.push(...results);
-        nextPageUrl =
-          typeof payload.next === "string" && payload.next
-            ? payload.next
-            : null;
-      }
-    }
-
-    return collected;
-  };
-
-  const loadOptionalPaginated = async <T,>(url: string): Promise<T[] | null> => {
-    try {
-      return await loadPaginated<T>(url);
-    } catch (error) {
-      console.warn(`Optional alumni backend request failed: ${url}`, error);
-      return null;
-    }
-  };
-
-  const addMissingAlumniEmails = (
-    alumniRecords: AlumniStudent[],
-    studentRecords: StudentRecord[],
-  ) => {
-    const studentEmailById = new Map(
-      studentRecords.map((student) => [student.id, student.email] as const),
-    );
-
-    return alumniRecords.map((record) => ({
-      ...record,
-      email: record.email || studentEmailById.get(record.id),
-    }));
-  };
-
   const loadAlumniAndStudents = async () => {
     setIsLoading(true);
+    setLoadError("");
 
     try {
-      const localStudents = readStoredStudents()
-        .filter(
-          (student) => normalizeBranchName(student.branch) === currentBranch,
-        )
-        .map(mapStoredStudentToUi);
-      const localAlumni = addMissingAlumniEmails(
-        readCachedAlumniForBranch(currentBranch),
-        localStudents,
-      );
-
-      setStudents(localStudents);
-      setAlumni(localAlumni);
-
-      if (!SHOULD_USE_ALUMNI_BACKEND) {
-        return;
-      }
-
-      const [apiAlumni, apiStudents] = await Promise.all([
-        loadOptionalPaginated<ApiAlumni>(ALUMNI_API_URL),
-        loadOptionalPaginated<ApiStudent>(STUDENTS_API_URL),
-      ]);
-
-      const storedStudents = readStoredStudents();
-      const mappedStudents = apiStudents
-        ? apiStudents
-            .filter((student) =>
-              belongsToCurrentBranch(student.student_id, student.branch),
-            )
-            .map((student) => mapApiStudentToUi(student, storedStudents))
-        : localStudents;
-      const mappedAlumni = apiAlumni
-        ? addMissingAlumniEmails(
-            apiAlumni
-              .filter((record) =>
-                belongsToCurrentBranch(record.student_id, record.branch),
-              )
-              .map(mapApiAlumniToUi),
-            mappedStudents,
-          )
-        : localAlumni;
-
-      setAlumni(mappedAlumni);
+      const storedStudents = await fetchAdminStudents(currentBranch);
+      const mappedStudents = storedStudents.map(mapStoredStudentToUi);
       setStudents(mappedStudents);
-
-      if (apiAlumni) {
-        persistAlumniBackupCacheForBranch(mappedAlumni, currentBranch);
-      }
+      setAlumni(
+        mappedStudents
+          .filter((student) => student.status === "Graduated")
+          .map(mapStudentToAlumni),
+      );
     } catch (error) {
       console.error("Failed to load alumni data", error);
-      const storedStudents = readStoredStudents().filter(
-        (student) => normalizeBranchName(student.branch) === currentBranch,
+      setAlumni([]);
+      setStudents([]);
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load alumni records from the live service.",
       );
-      const localStudents = storedStudents.map(mapStoredStudentToUi);
-      setAlumni(
-        addMissingAlumniEmails(
-          readCachedAlumniForBranch(currentBranch),
-          localStudents,
-        ),
-      );
-      setStudents(localStudents);
     } finally {
       setIsLoading(false);
     }
@@ -592,76 +328,29 @@ export default function AdminAlumni({
 
   const handleAddFromStudent = async (student: StudentRecord) => {
     try {
-      let createdAlumni: ApiAlumniRecord | null = null;
-      let savedLocallyOnly = false;
-      const graduationYear = getCurrentGraduationYear();
+      const graduatedRecord = await updateAdminStudentStatus({
+        branch: student.branch || currentBranch,
+        studentNumber: student.id,
+        status: "Graduated",
+      });
+      safelyRememberAlumniStudentStatus(student.id, student.status || "Complete");
 
-      try {
-        if (!SHOULD_USE_ALUMNI_BACKEND) {
-          throw new Error("Alumni backend is not configured.");
-        }
-
-        const createResponse = await fetch(ALUMNI_API_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            student_id: student.id,
-            full_name: student.name,
-            program: student.strandOrCourse || student.program,
-            year_graduated: graduationYear,
-            contact: student.contact || "",
-          }),
-        });
-
-        if (!createResponse.ok) {
-          const errorData = await createResponse.json().catch(() => ({}));
-          const firstError = Object.values(errorData).find((value) =>
-            Array.isArray(value),
-          ) as string[] | undefined;
-          throw new Error(firstError?.[0] || "Failed to add alumni record.");
-        }
-
-        createdAlumni = (await createResponse
-          .json()
-          .catch(() => null)) as ApiAlumniRecord | null;
-      } catch (error) {
-        console.warn(
-          "Unable to create alumni record in backend. Saving locally instead.",
-          error,
-        );
-        createdAlumni = buildLocalAlumniRecord(student, currentBranch);
-        savedLocallyOnly = true;
-      }
-
-      rememberAlumniStudentStatus(student.id, student.status || "Complete");
-
-      const nextAlumniRecord = buildAlumniUiRecord(student, createdAlumni);
-      try {
-        await updateAdminStudentStatus({
-          branch: student.studentSnapshot?.branch || getCurrentBranch(),
-          studentNumber: student.id,
-          status: "Graduated",
-        });
-      } catch (statusError) {
-        console.warn(
-          "Unable to mark alumni student as graduated in Supabase. The local alumni record will still block student portal access on this device.",
-          statusError,
-        );
-      }
-      const nextAlumni = [...alumni.filter((record) => record.id !== student.id), nextAlumniRecord];
-      persistAlumniBackupCacheForBranch(nextAlumni, currentBranch);
+      const graduatedStudent = mapStoredStudentToUi(graduatedRecord);
+      const nextAlumniRecord = mapStudentToAlumni(graduatedStudent);
+      const nextAlumni = [
+        ...alumni.filter((record) => record.id !== student.id),
+        nextAlumniRecord,
+      ];
       setAlumni(nextAlumni);
-      setStudents((prev) => prev.filter((record) => record.id !== student.id));
-      updateStoredStudentStatus(nextAlumniRecord, student.id, "Graduated");
-      setIsAddModalOpen(false);
-      addToast(
-        savedLocallyOnly
-          ? `${student.name} added to alumni locally.`
-          : `${student.name} added to alumni successfully!`,
-        savedLocallyOnly ? "warning" : "success",
+      setStudents((prev) =>
+        prev.map((record) =>
+          record.id === graduatedStudent.id
+            ? { ...record, ...graduatedStudent }
+            : record,
+        ),
       );
+      setIsAddModalOpen(false);
+      addToast(`${student.name} added to alumni successfully!`, "success");
     } catch (error) {
       console.error("Failed to add alumni from student", error);
       addToast(
@@ -686,12 +375,11 @@ export default function AdminAlumni({
     setRestoringAlumniId(alumniStudent.id);
 
     try {
-      const rememberedStatus = getRememberedAlumniStudentStatus(alumniStudent.id);
+      const rememberedStatus = safelyGetRememberedAlumniStudentStatus(alumniStudent.id);
       const restoredStatus =
         rememberedStatus === "Archived" || rememberedStatus === "Graduated"
           ? "Complete"
           : rememberedStatus || "Complete";
-      const linkedStudent = students.find((student) => student.id === alumniStudent.id);
       const restoredBranch =
         alumniStudent.branch || alumniStudent.studentSnapshot?.branch || currentBranch;
 
@@ -704,45 +392,9 @@ export default function AdminAlumni({
         status: restoredStatus,
       });
 
-      if (SHOULD_USE_ALUMNI_BACKEND && linkedStudent?.recordId) {
-        const response = await fetch(`${STUDENTS_API_URL}${linkedStudent.recordId}/`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ status: restoredStatus }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData?.detail || "Unable to reactivate student.");
-        }
-      }
-
-      if (SHOULD_USE_ALUMNI_BACKEND && alumniStudent.recordId) {
-        const response = await fetch(`${ALUMNI_API_URL}${alumniStudent.recordId}/`, {
-          method: "DELETE",
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData?.detail || "Unable to remove alumni record.");
-        }
-      }
-
       const nextAlumni = alumni.filter((record) => record.id !== alumniStudent.id);
-      persistAlumniBackupCacheForBranch(nextAlumni, currentBranch);
       setAlumni(nextAlumni);
-      updateStoredStudentStatus(alumniStudent, alumniStudent.id, restoredStatus);
-      const restoredStudentSnapshot = readStoredStudents().find(
-        (student) =>
-          student.id.trim().toUpperCase() === alumniStudent.id.trim().toUpperCase() &&
-          normalizeBranchName(student.branch) === normalizeBranchName(restoredBranch),
-      );
-      const restoredStudentForUi = {
-        ...mapStoredStudentToUi(restoredStudentSnapshot || restoredStoredStudent),
-        recordId: linkedStudent?.recordId ?? restoredStudentSnapshot?.recordId,
-      };
+      const restoredStudentForUi = mapStoredStudentToUi(restoredStoredStudent);
       setStudents((prev) =>
         prev.some((student) => student.id === alumniStudent.id)
           ? prev.map((student) =>
@@ -752,7 +404,7 @@ export default function AdminAlumni({
             )
           : [restoredStudentForUi, ...prev],
       );
-      forgetRememberedAlumniStudentStatus(alumniStudent.id);
+      safelyForgetRememberedAlumniStudentStatus(alumniStudent.id);
 
       if (viewingAlumni?.id === alumniStudent.id) {
         closeViewModal();
@@ -771,22 +423,11 @@ export default function AdminAlumni({
   };
 
   const availableYears = Array.from(
-    new Set(alumni.map((alum) => alum.yearGraduated)),
+    new Set(alumni.map((alum) => alum.yearGraduated).filter(Boolean)),
   ).sort((a, b) => Number(b) - Number(a));
 
   const viewingStudentSnapshot = useMemo(() => {
-    if (!viewingAlumni) {
-      return null;
-    }
-
-    const storedStudent = readStoredStudents().find(
-      (student) =>
-        student.id === viewingAlumni.id ||
-        (viewingAlumni.studentSnapshot?.trackingNumber &&
-          student.trackingNumber === viewingAlumni.studentSnapshot.trackingNumber),
-    );
-
-    return viewingAlumni.studentSnapshot || storedStudent || null;
+    return viewingAlumni?.studentSnapshot || null;
   }, [viewingAlumni]);
 
   const viewingStudentBranch =
@@ -904,7 +545,9 @@ export default function AdminAlumni({
           <h1>Alumni</h1>
           <p>
             {isLoading
-              ? "Loading alumni from backend..."
+              ? "Loading alumni from the live service..."
+              : loadError
+                ? "Alumni data could not be loaded."
               : "View and manage alumni records from all programs"}
           </p>
         </header>
@@ -989,7 +632,7 @@ export default function AdminAlumni({
                   <td colSpan={6} className="no-results">
                     {isLoading
                       ? "Loading alumni..."
-                      : "No alumni records found."}
+                      : loadError || "No alumni records found."}
                   </td>
                 </tr>
               )}
@@ -1052,7 +695,9 @@ export default function AdminAlumni({
                     ) : (
                       <tr>
                         <td colSpan={6} className="no-results">
-                          No available students to add.
+                          {isLoading
+                            ? "Loading students..."
+                            : loadError || "No available students to add."}
                         </td>
                       </tr>
                     )}

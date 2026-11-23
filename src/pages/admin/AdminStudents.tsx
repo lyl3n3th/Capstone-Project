@@ -9,14 +9,14 @@ import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import SystemAlertModal from "../../components/common/SystemAlertModal";
 import StudentImportModal from "../../components/admin/StudentImportModal";
-import StudentHistoricalGrades from "../../components/admin/StudentHistoricalGrades";
 import { useAuth } from "../../hooks/useAuth";
 import {
+  fetchAcademicInstructors,
+  type AcademicInstructorRecord,
+} from "../../services/academicData";
+import {
   BACKUP_RESTORE_APPLIED_EVENT,
-  persistAlumniBackupCache,
-  readCachedAlumni,
   rememberAlumniStudentStatus,
-  type AlumniBackupRecord,
 } from "../../services/backupApi";
 import {
   getNextStudentNumber,
@@ -171,16 +171,6 @@ const getStudentCourseDisplay = (
 ) =>
   student.strandOrCourse || (student.program === "College" ? DEFAULT_COLLEGE_COURSE : student.program);
 
-interface ApiAlumniRecord {
-  id?: number;
-  student_id?: string;
-  full_name?: string;
-  program?: string;
-  year_graduated?: string | null;
-  contact?: string | null;
-  became_alumni_on?: string | null;
-}
-
 interface StudentRequirementNotification {
   student: Student;
   pendingReviewCount: number;
@@ -199,9 +189,6 @@ interface StudentScheduleSelectionNotification {
   conflictCount: number;
 }
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-const ALUMNI_API_URL = `${API_BASE_URL}/api/alumni/`;
 const ENROLLEE_STORAGE_SCOPE = "enrollees";
 const STUDENT_EXPORT_MIME_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -319,47 +306,6 @@ const getStudentLifecycleStatus = (
   return "Undergraduate";
 };
 
-const getCurrentGraduationYear = () => String(new Date().getFullYear());
-
-const buildAlumniBackupRecord = (
-  student: Student,
-  apiAlumni?: ApiAlumniRecord | null,
-): AlumniBackupRecord => ({
-  recordId: typeof apiAlumni?.id === "number" ? apiAlumni.id : undefined,
-  id: apiAlumni?.student_id || student.id,
-  fullName: apiAlumni?.full_name || student.name,
-  program: apiAlumni?.program || student.strandOrCourse || student.program,
-  yearGraduated: apiAlumni?.year_graduated || getCurrentGraduationYear(),
-  contact: apiAlumni?.contact || student.contact || "",
-  email: student.email || undefined,
-  becameAlumniOn: apiAlumni?.became_alumni_on || "",
-  studentSnapshot: { ...student },
-});
-
-const buildLocalAlumniRecord = (student: Student): ApiAlumniRecord => ({
-  student_id: student.id,
-  full_name: student.name,
-  program: student.strandOrCourse || student.program,
-  year_graduated: getCurrentGraduationYear(),
-  contact: student.contact || "",
-  became_alumni_on: new Date().toISOString(),
-});
-
-const mergeAlumniBackupRecords = (
-  existingRecords: AlumniBackupRecord[],
-  nextRecords: AlumniBackupRecord[],
-) => {
-  const alumniById = new Map(
-    existingRecords.map((record) => [record.id, record] as const),
-  );
-
-  nextRecords.forEach((record) => {
-    alumniById.set(record.id, record);
-  });
-
-  return Array.from(alumniById.values());
-};
-
 const SEMESTER_DISPLAY_ORDER = ["1st Semester", "2nd Semester"];
 const COLLEGE_PERIOD_DISPLAY_ORDER = [
   "Prelim",
@@ -393,6 +339,7 @@ interface StudentGradeEditFieldState {
   gradingPeriod: string;
   semester: string;
   value: string;
+  instructorId: string;
   existingRecord: StoredStudentGradeRecord | null;
 }
 
@@ -1031,6 +978,12 @@ export default function AdminStudents({
     useState<StudentGradeEditState | null>(null);
   const [gradeEditFeedback, setGradeEditFeedback] =
     useState<InlineFeedback | null>(null);
+  const [gradeInstructors, setGradeInstructors] = useState<
+    AcademicInstructorRecord[]
+  >([]);
+  const [gradeInstructorLoadError, setGradeInstructorLoadError] = useState("");
+  const [isLoadingGradeInstructors, setIsLoadingGradeInstructors] =
+    useState(false);
   const [gradeManagementFeedback, setGradeManagementFeedback] =
     useState<InlineFeedback | null>(null);
   const [isSavingGradeEdit, setIsSavingGradeEdit] = useState(false);
@@ -1363,6 +1316,34 @@ export default function AdminStudents({
       );
     };
   }, [currentBranch]);
+
+  useEffect(() => {
+    const branch = gradeEditState?.branch;
+    if (!branch) return;
+    let active = true;
+    setGradeInstructors([]);
+    setIsLoadingGradeInstructors(true);
+    setGradeInstructorLoadError("");
+    void fetchAcademicInstructors(branch)
+      .then((instructors) => {
+        if (active) setGradeInstructors(instructors);
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setGradeInstructorLoadError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load instructors for this branch.",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setIsLoadingGradeInstructors(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [gradeEditState?.branch]);
 
   useEffect(() => {
     if (!currentBranch) {
@@ -2438,6 +2419,7 @@ export default function AdminStudents({
           gradingPeriod: record.gradingPeriod,
           semester: record.semester,
           value: record.grade,
+          instructorId: record.instructorId || "",
           existingRecord: record,
         },
       ],
@@ -2487,6 +2469,7 @@ export default function AdminStudents({
           gradingPeriod: quarterLabel,
           semester: "",
           value: existingRecord?.grade || "",
+          instructorId: existingRecord?.instructorId || "",
           existingRecord,
         };
       }),
@@ -2516,6 +2499,20 @@ export default function AdminStudents({
     }
   };
 
+  const handleGradeEditInstructorChange = (fieldKey: string, nextValue: string) => {
+    setGradeEditState((previousState) => {
+      if (!previousState) return previousState;
+      return {
+        ...previousState,
+        fields: previousState.fields.map((field) =>
+          field.key === fieldKey ? { ...field, instructorId: nextValue } : field,
+        ),
+      };
+    });
+    setGradeEditFeedback(null);
+    setGradeManagementFeedback(null);
+  };
+
   const handleSaveGradeEdit = () => {
     if (!gradeEditState) {
       return;
@@ -2531,13 +2528,27 @@ export default function AdminStudents({
       for (const field of gradeEditState.fields) {
         const trimmedValue = field.value.trim();
         const currentValue = field.existingRecord?.grade.trim() ?? "";
+        const instructorChanged =
+          field.instructorId !== (field.existingRecord?.instructorId ?? "");
 
-        if (trimmedValue === currentValue) {
+        if (trimmedValue === currentValue && !instructorChanged) {
           continue;
         }
 
         if (!field.existingRecord && trimmedValue === "") {
           continue;
+        }
+
+        const selectedInstructor = field.instructorId
+          ? gradeInstructors.find((instructor) => instructor.id === field.instructorId)
+          : undefined;
+        if (instructorChanged && field.instructorId && !selectedInstructor) {
+          setGradeEditFeedback({
+            type: "warning",
+            message: `${field.label}: Choose an active instructor from this branch.`,
+          });
+          setIsSavingGradeEdit(false);
+          return;
         }
 
         const validationResult = validateAndNormalizeUploadedGradeRow(
@@ -2555,7 +2566,12 @@ export default function AdminStudents({
             branch: gradeEditState.branch,
           },
           updatedAt,
-          { allowBlankGradeClear: true, preserveStudentNumber: field.existingRecord?.studentNumberIsOriginal },
+          {
+            allowBlankGradeClear: true,
+            preserveStudentNumber:
+              field.existingRecord?.source === "historical" ||
+              field.existingRecord?.studentNumberIsOriginal,
+          },
         );
 
         if (validationResult.errorReason) {
@@ -2570,7 +2586,17 @@ export default function AdminStudents({
         if (validationResult.normalizedRecord) {
           operations.push({
             type: "upsert",
-            record: { ...field.existingRecord, ...validationResult.normalizedRecord },
+            record: {
+              ...field.existingRecord,
+              ...validationResult.normalizedRecord,
+              ...(instructorChanged
+                ? {
+                    instructorId: selectedInstructor?.id,
+                    instructorName: selectedInstructor?.name,
+                    instructorEmployeeId: selectedInstructor?.employeeId,
+                  }
+                : {}),
+            },
           });
         } else if (validationResult.clearRecordIdentity) {
           operations.push({
@@ -2686,74 +2712,20 @@ export default function AdminStudents({
   const moveStudentsToAlumni = async (studentsToMove: Student[]) => {
     const movedStudentIds: string[] = [];
     const failedStudents: string[] = [];
-    const createdAlumniRecords: AlumniBackupRecord[] = [];
-    const locallyCachedStudents: string[] = [];
-    const graduationYear = getCurrentGraduationYear();
 
     for (const student of studentsToMove) {
       try {
-        let createdAlumni: ApiAlumniRecord | null = null;
-
+        await updateAdminStudentStatus({
+          branch: student.branch || currentBranch,
+          studentNumber: student.id,
+          status: "Graduated",
+        });
         try {
-          const createResponse = await fetch(ALUMNI_API_URL, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              student_id: student.id,
-              full_name: student.name,
-              program: student.strandOrCourse || student.program,
-              year_graduated: graduationYear,
-              contact: student.contact || "",
-            }),
-          });
-
-          if (!createResponse.ok) {
-            const errorData = await createResponse.json().catch(() => ({}));
-            const firstError = Object.values(errorData).find((value) =>
-              Array.isArray(value),
-            ) as string[] | undefined;
-            throw new Error(
-              firstError?.[0] ||
-                errorData?.detail ||
-                "Failed to add alumni record.",
-            );
-          }
-
-          createdAlumni = (await createResponse
-            .json()
-            .catch(() => null)) as ApiAlumniRecord | null;
-        } catch (error) {
-          console.warn(
-            "Unable to create alumni record in backend. Saving locally instead.",
-            error,
-          );
-          createdAlumni = buildLocalAlumniRecord(student);
-          locallyCachedStudents.push(student.name);
+          rememberAlumniStudentStatus(student.id, student.status);
+        } catch (cacheError) {
+          console.warn("Unable to cache the student's previous status for restore.", cacheError);
         }
-
-        rememberAlumniStudentStatus(student.id, student.status);
         movedStudentIds.push(student.id);
-        createdAlumniRecords.push(
-          buildAlumniBackupRecord(
-            { ...student, status: "Graduated" },
-            createdAlumni,
-          ),
-        );
-
-        try {
-          await updateAdminStudentStatus({
-            branch: student.branch || currentBranch,
-            studentNumber: student.id,
-            status: "Graduated",
-          });
-        } catch (statusError) {
-          console.warn(
-            "Unable to mark alumni student as graduated in Supabase. The local alumni record will still block student portal access on this device.",
-            statusError,
-          );
-        }
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unable to move to alumni.";
@@ -2766,48 +2738,15 @@ export default function AdminStudents({
       setStudents((prev) =>
         prev.filter((student) => !movedStudentIds.includes(student.id)),
       );
-      const graduatedStudentsByKey = new Map(
-        studentsToMove
-          .filter((student) => movedStudentIds.includes(student.id))
-          .map((student) => [
-            `${normalizeBranchName(student.branch || currentBranch)}::${student.id.trim().toUpperCase()}`,
-            { ...student, status: "Graduated" as const },
-          ]),
-      );
-      const storedStudentsWithGraduates = readStoredStudents().map(
-        (storedStudent) => {
-          const key = `${normalizeBranchName(storedStudent.branch)}::${storedStudent.id.trim().toUpperCase()}`;
-          const graduatedStudent = graduatedStudentsByKey.get(key);
-          if (!graduatedStudent) return storedStudent;
-
-          graduatedStudentsByKey.delete(key);
-          return {
-            ...storedStudent,
-            ...graduatedStudent,
-            status: "Graduated" as const,
-          };
-        },
-      );
-      writeStoredStudents([
-        ...storedStudentsWithGraduates,
-        ...graduatedStudentsByKey.values(),
-      ]);
       setSelectedStudentIds((prev) =>
         prev.filter((studentId) => !movedStudentIds.includes(studentId)),
       );
-      persistAlumniBackupCache(
-        mergeAlumniBackupRecords(readCachedAlumni(), createdAlumniRecords),
-      );
       const movedLabel = `Moved ${movedStudentIds.length} student${movedStudentIds.length === 1 ? "" : "s"} to alumni.`;
-      const cachedLabel =
-        locallyCachedStudents.length > 0
-          ? ` ${locallyCachedStudents.length} ${locallyCachedStudents.length === 1 ? "record was" : "records were"} saved locally because the alumni backend is unavailable.`
-          : "";
       const failedLabel =
         failedStudents.length > 0
           ? ` ${failedStudents.length} could not be moved.`
           : "";
-      setStudentRecoveryMessage(`${movedLabel}${cachedLabel}${failedLabel}`);
+      setStudentRecoveryMessage(`${movedLabel}${failedLabel}`);
 
       if (viewingStudent && movedStudentIds.includes(viewingStudent.id)) {
         closeViewModal();
@@ -5519,10 +5458,6 @@ export default function AdminStudents({
                     </div>
                   </div>
                   <div className="students-profile-field students-profile-field-full">
-                    {viewingStudent.importAcademicYear && viewingStudent.importSemester && (
-                      <StudentHistoricalGrades key={`${viewingStudent.id}-${viewingStudent.branch}`} student={viewingStudent}
-                        branch={viewingStudent.branch || currentBranch} recordedBy={currentUser?.displayName || loggedInUsername} />
-                    )}
                     <label>
                       {isViewingCollegeStudent
                         ? "Uploaded Grades by Semester"
@@ -5600,6 +5535,7 @@ export default function AdminStudents({
                                     className="students-grade-editor-field"
                                   >
                                     <span>{field.label}</span>
+                                    <small>Grade</small>
                                     <input
                                       type="text"
                                       value={field.value}
@@ -5609,18 +5545,61 @@ export default function AdminStudents({
                                           event.target.value,
                                         )
                                       }
-                                        placeholder={
-                                          gradeEditState.programType === "College"
-                                            ? "1.00, 1.25, 3.00, INC, FAILED"
-                                            : "60-100; 75 passing"
-                                        }
+                                      aria-label={`${field.label} grade`}
+                                      placeholder={
+                                        gradeEditState.programType === "College"
+                                          ? "1.00, 1.25, 3.00, INC, FAILED"
+                                          : "60-100; 75 passing"
+                                      }
                                       disabled={isSavingGradeEdit}
                                     />
+                                    <small>Instructor</small>
+                                    <select
+                                      value={field.instructorId}
+                                      onChange={(event) =>
+                                        handleGradeEditInstructorChange(
+                                          field.key,
+                                          event.target.value,
+                                        )
+                                      }
+                                      disabled={isSavingGradeEdit || isLoadingGradeInstructors}
+                                      aria-label={`${field.label} instructor`}
+                                    >
+                                      <option value="">No instructor recorded</option>
+                                      {field.instructorId &&
+                                      !gradeInstructors.some(
+                                        (instructor) =>
+                                          instructor.id === field.instructorId,
+                                      ) ? (
+                                        <option value={field.instructorId} disabled>
+                                          {field.existingRecord?.instructorName || "Saved instructor"} (unavailable)
+                                        </option>
+                                      ) : null}
+                                      {gradeInstructors.map((instructor) => (
+                                        <option key={instructor.id} value={instructor.id}>
+                                          {instructor.name} ({instructor.employeeId})
+                                        </option>
+                                      ))}
+                                    </select>
                                   </label>
                                 ))}
                               </div>
+                              {isLoadingGradeInstructors ? (
+                                <p className="students-grade-editor-hint" role="status">Loading branch instructors…</p>
+                              ) : null}
+                              {gradeInstructorLoadError ? (
+                                <p
+                                  className="students-inline-feedback warning"
+                                  role="alert"
+                                >
+                                  {gradeInstructorLoadError} Grade changes can
+                                  still be saved without changing instructor
+                                  attribution.
+                                </p>
+                              ) : null}
                               <p className="students-grade-editor-hint">
-                                Leave a field blank to clear that saved grade.
+                                Leave a grade blank to clear it. Select “No
+                                instructor recorded” to clear its instructor.
                               </p>
                               {gradeEditFeedback ? (
                                 <p
@@ -5642,7 +5621,7 @@ export default function AdminStudents({
                                   type="button"
                                   className="students-save-btn"
                                   onClick={handleSaveGradeEdit}
-                                  disabled={isSavingGradeEdit}
+                                  disabled={isSavingGradeEdit || isLoadingGradeInstructors}
                                 >
                                   {isSavingGradeEdit
                                     ? "Saving..."
@@ -5719,6 +5698,7 @@ export default function AdminStudents({
                                             <th>Grade</th>
                                             <th>Units</th>
                                             <th>Result</th>
+                                            <th>Instructor</th>
                                             <th>Actions</th>
                                           </tr>
                                         </thead>
@@ -5740,6 +5720,7 @@ export default function AdminStudents({
                                               <td>{record.normalizedGrade}</td>
                                               <td>{record.units ?? "—"}</td>
                                               <td>{record.evaluation}</td>
+                                              <td>{record.instructorName || "Not recorded"}</td>
                                               <td>
                                                 <div className="students-grade-row-actions">
                                                   <button
@@ -5750,8 +5731,7 @@ export default function AdminStudents({
                                                         record,
                                                       )
                                                     }
-                                                    disabled={isAnyBulkActionPending || record.source === "historical"}
-                                                    title={record.source === "historical" ? "Edit this grade in Previous Years and Semesters above." : undefined}
+                                                    disabled={isAnyBulkActionPending}
                                                   >
                                                     Edit
                                                   </button>
@@ -5851,11 +5831,28 @@ export default function AdminStudents({
                                               <td>{row.subjectCode}</td>
                                               <td>{row.subjectTitle}</td>
                                               {activeShsQuarterLabels.map(
-                                                (quarterLabel) => (
-                                                  <td key={quarterLabel}>
-                                                    {row.quarterGrades[quarterLabel]}
-                                                  </td>
-                                                ),
+                                                (quarterLabel) => {
+                                                  const quarterRecord = rowRecords.find(
+                                                    (record) =>
+                                                      record.gradingPeriod ===
+                                                      quarterLabel,
+                                                  );
+                                                  return (
+                                                    <td key={quarterLabel}>
+                                                      <div>
+                                                        {row.quarterGrades[
+                                                          quarterLabel
+                                                        ]}
+                                                      </div>
+                                                      <small className="student-details-grade-instructor">
+                                                        {quarterRecord
+                                                          ? quarterRecord.instructorName ||
+                                                            "Instructor not recorded"
+                                                          : "—"}
+                                                      </small>
+                                                    </td>
+                                                  );
+                                                },
                                               )}
                                               <td>
                                                 <div className="students-grade-row-actions">
@@ -5870,8 +5867,7 @@ export default function AdminStudents({
                                                         records: rowRecords,
                                                       })
                                                     }
-                                                    disabled={isAnyBulkActionPending || rowRecords.some(record => record.source === "historical")}
-                                                    title={rowRecords.some(record => record.source === "historical") ? "Edit these grades in Previous Years and Semesters above." : undefined}
+                                                    disabled={isAnyBulkActionPending}
                                                   >
                                                     Edit
                                                   </button>
