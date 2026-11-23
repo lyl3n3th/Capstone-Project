@@ -111,6 +111,66 @@ def dispatch_backup_job(*, branch_id, backup_type, created_by_id, history, snaps
     return history
 
 
+def _run_background_restore(history_id):
+    try:
+        close_old_connections()
+        history = get_backup_history(history_id)
+        if not history or history.status == BackupHistory.STATUS_DELETED:
+            return
+        restore_branch_backup(history)
+    except Exception as exc:
+        logger.exception("Background backup restore failed for history %s", history_id)
+        try:
+            update_backup_history(
+                history_id,
+                status=BackupHistory.STATUS_FAILED,
+                progress=100,
+                error_message=str(exc),
+                restore_finished_at=timezone.now(),
+            )
+        except Exception:
+            logger.exception("Could not record the restore failure for %s", history_id)
+    finally:
+        try:
+            close_old_connections()
+        except Exception:
+            logger.exception("Could not close database connections after restore %s", history_id)
+        finally:
+            _BACKGROUND_BACKUP_LOCK.release()
+
+
+def dispatch_restore_job(history):
+    """Queue a restore when possible, or start it off-request like backups."""
+    if backup_worker_available():
+        try:
+            task = restore_branch_backup_task.delay(str(history.id))
+        except Exception:
+            logger.exception("Could not enqueue restore for history %s", history.id)
+        else:
+            try:
+                return update_backup_history(history.id, task_id=task.id) or history
+            except Exception:
+                # The task is already queued; do not start a duplicate local copy.
+                logger.exception("Could not save the Celery task id for restore %s", history.id)
+                return history
+
+    if not _BACKGROUND_BACKUP_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another backup or restore is running on this service. Wait for it to finish, then retry.")
+
+    thread = threading.Thread(
+        target=_run_background_restore,
+        args=(str(history.id),),
+        name="backup-restore-job",
+        daemon=True,
+    )
+    try:
+        thread.start()
+    except Exception:
+        _BACKGROUND_BACKUP_LOCK.release()
+        raise
+    return history
+
+
 @shared_task(bind=True)
 def create_branch_backup_task(
     self,

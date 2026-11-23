@@ -323,22 +323,18 @@ class BackupRestoreStartView(APIView):
             return Response(BackupHistorySerializer(restore_history).data, status=status.HTTP_202_ACCEPTED)
 
         try:
-            from .tasks import backup_worker_available, restore_branch_backup_task
+            from .tasks import dispatch_restore_job
 
-            if not backup_worker_available():
-                raise RuntimeError("No Celery worker responded; running the restore on the web service.")
-            task = restore_branch_backup_task.delay(str(restore_history.id))
-            restore_history = update_backup_history(restore_history.id, task_id=task.id) or restore_history
+            restore_history = dispatch_restore_job(restore_history)
         except Exception as exc:
-            logger.warning("Celery dispatch failed for restore, running inline: %s", exc)
-            try:
-                restore_history = restore_branch_backup(restore_history)
-            except Exception as restore_error:
-                restore_history = update_backup_history(
-                    restore_history.id, status=BackupHistory.STATUS_FAILED,
-                    progress=100, error_message=str(restore_error),
-                    restore_finished_at=timezone.now(),
-                ) or restore_history
+            logger.exception("Could not start backup restore for history %s", restore_history.id)
+            restore_history = update_backup_history(
+                restore_history.id,
+                status=BackupHistory.STATUS_FAILED,
+                progress=100,
+                error_message=str(exc),
+                restore_finished_at=timezone.now(),
+            ) or restore_history
 
         return Response(BackupHistorySerializer(restore_history).data, status=status.HTTP_202_ACCEPTED)
 
