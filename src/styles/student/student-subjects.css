@@ -186,6 +186,14 @@
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
 }
 
+.s-own-schedule-subject-card > .s-subject-header {
+  margin-bottom: 0;
+}
+
+.s-own-schedule-subject-card > .s-subject-title {
+  margin: 0;
+}
+
 .s-own-schedule-subject-card.flagged {
   border-color: #fca5a5;
   background: #fff7f7;
