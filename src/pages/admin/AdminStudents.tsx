@@ -747,6 +747,26 @@ const getStudentSyncKey = (student: Pick<Student, "id" | "trackingNumber">) =>
 const isActiveStudentListRecord = (student: Pick<Student, "status">) =>
   getStudentLifecycleStatus(student) === "Undergraduate";
 
+const isStudentSelectableForBulkActions = (student: Pick<Student, "status">) =>
+  getStudentLifecycleStatus(student) === "Undergraduate";
+
+const isStudentEligibleForAlumniTransfer = (
+  student: Pick<Student, "program" | "yearLevel">,
+) => {
+  const normalizedProgram = student.program.trim().toLowerCase();
+  const normalizedYearLevel = student.yearLevel.trim().toLowerCase();
+
+  if (normalizedProgram !== "shs") {
+    return normalizedYearLevel === "4th year";
+  }
+
+  return (
+    normalizedYearLevel === "grade 12" ||
+    normalizedYearLevel === "g12" ||
+    normalizedYearLevel === "12"
+  );
+};
+
 const getActiveStudentsForAdminList = (branch: string) =>
   (getStudentsForBranch(branch) as Student[]).filter(isActiveStudentListRecord);
 
@@ -1151,7 +1171,6 @@ export default function AdminStudents({
     filterYearLevel,
     filterSection,
     filterStatus,
-    filterAcademicStanding,
     sortDirection,
     studentListRefreshVersion,
   ]);
@@ -1529,47 +1548,43 @@ export default function AdminStudents({
     return sortDirection === "asc" ? "↑" : "↓";
   };
 
-  const yearLevelOptions = Array.from(
-    new Set(students.map((student) => student.yearLevel)),
-  )
-    .filter(
-      (yearLevelOption) =>
-        yearLevelOption !== "Academic Track" && yearLevelOption !== "G12",
-    )
-    .sort();
-  const sectionOptions = Array.from(
-    new Set(
-      students
-        .map((student) => student.section)
-        .filter((section): section is string => Boolean(section)),
-    ),
-  ).sort();
-  const isStudentSelectableForBulkActions = (student: Student) =>
-    getStudentLifecycleStatus(student) === "Undergraduate";
-  const isStudentEligibleForAlumniTransfer = (student: Student) => {
-    const normalizedProgram = student.program.trim().toLowerCase();
-    const normalizedYearLevel = student.yearLevel.trim().toLowerCase();
-
-    if (normalizedProgram !== "shs") {
-      return normalizedYearLevel === "4th year";
-    }
-
-    if (normalizedProgram === "shs") {
-      return (
-        normalizedYearLevel === "grade 12" ||
-        normalizedYearLevel === "g12" ||
-        normalizedYearLevel === "12"
-      );
-    }
-
-    return false;
-  };
-  const selectedStudents = students.filter((student) =>
-    selectedStudentIds.includes(student.id) &&
-    isStudentSelectableForBulkActions(student),
+  const yearLevelOptions = useMemo(
+    () =>
+      Array.from(new Set(students.map((student) => student.yearLevel)))
+        .filter(
+          (yearLevelOption) =>
+            yearLevelOption !== "Academic Track" && yearLevelOption !== "G12",
+        )
+        .sort(),
+    [students],
   );
-  const alumniEligibleSelectedStudents = selectedStudents.filter(
-    isStudentEligibleForAlumniTransfer,
+  const sectionOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          students
+            .map((student) => student.section)
+            .filter((section): section is string => Boolean(section)),
+        ),
+      ).sort(),
+    [students],
+  );
+  const selectedStudentIdSet = useMemo(
+    () => new Set(selectedStudentIds),
+    [selectedStudentIds],
+  );
+  const selectedStudents = useMemo(
+    () =>
+      students.filter(
+        (student) =>
+          selectedStudentIdSet.has(student.id) &&
+          isStudentSelectableForBulkActions(student),
+      ),
+    [students, selectedStudentIdSet],
+  );
+  const alumniEligibleSelectedStudents = useMemo(
+    () => selectedStudents.filter(isStudentEligibleForAlumniTransfer),
+    [selectedStudents],
   );
   const isAnyBulkActionPending = isBulkMovingToAlumni || isBulkArchiving;
   const visibleStudentIds = currentPageStudents
@@ -3255,60 +3270,69 @@ export default function AdminStudents({
     viewingStudentApplicantRecord?.scholarshipExamScore,
   ]);
 
-  const requirementNotifications: StudentRequirementNotification[] = students
-    .filter(
-      (student) =>
-        student.status !== "Archived",
-    )
-    .map((student) => {
-      const requirementSnapshot = getStudentRequirementSnapshot({
-        branch: student.branch || currentBranch,
-        studentNumber: student.id,
-        trackingNumber: student.trackingNumber,
-      });
+  const requirementNotifications = useMemo<StudentRequirementNotification[]>(
+    () =>
+      students
+        .filter((student) => student.status !== "Archived")
+        .map((student) => {
+          const requirementSnapshot = getStudentRequirementSnapshot({
+            branch: student.branch || currentBranch,
+            studentNumber: student.id,
+            trackingNumber: student.trackingNumber,
+          });
 
-      if (!requirementSnapshot) {
-        return null;
-      }
+          if (!requirementSnapshot) {
+            return null;
+          }
 
-      const pendingReviewCount = requirementSnapshot.submittedAttachments.filter(
-        (attachment) => attachment.reviewStatus === "Pending",
-      ).length;
+          const pendingReviewCount =
+            requirementSnapshot.submittedAttachments.filter(
+              (attachment) => attachment.reviewStatus === "Pending",
+            ).length;
 
-      if (pendingReviewCount === 0) {
-        return null;
-      }
+          if (pendingReviewCount === 0) {
+            return null;
+          }
 
-      return {
-        student,
-        pendingReviewCount,
-        submittedCount: requirementSnapshot.summary.submitted,
-        pendingRequirementCount: requirementSnapshot.summary.pending,
-        approvedCount: requirementSnapshot.summary.approved,
-        rejectedCount: requirementSnapshot.summary.rejected,
-        submittedAttachments: [...requirementSnapshot.submittedAttachments].sort(
-          (left, right) =>
-            getAttachmentReviewRank(left.reviewStatus) -
-              getAttachmentReviewRank(right.reviewStatus) ||
-            left.name.localeCompare(right.name),
-        ),
-      };
-    })
-    .filter(
-      (
-        notification,
-      ): notification is StudentRequirementNotification => notification !== null,
-    )
-    .sort((left, right) => {
-      if (right.pendingReviewCount !== left.pendingReviewCount) {
-        return right.pendingReviewCount - left.pendingReviewCount;
-      }
+          return {
+            student,
+            pendingReviewCount,
+            submittedCount: requirementSnapshot.summary.submitted,
+            pendingRequirementCount: requirementSnapshot.summary.pending,
+            approvedCount: requirementSnapshot.summary.approved,
+            rejectedCount: requirementSnapshot.summary.rejected,
+            submittedAttachments: [
+              ...requirementSnapshot.submittedAttachments,
+            ].sort(
+              (left, right) =>
+                getAttachmentReviewRank(left.reviewStatus) -
+                  getAttachmentReviewRank(right.reviewStatus) ||
+                left.name.localeCompare(right.name),
+            ),
+          };
+        })
+        .filter(
+          (
+            notification,
+          ): notification is StudentRequirementNotification =>
+            notification !== null,
+        )
+        .sort((left, right) => {
+          if (right.pendingReviewCount !== left.pendingReviewCount) {
+            return right.pendingReviewCount - left.pendingReviewCount;
+          }
 
-      return left.student.name.localeCompare(right.student.name);
-    });
-  const pendingNotificationCount = requirementNotifications.reduce(
-    (total, notification) => total + notification.pendingReviewCount,
-    0,
+          return left.student.name.localeCompare(right.student.name);
+        }),
+    [students, currentBranch],
+  );
+  const pendingNotificationCount = useMemo(
+    () =>
+      requirementNotifications.reduce(
+        (total, notification) => total + notification.pendingReviewCount,
+        0,
+      ),
+    [requirementNotifications],
   );
   const pendingScheduleNotifications = useMemo<
     StudentScheduleSelectionNotification[]
