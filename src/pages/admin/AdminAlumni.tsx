@@ -17,6 +17,7 @@ import {
 } from "../../services/backupApi";
 import {
   getCurrentBranch,
+  fetchAndCacheBranchScopedData,
   getStudentCredentialOverview,
   refreshStudentDetailCredentials,
   type StudentStorageRecord,
@@ -50,6 +51,7 @@ interface AlumniStudent {
   contact: string;
   email?: string;
   becameAlumniOn: string;
+  graduationDateEstimated?: boolean;
   branch?: string;
   studentSnapshot?: StudentStorageRecord;
 }
@@ -145,14 +147,29 @@ const mapStoredStudentToUi = (student: StudentStorageRecord): StudentRecord => (
   studentSnapshot: { ...student },
 });
 
-const mapStudentToAlumni = (student: StudentRecord): AlumniStudent => ({
+interface AlumniGraduationDate {
+  date: string;
+  estimated?: boolean;
+}
+
+const fetchAlumniGraduationDates = (branch: string) =>
+  fetchAndCacheBranchScopedData<Record<string, AlumniGraduationDate>>(
+    "alumni-graduation-dates",
+    branch,
+  );
+
+const mapStudentToAlumni = (
+  student: StudentRecord,
+  graduationDate?: AlumniGraduationDate,
+): AlumniStudent => ({
   id: student.id,
   fullName: student.name,
   program: student.strandOrCourse || student.program,
-  yearGraduated: student.studentSnapshot?.yearCompletion || "",
+  yearGraduated: graduationDate?.date.slice(0, 4) || "",
   contact: student.contact || "",
   email: student.email || undefined,
-  becameAlumniOn: "",
+  becameAlumniOn: graduationDate?.date || "",
+  graduationDateEstimated: graduationDate?.estimated,
   branch: student.branch || student.studentSnapshot?.branch,
   studentSnapshot: student.studentSnapshot
     ? { ...student.studentSnapshot, status: "Graduated" }
@@ -232,13 +249,19 @@ export default function AdminAlumni({
     setLoadError("");
 
     try {
-      const storedStudents = await fetchAdminStudents(currentBranch);
+      const [storedStudents, graduationDates] = await Promise.all([
+        fetchAdminStudents(currentBranch),
+        fetchAlumniGraduationDates(currentBranch).catch((error) => {
+          console.warn("Unable to load alumni graduation dates.", error);
+          return null;
+        }),
+      ]);
       const mappedStudents = storedStudents.map(mapStoredStudentToUi);
       setStudents(mappedStudents);
       setAlumni(
         mappedStudents
           .filter((student) => student.status === "Graduated")
-          .map(mapStudentToAlumni),
+          .map((student) => mapStudentToAlumni(student, graduationDates?.[student.id])),
       );
     } catch (error) {
       console.error("Failed to load alumni data", error);
@@ -375,7 +398,11 @@ export default function AdminAlumni({
       safelyRememberAlumniStudentStatus(student.id, student.status || "Complete");
 
       const graduatedStudent = mapStoredStudentToUi(graduatedRecord);
-      const nextAlumniRecord = mapStudentToAlumni(graduatedStudent);
+      const graduationDates = await fetchAlumniGraduationDates(student.branch || currentBranch).catch((error) => {
+        console.warn("Unable to refresh alumni graduation date.", error);
+        return null;
+      });
+      const nextAlumniRecord = mapStudentToAlumni(graduatedStudent, graduationDates?.[student.id]);
       const nextAlumni = [
         ...alumni.filter((record) => record.id !== student.id),
         nextAlumniRecord,
@@ -800,7 +827,7 @@ export default function AdminAlumni({
                         formatStoredDate(viewingStudentSnapshot?.documentSubmitted),
                       ],
                       ["Year Graduated", viewingAlumni.yearGraduated || "Not set"],
-                      ["Became Alumni On", formatStoredDate(viewingAlumni.becameAlumniOn)],
+                      ["Became Alumni On", viewingAlumni.graduationDateEstimated ? `${formatStoredDate(viewingAlumni.becameAlumniOn)} (estimated)` : formatStoredDate(viewingAlumni.becameAlumniOn)],
                     ].map(([label, value]) => (
                       <div className="detail-item" key={label}>
                         <span className="detail-label">{label}:</span>
