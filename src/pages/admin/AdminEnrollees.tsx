@@ -8059,7 +8059,8 @@ export default function AdminEnrollees({
   const activeBranchStudents = getStudentsForBranch(currentBranch).filter(
     (student) => student.status !== "Archived",
   );
-  const activeStudentsForMove = [...activeBranchStudents]
+  const activeStudentsForMove = activeBranchStudents
+    .filter((student) => Boolean(normalizeSectionCodeValue(student.section)))
     .sort(
       (left, right) =>
         left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
