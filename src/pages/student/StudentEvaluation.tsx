@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   FaArrowLeft,
-  FaChalkboardTeacher,
   FaCheckCircle,
   FaClipboardList,
   FaLock,
@@ -726,6 +725,13 @@ function StudentEvaluation() {
                 <div className="s-evaluation-term-card">
                   <span>{currentAcademicYear}</span>
                   <strong>{currentSemester}</strong>
+                  <div
+                    className={`s-evaluation-state s-evaluation-state-${evaluationsOpen ? "open" : "closed"} s-evaluation-term-status`}
+                    role="status"
+                  >
+                    {evaluationsOpen ? <FaLockOpen /> : <FaLock />}
+                    {getEvaluationStateLabel(evaluationsOpen ? "open" : "closed")}
+                  </div>
                 </div>
               </section>
 
@@ -762,22 +768,9 @@ function StudentEvaluation() {
                         className={`s-evaluation-card s-evaluation-card-${card.state}`}
                       >
                         <div className="s-evaluation-card-top">
-                          <div className="s-evaluation-card-icon">
-                            <FaChalkboardTeacher />
-                          </div>
                           <div className="s-evaluation-card-copy">
                             <h3>{getEvaluationSubjectTitle(card)}</h3>
                           </div>
-                          <span
-                            className={`s-evaluation-state s-evaluation-state-${card.state}`}
-                          >
-                            {card.state === "open" ? (
-                              <FaLockOpen />
-                            ) : (
-                              <FaLock />
-                            )}
-                            {getEvaluationStateLabel(card.state)}
-                          </span>
                         </div>
 
                         <div className="s-evaluation-subject-list">

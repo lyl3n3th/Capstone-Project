@@ -101,7 +101,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 18px;
-  align-items: start;
+  grid-auto-rows: 1fr;
+  align-items: stretch;
 }
 
 .s-evaluation-card {
@@ -132,24 +133,8 @@
 }
 
 .s-evaluation-card-top {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
+  display: block;
   min-width: 0;
-}
-
-.s-evaluation-card-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 54px;
-  height: 54px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  color: #1a3d5c;
-  font-size: 22px;
-  flex-shrink: 0;
 }
 
 .s-evaluation-card-copy {
@@ -162,6 +147,7 @@
   color: #0f172a;
   font-size: 18px;
   line-height: 1.2;
+  min-height: 4.8em;
   overflow-wrap: anywhere;
 }
 
@@ -197,9 +183,8 @@
   color: #075985;
 }
 
-.s-evaluation-state-unavailable {
-  background: #f1f5f9;
-  color: #475569;
+.s-evaluation-term-status {
+  margin-top: 14px;
 }
 
 .s-evaluation-subject-list {
@@ -223,6 +208,7 @@
 }
 
 .s-evaluation-card-note {
+  flex: 1 0 auto;
   margin: 0;
   color: #475569;
   font-size: 13px;
@@ -674,10 +660,6 @@
 
   .s-evaluation-card {
     padding: 18px;
-  }
-
-  .s-evaluation-card-top {
-    grid-template-columns: auto minmax(0, 1fr);
   }
 
   .s-evaluation-state {
