@@ -73,3 +73,25 @@
   overflow-wrap: normal;
   word-break: normal;
 }
+
+/* SHS has no units column. Keep the four remaining columns aligned. */
+.student-history .student-history-shs-table th:nth-child(1),
+.student-history .student-history-shs-table td:nth-child(1) {
+  width: 40%;
+}
+
+.student-history .student-history-shs-table th:nth-child(2),
+.student-history .student-history-shs-table td:nth-child(2) {
+  width: 24%;
+}
+
+.student-history .student-history-shs-table th:nth-child(3),
+.student-history .student-history-shs-table td:nth-child(3) {
+  width: 25%;
+}
+
+.student-history .student-history-shs-table th:nth-child(4),
+.student-history .student-history-shs-table td:nth-child(4) {
+  width: 11%;
+  white-space: nowrap;
+}

@@ -75,3 +75,29 @@ assert.equal(shsBatch[0].gradingPeriod, '1st Quarter');
 assert.equal(shsBatch[0].numericGrade, 85);
 assert.equal(shsBatch[0].programType, 'SHS');
 console.log('Inline historical grade checks passed: multi-subject batches, per-subject instructors, exact student IDs, dirty detection, protected grades, validation, and independent SHS quarters.');
+
+const { getHistoricalSemesterInstructor, shouldSaveHistoricalGradeDraft } = module.exports;
+const first = {...shsBatch[0], instructorId:'teacher-one'};
+const second = {...shsBatch[0], gradingPeriod:'2nd Quarter', instructorId:'teacher-two'};
+assert.equal(getHistoricalSemesterInstructor([first, undefined]), 'teacher-one');
+assert.equal(getHistoricalSemesterInstructor([undefined, second]), 'teacher-two');
+assert.equal(getHistoricalSemesterInstructor([first, second], 'teacher-two'), 'teacher-two');
+assert.equal(getHistoricalSemesterInstructor([first, second], ''), '');
+assert.equal(getHistoricalSemesterInstructor([first, {...second, source:undefined}], 'teacher-one'), 'teacher-two');
+assert.equal(getHistoricalSemesterInstructor([undefined, undefined]), '');
+assert.equal(shouldSaveHistoricalGradeDraft({grade:'',instructorId:'teacher-one'}), false);
+assert.equal(shouldSaveHistoricalGradeDraft({grade:'85',instructorId:'teacher-one'}), true);
+assert.equal(shouldSaveHistoricalGradeDraft({grade:second.grade,instructorId:'teacher-one'},second), true);
+assert.equal(shouldSaveHistoricalGradeDraft({grade:second.grade,instructorId:'teacher-two'},second), false);
+assert.equal(shouldSaveHistoricalGradeDraft({grade:second.grade,instructorId:'teacher-one'},{...second,source:undefined}), false);
+assert.equal(shsBatch[0].units, null);
+console.log('Shared SHS instructor and no-unit checks passed.');
+
+const sharedTeacher = getHistoricalSemesterInstructor([first, second], 'teacher-two');
+const paired = ['1st Quarter','2nd Quarter'].map((period,index) => buildHistoricalGradeRecords({
+  ...params, student:shs, term:shsTerm, period,
+  edits:[{...edits[0], subject:{...subject,program:'SHS',yearLevel:'Grade 11'}, grade:index===0?'85':'90', instructorId:sharedTeacher}],
+})[0]);
+assert.deepEqual(paired.map(row=>row.instructorId), ['teacher-two','teacher-two']);
+assert.deepEqual(paired.map(row=>row.grade), ['85','90']);
+assert.equal(getHistoricalSemesterInstructor([{...first,gradingPeriod:'3rd Quarter',instructorId:'teacher-one'},undefined]), 'teacher-one');

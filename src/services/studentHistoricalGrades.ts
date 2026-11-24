@@ -15,6 +15,18 @@ export const isHistoricalGradeChanged = (draft: HistoricalGradeDraft, saved?: St
   draft.grade.trim() !== (saved?.grade ?? '').trim() ||
   draft.instructorId !== (saved?.instructorId ?? '');
 
+// SHS uses the same instructor for both quarters of a semester.
+export const getHistoricalSemesterInstructor = (
+  records: Array<StoredStudentGradeRecord | undefined>,
+  selected?: string,
+) => {
+  const protectedInstructor = records.find(record => record && record.source !== 'historical' && record.instructorId)?.instructorId;
+  return protectedInstructor ?? selected ?? records.find(record => record?.instructorId)?.instructorId ?? '';
+};
+
+export const shouldSaveHistoricalGradeDraft = (draft: HistoricalGradeDraft, saved?: StoredStudentGradeRecord) =>
+  (!saved || saved.source === 'historical') && Boolean(saved || draft.grade.trim()) && isHistoricalGradeChanged(draft, saved);
+
 export function buildHistoricalGradeRecords({ student, branch, term, period, edits, instructors, recordedBy }: {
   student: HistoricalStudent;
   branch: string;
@@ -37,7 +49,7 @@ export function buildHistoricalGradeRecords({ student, branch, term, period, edi
     if (!teacher) throw new Error(`${subject.code}: Choose an instructor from this branch.`);
     const result = validateAndNormalizeUploadedGradeRow({
       studentId: student.id, fullName: student.name, subjectCode: subject.code, subjectTitle: subject.name,
-      grade: grade.trim(), unit: subject.units == null ? '' : String(subject.units), gradingPeriod: period,
+      grade: grade.trim(), unit: student.program !== 'College' || subject.units == null ? '' : String(subject.units), gradingPeriod: period,
       programType: student.program === 'College' ? 'College' : 'SHS',
       academicYear: term.academicYear, semester: term.semester, branch,
     }, undefined, { preserveStudentNumber: true });
