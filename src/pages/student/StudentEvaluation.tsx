@@ -722,9 +722,11 @@ function StudentEvaluation() {
                     track your progress before submitting the evaluation.
                   </p>
                 </div>
-                <div className="s-evaluation-term-card">
-                  <span>{currentAcademicYear}</span>
-                  <strong>{currentSemester}</strong>
+                <div className="s-evaluation-header-meta">
+                  <div className="s-evaluation-term-card">
+                    <span>{currentAcademicYear}</span>
+                    <strong>{currentSemester}</strong>
+                  </div>
                   <div
                     className={`s-evaluation-state s-evaluation-state-${evaluationsOpen ? "open" : "closed"} s-evaluation-term-status`}
                     role="status"
