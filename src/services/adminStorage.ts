@@ -3571,6 +3571,7 @@ export const getStudentPortalSubjects = (
     | "studentStatus"
   > &
     Pick<StudentStorageRecord, "id" | "trackingNumber">,
+  recordedTerm?: { academicYear: string; semester: string },
 ): StudentPortalSubject[] => {
   const branch = normalizeBranchName(student.branch);
   const storedSubjects =
@@ -3609,7 +3610,11 @@ export const getStudentPortalSubjects = (
   const plannedSemester = activeStudentSubjectPlan
     ? normalizeStoredSemester(activeStudentSubjectPlan.semester)
     : undefined;
+  const fallbackRecordedTerm = !student.section?.trim() && !activeStudentSubjectPlan
+    ? recordedTerm
+    : undefined;
   const defaultAcademicYear =
+    fallbackRecordedTerm?.academicYear ||
     storedAssignments[0]?.academicYear ||
     activeStudentSubjectPlan?.academicYear ||
     "2026-2027";
@@ -3659,6 +3664,7 @@ export const getStudentPortalSubjects = (
     plannedSemester ||
     activeSectionSemester ||
     ownScheduleSemester ||
+    fallbackRecordedTerm?.semester ||
     defaultStartingSemester;
   const semesterScopedSubjects = effectiveSemester
     ? matchedSubjects.filter(

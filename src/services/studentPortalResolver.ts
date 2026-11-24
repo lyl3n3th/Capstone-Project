@@ -698,8 +698,26 @@ export const resolveStudentPortalContext = (
     };
   }
 
+  // A sectionless student without an approved enrollment or schedule can have
+  // completed grades even when the branch catalog contains future assignments.
+  const latestRecordedTerm = !resolvedStudentRecord.section?.trim()
+    ? getStudentGradeRecords({
+        branch: resolvedStudentRecord.branch,
+        studentId: resolvedStudentRecord.id,
+      })
+        .filter(record => record.programType === resolvedStudentRecord.program &&
+          /^\d{4}-\d{4}$/.test(record.academicYear) &&
+          getSemesterSortValue(record.semester) >= 0)
+        .sort((left, right) =>
+          getAcademicYearSortValue(right.academicYear) - getAcademicYearSortValue(left.academicYear) ||
+          getSemesterSortValue(right.semester) - getSemesterSortValue(left.semester),
+        )[0]
+    : undefined;
+  const fallbackSubjects = latestRecordedTerm
+    ? getStudentPortalSubjects(resolvedStudentRecord, latestRecordedTerm)
+    : portalSubjects;
   const defaultCurrentTerm =
-    getLatestPortalTermFromSubjects(portalSubjects, resolvedStudentRecord.yearLevel) ||
+    getLatestPortalTermFromSubjects(fallbackSubjects, resolvedStudentRecord.yearLevel) ||
     {
       yearLevel: resolvedStudentRecord.yearLevel,
       academicYear: "2026-2027",
@@ -709,14 +727,14 @@ export const resolveStudentPortalContext = (
   const shsAutoProgressedContext = getShsAutoProgressedContext({
     resolvedStudentRecord,
     currentTerm: defaultCurrentTerm,
-    portalSubjects,
+    portalSubjects: fallbackSubjects,
   });
 
   return (
     shsAutoProgressedContext || {
       resolvedStudentRecord,
       currentTerm: defaultCurrentTerm,
-      subjects: portalSubjects,
+      subjects: fallbackSubjects,
     }
   );
 };
