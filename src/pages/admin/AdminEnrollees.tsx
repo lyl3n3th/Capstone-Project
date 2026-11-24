@@ -1673,6 +1673,8 @@ export default function AdminEnrollees({
     useState<SectionFormState>(createDefaultSectionForm());
   const [showMoveStudentsModal, setShowMoveStudentsModal] = useState(false);
   const [moveStudentSearchTerm, setMoveStudentSearchTerm] = useState("");
+  const [moveStudentSearchFocused, setMoveStudentSearchFocused] = useState(false);
+  const [moveStudentSearchIndex, setMoveStudentSearchIndex] = useState(-1);
   const [selectedMoveStudentId, setSelectedMoveStudentId] = useState("");
   const [pendingMoveSectionCode, setPendingMoveSectionCode] = useState("");
   const [isSavingMoveStudent, setIsSavingMoveStudent] = useState(false);
@@ -5442,6 +5444,8 @@ export default function AdminEnrollees({
 
   const openMoveStudentsModal = () => {
     setMoveStudentSearchTerm("");
+    setMoveStudentSearchFocused(false);
+    setMoveStudentSearchIndex(-1);
     setSelectedMoveStudentId("");
     setPendingMoveSectionCode("");
     setMoveStudentFeedback(null);
@@ -5451,6 +5455,8 @@ export default function AdminEnrollees({
   const closeMoveStudentsModal = () => {
     setShowMoveStudentsModal(false);
     setMoveStudentSearchTerm("");
+    setMoveStudentSearchFocused(false);
+    setMoveStudentSearchIndex(-1);
     setSelectedMoveStudentId("");
     setPendingMoveSectionCode("");
     setMoveStudentFeedback(null);
@@ -5695,10 +5701,10 @@ export default function AdminEnrollees({
       return;
     }
 
-    if (isSectionChoiceLocked(normalizedSectionCode)) {
+    if (!pendingMoveSectionChoice) {
       setMoveStudentFeedback({
         type: "warning",
-        message: `${normalizedSectionCode} is locked for new assignments.`,
+        message: "Choose an available section matching this student's academic term.",
       });
       return;
     }
@@ -8096,26 +8102,42 @@ export default function AdminEnrollees({
         );
       })()
     : [];
-  const normalizedMoveStudentSearch = moveStudentSearchTerm.trim().toLowerCase();
-  const filteredStudentsForMove = activeStudentsForMove.filter((student) =>
-    !normalizedMoveStudentSearch
-      ? true
-      : [
-          student.name,
-          student.id,
-          student.section,
-          student.program,
-          student.yearLevel,
-          student.strandOrCourse,
-        ]
-          .filter(Boolean)
-          .some((value) =>
-            value?.toString().toLowerCase().includes(normalizedMoveStudentSearch),
-          ),
-  );
+  const moveStudentSearchTerms = moveStudentSearchTerm
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const filteredStudentsForMove = activeStudentsForMove.filter((student) => {
+    const searchableStudent = [
+      student.name,
+      student.id,
+      student.trackingNumber,
+      student.section,
+      student.program,
+      student.yearLevel,
+      student.strandOrCourse,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return moveStudentSearchTerms.every((term) => searchableStudent.includes(term));
+  });
   const selectedMoveStudent =
     activeStudentsForMove.find((student) => student.id === selectedMoveStudentId) ??
     null;
+  const showMoveStudentResults =
+    moveStudentSearchFocused && moveStudentSearchTerms.length > 0 && !selectedMoveStudent;
+  const selectMoveStudent = (student: StudentStorageRecord) => {
+    setSelectedMoveStudentId(student.id);
+    setMoveStudentSearchTerm(`${student.name} - ${student.id}`);
+    setMoveStudentSearchFocused(false);
+    setMoveStudentSearchIndex(-1);
+    setPendingMoveSectionCode("");
+    setMoveStudentFeedback(null);
+  };
+  const selectedMoveStudentTerm = selectedMoveStudent
+    ? resolveStudentPortalContext(selectedMoveStudent).currentTerm
+    : undefined;
   const selectedMoveStudentSectionChoices = selectedMoveStudent
     ? getStudentSectionChoices({
         branch: selectedMoveStudent.branch || currentBranch,
@@ -8138,42 +8160,24 @@ export default function AdminEnrollees({
         normalizeSectionCodeValue(section.code) ===
           normalizeSectionCodeValue(sectionCode) && isSectionLocked(section),
     );
+  const eligibleMoveSectionChoices = selectedMoveStudentTerm
+    ? selectedMoveStudentSectionChoices.filter(
+        (section) =>
+          normalizeSectionSemester(section.semester) ===
+            normalizeSectionSemester(selectedMoveStudentTerm.semester) &&
+          normalizeSectionCodeValue(section.code) !==
+            normalizeSectionCodeValue(selectedMoveStudent?.section) &&
+          !isSectionChoiceLocked(section.code) &&
+          !section.isFull,
+      )
+    : [];
   const pendingMoveSectionChoice =
-    selectedMoveStudentSectionChoices.find(
+    eligibleMoveSectionChoices.find(
       (section) =>
         normalizeSectionCodeValue(section.code) ===
         normalizeSectionCodeValue(pendingMoveSectionCode),
     ) ?? null;
-  const canApplyStudentMove =
-    Boolean(selectedMoveStudent) &&
-    Boolean(normalizeSectionCodeValue(pendingMoveSectionCode)) &&
-    !isSectionChoiceLocked(pendingMoveSectionCode) &&
-    normalizeSectionCodeValue(pendingMoveSectionCode) !==
-      normalizeSectionCodeValue(selectedMoveStudent?.section);
-
-  useEffect(() => {
-    if (!showMoveStudentsModal) {
-      return;
-    }
-
-    if (
-      selectedMoveStudentId &&
-      filteredStudentsForMove.some((student) => student.id === selectedMoveStudentId)
-    ) {
-      return;
-    }
-
-    setSelectedMoveStudentId(filteredStudentsForMove[0]?.id || "");
-  }, [filteredStudentsForMove, selectedMoveStudentId, showMoveStudentsModal]);
-
-  useEffect(() => {
-    if (!showMoveStudentsModal) {
-      return;
-    }
-
-    setPendingMoveSectionCode((selectedMoveStudent?.section || "").trim());
-    setMoveStudentFeedback(null);
-  }, [selectedMoveStudent?.id, selectedMoveStudent?.section, showMoveStudentsModal]);
+  const canApplyStudentMove = Boolean(selectedMoveStudent && pendingMoveSectionChoice);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -13612,39 +13616,121 @@ export default function AdminEnrollees({
               </button>
             </div>
             <div className="review-modal-body student-move-body">
-              <div className="student-move-toolbar">
-                <label className="student-move-field">
-                  <span>Search student</span>
+              <div className="assignment-controls">
+                <div className="manual-student-autocomplete">
                   <input
-                    type="text"
-                    value={moveStudentSearchTerm}
-                    onChange={(event) => setMoveStudentSearchTerm(event.target.value)}
-                    placeholder="Search by name, ID, section, or program"
-                  />
-                </label>
-                <label className="student-move-field">
-                  <span>Select student</span>
-                  <select
-                    value={
-                      filteredStudentsForMove.length > 0 ? selectedMoveStudentId : ""
+                    type="search"
+                    role="combobox"
+                    autoComplete="off"
+                    aria-label="Search students to move"
+                    aria-autocomplete="list"
+                    aria-expanded={showMoveStudentResults}
+                    aria-controls="move-student-results"
+                    aria-activedescendant={
+                      showMoveStudentResults && filteredStudentsForMove[moveStudentSearchIndex]
+                        ? `move-student-option-${moveStudentSearchIndex}`
+                        : undefined
                     }
+                    placeholder="Search student name or number..."
+                    value={moveStudentSearchTerm}
+                    disabled={isSavingMoveStudent}
+                    onFocus={() => setMoveStudentSearchFocused(true)}
+                    onBlur={() => setMoveStudentSearchFocused(false)}
                     onChange={(event) => {
-                      setSelectedMoveStudentId(event.target.value);
+                      setMoveStudentSearchTerm(event.target.value);
+                      setSelectedMoveStudentId("");
+                      setPendingMoveSectionCode("");
                       setMoveStudentFeedback(null);
+                      setMoveStudentSearchIndex(-1);
+                      setMoveStudentSearchFocused(true);
                     }}
-                  >
-                    {filteredStudentsForMove.length > 0 ? (
-                      filteredStudentsForMove.map((student) => (
-                        <option key={student.id} value={student.id}>
-                          {student.name} | {student.id} |{" "}
-                          {student.section || "Not assigned"}
-                        </option>
-                      ))
-                    ) : (
-                      <option value="">No matching student found</option>
-                    )}
-                  </select>
-                </label>
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setMoveStudentSearchFocused(false);
+                        setMoveStudentSearchIndex(-1);
+                        return;
+                      }
+                      if (
+                        !moveStudentSearchTerms.length ||
+                        selectedMoveStudent ||
+                        !filteredStudentsForMove.length
+                      ) return;
+                      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                        event.preventDefault();
+                        setMoveStudentSearchFocused(true);
+                        const nextIndex = event.key === "ArrowDown"
+                          ? Math.min(moveStudentSearchIndex + 1, filteredStudentsForMove.length - 1)
+                          : Math.max(moveStudentSearchIndex - 1, 0);
+                        setMoveStudentSearchIndex(nextIndex);
+                        window.requestAnimationFrame(() =>
+                          document.getElementById(`move-student-option-${nextIndex}`)?.scrollIntoView({ block: "nearest" }),
+                        );
+                      } else if (
+                        event.key === "Enter" &&
+                        showMoveStudentResults &&
+                        filteredStudentsForMove[moveStudentSearchIndex]
+                      ) {
+                        event.preventDefault();
+                        selectMoveStudent(filteredStudentsForMove[moveStudentSearchIndex]);
+                      }
+                    }}
+                  />
+                  {showMoveStudentResults && (
+                    <div className="manual-student-results" id="move-student-results" role="listbox" aria-label="Matching students">
+                      {filteredStudentsForMove.length === 0 ? (
+                        <div className="manual-student-no-results" role="status">No matching students</div>
+                      ) : (
+                        filteredStudentsForMove.map((student, index) => (
+                          <button
+                            key={student.id}
+                            id={`move-student-option-${index}`}
+                            type="button"
+                            role="option"
+                            aria-selected={index === moveStudentSearchIndex}
+                            tabIndex={-1}
+                            className="manual-student-option"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => selectMoveStudent(student)}
+                          >
+                            <strong>{student.name}</strong>
+                            <span>{student.id} · {student.section || "Not assigned"} · {student.strandOrCourse} · {student.yearLevel}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+                <select
+                  aria-label="Select destination section"
+                  value={pendingMoveSectionChoice?.code ?? ""}
+                  onChange={(event) => {
+                    setPendingMoveSectionCode(event.target.value);
+                    setMoveStudentFeedback(null);
+                  }}
+                  disabled={!selectedMoveStudent || eligibleMoveSectionChoices.length === 0 || isSavingMoveStudent}
+                >
+                  <option value="" disabled>
+                    {!selectedMoveStudent
+                      ? "Select a student first"
+                      : eligibleMoveSectionChoices.length === 0
+                        ? "No available matching sections"
+                        : "Select destination section"}
+                  </option>
+                  {eligibleMoveSectionChoices.map((sectionChoice) => (
+                    <option key={sectionChoice.id} value={sectionChoice.code}>
+                      {buildStudentSectionOptionLabel(sectionChoice)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="action-btn move-students"
+                  onClick={handleApplyStudentMove}
+                  disabled={!canApplyStudentMove || isSavingMoveStudent}
+                >
+                  <FaExchangeAlt />{" "}
+                  {isSavingMoveStudent ? "Moving..." : "Move Student"}
+                </button>
               </div>
 
               {selectedMoveStudent ? (
@@ -13664,6 +13750,7 @@ export default function AdminEnrollees({
                         {selectedMoveStudent.program} |{" "}
                         {selectedMoveStudent.yearLevel}
                         {` | ${getCourseStrandDisplay(selectedMoveStudent)}`}
+                        {selectedMoveStudentTerm && ` | ${selectedMoveStudentTerm.semester}`}
                       </span>
                     </div>
                     {selectedMoveStudentCurrentSectionChoice ? (
@@ -13681,66 +13768,12 @@ export default function AdminEnrollees({
                     ) : null}
                   </div>
 
-                  {selectedMoveStudentSectionChoices.length > 0 ? (
-                    <>
-                      <div className="student-move-controls">
-                        <select
-                          value={pendingMoveSectionCode}
-                          onChange={(event) => {
-                            setPendingMoveSectionCode(event.target.value);
-                            if (moveStudentFeedback) {
-                              setMoveStudentFeedback(null);
-                            }
-                          }}
-                          disabled={isSavingMoveStudent}
-                        >
-                          <option value="">Select section</option>
-                          {selectedMoveStudentSectionChoices.map((sectionChoice) => (
-                            <option
-                              key={sectionChoice.id}
-                              value={sectionChoice.code}
-                              disabled={
-                                isSectionChoiceLocked(sectionChoice.code) &&
-                                normalizeSectionCodeValue(sectionChoice.code) !==
-                                  normalizeSectionCodeValue(
-                                    selectedMoveStudent.section,
-                                  )
-                              }
-                            >
-                              {buildStudentSectionOptionLabel(sectionChoice)}
-                              {isSectionChoiceLocked(sectionChoice.code)
-                                ? " - Locked"
-                                : ""}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          className="action-btn move-students"
-                          onClick={handleApplyStudentMove}
-                          disabled={!canApplyStudentMove || isSavingMoveStudent}
-                        >
-                          <FaExchangeAlt />{" "}
-                          {isSavingMoveStudent ? "Moving..." : "Move Student"}
-                        </button>
-                      </div>
-                      {pendingMoveSectionChoice ? (
-                        <p className="student-move-hint">
-                          Move to {pendingMoveSectionChoice.code}:{" "}
-                          {getSectionDescriptorLabel(pendingMoveSectionChoice)} (
-                          {getSectionCapacityLabel(pendingMoveSectionChoice)})
-                        </p>
-                      ) : (
-                        <p className="student-move-hint">
-                          Select a matching section to update this student&apos;s
-                          placement.
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <div className="student-move-empty">
-                      No matching section is available yet for this student.
-                    </div>
+                  {pendingMoveSectionChoice && (
+                    <p className="student-move-hint">
+                      Move to {pendingMoveSectionChoice.code}:{" "}
+                      {getSectionDescriptorLabel(pendingMoveSectionChoice)} (
+                      {getSectionCapacityLabel(pendingMoveSectionChoice)})
+                    </p>
                   )}
 
                   {moveStudentFeedback ? (
