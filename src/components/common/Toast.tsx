@@ -67,13 +67,25 @@ export const Toast: React.FC<ToastProps> = ({
         display: "flex",
         alignItems: "center",
         gap: "12px",
-        minWidth: "280px",
-        maxWidth: "380px",
+        boxSizing: "border-box",
+        minWidth: "min(316px, calc(100vw - 40px))",
+        maxWidth: "min(416px, calc(100vw - 40px))",
         animation: "slideIn 0.3s ease",
       }}
     >
-      <span style={{ color: getColor(), fontSize: "20px" }}>{getIcon()}</span>
-      <span style={{ flex: 1, fontSize: "14px", color: "#333" }}>
+      <span style={{ color: getColor(), fontSize: "20px", flexShrink: 0 }}>
+        {getIcon()}
+      </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflowWrap: "anywhere",
+          whiteSpace: "normal",
+          fontSize: "14px",
+          color: "#333",
+        }}
+      >
         {message}
       </span>
       <button
@@ -82,6 +94,7 @@ export const Toast: React.FC<ToastProps> = ({
           background: "none",
           border: "none",
           cursor: "pointer",
+          flexShrink: 0,
           color: "#999",
           fontSize: "14px",
         }}

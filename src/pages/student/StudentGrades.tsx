@@ -1705,10 +1705,6 @@ function StudentGrades() {
 
   const handleFilter = () => {
     setShowFilters((prev) => !prev);
-    addToast(
-      showFilters ? "Filter panel closed" : "Filter panel opened",
-      "info",
-    );
   };
 
   const handleGenerateReportCard = async () => {
@@ -1907,10 +1903,6 @@ function StudentGrades() {
                     value={effectiveAcademicYear}
                     onChange={(event) => {
                       setSelectedAcademicYear(event.target.value);
-                      addToast(
-                        `Filtered by academic year: ${event.target.value}`,
-                        "info",
-                      );
                     }}
                     className="s-filter-select"
                   >
@@ -1933,10 +1925,6 @@ function StudentGrades() {
                     value={effectiveSemester}
                     onChange={(event) => {
                       setSelectedSemester(event.target.value);
-                      addToast(
-                        `Filtered by semester: ${event.target.value}`,
-                        "info",
-                      );
                     }}
                     className="s-filter-select"
                   >
