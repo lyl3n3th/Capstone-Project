@@ -910,6 +910,7 @@ export default function AdminAlumni({
                                 "alumni-grade-table",
                                 "student-details-grade-table",
                                 "student-details-alumni-grade-table",
+                                viewingStudentProgram === "SHS" ? "student-details-alumni-shs-grade-table" : "",
                               ].join(" ")}
                             >
                               <thead>
@@ -921,7 +922,7 @@ export default function AdminAlumni({
                                       {getRequiredShsQuarterLabelsForSemester(term.semester).map((quarter) => (
                                         <th key={quarter}>{quarter}</th>
                                       ))}
-                                      <th>Semester Final Grade</th>
+                                      <th>Final Grade</th>
                                     </>
                                   ) : (
                                     <>

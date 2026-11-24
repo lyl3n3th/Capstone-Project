@@ -146,3 +146,34 @@
 .student-details-alumni-grade-table td:nth-child(6) {
   width: 24%;
 }
+
+.student-details-alumni-grade-table.student-details-alumni-shs-grade-table {
+  min-width: 740px;
+}
+
+.student-details-alumni-shs-grade-table th,
+.student-details-alumni-shs-grade-table td {
+  box-sizing: border-box;
+  white-space: normal;
+}
+
+.student-details-alumni-shs-grade-table th:nth-child(1),
+.student-details-alumni-shs-grade-table td:nth-child(1) {
+  width: 13%;
+}
+
+.student-details-alumni-shs-grade-table th:nth-child(2),
+.student-details-alumni-shs-grade-table td:nth-child(2) {
+  width: 37%;
+}
+
+.student-details-alumni-shs-grade-table th:nth-child(n + 3),
+.student-details-alumni-shs-grade-table td:nth-child(n + 3) {
+  width: 12%;
+  text-align: center;
+}
+
+.student-details-alumni-shs-grade-table th:nth-child(6),
+.student-details-alumni-shs-grade-table td:nth-child(6) {
+  width: 14%;
+}
