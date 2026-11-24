@@ -218,7 +218,7 @@
   margin-top: auto;
 }
 
-.s-own-schedule-field span {
+.s-own-schedule-field > span {
   color: #475569;
   font-size: 12px;
   font-weight: 700;
@@ -226,8 +226,20 @@
   letter-spacing: 0.04em;
 }
 
-.s-own-schedule-field select {
+.s-schedule-dropdown {
+  position: relative;
   width: 100%;
+  min-width: 0;
+}
+
+.s-schedule-dropdown-trigger {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
   min-height: 44px;
   padding: 10px 12px;
   border: 1px solid #d6e1ea;
@@ -235,12 +247,70 @@
   font-size: 14px;
   color: #1f2937;
   background: #ffffff;
+  text-align: left;
+  cursor: pointer;
 }
 
-.s-own-schedule-field select:focus {
-  outline: none;
-  border-color: #066287;
-  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.12);
+.s-schedule-dropdown-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.s-schedule-dropdown-trigger svg {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.s-schedule-dropdown-trigger:focus-visible,
+.s-schedule-dropdown-options button:focus-visible {
+  outline: 2px solid #066287;
+  outline-offset: -2px;
+}
+
+.s-schedule-dropdown-trigger:disabled {
+  cursor: default;
+  color: #64748b;
+}
+
+.s-schedule-dropdown-options {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 100%;
+  box-sizing: border-box;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 20;
+  padding: 4px;
+  border: 1px solid #d6e1ea;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.15);
+}
+
+.s-schedule-dropdown-options button {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.s-schedule-dropdown-options button:hover,
+.s-schedule-dropdown-options button[aria-pressed="true"] {
+  background: #eaf5fa;
+  color: #066287;
 }
 
 .s-own-schedule-empty-option {

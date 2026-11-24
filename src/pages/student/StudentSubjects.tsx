@@ -1,7 +1,8 @@
 import { IRREGULAR_SEMESTER_UNIT_LIMIT, getIrregularScheduleUnitError, getScheduleTotalUnits } from "../../services/studentScheduleUnitLimit";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useId } from "react";
 import {
   FaCalendarAlt,
+  FaChevronDown,
   FaDownload,
   FaGraduationCap,
 } from "react-icons/fa";
@@ -120,6 +121,77 @@ const formatScheduleChoiceLabel = (
           .join(" / ")
       : "Schedule pending"
   }${assignment.instructorName ? ` - ${assignment.instructorName}` : ""}`;
+
+interface ScheduleChoiceDropdownProps {
+  assignments: StudentScheduledAssignmentItem[];
+  value: string;
+  onChange: (assignmentId: string) => void;
+}
+
+function ScheduleChoiceDropdown({ assignments, value, onChange }: ScheduleChoiceDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listId = useId();
+  const selected = assignments.find((assignment) => assignment.assignmentId === value);
+  const placeholder = assignments.length ? "Select a schedule" : "No offering available";
+  const select = (assignmentId: string) => {
+    setOpen(false);
+    triggerRef.current?.focus();
+    onChange(assignmentId);
+  };
+
+  return (
+    <div className="s-own-schedule-field">
+      <span>Available schedules</span>
+      <div
+        className="s-schedule-dropdown"
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && open) {
+            event.preventDefault();
+            setOpen(false);
+            triggerRef.current?.focus();
+          }
+        }}
+      >
+        <button
+          ref={triggerRef}
+          type="button"
+          className="s-schedule-dropdown-trigger"
+          aria-label={selected ? `Available schedules: ${formatScheduleChoiceLabel(selected)}` : placeholder}
+          aria-expanded={open}
+          aria-controls={listId}
+          disabled={assignments.length === 0}
+          onClick={() => setOpen((previous) => !previous)}
+        >
+          <span title={selected ? formatScheduleChoiceLabel(selected) : undefined}>
+            {selected ? formatScheduleChoiceLabel(selected) : placeholder}
+          </span>
+          <FaChevronDown aria-hidden="true" />
+        </button>
+        {open && assignments.length > 0 && (
+          <div className="s-schedule-dropdown-options" id={listId} role="group" aria-label="Available schedules">
+            <button type="button" aria-pressed={!value} onClick={() => select("")}>
+              Select a schedule
+            </button>
+            {assignments.map((assignment) => (
+              <button
+                key={assignment.assignmentId}
+                type="button"
+                aria-pressed={assignment.assignmentId === value}
+                onClick={() => select(assignment.assignmentId)}
+              >
+                {formatScheduleChoiceLabel(assignment)}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const formatAssignmentScheduleDetails = (
   assignment?: Pick<StudentScheduledAssignmentItem, "schedule">,
@@ -1655,34 +1727,13 @@ function StudentSubjects() {
                             </div>
                           </div>
 
-                          <label className="s-own-schedule-field">
-                            <span>Available schedules</span>
-                            <select
-                              value={
-                                selectedAssignmentsBySubject[group.subjectId] || ""
-                              }
-                              onChange={(event) =>
-                                handleOwnScheduleSelectionChange(
-                                  group.subjectId,
-                                  event.target.value,
-                                )
-                              }
-                            >
-                              <option value="">
-                                {group.assignmentOptions.length > 0
-                                  ? "Select a schedule"
-                                  : "No offering available"}
-                              </option>
-                              {group.assignmentOptions.map((assignment) => (
-                                <option
-                                  key={assignment.assignmentId}
-                                  value={assignment.assignmentId}
-                                >
-                                  {formatScheduleChoiceLabel(assignment)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                          <ScheduleChoiceDropdown
+                            assignments={group.assignmentOptions}
+                            value={selectedAssignmentsBySubject[group.subjectId] || ""}
+                            onChange={(assignmentId) =>
+                              handleOwnScheduleSelectionChange(group.subjectId, assignmentId)
+                            }
+                          />
 
                           {group.assignmentOptions.length === 0 ? (
                             <p className="s-own-schedule-empty-option">
