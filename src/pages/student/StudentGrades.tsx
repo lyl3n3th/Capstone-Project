@@ -2060,28 +2060,6 @@ function StudentGrades() {
                     </tr>
                   )}
                 </tbody>
-                {isSHS && displayRows.length > 0 ? (
-                  <tfoot>
-                    <tr>
-                      <td
-                        colSpan={Math.max(1, tableColumns.length - 2)}
-                        className="s-grade-status-cell"
-                      >
-                        General Average for the Semester
-                      </td>
-                      <td className="s-grade-value">
-                        {areCurrentTermGradesLocked ? (
-                          <span className="s-locked-grade-cell">
-                            <FaLock /> {lockedGradeValue}
-                          </span>
-                        ) : (
-                          shsGeneralAverage
-                        )}
-                      </td>
-                      <td></td>
-                    </tr>
-                  </tfoot>
-                ) : null}
               </table>
             </div>
           </div>
