@@ -223,12 +223,14 @@
   background: white;
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  min-width: 680px;
+  width: fit-content;
+  min-width: max(100%, 680px);
 }
 
 /* Table Styles */
 .s-grades-table {
   width: 100%;
+  background: #ffffff;
   border-collapse: collapse;
 }
 
@@ -372,7 +374,7 @@
 }
 
 .s-grades-table-college {
-  min-width: 900px;
+  min-width: max(100%, 900px);
 }
 
 /* Fixed Header for Grades Page */
@@ -434,11 +436,11 @@
   }
   
   .s-grades-table-container {
-    min-width: 620px;
+    min-width: max(100%, 620px);
   }
 
   .s-grades-table-college {
-    min-width: 820px;
+    min-width: max(100%, 820px);
   }
   
   .s-grades-table th,
@@ -450,11 +452,11 @@
 
 @media (max-width: 480px) {
   .s-grades-table-container {
-    min-width: 560px;
+    min-width: max(100%, 560px);
   }
 
   .s-grades-table-college {
-    min-width: 760px;
+    min-width: max(100%, 760px);
   }
   
   .s-grades-table th,
