@@ -2139,6 +2139,72 @@
   flex-wrap: wrap;
 }
 
+.manual-student-autocomplete {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.manual-student-autocomplete input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  font-size: 14px;
+}
+
+.manual-student-autocomplete input:focus {
+  outline: none;
+  border-color: #066287;
+  box-shadow: 0 0 0 3px rgba(6, 98, 135, 0.1);
+}
+
+.manual-student-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 10;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+}
+
+.manual-student-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: #fff;
+  color: #111827;
+  text-align: left;
+  cursor: pointer;
+}
+
+.manual-student-option:hover,
+.manual-student-option[aria-selected="true"] {
+  background: #eaf5fa;
+}
+
+.manual-student-option span,
+.manual-student-no-results {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.manual-student-no-results {
+  padding: 12px;
+}
+
 .assignment-controls select {
   flex: 1;
   min-width: 200px;
@@ -4513,6 +4579,10 @@
   
   .assignment-controls {
     flex-direction: column;
+  }
+
+  .manual-student-autocomplete {
+    flex: auto;
   }
   
   .section-group-header {

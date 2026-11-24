@@ -1,6 +1,7 @@
 import { isCollegeTransferee } from "../../services/adminStorage";
 import { buildEvaluationSummaryReport } from "../../services/evaluationSummaryReport";
 import TablePagination from "../../components/common/TablePagination";
+import { resolveStudentPortalContext } from "../../services/studentPortalResolver";
 import { useConfirmation } from "../../hooks/useConfirmation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -1650,6 +1651,8 @@ export default function AdminEnrollees({
   const [showSectionManager, setShowSectionManager] = useState(false);
   const [manualStudentSearch, setManualStudentSearch] = useState("");
   const [manualStudentId, setManualStudentId] = useState("");
+  const [manualSearchFocused, setManualSearchFocused] = useState(false);
+  const [manualSearchIndex, setManualSearchIndex] = useState(-1);
   const [manualSectionId, setManualSectionId] = useState("");
   const [sectionManagerScope, setSectionManagerScope] = useState<
     "all" | "admissions" | "transferees"
@@ -8009,12 +8012,40 @@ export default function AdminEnrollees({
       );
     },
   );
-  const selectedManualStudent = filteredManualStudents.find(
+  const selectedManualStudent = sectionManagerPendingAssignments.find(
     (student) => student.id === manualStudentId,
   );
-  const selectedManualSection = classSections.find(
-    (section) => section.id === manualSectionId && !isSectionLocked(section),
+  const manualStoredStudent = selectedManualStudent
+    ? getActiveBranchStudents().find(
+        (student) => student.id === selectedManualStudent.id,
+      )
+    : undefined;
+  const manualStudentTerm = manualStoredStudent
+    ? resolveStudentPortalContext(manualStoredStudent).currentTerm
+    : undefined;
+  const matchingManualSections = selectedManualStudent && manualStudentTerm
+    ? getMatchingSectionsForEnrollee(
+        selectedManualStudent,
+        selectedManualStudent.yearLevel,
+        manualStudentTerm.semester,
+      ).filter((section) => section.currentEnrollees < section.maxCapacity)
+    : [];
+  const selectedManualSection = matchingManualSections.find(
+    (section) => section.id === manualSectionId,
   );
+  const showManualStudentResults =
+    manualSearchFocused && manualStudentSearchTerms.length > 0 && !selectedManualStudent;
+  const selectManualStudent = (student: Enrollee) => {
+    setManualStudentId(student.id);
+    setManualStudentSearch(
+      [student.fullName, student.studentNumber || student.trackingNumber]
+        .filter(Boolean)
+        .join(" - "),
+    );
+    setManualSectionId("");
+    setManualSearchFocused(false);
+    setManualSearchIndex(-1);
+  };
   const activeAdmissionPendingAssignments =
     activeTab === "transferees"
       ? pendingTransfereeAssignments
@@ -8482,6 +8513,8 @@ export default function AdminEnrollees({
                     setManualStudentSearch("");
                     setManualStudentId("");
                     setManualSectionId("");
+                    setManualSearchFocused(false);
+                    setManualSearchIndex(-1);
                     setShowSectionManager(true);
                   }}
                 >
@@ -11912,56 +11945,106 @@ export default function AdminEnrollees({
               <div className="manual-assignment" style={{ marginBottom: 16 }}>
                 <h3>Manual Assignment</h3>
                 <div className="assignment-controls">
-                  <input
-                    type="search"
-                    className="search-input"
-                    aria-label="Search students for manual assignment"
-                    placeholder="Search by student name or number..."
-                    value={manualStudentSearch}
-                    onChange={(event) => {
-                      setManualStudentSearch(event.target.value);
-                      setManualStudentId("");
-                    }}
-                    style={{ flexBasis: "100%", minWidth: 0 }}
-                  />
-                  <select
-                    className="student-select"
-                    id="studentSelect"
-                    aria-label="Select student"
-                    value={selectedManualStudent?.id ?? ""}
-                    onChange={(event) => setManualStudentId(event.target.value)}
-                  >
-                    <option value="" disabled>
-                      {filteredManualStudents.length > 0
-                        ? "Select Student"
-                        : "No matching students"}
-                    </option>
-                    {filteredManualStudents.map((student) => (
-                      <option key={student.id} value={student.id}>
-                        {student.fullName} -{" "}
-                        {student.studentNumber || student.trackingNumber}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="manual-student-autocomplete">
+                    <input
+                      type="search"
+                      role="combobox"
+                      autoComplete="off"
+                      aria-label="Search students for manual assignment"
+                      aria-autocomplete="list"
+                      aria-expanded={showManualStudentResults}
+                      aria-controls="manual-student-results"
+                      aria-activedescendant={
+                        showManualStudentResults && filteredManualStudents[manualSearchIndex]
+                          ? `manual-student-option-${manualSearchIndex}`
+                          : undefined
+                      }
+                      placeholder="Search student name or number..."
+                      value={manualStudentSearch}
+                      onFocus={() => setManualSearchFocused(true)}
+                      onBlur={() => setManualSearchFocused(false)}
+                      onChange={(event) => {
+                        setManualStudentSearch(event.target.value);
+                        setManualStudentId("");
+                        setManualSectionId("");
+                        setManualSearchIndex(-1);
+                        setManualSearchFocused(true);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          setManualSearchFocused(false);
+                          setManualSearchIndex(-1);
+                          return;
+                        }
+                        if (
+                          !manualStudentSearchTerms.length ||
+                          selectedManualStudent ||
+                          !filteredManualStudents.length
+                        ) return;
+                        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setManualSearchFocused(true);
+                          const nextIndex = event.key === "ArrowDown"
+                            ? Math.min(manualSearchIndex + 1, filteredManualStudents.length - 1)
+                            : Math.max(manualSearchIndex - 1, 0);
+                          setManualSearchIndex(nextIndex);
+                          window.requestAnimationFrame(() =>
+                            document.getElementById(`manual-student-option-${nextIndex}`)?.scrollIntoView({ block: "nearest" }),
+                          );
+                        } else if (
+                          event.key === "Enter" &&
+                          showManualStudentResults &&
+                          filteredManualStudents[manualSearchIndex]
+                        ) {
+                          event.preventDefault();
+                          selectManualStudent(filteredManualStudents[manualSearchIndex]);
+                        }
+                      }}
+                    />
+                    {showManualStudentResults && (
+                      <div className="manual-student-results" id="manual-student-results" role="listbox" aria-label="Matching students">
+                        {filteredManualStudents.length === 0 ? (
+                          <div className="manual-student-no-results" role="status">No matching students</div>
+                        ) : (
+                          filteredManualStudents.map((student, index) => (
+                            <button
+                              key={student.id}
+                              id={`manual-student-option-${index}`}
+                              type="button"
+                              role="option"
+                              aria-selected={index === manualSearchIndex}
+                              tabIndex={-1}
+                              className="manual-student-option"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => selectManualStudent(student)}
+                            >
+                              <strong>{student.fullName}</strong>
+                              <span>{student.studentNumber || student.trackingNumber} · {student.strandOrCourse} · {student.yearLevel}</span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <select
                     className="section-select"
                     id="sectionSelect"
                     aria-label="Select section"
+                    disabled={!selectedManualStudent || matchingManualSections.length === 0}
                     value={selectedManualSection?.id ?? ""}
                     onChange={(event) => setManualSectionId(event.target.value)}
                   >
                     <option value="" disabled>
-                      Select Section
+                      {!selectedManualStudent
+                        ? "Select a student first"
+                        : matchingManualSections.length === 0
+                          ? "No available matching sections"
+                          : "Select Section"}
                     </option>
-                    {classSections.map((section) => (
-                      <option
-                        key={section.id}
-                        value={section.id}
-                        disabled={isSectionLocked(section)}
-                      >
+                    {matchingManualSections.map((section) => (
+                      <option key={section.id} value={section.id}>
                         {section.code} - {section.semester} (
                         {section.currentEnrollees}/{section.maxCapacity})
-                        {isSectionLocked(section) ? " - Locked" : ""}
                       </option>
                     ))}
                   </select>
@@ -11977,6 +12060,8 @@ export default function AdminEnrollees({
                         setManualStudentSearch("");
                         setManualStudentId("");
                         setManualSectionId("");
+                        setManualSearchFocused(false);
+                        setManualSearchIndex(-1);
                       }
                     }}
                   >
