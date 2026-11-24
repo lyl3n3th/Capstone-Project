@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fetchAcademicSubjects, fetchAcademicInstructors, type AcademicSubjectRecord, type AcademicInstructorRecord } from '../../services/academicData';
 import {
   buildHistoricalGradeRecords, getHistoricalTerms, getHistoricalSubjects, isHistoricalGradeChanged,
@@ -7,16 +7,24 @@ import {
 import { fetchAndCacheStudentGradeRecordsForBranch, getStudentGradeRecords, getRequiredShsQuarterLabelsForSemester, STUDENT_GRADE_RECORDS_UPDATED_EVENT, type StoredStudentGradeRecord } from '../../services/studentGrades';
 import '../../styles/admin/student-historical-grades.css';
 
-interface Props { student: HistoricalStudent; branch: string; recordedBy: string }
+interface Props {
+  student: HistoricalStudent;
+  branch: string;
+  recordedBy: string;
+  schoolYearFilter?: string;
+  semesterFilter?: string;
+  searchTerm?: string;
+  onRemove?: (record: StoredStudentGradeRecord) => void;
+}
 type SectionDrafts = Record<string, HistoricalGradeDraft>;
 type SectionFeedback = { error?: string; message?: string };
 const sectionKey = (term: HistoricalTerm, period: string) => `${term.academicYear}::${term.semester}::${period}`;
 const subjectKey = (subject: AcademicSubjectRecord) => subject.code.trim().toUpperCase();
 
-export default function StudentHistoricalGrades({ student, branch, recordedBy }: Props) {
+export default function StudentHistoricalGrades({ student, branch, recordedBy, schoolYearFilter = 'all', semesterFilter = 'all', searchTerm = '', onRemove }: Props) {
   const [subjects, setSubjects] = useState<AcademicSubjectRecord[]>([]);
   const [instructors, setInstructors] = useState<AcademicInstructorRecord[]>([]);
-  const [records, setRecords] = useState<StoredStudentGradeRecord[]>([]);
+  const [records, setRecords] = useState<StoredStudentGradeRecord[]>(() => getStudentGradeRecords({ branch, studentId: student.id }));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [drafts, setDrafts] = useState<Record<string, SectionDrafts>>({});
@@ -32,7 +40,7 @@ export default function StudentHistoricalGrades({ student, branch, recordedBy }:
           setRecords(saved.filter(row => row.studentId.toUpperCase() === student.id.toUpperCase()));
         }
       })
-      .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : 'Unable to load historical grades.'); })
+      .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : 'Unable to load previous grades.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [branch, student.id]);
@@ -89,16 +97,16 @@ export default function StudentHistoricalGrades({ student, branch, recordedBy }:
     } finally { setSavingSection(null); }
   };
 
-  const terms = getHistoricalTerms(student);
-  return <section className="student-history" aria-label="Historical grades">
-    <h3>Previous Years and Semesters</h3>
-    <p>Earlier terms are based on the imported year level and academic year. Blank grades are not included in averages. Verify subjects against the student's official records.</p>
-    <p>Enter grades and choose the original instructor directly in each row. Save applies only to the semester or quarter you are editing. Clear discards its unsaved changes.</p>
-    <p>To remove a saved grade, use Remove in Uploaded Grades below.</p>
-    {loading && <p role="status">Loading curriculum and historical grades...</p>}
+  const terms = getHistoricalTerms(student).filter(term =>
+    (schoolYearFilter === "all" || term.academicYear === schoolYearFilter) &&
+    (semesterFilter === "all" || term.semester === semesterFilter),
+  );
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  return <section className="student-history" aria-label="Previous semester grades">
+    {loading && <p role="status">Loading curriculum and grades...</p>}
     {error && <p role="alert" className="student-history-error">{error}</p>}
     {!loading && !instructors.length && <p>Add the original instructor to this branch in Instructor Management before recording grades.</p>}
-    {!loading && !terms.length && <p>No earlier terms precede the student's imported placement.</p>}
+    {!loading && !terms.length && <p>No previous semesters match the current filters.</p>}
     {!loading && terms.map(term => {
       const available = getHistoricalSubjects(student, term, subjects);
       const extra = records.filter(row => row.source === 'historical' && row.academicYear === term.academicYear &&
@@ -110,31 +118,35 @@ export default function StudentHistoricalGrades({ student, branch, recordedBy }:
       }))];
       const periods = student.program === 'College' ? [term.semester] : getRequiredShsQuarterLabelsForSemester(term.semester);
       return <details key={`${term.academicYear}-${term.semester}`} open className="student-history-term">
-        <summary>{term.yearLevel} · {term.academicYear} · {term.semester}</summary>
-        {!all.length ? <p>No subjects are configured for this course and term. Add them in Academic Management to enter historical grades.</p> : periods.map(period => {
+        <summary>{term.yearLevel} � {term.academicYear} � {term.semester}</summary>
+        {!all.length ? <p>No subjects are configured for this course and term. Add them in Academic Management to enter grades.</p> : periods.map(period => {
           const key = sectionKey(term, period);
           const dirty = all.some(subject => {
             const draft = drafts[key]?.[subjectKey(subject)];
             return draft && isHistoricalGradeChanged(draft, matching(subject.code, term, period));
           });
-          const sectionLabel = `${term.yearLevel} · ${term.academicYear} · ${term.semester}${student.program === 'College' ? '' : ` · ${period}`}`;
+          const sectionLabel = `${term.yearLevel} � ${term.academicYear} � ${term.semester}${student.program === 'College' ? '' : ` � ${period}`}`;
           return <section className="student-history-period" key={period} aria-label={sectionLabel}>
             {student.program !== 'College' && <h4>{period}</h4>}
             <div className="students-grade-table-wrapper"><table className="students-grade-table">
-              <thead><tr><th>Subject</th><th>Units</th><th>{period}</th><th>Original instructor</th></tr></thead>
-              <tbody>{all.map(subject => {
+              <thead><tr><th>Subject</th><th>Units</th><th>{period}</th><th>Instructor</th><th>Actions</th></tr></thead>
+              <tbody>{all.filter(subject => {
+                const saved = matching(subject.code, term, period);
+                return (!onRemove || !saved || saved.source === "historical") && (!normalizedSearch ||
+                  [subject.code, subject.name, period, saved?.grade, saved?.evaluation, saved?.instructorName].filter(Boolean).join(" ").toLowerCase().includes(normalizedSearch));
+              }).map(subject => {
                 const saved = matching(subject.code, term, period);
                 const protectedRecord = Boolean(saved && saved.source !== 'historical');
                 const value = drafts[key]?.[subjectKey(subject)] ?? { grade: saved?.grade ?? '', instructorId: saved?.instructorId ?? '' };
                 const teacherUnavailable = value.instructorId && !instructors.some(teacher => teacher.id === value.instructorId);
                 const label = `${subject.code}, ${term.academicYear}, ${period}`;
                 return <tr key={subject.id}>
-                  <td>{subject.code} — {subject.name}{protectedRecord && <small className="student-history-readonly">Already uploaded</small>}</td>
-                  <td>{subject.units ?? '—'}</td>
+                  <td>{subject.code} - {subject.name}{protectedRecord && <small className="student-history-readonly">Already uploaded</small>}</td>
+                  <td>{subject.units ?? '-'}</td>
                   <td><input className="student-history-grade-input" aria-label={`Historical grade: ${label}`}
                     value={value.grade} disabled={Boolean(savingSection) || protectedRecord}
                     onChange={event => change(key, subject, saved, 'grade', event.target.value)}
-                    placeholder={student.program === 'College' ? '50–100, INC, FAILED, DRP' : '60–100'} /></td>
+                    placeholder={student.program === 'College' ? '50-100, INC, FAILED, DRP' : '60-100'} /></td>
                   <td><select className="student-history-instructor-select" aria-label={`Original instructor: ${label}`}
                     value={value.instructorId} disabled={Boolean(savingSection) || protectedRecord}
                     onChange={event => change(key, subject, saved, 'instructorId', event.target.value)}>
@@ -142,6 +154,8 @@ export default function StudentHistoricalGrades({ student, branch, recordedBy }:
                     {teacherUnavailable && <option value={value.instructorId} disabled>{saved?.instructorName || 'Saved instructor'} (unavailable)</option>}
                     {instructors.map(teacher => <option key={teacher.id} value={teacher.id}>{teacher.name} ({teacher.employeeId})</option>)}
                   </select></td>
+                  <td>{onRemove && saved && <button type="button" className="students-grade-action-btn danger"
+                    disabled={Boolean(savingSection) || Boolean(drafts[key]?.[subjectKey(subject)])} onClick={() => onRemove(saved)}>Remove</button>}</td>
                 </tr>;
               })}</tbody>
             </table></div>
@@ -158,3 +172,4 @@ export default function StudentHistoricalGrades({ student, branch, recordedBy }:
     })}
   </section>;
 }
+

@@ -9,6 +9,8 @@ import * as XLSX from "xlsx";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import SystemAlertModal from "../../components/common/SystemAlertModal";
 import StudentImportModal from "../../components/admin/StudentImportModal";
+import StudentHistoricalGrades from "../../components/admin/StudentHistoricalGrades";
+import { getHistoricalTerms } from "../../services/studentHistoricalGrades";
 import { useAuth } from "../../hooks/useAuth";
 import {
   fetchAcademicInstructors,
@@ -2928,6 +2930,10 @@ export default function AdminStudents({
         : [],
     [currentBranch, gradeRecordsVersion, viewingStudent],
   );
+  const viewingStudentPriorTerms = viewingStudent && isImportedStudent(viewingStudent)
+    ? getHistoricalTerms(viewingStudent)
+    : [];
+  const priorTermKeys = new Set(viewingStudentPriorTerms.map(term => buildGradeTermKey(term.academicYear, term.semester)));
   const viewingStudentGradeTriggerIds = useMemo(
     () =>
       new Set(
@@ -2938,14 +2944,14 @@ export default function AdminStudents({
   );
   const viewingStudentGradeSchoolYearOptions = Array.from(
     new Set(
-      viewingStudentGradeRecords
+      [...viewingStudentGradeRecords, ...viewingStudentPriorTerms]
         .map((record) => record.academicYear)
         .filter(Boolean),
     ),
   ).sort();
   const viewingStudentGradeSemesterOptions = Array.from(
     new Set(
-      viewingStudentGradeRecords
+      [...viewingStudentGradeRecords, ...viewingStudentPriorTerms]
         .map((record) => record.semester)
         .filter(Boolean),
     ),
@@ -2976,10 +2982,13 @@ export default function AdminStudents({
       viewingStudentGradeRecords,
     ],
   );
+  const isRegularGradeRow = (record: StoredStudentGradeRecord) =>
+    record.source !== "historical" || !priorTermKeys.has(buildGradeTermKey(record.academicYear, record.semester));
+  const regularGradeRecords = filteredViewingStudentGradeRecords.filter(isRegularGradeRow);
   const filteredViewingStudentGradeTerms = sortAcademicTerms(
     Array.from(
       new Map(
-        filteredViewingStudentGradeRecords
+        regularGradeRecords
           .filter(
             (record) => Boolean(record.academicYear) && Boolean(record.semester),
           )
@@ -5484,11 +5493,11 @@ export default function AdminStudents({
                   <div className="students-profile-field students-profile-field-full">
                     <label>
                       {isViewingCollegeStudent
-                        ? "Uploaded Grades by Semester"
-                        : "Uploaded Grades by Quarter"}
+                        ? "Grades by Semester"
+                        : "Grades by Quarter"}
                     </label>
                     <div className="students-profile-value students-profile-list-box">
-                      {viewingStudentGradeRecords.length > 0 ? (
+                      {viewingStudentGradeRecords.length > 0 || viewingStudentPriorTerms.length > 0 ? (
                         <div className="students-grade-sections">
                           <div className="students-grade-toolbar">
                             <div className="students-grade-filter-field">
@@ -5661,16 +5670,32 @@ export default function AdminStudents({
                               {gradeManagementFeedback.message}
                             </p>
                           ) : null}
+                          {viewingStudentPriorTerms.length > 0 && (
+                            <StudentHistoricalGrades
+                              key={`${viewingStudent.branch || currentBranch}:${viewingStudent.id}`}
+                              student={viewingStudent}
+                              branch={viewingStudent.branch || currentBranch}
+                              recordedBy={loggedInUsername}
+                              schoolYearFilter={gradeSchoolYearFilter}
+                              semesterFilter={gradeSemesterFilter}
+                              searchTerm={gradeSearchTerm}
+                              onRemove={(record) => void handleRemoveGradeRecords({
+                                branch: viewingStudent.branch || currentBranch,
+                                records: [record],
+                                summaryLabel: `${record.subjectCode} - ${record.subjectTitle} (${record.gradingPeriod})`,
+                              })}
+                            />
+                          )}
                           {filteredViewingStudentGradeTerms.map(
                             ({ academicYear, semester }) => {
                               const filteredTermGrades =
-                                filteredViewingStudentGradeRecords.filter(
+                                regularGradeRecords.filter(
                                   (record) =>
                                     record.academicYear === academicYear &&
                                     record.semester === semester,
                                 );
                               const allTermGrades =
-                                viewingStudentGradeRecords.filter(
+                                viewingStudentGradeRecords.filter(isRegularGradeRow).filter(
                                   (record) =>
                                   record.academicYear === academicYear &&
                                   record.semester === semester,
@@ -5923,7 +5948,7 @@ export default function AdminStudents({
                               );
                             },
                           )}
-                          {filteredViewingStudentGradeTerms.length === 0 ? (
+                          {filteredViewingStudentGradeTerms.length === 0 && viewingStudentPriorTerms.length === 0 ? (
                             <div className="students-grade-empty-state">
                               No grades match the current filters.
                             </div>
