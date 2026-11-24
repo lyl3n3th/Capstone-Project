@@ -29,6 +29,15 @@ const roundTrip = XLSX.read(XLSX.write(workbook(), { type: "buffer", bookType: "
 let result = api.parseStudentImportWorkbook(roundTrip);
 assert.equal(result.rows.length, 1, "Prefilled branch-only rows must be ignored");
 assert.deepEqual(api.validateStudentImportRows(result.rows, context), []);
+const shsOffering = { ...offerings[0], program_name: "Senior High School", track_name: "ICT" };
+const shsContext = { ...context, offerings: [...offerings, shsOffering] };
+for (const year_level of ["Grade 11", "Grade 12"]) {
+  const shsRow = { ...valid, program: "SHS", year_level, track_name: "ICT" };
+  const parsed = api.parseStudentImportWorkbook(workbook([{ row: 2, values: shsRow }]));
+  assert(api.validateStudentImportRows(parsed.rows, shsContext).some(error => error.field === "academic_standing" && /must have Regular/.test(error.message)));
+  const regular = api.parseStudentImportWorkbook(workbook([{ row: 2, values: { ...shsRow, academic_standing: "Regular" } }]));
+  assert.deepEqual(api.validateStudentImportRows(regular.rows, shsContext), []);
+}
 assert.equal(result.rows[0].values.student_number, "BAC-001234");
 assert.equal(result.rows[0].values.phone_number, "09123456789");
 assert.equal(api.STUDENT_IMPORT_COLUMNS.some((column) => column.key === "section"), false);
