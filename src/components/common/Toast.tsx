@@ -64,37 +64,44 @@ export const Toast: React.FC<ToastProps> = ({
         borderRadius: "8px",
         padding: "12px 16px",
         marginBottom: "12px",
-        display: "flex",
+        display: "grid",
+        gridTemplateColumns: "20px minmax(0, 1fr) 24px",
         alignItems: "center",
         gap: "12px",
         boxSizing: "border-box",
-        minWidth: "min(316px, calc(100vw - 40px))",
-        maxWidth: "min(416px, calc(100vw - 40px))",
+        width: "min(416px, calc(100vw - 40px))",
+        minWidth: 0,
+        maxWidth: "100%",
+        overflow: "hidden",
         animation: "slideIn 0.3s ease",
       }}
     >
-      <span style={{ color: getColor(), fontSize: "20px", flexShrink: 0 }}>
+      <span style={{ color: getColor(), fontSize: "20px", display: "flex" }}>
         {getIcon()}
       </span>
-      <span
+      <div
+        className="toast-message"
         style={{
-          flex: 1,
           minWidth: 0,
+          maxWidth: "100%",
           overflowWrap: "anywhere",
+          wordBreak: "break-word",
           whiteSpace: "normal",
           fontSize: "14px",
           color: "#333",
         }}
       >
         {message}
-      </span>
+      </div>
       <button
         onClick={onClose}
         style={{
           background: "none",
           border: "none",
           cursor: "pointer",
-          flexShrink: 0,
+          padding: 0,
+          width: "24px",
+          minWidth: 0,
           color: "#999",
           fontSize: "14px",
         }}
@@ -121,6 +128,7 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
         position: "fixed",
         top: "20px",
         right: "20px",
+        maxWidth: "calc(100vw - 40px)",
         zIndex: 9999,
         display: "flex",
         flexDirection: "column",
