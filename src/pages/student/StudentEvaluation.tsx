@@ -5,6 +5,7 @@ import {
   FaClipboardList,
   FaLock,
   FaLockOpen,
+  FaUser,
 } from "react-icons/fa";
 import Sidebar from "../../components/common/Sidebar";
 import Header from "../../components/common/Header";
@@ -559,6 +560,7 @@ function StudentEvaluation() {
                     <div className="s-evaluation-detail-meta">
                       <div className="s-evaluation-subject-list">
                         <span className="s-evaluation-subject-chip">
+                          <FaUser aria-hidden="true" />
                           {card.instructorName}
                         </span>
                       </div>
@@ -777,6 +779,7 @@ function StudentEvaluation() {
 
                         <div className="s-evaluation-subject-list">
                           <span className="s-evaluation-subject-chip">
+                            <FaUser aria-hidden="true" />
                             {card.instructorName}
                           </span>
                         </div>
