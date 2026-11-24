@@ -18,3 +18,58 @@
 .student-history .student-history-save { background: #066287; color: white; border-color: #066287; }
 .student-history .student-history-success { color: #166534; }
 .student-history .student-history-error { color: #b91c1c; }
+
+/* Keep the imported grade tables aligned across every term and quarter. */
+.student-history .students-grade-table {
+  table-layout: fixed;
+  min-width: 920px;
+}
+
+.student-history .students-grade-table th,
+.student-history .students-grade-table td {
+  box-sizing: border-box;
+  padding: 12px 10px;
+}
+
+.student-history .students-grade-table th:nth-child(1),
+.student-history .students-grade-table td:nth-child(1) {
+  width: 34%;
+  overflow-wrap: anywhere;
+}
+
+.student-history .students-grade-table th:nth-child(2),
+.student-history .students-grade-table td:nth-child(2) {
+  width: 7%;
+  white-space: nowrap;
+}
+
+.student-history .students-grade-table th:nth-child(3),
+.student-history .students-grade-table td:nth-child(3) {
+  width: 23%;
+}
+
+.student-history .students-grade-table th:nth-child(4),
+.student-history .students-grade-table td:nth-child(4) {
+  width: 25%;
+}
+
+.student-history .students-grade-table th:nth-child(5),
+.student-history .students-grade-table td:nth-child(5) {
+  width: 11%;
+  white-space: nowrap;
+}
+
+.student-history .student-history-grade-input,
+.student-history .student-history-instructor-select {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: none;
+}
+
+.student-history .students-grade-action-btn {
+  width: auto;
+  min-width: 76px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
