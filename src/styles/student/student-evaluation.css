@@ -157,7 +157,6 @@
   color: #0f172a;
   font-size: 18px;
   line-height: 1.2;
-  min-height: 3.6em;
   text-align: center;
   overflow-wrap: anywhere;
 }
@@ -424,6 +423,7 @@
 
 .s-evaluation-essay-field {
   display: grid;
+  min-width: 0;
   gap: 0.55rem;
   margin-top: 0.85rem;
 }
@@ -436,7 +436,11 @@
 }
 
 .s-evaluation-essay-field textarea {
+  display: block;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: 120px;
   resize: vertical;
   border: 1px solid #cbd5e1;
