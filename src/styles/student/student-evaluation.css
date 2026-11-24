@@ -111,7 +111,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 18px;
-  grid-auto-rows: 1fr;
+  grid-auto-rows: auto;
   align-items: stretch;
 }
 
@@ -154,6 +154,7 @@
 
 .s-evaluation-card-copy h3 {
   margin: 0;
+  min-height: 3.6em;
   color: #0f172a;
   font-size: 18px;
   line-height: 1.2;
@@ -224,6 +225,25 @@
 
 .s-evaluation-subject-chip svg {
   flex-shrink: 0;
+}
+
+.s-evaluation-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+@supports (grid-template-rows: subgrid) {
+  .s-evaluation-card {
+    display: grid;
+    grid-row: span 3;
+    grid-template-rows: subgrid;
+  }
+
+  .s-evaluation-card-body {
+    grid-row: 3;
+  }
 }
 
 .s-evaluation-card-note {

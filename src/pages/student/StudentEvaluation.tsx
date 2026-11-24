@@ -784,50 +784,52 @@ function StudentEvaluation() {
                           </span>
                         </div>
 
-                        <p className="s-evaluation-card-note">
-                          {isSubmitted
-                            ? "Your evaluation for this subject has been submitted."
-                            : getEvaluationStateCopy(card.state)}
-                        </p>
+                        <div className="s-evaluation-card-body">
+                          <p className="s-evaluation-card-note">
+                            {isSubmitted
+                              ? "Your evaluation for this subject has been submitted."
+                              : getEvaluationStateCopy(card.state)}
+                          </p>
 
-                        {card.state === "open" && !isSubmitted ? (
-                          <>
-                            <div className="s-evaluation-progress">
-                              <div className="s-evaluation-progress-head">
-                                <span>Evaluation progress</span>
-                                <strong>
-                                  {cardProgress.answeredCount}/
-                                  {cardProgress.totalCount} answered
-                                </strong>
+                          {card.state === "open" && !isSubmitted ? (
+                            <>
+                              <div className="s-evaluation-progress">
+                                <div className="s-evaluation-progress-head">
+                                  <span>Evaluation progress</span>
+                                  <strong>
+                                    {cardProgress.answeredCount}/
+                                    {cardProgress.totalCount} answered
+                                  </strong>
+                                </div>
+                                <div
+                                  className="s-evaluation-progress-track"
+                                  aria-label={`${cardProgress.percentage}% complete`}
+                                >
+                                  <span
+                                    style={{
+                                      width: `${cardProgress.percentage}%`,
+                                    }}
+                                  />
+                                </div>
                               </div>
-                              <div
-                                className="s-evaluation-progress-track"
-                                aria-label={`${cardProgress.percentage}% complete`}
+
+                              <button
+                                type="button"
+                                className="s-evaluation-action"
+                                onClick={() => handleStartEvaluation(card.key)}
                               >
-                                <span
-                                  style={{
-                                    width: `${cardProgress.percentage}%`,
-                                  }}
-                                />
-                              </div>
+                                <FaClipboardList />
+                                Evaluate Instructor
+                              </button>
+                            </>
+                          ) : null}
+                          {isSubmitted ? (
+                            <div className="s-evaluation-submitted">
+                              <FaCheckCircle />
+                              Submitted
                             </div>
-
-                            <button
-                              type="button"
-                              className="s-evaluation-action"
-                              onClick={() => handleStartEvaluation(card.key)}
-                            >
-                              <FaClipboardList />
-                              Evaluate Instructor
-                            </button>
-                          </>
-                        ) : null}
-                        {isSubmitted ? (
-                          <div className="s-evaluation-submitted">
-                            <FaCheckCircle />
-                            Submitted
-                          </div>
-                        ) : null}
+                          ) : null}
+                        </div>
                       </article>
                     );
                   })}
