@@ -10,6 +10,7 @@ import { useStudent } from "../../hooks/useStudent";
 import {
   fetchInstructorEvaluationSubmissions,
   getEnrollmentRetakeChoiceGroups,
+  getCompletedSubjectCodes,
   getStudentCredentialOverview,
   getStudentPortalSubjectsForTerm,
   INSTRUCTOR_EVALUATION_SUBMISSIONS_UPDATED_EVENT,
@@ -44,6 +45,7 @@ import {
   uploadEnrollmentRequestAttachment,
 } from "../../services/enrollmentRequests";
 import {
+  fetchAndCacheStudentGradeRecordsForBranch,
   getStudentGradeRecords,
   STUDENT_GRADE_RECORDS_UPDATED_EVENT,
   type StoredStudentGradeRecord,
@@ -93,386 +95,6 @@ type NextAcademicPlacement = {
   academicYear: string;
   hasNextTerm: boolean;
 };
-
-type EnrollmentFallbackSubject = {
-  id: string;
-  code: string;
-  title: string;
-  units?: number;
-  program: "SHS" | "College";
-  yearLevel: string;
-  semester: string;
-  strand?: string;
-};
-
-const FALLBACK_ENROLLMENT_SUBJECTS: EnrollmentFallbackSubject[] = [
-  {
-    id: "shs-g11-s2-1",
-    code: "MIN106",
-    title: "21st Century Literature from the Philippines and the World",
-    program: "SHS",
-    yearLevel: "Grade 11",
-    semester: "2nd Semester",
-  },
-  {
-    id: "shs-g11-s2-2",
-    code: "MIN107",
-    title: "Statistics and Probability",
-    program: "SHS",
-    yearLevel: "Grade 11",
-    semester: "2nd Semester",
-  },
-  {
-    id: "shs-g11-s2-3",
-    code: "MIN108",
-    title: "Physical Science",
-    program: "SHS",
-    yearLevel: "Grade 11",
-    semester: "2nd Semester",
-  },
-  {
-    id: "shs-g11-s2-4",
-    code: "MIN109",
-    title: "Empowerment Technologies",
-    program: "SHS",
-    yearLevel: "Grade 11",
-    semester: "2nd Semester",
-  },
-  {
-    id: "shs-g11-s2-ict-1",
-    code: "MAJ106",
-    title: "Programming Fundamentals",
-    program: "SHS",
-    yearLevel: "Grade 11",
-    semester: "2nd Semester",
-    strand: "ICT",
-  },
-  {
-    id: "shs-g11-s2-ict-2",
-    code: "MAJ107",
-    title: "Web Development Basics",
-    program: "SHS",
-    yearLevel: "Grade 11",
-    semester: "2nd Semester",
-    strand: "ICT",
-  },
-  {
-    id: "shs-g12-s1-1",
-    code: "MIN201",
-    title: "English for Academic and Professional Purposes",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "1st Semester",
-  },
-  {
-    id: "shs-g12-s1-2",
-    code: "MIN202",
-    title: "Media and Information Literacy",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "1st Semester",
-  },
-  {
-    id: "shs-g12-s1-3",
-    code: "MIN203",
-    title: "Contemporary Philippine Arts from the Regions",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "1st Semester",
-  },
-  {
-    id: "shs-g12-s1-4",
-    code: "MIN204",
-    title: "Research in Daily Life 1",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "1st Semester",
-  },
-  {
-    id: "shs-g12-s1-ict-1",
-    code: "MAJ201",
-    title: "Animation and Multimedia",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "1st Semester",
-    strand: "ICT",
-  },
-  {
-    id: "shs-g12-s1-ict-2",
-    code: "MAJ202",
-    title: "Mobile Application Fundamentals",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "1st Semester",
-    strand: "ICT",
-  },
-  {
-    id: "shs-g12-s2-1",
-    code: "MIN205",
-    title: "Inquiries, Investigations and Immersion",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "2nd Semester",
-  },
-  {
-    id: "shs-g12-s2-2",
-    code: "MIN206",
-    title: "Understanding Culture, Society and Politics",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "2nd Semester",
-  },
-  {
-    id: "shs-g12-s2-3",
-    code: "MIN207",
-    title: "Introduction to the Philosophy of the Human Person",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "2nd Semester",
-  },
-  {
-    id: "shs-g12-s2-4",
-    code: "MIN208",
-    title: "Research in Daily Life 2",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "2nd Semester",
-  },
-  {
-    id: "shs-g12-s2-ict-1",
-    code: "MAJ203",
-    title: "Systems Integration and Architecture",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "2nd Semester",
-    strand: "ICT",
-  },
-  {
-    id: "shs-g12-s2-ict-2",
-    code: "MAJ204",
-    title: "Work Immersion",
-    program: "SHS",
-    yearLevel: "Grade 12",
-    semester: "2nd Semester",
-    strand: "ICT",
-  },
-  {
-    id: "col-1y-2s-1",
-    code: "GE102",
-    title: "Purposive Communication",
-    units: 3,
-    program: "College",
-    yearLevel: "1st Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-1y-2s-2",
-    code: "MATH102",
-    title: "Mathematics in the Modern World",
-    units: 3,
-    program: "College",
-    yearLevel: "1st Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-1y-2s-3",
-    code: "CC102",
-    title: "Computer Programming 1",
-    units: 3,
-    program: "College",
-    yearLevel: "1st Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-1y-2s-4",
-    code: "NSTP102",
-    title: "NSTP 2",
-    units: 3,
-    program: "College",
-    yearLevel: "1st Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-2y-1s-1",
-    code: "GE201",
-    title: "Readings in Philippine History",
-    units: 3,
-    program: "College",
-    yearLevel: "2nd Year",
-    semester: "1st Semester",
-  },
-  {
-    id: "col-2y-1s-2",
-    code: "IT201",
-    title: "Data Structures and Algorithms",
-    units: 3,
-    program: "College",
-    yearLevel: "2nd Year",
-    semester: "1st Semester",
-  },
-  {
-    id: "col-2y-1s-3",
-    code: "IT202",
-    title: "Object-Oriented Programming",
-    units: 3,
-    program: "College",
-    yearLevel: "2nd Year",
-    semester: "1st Semester",
-  },
-  {
-    id: "col-2y-1s-4",
-    code: "IT203",
-    title: "Discrete Mathematics",
-    units: 3,
-    program: "College",
-    yearLevel: "2nd Year",
-    semester: "1st Semester",
-  },
-  {
-    id: "col-2y-2s-1",
-    code: "GE202",
-    title: "Ethics",
-    units: 3,
-    program: "College",
-    yearLevel: "2nd Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-2y-2s-2",
-    code: "IT204",
-    title: "Database Management Systems",
-    units: 3,
-    program: "College",
-    yearLevel: "2nd Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-2y-2s-3",
-    code: "IT205",
-    title: "Networking 1",
-    units: 3,
-    program: "College",
-    yearLevel: "2nd Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-2y-2s-4",
-    code: "IT206",
-    title: "Human-Computer Interaction",
-    units: 3,
-    program: "College",
-    yearLevel: "2nd Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-3y-1s-1",
-    code: "IT301",
-    title: "Web Development",
-    units: 3,
-    program: "College",
-    yearLevel: "3rd Year",
-    semester: "1st Semester",
-  },
-  {
-    id: "col-3y-1s-2",
-    code: "IT302",
-    title: "Systems Analysis and Design",
-    units: 3,
-    program: "College",
-    yearLevel: "3rd Year",
-    semester: "1st Semester",
-  },
-  {
-    id: "col-3y-1s-3",
-    code: "IT303",
-    title: "Integrative Programming",
-    units: 3,
-    program: "College",
-    yearLevel: "3rd Year",
-    semester: "1st Semester",
-  },
-  {
-    id: "col-3y-2s-1",
-    code: "IT304",
-    title: "Mobile Application Development",
-    units: 3,
-    program: "College",
-    yearLevel: "3rd Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-3y-2s-2",
-    code: "IT305",
-    title: "Information Assurance",
-    units: 3,
-    program: "College",
-    yearLevel: "3rd Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-3y-2s-3",
-    code: "IT306",
-    title: "Cloud Computing",
-    units: 3,
-    program: "College",
-    yearLevel: "3rd Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-4y-1s-1",
-    code: "IT401",
-    title: "Capstone Project 1",
-    units: 3,
-    program: "College",
-    yearLevel: "4th Year",
-    semester: "1st Semester",
-  },
-  {
-    id: "col-4y-1s-2",
-    code: "IT402",
-    title: "Data Analytics",
-    units: 3,
-    program: "College",
-    yearLevel: "4th Year",
-    semester: "1st Semester",
-  },
-  {
-    id: "col-4y-1s-3",
-    code: "IT403",
-    title: "IT Project Management",
-    units: 3,
-    program: "College",
-    yearLevel: "4th Year",
-    semester: "1st Semester",
-  },
-  {
-    id: "col-4y-2s-1",
-    code: "IT405",
-    title: "Capstone Project 2",
-    units: 3,
-    program: "College",
-    yearLevel: "4th Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-4y-2s-2",
-    code: "IT406",
-    title: "Internship / Practicum",
-    units: 6,
-    program: "College",
-    yearLevel: "4th Year",
-    semester: "2nd Semester",
-  },
-  {
-    id: "col-4y-2s-3",
-    code: "IT407",
-    title: "Professional Ethics",
-    units: 3,
-    program: "College",
-    yearLevel: "4th Year",
-    semester: "2nd Semester",
-  },
-];
 
 const useToast = () => {
   const toastCounterRef = useRef(0);
@@ -580,52 +202,6 @@ const getEnrollmentRequirementItems = (
     key: requirement.key,
     label: requirement.name,
   }));
-
-const getFallbackEnrollmentSubjects = ({
-  program,
-  yearLevel,
-  semester,
-  strandOrCourse,
-  academicYear,
-}: {
-  program: "SHS" | "College";
-  yearLevel: string;
-  semester: string;
-  strandOrCourse?: string;
-  academicYear: string;
-}): StudentPortalSubject[] => {
-  const normalizedTrack = normalizeAcademicToken(strandOrCourse);
-
-  return FALLBACK_ENROLLMENT_SUBJECTS.filter((subject) => {
-    if (
-      subject.program !== program ||
-      subject.yearLevel !== yearLevel ||
-      subject.semester !== semester
-    ) {
-      return false;
-    }
-
-    if (!subject.strand) {
-      return true;
-    }
-
-    return normalizedTrack.includes(normalizeAcademicToken(subject.strand));
-  })
-    .sort((left, right) => left.code.localeCompare(right.code))
-    .map((subject) => ({
-      id: subject.id,
-      code: subject.code,
-      title: subject.title,
-      units: subject.units,
-      schedule: "To be announced",
-      room: "TBA",
-      professor: "To be assigned",
-      days: "TBA",
-      time: "To be announced",
-      semester: subject.semester,
-      academicYear,
-    }));
-};
 
 const formatCurrency = (amount: number) =>
   new Intl.NumberFormat("en-PH", {
@@ -809,29 +385,6 @@ function StudentEnrollment() {
         trackingNumber: student.trackingNumber,
       })
     : null;
-  const storedAssignedSubjects =
-    student && nextPlacement.hasNextTerm
-      ? getStudentPortalSubjectsForTerm({
-          branch: student.branch,
-          program: storageProgram,
-          yearLevel: nextPlacement.yearLevel,
-          strandOrCourse: student.program,
-          semester: nextPlacement.semester,
-          academicYear: nextPlacement.academicYear,
-        })
-      : [];
-  const assignedSubjects =
-    storedAssignedSubjects.length > 0
-      ? storedAssignedSubjects
-      : nextPlacement.hasNextTerm
-        ? getFallbackEnrollmentSubjects({
-            program: storageProgram,
-            yearLevel: nextPlacement.yearLevel,
-            semester: nextPlacement.semester,
-            strandOrCourse: student?.program,
-            academicYear: nextPlacement.academicYear,
-          })
-        : [];
   const isCollegeStudent = Boolean(student && student.programType !== "SHS");
   const enrollmentRequirements = useMemo(
     () => getEnrollmentRequirementItems(storageProgram),
@@ -852,6 +405,22 @@ function StudentEnrollment() {
     },
     [gradeRecordsVersion, storageProgram, student?.branch, student?.studentNumber],
   );
+  const completedSubjectCodes = getCompletedSubjectCodes(studentGradeRecords);
+  const assignedSubjects =
+    student && nextPlacement.hasNextTerm
+      ? getStudentPortalSubjectsForTerm({
+          branch: student.branch,
+          program: storageProgram,
+          yearLevel: nextPlacement.yearLevel,
+          strandOrCourse: student.program,
+          semester: nextPlacement.semester,
+          academicYear: nextPlacement.academicYear,
+          requireCourseMatch: true,
+        }).filter(
+          (subject) =>
+            !completedSubjectCodes.has(subject.code.trim().toUpperCase()),
+        )
+      : [];
   const currentTermSubjects = useMemo(
     () =>
       subjects.filter(
@@ -1662,6 +1231,16 @@ function StudentEnrollment() {
       window.removeEventListener("storage", handleStorageUpdate);
     };
   }, []);
+
+  useEffect(() => {
+    if (!student?.branch) return;
+
+    void fetchAndCacheStudentGradeRecordsForBranch(student.branch).catch(
+      (error) => {
+        console.warn("Unable to refresh student grades for enrollment subjects.", error);
+      },
+    );
+  }, [student?.branch]);
 
   useEffect(() => {
     if (!student) {

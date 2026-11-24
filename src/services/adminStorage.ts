@@ -18,6 +18,7 @@ import {
 } from "./admission";
 import {
   buildEnrollmentSubjectKey,
+  getRequiredShsQuarterLabels,
   type EnrollmentRetakeChoiceGroup,
   type EnrollmentRetakeRequestItem,
 } from "./enrollmentLoadPlanner";
@@ -2222,50 +2223,93 @@ const compareStoredGradeRecords = (
 const normalizeStoredSubjectCompletionCode = (code?: string | null) =>
   code?.trim().toUpperCase() || "";
 
-const getCompletedSubjectCodes = (gradeRecords: StoredStudentGradeRecord[]) => {
-  const latestTerminalRecordsBySubject = new Map<string, StoredStudentGradeRecord>();
-
-  gradeRecords.filter(isTerminalStoredGradeRecord).forEach((record) => {
-    const subjectCode = normalizeStoredSubjectCompletionCode(record.subjectCode);
-
-    if (!subjectCode) {
-      return;
-    }
-
-    const existingRecord = latestTerminalRecordsBySubject.get(subjectCode);
-
-    if (!existingRecord || compareStoredGradeRecords(record, existingRecord) >= 0) {
-      latestTerminalRecordsBySubject.set(subjectCode, record);
-    }
-  });
-
-  return new Set(
-    Array.from(latestTerminalRecordsBySubject.values())
-      .filter((record) => record.evaluation === "Passed")
-      .map((record) => normalizeStoredSubjectCompletionCode(record.subjectCode)),
-  );
-};
-
-const getLatestTerminalGradeRecordsBySubjectCode = (
+export const getCompletedSubjectCodes = (
   gradeRecords: StoredStudentGradeRecord[],
 ) => {
-  const latestRecordsBySubject = new Map<string, StoredStudentGradeRecord>();
+  const latestTerminalRecordsBySubject = new Map<string, StoredStudentGradeRecord>();
 
-  gradeRecords.filter(isTerminalStoredGradeRecord).forEach((record) => {
-    const subjectCode = normalizeStoredSubjectCompletionCode(record.subjectCode);
+  gradeRecords
+    .filter(
+      (record) =>
+        record.programType === "College" && isTerminalStoredGradeRecord(record),
+    )
+    .forEach((record) => {
+      const subjectCode = normalizeStoredSubjectCompletionCode(record.subjectCode);
 
-    if (!subjectCode) {
-      return;
-    }
+      if (!subjectCode) {
+        return;
+      }
 
-    const existingRecord = latestRecordsBySubject.get(subjectCode);
+      const existingRecord = latestTerminalRecordsBySubject.get(subjectCode);
 
-    if (!existingRecord || compareStoredGradeRecords(record, existingRecord) >= 0) {
-      latestRecordsBySubject.set(subjectCode, record);
+      if (!existingRecord || compareStoredGradeRecords(record, existingRecord) >= 0) {
+        latestTerminalRecordsBySubject.set(subjectCode, record);
+      }
+    });
+
+  const completedSubjectCodes = new Set(
+    Array.from(latestTerminalRecordsBySubject.values())
+      .filter((record) => record.programType === "College" && record.evaluation === "Passed")
+      .map((record) => normalizeStoredSubjectCompletionCode(record.subjectCode)),
+  );
+
+  const latestShsTermsBySubject = new Map<
+    string,
+    { academicYear: string; semester: string; records: StoredStudentGradeRecord[] }
+  >();
+  gradeRecords
+    .filter((record) => record.programType === "SHS")
+    .forEach((record) => {
+      const subjectCode = normalizeStoredSubjectCompletionCode(record.subjectCode);
+
+      if (!subjectCode) return;
+
+      const existingTerm = latestShsTermsBySubject.get(subjectCode);
+      const termComparison = existingTerm
+        ? getStoredGradeAcademicYearSortValue(record.academicYear) -
+            getStoredGradeAcademicYearSortValue(existingTerm.academicYear) ||
+          getStoredSubjectSemesterRank(record.semester) -
+            getStoredSubjectSemesterRank(existingTerm.semester) ||
+          record.academicYear.localeCompare(existingTerm.academicYear) ||
+          record.semester.localeCompare(existingTerm.semester)
+        : 1;
+
+      if (!existingTerm || termComparison > 0) {
+        latestShsTermsBySubject.set(subjectCode, {
+          academicYear: record.academicYear,
+          semester: record.semester,
+          records: [record],
+        });
+      } else if (termComparison === 0) {
+        latestShsTermsBySubject.set(subjectCode, {
+          ...existingTerm,
+          records: [...existingTerm.records, record],
+        });
+      }
+    });
+
+  latestShsTermsBySubject.forEach((term, subjectCode) => {
+    const latestRecordByQuarter = new Map<string, StoredStudentGradeRecord>();
+    term.records.forEach((record) => {
+      const quarterLabel = record.gradingPeriod.trim().toLowerCase();
+      const existingRecord = latestRecordByQuarter.get(quarterLabel);
+
+      if (!existingRecord || record.updatedAt.localeCompare(existingRecord.updatedAt) >= 0) {
+        latestRecordByQuarter.set(quarterLabel, record);
+      }
+    });
+    const requiredQuarterLabels = getRequiredShsQuarterLabels(term.semester);
+
+    if (
+      requiredQuarterLabels.every(
+        (label) => latestRecordByQuarter.get(label.toLowerCase())?.evaluation === "Passed",
+      )
+    ) {
+      completedSubjectCodes.add(subjectCode);
     }
   });
 
-  return latestRecordsBySubject;
+  return completedSubjectCodes;
 };
 
 const subjectIsCompletedByGrades = (
@@ -2285,12 +2329,12 @@ const getStoredSubjectLookupKeys = (
 const subjectPrerequisitesArePassed = ({
   subject,
   subjects,
-  latestGradeRecordsBySubjectCode,
+  completedSubjectCodes,
   creditedSubjectCodes = new Set<string>(),
 }: {
   subject: Pick<StoredAcademicSubject, "prerequisiteSubjectIds">;
   subjects: Pick<StoredAcademicSubject, "id" | "code">[];
-  latestGradeRecordsBySubjectCode: Map<string, StoredStudentGradeRecord>;
+  completedSubjectCodes: Set<string>;
   creditedSubjectCodes?: Set<string>;
 }) => {
   const prerequisiteIds = subject.prerequisiteSubjectIds ?? [];
@@ -2312,10 +2356,11 @@ const subjectPrerequisitesArePassed = ({
     const prerequisiteCode = normalizeStoredSubjectCompletionCode(
       prerequisiteSubject?.code || prerequisiteId,
     );
-    const latestGradeRecord =
-      latestGradeRecordsBySubjectCode.get(prerequisiteCode);
 
-    return creditedSubjectCodes.has(prerequisiteCode) || latestGradeRecord?.evaluation === "Passed";
+    return (
+      creditedSubjectCodes.has(prerequisiteCode) ||
+      completedSubjectCodes.has(prerequisiteCode)
+    );
   });
 };
 
@@ -4512,8 +4557,6 @@ export const getStudentScheduleChoiceGroups = ({
   ));
   const completedSubjectCodes = getCompletedSubjectCodes(gradeRecords ?? []);
   creditedSubjectCodes.forEach((code) => completedSubjectCodes.add(code));
-  const latestGradeRecordsBySubjectCode =
-    getLatestTerminalGradeRecordsBySubjectCode(gradeRecords ?? []);
   const relaxedSubjectMatches = hasGradeEligibilityContext
     ? matchedSubjects.filter(
         (subject) =>
@@ -4521,7 +4564,7 @@ export const getStudentScheduleChoiceGroups = ({
           subjectPrerequisitesArePassed({
             subject,
             subjects: storedSubjects,
-            latestGradeRecordsBySubjectCode,
+            completedSubjectCodes,
             creditedSubjectCodes,
           }),
       )
