@@ -2274,10 +2274,10 @@ export default function AdminStudents({
 
     const input = document.createElement("input");
     input.type = "file";
-    input.accept =
-      requirement.code === "transcript_of_records"
-        ? ".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
-        : ".pdf,.jpg,.jpeg,.png,.doc,.docx";
+    const isForm137 = requirement.code === "form_137";
+    input.accept = isForm137
+      ? ".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      : ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/jpg,image/png";
 
     input.onchange = async () => {
       const file = input.files?.[0];
@@ -2285,13 +2285,16 @@ export default function AdminStudents({
         return;
       }
 
-      if (
-        requirement.code === "transcript_of_records" &&
-        !/\.(pdf|jpe?g|png|webp)$/i.test(file.name)
-      ) {
+      const allowedExtension = isForm137 ? /\.(xls|xlsx)$/i : /\.(pdf|jpe?g|png)$/i;
+      const allowedMimeTypes = isForm137
+        ? ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]
+        : ["application/pdf", "image/jpeg", "image/jpg", "image/png"];
+      if (!allowedExtension.test(file.name) || (file.type && !allowedMimeTypes.includes(file.type))) {
         setCredentialActionFeedback({
           type: "error",
-          message: "TOR must be a PDF or image file (JPG, PNG, or WebP).",
+          message: isForm137
+            ? "Form 137 must be an Excel file (.xls or .xlsx)."
+            : `${requirement.name} must be a PDF or image file (JPG or PNG).`,
         });
         return;
       }
