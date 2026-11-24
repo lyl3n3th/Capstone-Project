@@ -109,7 +109,7 @@ const getDeferredOwnScheduleSubjects = ({
   semester: string;
   approvedSubjects: StudentPortalSubject[];
 }) => {
-  if (approvedSubjects.length === 0) {
+  if (resolvedStudentRecord.importAcademicYear || approvedSubjects.length === 0) {
     return [];
   }
 
@@ -579,7 +579,11 @@ export const resolveStudentPortalContext = (
       ? ownScheduleSelectionStatusForApprovedTerm || "Not Submitted"
       : storedStudent.ownScheduleSelectionStatus,
   };
-  const portalSubjects = getStudentPortalSubjects(resolvedStudentRecord);
+  // Imported students get their subjects from the actual import or approved term.
+  // Generic catalog fallback can assign subjects to an unrelated academic year.
+  const portalSubjects = storedStudent.importAcademicYear
+    ? []
+    : getStudentPortalSubjects(resolvedStudentRecord);
 
   if (approvedEnrollmentRequest) {
     const isOwnScheduleEnrollment =

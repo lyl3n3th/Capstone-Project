@@ -16,7 +16,7 @@ const resolverCode=ts.transpileModule(resolverSource,{compilerOptions:{module:ts
 const defaultsModule={exports:{}};
 Function('module','exports',ts.transpileModule(readFileSync(new URL('../src/services/importedStudentScheduling.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(defaultsModule,defaultsModule.exports);
 const resolver={exports:{}};
-Function('require','module','exports',resolverCode)(name=>name.includes('importedStudentScheduling')?defaultsModule.exports:name.includes('adminStorage')?{...storage.exports,normalizeBranchName:value=>value,getStudentPortalSubjects:()=>[],getStudentScheduleSelectionRequest:()=>null,readBranchScopedData:()=>({})}:name.includes('enrollmentRequests')?{getLatestApprovedEnrollmentRequestForStudent:()=>null}:name.includes('studentGrades')?{getStudentGradeRecords:()=>[],hasCompletePassingShsSemesterGrades:()=>false}:{},resolver,resolver.exports);
+Function('require','module','exports',resolverCode)(name=>name.includes('importedStudentScheduling')?defaultsModule.exports:name.includes('adminStorage')?{...storage.exports,normalizeBranchName:value=>value,isCollegeTransferee:()=>false,getStudentPortalSubjects:()=>[],getStudentScheduleSelectionRequest:()=>null,readBranchScopedData:()=>({})}:name.includes('enrollmentRequests')?{getLatestApprovedEnrollmentRequestForStudent:()=>null}:name.includes('studentGrades')?{getStudentGradeRecords:()=>[],hasCompletePassingShsSemesterGrades:()=>false}:{},resolver,resolver.exports);
 const student={id:'LEGACY-2022-A',name:'Imported Student',branch:'Bacoor',program:'College',yearLevel:'4th Year',strandOrCourse:'BSE - Bachelor of Entrepreneurship',section:'',importAcademicYear:'2026-2027',importSemester:'2nd Semester',importAcademicStanding:'Regular'};
 let context=resolver.exports.resolveStudentPortalContext(student);
 assert.equal(context.currentTerm.source,'import');assert.equal(context.currentTerm.semester,'2nd Semester');assert.deepEqual(context.subjects.map(subject=>subject.code),['ENT402']);
@@ -33,4 +33,10 @@ context=resolver.exports.resolveStudentPortalContext({...student,section:'BSE-4A
 assert.equal(context.subjects.length,2);assert(context.subjects.find(subject=>subject.code==='ENT402').schedule.includes('9:00 AM'));assert.equal(context.subjects.find(subject=>subject.code==='ENT403').schedule,'TBA');
 const ownSchedule=resolver.exports.resolveStudentPortalContext({...student,requestedOwnSchedule:true,ownScheduleRequestStatus:'Approved',ownScheduleSelectionStatus:'Approved',ownScheduleAcademicYear:'2026-2027',ownScheduleSemester:'2nd Semester'});
 assert.equal(ownSchedule.currentTerm.source,'own_schedule');assert.deepEqual(ownSchedule.subjects,[],'Approved own-schedule rules must still apply before importing the curriculum fallback');
+const irregular = {...student, importAcademicStanding:'Irregular', importAcademicYear:'2028-2029'};
+const irregularContext = resolver.exports.resolveStudentPortalContext(irregular);
+assert.equal(irregularContext.currentTerm.academicYear,'2028-2029');
+assert.equal(irregularContext.currentTerm.semester,'2nd Semester');
+assert(irregularContext.subjects.length > 0);
+assert(irregularContext.subjects.every(subject=>subject.academicYear==='2028-2029' && subject.semester==='2nd Semester'),'Imported irregular subjects must stay in the actual import term');
 console.log('Imported subject checks passed: blank sections, irregular/regular placement, exact year/semester/course/branch, unscheduled and scheduled subjects, no duplicates, and own-schedule precedence.');
