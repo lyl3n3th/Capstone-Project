@@ -18,13 +18,13 @@ import {
 import {
   getCurrentBranch,
   getStudentCredentialOverview,
-  fetchImportedStudentCredentials,
-  isImportedStudent,
+  refreshStudentDetailCredentials,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
 import {
   getStudentAcademicStanding,
   getStudentGradeRecords,
+  getRequiredShsQuarterLabelsForSemester,
   type StoredStudentGradeRecord,
 } from "../../services/studentGrades";
 import {
@@ -72,6 +72,43 @@ interface Toast {
   message: string;
   type: "success" | "error" | "info" | "warning";
 }
+
+const buildAlumniShsGradeRows = (records: StoredStudentGradeRecord[], semester: string) => {
+  const quarterLabels = getRequiredShsQuarterLabelsForSemester(semester);
+  const grouped = new Map<string, {
+    subjectCode: string;
+    subjectTitle: string;
+    grades: Map<string, StoredStudentGradeRecord>;
+  }>();
+
+  for (const record of records) {
+    if (!quarterLabels.includes(record.gradingPeriod)) continue;
+    const key = `${record.subjectCode.trim().toUpperCase()}::${record.subjectTitle.trim().toUpperCase()}`;
+    const row = grouped.get(key) ?? {
+      subjectCode: record.subjectCode,
+      subjectTitle: record.subjectTitle,
+      grades: new Map<string, StoredStudentGradeRecord>(),
+    };
+    row.grades.set(record.gradingPeriod, record);
+    grouped.set(key, row);
+  }
+
+  return Array.from(grouped.entries()).map(([key, row]) => {
+    const quarterRecords = quarterLabels.map((label) => row.grades.get(label));
+    const grades = quarterRecords.map((record) => record?.numericGrade);
+    const finalGrade = grades.every((grade) => typeof grade === "number" && Number.isFinite(grade))
+      ? Math.floor(grades.reduce<number>((sum, grade) => sum + (grade ?? 0), 0) / quarterLabels.length)
+      : null;
+    return {
+      key,
+      subjectCode: row.subjectCode,
+      subjectTitle: row.subjectTitle,
+      quarterGrades: quarterRecords.map((record) => record?.normalizedGrade ?? "—"),
+      finalGrade,
+      result: finalGrade === null ? "—" : finalGrade >= 75 ? "Passed" : "Failed",
+    };
+  }).sort((left, right) => left.subjectCode.localeCompare(right.subjectCode));
+};
 
 const formatDetailValue = (value?: string | number | null) => {
   if (value === null || value === undefined) {
@@ -173,6 +210,8 @@ export default function AdminAlumni({
   const [alumni, setAlumni] = useState<AlumniStudent[]>([]);
   const [restoringAlumniId, setRestoringAlumniId] = useState<string | null>(null);
   const [credentialRefreshVersion, setCredentialRefreshVersion] = useState(0);
+  const [credentialLoadError, setCredentialLoadError] = useState("");
+  const [loadingCredentials, setLoadingCredentials] = useState(false);
   const currentBranch = getCurrentBranch();
 
   // Toast functions
@@ -473,18 +512,15 @@ export default function AdminAlumni({
   useEffect(() => {
     if (
       !viewingAlumni ||
-      !viewingStudentSnapshot ||
-      !isImportedStudent(viewingStudentSnapshot)
+      !viewingStudentSnapshot
     ) {
       return;
     }
 
     let isCurrentView = true;
-    void fetchImportedStudentCredentials(
-      viewingStudentBranch,
-      viewingAlumni.id,
-      viewingStudentSnapshot,
-    )
+    setCredentialLoadError("");
+    setLoadingCredentials(true);
+    void refreshStudentDetailCredentials(viewingStudentSnapshot)
       .then(() => {
         if (isCurrentView) {
           setCredentialRefreshVersion((version) => version + 1);
@@ -492,6 +528,10 @@ export default function AdminAlumni({
       })
       .catch((error) => {
         console.warn("Unable to refresh alumni credential links.", error);
+        if (isCurrentView) setCredentialLoadError("Unable to refresh credential copies. Please reopen this student to retry.");
+      })
+      .finally(() => {
+        if (isCurrentView) setLoadingCredentials(false);
       });
 
     return () => {
@@ -511,6 +551,8 @@ export default function AdminAlumni({
   }, [viewingStudentGrades]);
 
   const openViewModal = (alumniStudent: AlumniStudent) => {
+    setCredentialLoadError("");
+    setLoadingCredentials(Boolean(alumniStudent.studentSnapshot));
     setViewingAlumni(alumniStudent);
   };
 
@@ -807,6 +849,8 @@ export default function AdminAlumni({
 
                 <section className="alumni-detail-section">
                   <h3>Credentials Copy</h3>
+                  {loadingCredentials && <p className="alumni-detail-summary" role="status">Loading credential copies…</p>}
+                  {credentialLoadError && <p className="alumni-detail-summary" role="alert">{credentialLoadError}</p>}
                   {viewingStudentCredentials?.summary ? (
                     <p className="alumni-detail-summary">
                       {viewingStudentCredentials.summary.submitted}/
@@ -842,7 +886,7 @@ export default function AdminAlumni({
                     </div>
                   ) : (
                     <p className="alumni-empty-state">
-                      No linked credential copies found.
+                      {loadingCredentials ? "Checking for linked credential copies…" : "No linked credential copies found."}
                     </p>
                   )}
                 </section>
@@ -872,14 +916,37 @@ export default function AdminAlumni({
                                 <tr>
                                   <th>Subject Code</th>
                                   <th>Subject Title</th>
-                                  <th>Period</th>
-                                  <th>Grade</th>
-                                  <th>Units</th>
+                                  {viewingStudentProgram === "SHS" ? (
+                                    <>
+                                      {getRequiredShsQuarterLabelsForSemester(term.semester).map((quarter) => (
+                                        <th key={quarter}>{quarter}</th>
+                                      ))}
+                                      <th>Semester Final Grade</th>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <th>Period</th>
+                                      <th>Grade</th>
+                                      <th>Units</th>
+                                    </>
+                                  )}
                                   <th>Result</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {term.records.map((record) => (
+                                {viewingStudentProgram === "SHS" ? (
+                                  buildAlumniShsGradeRows(term.records, term.semester).map((row) => (
+                                    <tr key={row.key}>
+                                      <td>{row.subjectCode}</td>
+                                      <td>{row.subjectTitle}</td>
+                                      {row.quarterGrades.map((grade, index) => (
+                                        <td key={index}>{grade}</td>
+                                      ))}
+                                      <td>{row.finalGrade ?? "—"}</td>
+                                      <td>{row.result}</td>
+                                    </tr>
+                                  ))
+                                ) : term.records.map((record) => (
                                   <tr key={record.id}>
                                     <td>{record.subjectCode}</td>
                                     <td>{record.subjectTitle}</td>

@@ -5004,6 +5004,42 @@ export const fetchSupabaseAdmissionApplicants = async (
   return records;
 };
 
+// Refresh the same saved credential records for active students and alumni.
+export const refreshStudentDetailCredentials = async (student: StudentStorageRecord) => {
+  const branch = normalizeBranchName(student.branch);
+  if (isImportedStudent(student)) {
+    await fetchImportedStudentCredentials(branch, student.id, student);
+    return;
+  }
+
+  await fetchBranchDirectory();
+  const branchCode =
+    findRegisteredBranch(branch)?.code ?? normalizeBranchCode(branch);
+  const { data, error } = await supabase
+    .rpc("get_admin_admission_queue", { p_branch_code: branchCode })
+    .eq("student_number", student.id)
+    .returns<SupabaseAdminAdmissionQueueRow[]>();
+  if (error) throw new Error(error.message);
+
+  const row = (Array.isArray(data) ? data : []).find(
+    (candidate) => candidate.application_status !== "draft",
+  );
+  if (!row) return;
+
+  const applicant = await mapSupabaseApplicantToAdminRecord(row);
+  const cached = readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", branch) ?? [];
+  const existing = cached.filter((record) => record.trackingNumber === applicant.trackingNumber);
+  const merged = mergeAdminEnrolleeRecords([applicant], existing)[0] ?? applicant;
+  const reviewed = await fetchStudentCredentialReviewDecisions(merged, branch);
+  const latest = readBranchScopedData<AdminEnrolleeRecord[]>("enrollees", branch) ?? [];
+  writeBranchScopedData(
+    "enrollees",
+    branch,
+    [...latest.filter((record) => record.trackingNumber !== reviewed.trackingNumber), reviewed],
+    { skipSupabaseSync: true },
+  );
+};
+
 export const upsertSubmittedApplicant = ({
   application,
   draft,

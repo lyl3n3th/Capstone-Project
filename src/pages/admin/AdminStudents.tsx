@@ -35,7 +35,7 @@ import {
   readStoredStudents,
   removeStudentCredentialUpload,
   syncStudentCredentialUpload,
-  fetchImportedStudentCredentials,
+  refreshStudentDetailCredentials,
   uploadImportedStudentCredential,
   removeImportedStudentCredential,
   writeBranchScopedData,
@@ -2056,17 +2056,15 @@ export default function AdminStudents({
     const credentialRequest = ++credentialLoadRequest.current;
     setCredentialActionFeedback(null);
     setCredentialActionKey(null);
-    if (isImportedStudent(student)) {
-      setCredentialActionKey("loading");
-      void fetchImportedStudentCredentials(branch, student.id).then(() => {
-        if (credentialRequest === credentialLoadRequest.current) setStudents(prev => [...prev]);
-      }).catch(error => {
-        if (credentialRequest === credentialLoadRequest.current) setCredentialActionFeedback({ type: "error",
-          message: error instanceof Error ? error.message : "Unable to load student credentials." });
-      }).finally(() => {
-        if (credentialRequest === credentialLoadRequest.current) setCredentialActionKey(null);
-      });
-    }
+    setCredentialActionKey("loading");
+    void refreshStudentDetailCredentials(student).then(() => {
+      if (credentialRequest === credentialLoadRequest.current) setStudents(prev => [...prev]);
+    }).catch(error => {
+      if (credentialRequest === credentialLoadRequest.current) setCredentialActionFeedback({ type: "error",
+        message: error instanceof Error ? error.message : "Unable to load student credentials." });
+    }).finally(() => {
+      if (credentialRequest === credentialLoadRequest.current) setCredentialActionKey(null);
+    });
     void fetchAndCacheStudentPaymentsForBranch(branch)
       .then(() => fetchNextStudentPaymentReceiptNumber(branch))
       .then(setPaymentReceiptNumber)
@@ -2884,6 +2882,7 @@ export default function AdminStudents({
         branch: viewingStudent.branch || currentBranch,
         studentNumber: viewingStudent.id,
         trackingNumber: viewingStudent.trackingNumber,
+        studentSnapshot: viewingStudent,
       })
     : null;
   const viewingStudentProgram = viewingStudent?.program || "";
