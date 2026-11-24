@@ -1648,6 +1648,9 @@ export default function AdminEnrollees({
   const isEnrollmentRequest = isEnrollmentRequestRecord;
 
   const [showSectionManager, setShowSectionManager] = useState(false);
+  const [manualStudentSearch, setManualStudentSearch] = useState("");
+  const [manualStudentId, setManualStudentId] = useState("");
+  const [manualSectionId, setManualSectionId] = useState("");
   const [sectionManagerScope, setSectionManagerScope] = useState<
     "all" | "admissions" | "transferees"
   >("all");
@@ -7986,6 +7989,32 @@ export default function AdminEnrollees({
       : sectionManagerScope === "admissions"
         ? pendingRegularAssignments
         : pendingAssignments;
+  const manualStudentSearchTerms = manualStudentSearch
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const filteredManualStudents = sectionManagerPendingAssignments.filter(
+    (student) => {
+      const searchableStudent = [
+        student.fullName,
+        student.studentNumber,
+        student.trackingNumber,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return manualStudentSearchTerms.every((term) =>
+        searchableStudent.includes(term),
+      );
+    },
+  );
+  const selectedManualStudent = filteredManualStudents.find(
+    (student) => student.id === manualStudentId,
+  );
+  const selectedManualSection = classSections.find(
+    (section) => section.id === manualSectionId && !isSectionLocked(section),
+  );
   const activeAdmissionPendingAssignments =
     activeTab === "transferees"
       ? pendingTransfereeAssignments
@@ -8450,6 +8479,9 @@ export default function AdminEnrollees({
                         ? "transferees"
                         : "admissions",
                     );
+                    setManualStudentSearch("");
+                    setManualStudentId("");
+                    setManualSectionId("");
                     setShowSectionManager(true);
                   }}
                 >
@@ -11877,6 +11909,81 @@ export default function AdminEnrollees({
               </button>
             </div>
             <div className="modal-body">
+              <div className="manual-assignment" style={{ marginBottom: 16 }}>
+                <h3>Manual Assignment</h3>
+                <div className="assignment-controls">
+                  <input
+                    type="search"
+                    className="search-input"
+                    aria-label="Search students for manual assignment"
+                    placeholder="Search by student name or number..."
+                    value={manualStudentSearch}
+                    onChange={(event) => {
+                      setManualStudentSearch(event.target.value);
+                      setManualStudentId("");
+                    }}
+                    style={{ flexBasis: "100%", minWidth: 0 }}
+                  />
+                  <select
+                    className="student-select"
+                    id="studentSelect"
+                    aria-label="Select student"
+                    value={selectedManualStudent?.id ?? ""}
+                    onChange={(event) => setManualStudentId(event.target.value)}
+                  >
+                    <option value="" disabled>
+                      {filteredManualStudents.length > 0
+                        ? "Select Student"
+                        : "No matching students"}
+                    </option>
+                    {filteredManualStudents.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.fullName} -{" "}
+                        {student.studentNumber || student.trackingNumber}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="section-select"
+                    id="sectionSelect"
+                    aria-label="Select section"
+                    value={selectedManualSection?.id ?? ""}
+                    onChange={(event) => setManualSectionId(event.target.value)}
+                  >
+                    <option value="" disabled>
+                      Select Section
+                    </option>
+                    {classSections.map((section) => (
+                      <option
+                        key={section.id}
+                        value={section.id}
+                        disabled={isSectionLocked(section)}
+                      >
+                        {section.code} - {section.semester} (
+                        {section.currentEnrollees}/{section.maxCapacity})
+                        {isSectionLocked(section) ? " - Locked" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="action-btn assign"
+                    disabled={!selectedManualStudent || !selectedManualSection}
+                    onClick={() => {
+                      if (selectedManualStudent && selectedManualSection) {
+                        handleAssignToSection(
+                          selectedManualStudent.id,
+                          selectedManualSection.id,
+                        );
+                        setManualStudentSearch("");
+                        setManualStudentId("");
+                        setManualSectionId("");
+                      }
+                    }}
+                  >
+                    <FaUserPlus /> Assign
+                  </button>
+                </div>
+              </div>
               <div className="section-manager-toolbar">
                 <div className="section-manager-toolbar-copy">
                   <strong>Section tools</strong>
@@ -12142,67 +12249,7 @@ export default function AdminEnrollees({
                   </div>
                 ))}
               </div>
-              <div className="manual-assignment">
-                <h3>Manual Assignment</h3>
-                <div className="assignment-controls">
-                  <select
-                    className="student-select"
-                    id="studentSelect"
-                    defaultValue=""
-                  >
-                    <option value="" disabled>
-                      Select Student
-                    </option>
-                    {sectionManagerPendingAssignments.map((student) => (
-                      <option key={student.id} value={student.id}>
-                        {student.fullName} -{" "}
-                        {student.studentNumber || student.trackingNumber}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    className="section-select"
-                    id="sectionSelect"
-                    defaultValue=""
-                  >
-                    <option value="" disabled>
-                      Select Section
-                    </option>
-                    {classSections.map((section) => (
-                      <option
-                        key={section.id}
-                        value={section.id}
-                        disabled={isSectionLocked(section)}
-                      >
-                        {section.code} - {section.semester} (
-                        {section.currentEnrollees}/{section.maxCapacity})
-                        {isSectionLocked(section) ? " - Locked" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="action-btn assign"
-                    onClick={() => {
-                      const studentSelect = document.getElementById(
-                        "studentSelect",
-                      ) as HTMLSelectElement;
-                      const sectionSelect = document.getElementById(
-                        "sectionSelect",
-                      ) as HTMLSelectElement;
-                      if (studentSelect.value && sectionSelect.value) {
-                        handleAssignToSection(
-                          studentSelect.value,
-                          sectionSelect.value,
-                        );
-                        studentSelect.value = "";
-                        sectionSelect.value = "";
-                      }
-                    }}
-                  >
-                    <FaUserPlus /> Assign
-                  </button>
-                </div>
-              </div>
+
             </div>
             <div className="modal-footer">
               <button
