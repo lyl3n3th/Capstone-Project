@@ -26,6 +26,21 @@
   overflow-wrap: anywhere;
 }
 
+.student-details-grade-table .students-grade-row-actions .students-grade-action-btn {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 84px;
+  min-width: 84px;
+  height: 32px;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
 .student-details-college-grade-table,
 .student-details-alumni-grade-table {
   min-width: 900px;
@@ -78,7 +93,7 @@
 @media (min-width: 769px) {
   .students-grade-table.student-details-college-grade-table {
     width: 100%;
-    min-width: 0;
+    min-width: 740px;
   }
 
   .students-grade-table.student-details-college-grade-table th,
@@ -91,12 +106,6 @@
     flex-direction: column;
     flex-wrap: nowrap;
     gap: 6px;
-  }
-
-  .students-grade-table.student-details-college-grade-table .students-grade-action-btn {
-    box-sizing: border-box;
-    width: 72px;
-    min-width: 72px;
   }
 }
 
