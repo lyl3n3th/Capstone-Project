@@ -118,14 +118,14 @@ export default function StudentHistoricalGrades({ student, branch, recordedBy, s
       }))];
       const periods = student.program === 'College' ? [term.semester] : getRequiredShsQuarterLabelsForSemester(term.semester);
       return <details key={`${term.academicYear}-${term.semester}`} open className="student-history-term">
-        <summary>{term.yearLevel} � {term.academicYear} � {term.semester}</summary>
+        <summary>{term.yearLevel} - {term.academicYear} - {term.semester}</summary>
         {!all.length ? <p>No subjects are configured for this course and term. Add them in Academic Management to enter grades.</p> : periods.map(period => {
           const key = sectionKey(term, period);
           const dirty = all.some(subject => {
             const draft = drafts[key]?.[subjectKey(subject)];
             return draft && isHistoricalGradeChanged(draft, matching(subject.code, term, period));
           });
-          const sectionLabel = `${term.yearLevel} � ${term.academicYear} � ${term.semester}${student.program === 'College' ? '' : ` � ${period}`}`;
+          const sectionLabel = `${term.yearLevel} - ${term.academicYear} - ${term.semester}${student.program === 'College' ? '' : ` - ${period}`}`;
           return <section className="student-history-period" key={period} aria-label={sectionLabel}>
             {student.program !== 'College' && <h4>{period}</h4>}
             <div className="students-grade-table-wrapper"><table className="students-grade-table">
@@ -154,8 +154,9 @@ export default function StudentHistoricalGrades({ student, branch, recordedBy, s
                     {teacherUnavailable && <option value={value.instructorId} disabled>{saved?.instructorName || 'Saved instructor'} (unavailable)</option>}
                     {instructors.map(teacher => <option key={teacher.id} value={teacher.id}>{teacher.name} ({teacher.employeeId})</option>)}
                   </select></td>
-                  <td>{onRemove && saved && <button type="button" className="students-grade-action-btn danger"
-                    disabled={Boolean(savingSection) || Boolean(drafts[key]?.[subjectKey(subject)])} onClick={() => onRemove(saved)}>Remove</button>}</td>
+                  <td>{onRemove && <button type="button" className="students-grade-action-btn danger"
+                    disabled={!saved?.grade.trim() || !saved.instructorId || Boolean(savingSection) || Boolean(drafts[key]?.[subjectKey(subject)])}
+                    onClick={() => { if (saved) onRemove(saved); }}>Remove</button>}</td>
                 </tr>;
               })}</tbody>
             </table></div>
