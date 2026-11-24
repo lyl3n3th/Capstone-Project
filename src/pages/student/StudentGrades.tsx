@@ -748,7 +748,9 @@ const escapePdfText = (value: string | number | null | undefined) =>
     .replace(/\)/g, "\\)");
 
 const wrapPdfText = (value: string, maxChars: number) => {
-  const words = sanitizePdfText(value).split(" ").filter(Boolean);
+  const words = sanitizePdfText(value).split(" ").filter(Boolean).flatMap(word =>
+    word.length > maxChars ? word.match(new RegExp(`.{1,${maxChars}}`, "g")) ?? [] : [word],
+  );
   const lines: string[] = [];
   let currentLine = "";
 
@@ -957,16 +959,16 @@ const buildReportCardPdf = async ({
         ]),
   ];
   const pageContents: string[][] = [[]];
-  const pageWidth = isSHS ? 595 : 842;
-  const pageHeight = isSHS ? 842 : 595;
+  const pageWidth = isSHS ? 842 : 595;
+  const pageHeight = isSHS ? 595 : 842;
   const margin = 20;
   const contentWidth = pageWidth - margin * 2;
   const rowPadding = 4;
   const lineHeight = 8.5;
   const footerClearance = 22;
   const columnWidths = isSHS
-    ? [78, 207, 55, 55, 100, 60]
-    : [120, 260, 62, 78, 92, 190];
+    ? [92, 230, 75, 75, 105, 150, 75]
+    : [72, 180, 40, 50, 70, 143];
   const logoResource = await loadPdfJpegImage(aicsLogo, "AicsLogo");
   let currentPage = 0;
   let y = pageHeight - margin;
@@ -1057,14 +1059,14 @@ const buildReportCardPdf = async ({
   };
   const drawTableHeader = () => {
     let x = margin;
-    const headerHeight = isSHS ? 24 : 20;
+    const headers = columns.map((column, index) =>
+      wrapPdfText(column.label, Math.max(4, Math.floor((columnWidths[index] - 16) / 4.6))),
+    );
+    const headerHeight = Math.max(isSHS ? 24 : 20, 13 + Math.max(...headers.map(lines => lines.length)) * 7);
 
-    columns.forEach((column, index) => {
-      const width = columnWidths[index] ?? 80;
-      const headerLines = wrapPdfText(
-        column.label,
-        Math.max(8, Math.floor(width / 4.6)),
-      );
+    columns.forEach((_column, index) => {
+      const width = columnWidths[index];
+      const headerLines = headers[index];
 
       rect(x, y - headerHeight, width, headerHeight, {
         fill: headerFillColor,
@@ -1079,19 +1081,23 @@ const buildReportCardPdf = async ({
           [0.01, 0.16, 0.28],
         );
       });
-      x += columnWidths[index] ?? 80;
+      x += columnWidths[index];
     });
     y -= headerHeight;
   };
   const drawMeta = () => {
     const rightColumnX = margin + contentWidth / 2 + 10;
 
-    text(`Student: ${studentName}`, margin, y, 9, mutedColor);
-    text(`Student Number: ${studentNumber || "N/A"}`, rightColumnX, y, 9, mutedColor);
-    y -= 16;
-    text(`Program: ${program || "N/A"}`, margin, y, 9, mutedColor);
-    text(`Term: ${semester}`, rightColumnX, y, 9, mutedColor);
-    y -= 22;
+    const drawMetaRow = (left: string, right: string, spacing: number) => {
+      const maxChars = Math.floor((contentWidth / 2 - 12) / 4.8);
+      const leftLines = wrapPdfText(left, maxChars);
+      const rightLines = wrapPdfText(right, maxChars);
+      leftLines.forEach((value, index) => text(value, margin, y - index * 12, 9, mutedColor));
+      rightLines.forEach((value, index) => text(value, rightColumnX, y - index * 12, 9, mutedColor));
+      y -= spacing + (Math.max(leftLines.length, rightLines.length) - 1) * 12;
+    };
+    drawMetaRow(`Student: ${studentName}`, `Student Number: ${studentNumber || "N/A"}`, 16);
+    drawMetaRow(`Program: ${program || "N/A"}`, `Term: ${semester}`, 22);
   };
   const drawSummary = () => {
     const boxGap = 8;
@@ -1123,7 +1129,7 @@ const buildReportCardPdf = async ({
       leftRow,
       collegeGradingSystemRightRows[index],
     ]);
-    const gradingColumnWidths = [76, 108, 96, 76, 108, 96];
+    const gradingColumnWidths = [60, 100, 90, 60, 100, 90];
     const gradingTextSize = 6.7;
     const gradingTextContext = document.createElement("canvas").getContext("2d");
     if (gradingTextContext) {
@@ -1223,8 +1229,8 @@ const buildReportCardPdf = async ({
 
   tableRows.forEach((row) => {
     const wrappedCells = columns.map((column, index) => {
-      const width = columnWidths[index] ?? 80;
-      return wrapPdfText(String(row[column.key]), Math.max(8, Math.floor(width / 5)));
+      const width = columnWidths[index];
+      return wrapPdfText(String(row[column.key]), Math.max(4, Math.floor((width - 16) / 5)));
     });
     const rowHeight =
       Math.max(...wrappedCells.map((cellLines) => cellLines.length)) * lineHeight +
@@ -1237,7 +1243,7 @@ const buildReportCardPdf = async ({
 
     let x = margin;
     wrappedCells.forEach((cellLines, index) => {
-      const width = columnWidths[index] ?? 80;
+      const width = columnWidths[index];
       rect(x, y - rowHeight, width, rowHeight, {
         stroke: gridColor,
       });
