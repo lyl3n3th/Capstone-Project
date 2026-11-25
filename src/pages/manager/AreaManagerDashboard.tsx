@@ -289,10 +289,11 @@ const AreaManagerDashboard = ({
       const currentRequest = ++request;
       try {
         const { data, error } = await supabase
-          .rpc("get_manager_branch_enrollment_counts", { p_branches: managedBranches })
-          .returns<Array<BranchEnrollmentCounts & { branch: AdminBranchName }>>();
+          .rpc("get_manager_branch_enrollment_counts", { p_branches: managedBranches });
         if (error) throw error;
-        const entries = (data ?? []).map(({ branch, shs, college }) => [branch, { shs, college }] as const);
+        if (!Array.isArray(data)) throw new Error("Invalid enrollment counts response.");
+        const rows: Array<BranchEnrollmentCounts & { branch: AdminBranchName }> = data;
+        const entries = rows.map(({ branch, shs, college }) => [branch, { shs, college }] as const);
         if (active && currentRequest === request) {
           setEnrollmentSnapshot({ branchKey, counts: Object.fromEntries(entries) });
           setEnrollmentError("");
