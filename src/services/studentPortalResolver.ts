@@ -18,6 +18,8 @@ import {
   getStudentGradeRecords,
   hasCompletePassingShsSemesterGrades,
 } from "./studentGrades";
+import { getCurrentTermEvaluationLockStatus } from "./studentEvaluationLock";
+import { readInstructorEvaluationSubmissions } from "./adminStorage";
 
 export interface StudentPortalCurrentTerm {
   yearLevel: string;
@@ -507,6 +509,23 @@ const getShsAutoProgressedContext = ({
       semester: "1st Semester",
     })
   ) {
+    return null;
+  }
+
+  const evaluationLockStatus = getCurrentTermEvaluationLockStatus({
+    student: {
+      id: resolvedStudentRecord.id,
+      studentNumber: resolvedStudentRecord.id,
+    },
+    subjects: firstSemesterSubjects,
+    currentTerm: {
+      ...currentTerm,
+      semester: "1st Semester",
+    },
+    submissions: readInstructorEvaluationSubmissions(resolvedStudentRecord.branch),
+  });
+
+  if (evaluationLockStatus.isLocked) {
     return null;
   }
 
