@@ -756,11 +756,11 @@ export default function AdminTrash({
     void (async () => {
       const confirmed = (await requestConfirmation(
         hideOnly
-          ? `Hide ${enrollee.fullName} from Archive and keep the linked student and admission records?`
+          ? `Clear the archive entry for ${enrollee.fullName}? The linked student and admission records will be kept.`
           : `Delete ${enrollee.fullName} permanently? This action cannot be undone.`,
         {
-          title: hideOnly ? "Hide from Archive" : "Permanently Delete Enrollee",
-          confirmLabel: hideOnly ? "Hide from Archive" : "Delete permanently",
+          title: hideOnly ? "Clear archive entry" : "Permanently Delete Enrollee",
+          confirmLabel: hideOnly ? "Clear archive entry" : "Delete permanently",
           destructive: !hideOnly,
         },
       ));
@@ -775,7 +775,7 @@ export default function AdminTrash({
         await deleteEnrolleeRecord(enrollee);
         addToast(
           hideOnly
-            ? `${enrollee.fullName} was hidden from Archive.`
+            ? `${enrollee.fullName} was cleared from Archive.`
             : `${enrollee.fullName} has been permanently deleted.`,
           "success",
         );
@@ -840,7 +840,7 @@ export default function AdminTrash({
     }
 
     const confirmed = (await requestConfirmation(
-      "Clear Archive? Enrollees linked to students will be hidden. Other archived records will be permanently deleted if eligible.",
+      "Clear Archive? Entries for enrollees linked to students will be cleared while their student and admission records are retained. Other archived records will be permanently deleted if eligible.",
       {
         title: "Clear Archive",
         confirmLabel: "Clear archive",
@@ -880,7 +880,7 @@ export default function AdminTrash({
       const message =
         warningCount > 0
           ? `${deletedLabel} removed from Archive, but ${warningCount} legacy student record${warningCount === 1 ? "" : "s"} still need API cleanup.`
-          : `${deletedLabel} removed from Archive.`;
+          : failedCount === 0 ? "Archive cleared." : `${deletedLabel} cleared from Archive.`;
       addToast(message, warningCount > 0 ? "warning" : "success");
     }
 
@@ -1092,10 +1092,10 @@ export default function AdminTrash({
                           onClick={() => handleDeleteRecord(record)}
                           disabled={isProcessingTrash}
                           aria-label={record.enrollee?.studentNumber?.trim()
-                            ? `Hide ${record.name} from Archive`
+                            ? `Clear archive entry for ${record.name}`
                             : `Delete ${record.name}`}
                           title={record.enrollee?.studentNumber?.trim()
-                            ? "Hide from Archive"
+                            ? "Clear archive entry"
                             : `Delete ${record.name}`}
                         >
                           {record.enrollee?.studentNumber?.trim() ? <MdArchive /> : <FaTrash />}
