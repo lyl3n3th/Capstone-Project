@@ -101,7 +101,6 @@ import {
   fetchNextStudentPaymentReceiptNumber,
   getStudentPayments,
   removeStudentPayment,
-  setStudentPaymentTerm,
   STUDENT_PAYMENTS_UPDATED_EVENT,
 } from "../../services/studentPayments";
 import {
@@ -1012,12 +1011,6 @@ export default function AdminStudents({
   const [paymentRecordsVersion, setPaymentRecordsVersion] = useState(0);
   const [paymentAcademicYearFilter, setPaymentAcademicYearFilter] = useState("");
   const [paymentSemesterFilter, setPaymentSemesterFilter] = useState("");
-  const [legacyPaymentTermDrafts, setLegacyPaymentTermDrafts] = useState<
-    Record<string, string>
-  >({});
-  const [assigningLegacyPaymentId, setAssigningLegacyPaymentId] = useState<
-    string | null
-  >(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentReceiptNumber, setPaymentReceiptNumber] = useState("");
   const [paymentDate, setPaymentDate] = useState(getTodayInputDate);
@@ -2042,8 +2035,6 @@ export default function AdminStudents({
     const studentCurrentTerm = resolveStudentPortalContext(student).currentTerm;
     setPaymentAcademicYearFilter(studentCurrentTerm.academicYear);
     setPaymentSemesterFilter(studentCurrentTerm.semester);
-    setLegacyPaymentTermDrafts({});
-    setAssigningLegacyPaymentId(null);
     setPaymentAmount("");
     setPaymentReceiptNumber(
       buildNextReceiptNumber(student.branch || currentBranch),
@@ -2094,8 +2085,6 @@ export default function AdminStudents({
     setGradeSearchTerm("");
     setPaymentAcademicYearFilter("");
     setPaymentSemesterFilter("");
-    setLegacyPaymentTermDrafts({});
-    setAssigningLegacyPaymentId(null);
     setGradeEditState(null);
     setGradeEditFeedback(null);
     setGradeManagementFeedback(null);
@@ -3242,14 +3231,49 @@ export default function AdminStudents({
     Boolean(viewingStudent) &&
     (canRecordViewingStudentPayment ||
       isViewingUnassignedPaymentTerm ||
-      viewingStudentPayments.length > 0);
+      viewingStudentPayments.length > 0 ||
+      viewingStudentPaymentTerms.length > 0);
+  const viewingStudentPaymentSummaryStatus =
+    isViewingUnassignedPaymentTerm
+      ? "Unassigned"
+      : viewingStudentTotalAssessment > 0
+        ? viewingStudentBalanceSummary.status
+        : "No Assessment";
   const getPaymentStatusClassName = (
-    status: typeof viewingStudentBalanceSummary.status,
+    status: typeof viewingStudentPaymentSummaryStatus,
   ) => {
     if (status === "Fully Paid") return "students-payment-status-paid";
     if (status === "Partial") return "students-payment-status-partial";
-    return "students-payment-status-unpaid";
+    if (status === "Unpaid") return "students-payment-status-unpaid";
+    return "students-payment-status-unavailable";
   };
+  const viewingStudentPaymentSummaryCards = (
+    <div className="students-payment-summary">
+      <div className="students-payment-summary-card">
+        <span>Total Assessment</span>
+        <strong>
+          {formatPeso(viewingStudentBalanceSummary.totalAssessment)}
+        </strong>
+      </div>
+      <div className="students-payment-summary-card">
+        <span>Total Paid</span>
+        <strong>{formatPeso(viewingStudentBalanceSummary.totalPaid)}</strong>
+      </div>
+      <div className="students-payment-summary-card balance">
+        <span>Current Balance</span>
+        <strong>
+          {formatPeso(viewingStudentBalanceSummary.currentBalance)}
+        </strong>
+      </div>
+      <div
+        className={`students-payment-status ${getPaymentStatusClassName(
+          viewingStudentPaymentSummaryStatus,
+        )}`}
+      >
+        {viewingStudentPaymentSummaryStatus}
+      </div>
+    </div>
+  );
   const canEditViewingStudentScholarshipScore =
     isViewingCollegeStudent &&
     Boolean(viewingStudent && viewingStudentApplicantRecord?.trackingNumber);
@@ -3487,48 +3511,6 @@ export default function AdminStudents({
       });
     } finally {
       setIsSavingPayment(false);
-    }
-  };
-
-  const handleSetStudentPaymentTerm = async (paymentId: string) => {
-    if (!viewingStudent) return;
-
-    const selectedTerm = legacyPaymentTermDrafts[paymentId];
-    const separatorIndex = selectedTerm?.indexOf("::") ?? -1;
-    if (separatorIndex < 0) {
-      setPaymentFeedback({
-        type: "warning",
-        message: "Choose the academic year and semester for this receipt.",
-      });
-      return;
-    }
-
-    const academicYear = selectedTerm.slice(0, separatorIndex);
-    const semester = selectedTerm.slice(separatorIndex + 2);
-
-    try {
-      setAssigningLegacyPaymentId(paymentId);
-      await setStudentPaymentTerm({
-        branch: viewingStudent.branch || currentBranch,
-        paymentId,
-        academicYear,
-        semester,
-      });
-      setPaymentRecordsVersion((previousValue) => previousValue + 1);
-      setPaymentFeedback({
-        type: "success",
-        message: `Receipt term saved as ${academicYear} | ${semester}.`,
-      });
-    } catch (error) {
-      setPaymentFeedback({
-        type: "warning",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Unable to save this receipt's academic term.",
-      });
-    } finally {
-      setAssigningLegacyPaymentId(null);
     }
   };
 
@@ -5032,10 +5014,13 @@ export default function AdminStudents({
                           ) : null}
 
                           {isViewingUnassignedPaymentTerm ? (
-                            <p className="students-payment-assessment-note">
-                              These older receipts have no saved academic year or
-                              semester. They are excluded from all term balances.
-                            </p>
+                            <>
+                              <p className="students-payment-assessment-note">
+                                These older receipts have no saved academic year or
+                                semester. They are excluded from all term balances.
+                              </p>
+                              {viewingStudentPaymentSummaryCards}
+                            </>
                           ) : viewingStudentTotalAssessment > 0 ? (
                             <>
                               <div className="students-payment-form">
@@ -5116,37 +5101,7 @@ export default function AdminStudents({
                                 </div>
                               </div>
 
-                              <div className="students-payment-summary">
-                                <div className="students-payment-summary-card">
-                                  <span>Total Assessment</span>
-                                  <strong>
-                                    {formatPeso(
-                                      viewingStudentBalanceSummary.totalAssessment,
-                                    )}
-                                  </strong>
-                                </div>
-                                <div className="students-payment-summary-card">
-                                  <span>Total Paid</span>
-                                  <strong>
-                                    {formatPeso(viewingStudentBalanceSummary.totalPaid)}
-                                  </strong>
-                                </div>
-                                <div className="students-payment-summary-card balance">
-                                  <span>Current Balance</span>
-                                  <strong>
-                                    {formatPeso(
-                                      viewingStudentBalanceSummary.currentBalance,
-                                    )}
-                                  </strong>
-                                </div>
-                                <div
-                                  className={`students-payment-status ${getPaymentStatusClassName(
-                                    viewingStudentBalanceSummary.status,
-                                  )}`}
-                                >
-                                  {viewingStudentBalanceSummary.status}
-                                </div>
-                              </div>
+                              {viewingStudentPaymentSummaryCards}
                               <p className="students-payment-assessment-note">
                                 {selectedPaymentAcademicYear} | {selectedPaymentSemester}
                                 {" - "}
@@ -5158,11 +5113,14 @@ export default function AdminStudents({
                               </p>
                             </>
                           ) : (
-                            <p className="students-payment-assessment-note">
-                              No tuition assessment is available for{" "}
-                              {selectedPaymentAcademicYear} | {selectedPaymentSemester}.
-                              Payment receipts for this term remain visible below.
-                            </p>
+                            <>
+                              {viewingStudentPaymentSummaryCards}
+                              <p className="students-payment-assessment-note">
+                                No tuition assessment is available for{" "}
+                                {selectedPaymentAcademicYear} | {selectedPaymentSemester}.
+                                Payment receipts for this term remain visible below.
+                              </p>
+                            </>
                           )}
 
                           <div className="students-payment-receipts">
@@ -5188,104 +5146,41 @@ export default function AdminStudents({
                                   </thead>
                                   <tbody>
                                     {viewingStudentPaymentRecordsForFilter.map(
-                                      (payment) => {
-                                        const savedPaymentTerm =
-                                          payment.academicYear && payment.semester
-                                            ? buildGradeTermKey(
-                                                payment.academicYear,
-                                                payment.semester,
-                                              )
-                                            : "";
-                                        const selectedPaymentTermDraft =
-                                          Object.prototype.hasOwnProperty.call(
-                                            legacyPaymentTermDrafts,
-                                            payment.id,
-                                          )
-                                            ? legacyPaymentTermDrafts[payment.id]
-                                            : savedPaymentTerm;
-                                        const hasPaymentTermChange =
-                                          selectedPaymentTermDraft !==
-                                          savedPaymentTerm;
-
-                                        return (
-                                          <tr key={payment.id}>
-                                        <td>
-                                          {new Date(
-                                            payment.paidAt,
-                                          ).toLocaleDateString()}
-                                        </td>
-                                        <td>
-                                          <div className="students-payment-legacy-assignment">
-                                            <select
-                                              aria-label={`Academic term for receipt ${payment.receiptNumber}`}
-                                              value={selectedPaymentTermDraft}
-                                              onChange={(event) =>
-                                                setLegacyPaymentTermDrafts((previous) => ({
-                                                  ...previous,
-                                                  [payment.id]: event.target.value,
-                                                }))
-                                              }
-                                            >
-                                              <option value="">Choose term</option>
-                                              {viewingStudentPaymentTerms.map((term) => (
-                                                <option
-                                                  key={buildGradeTermKey(
-                                                    term.academicYear,
-                                                    term.semester,
-                                                  )}
-                                                  value={buildGradeTermKey(
-                                                    term.academicYear,
-                                                    term.semester,
-                                                  )}
-                                                >
-                                                  {term.academicYear} | {term.semester}
-                                                </option>
-                                              ))}
-                                            </select>
+                                      (payment) => (
+                                        <tr key={payment.id}>
+                                          <td>
+                                            {new Date(
+                                              payment.paidAt,
+                                            ).toLocaleDateString()}
+                                          </td>
+                                          <td>
+                                            {payment.academicYear && payment.semester
+                                              ? `${payment.academicYear} | ${payment.semester}`
+                                              : "Unassigned"}
+                                          </td>
+                                          <td>{payment.receiptNumber}</td>
+                                          <td>{formatPeso(payment.amount)}</td>
+                                          <td>
+                                            {payment.encodedBy}
+                                            {payment.encodedRole
+                                              ? ` (${payment.encodedRole})`
+                                              : ""}
+                                          </td>
+                                          <td>{payment.notes || "-"}</td>
+                                          <td>
                                             <button
                                               type="button"
-                                              className="students-grade-action-btn"
+                                              className="students-grade-action-btn danger"
                                               onClick={() =>
-                                                void handleSetStudentPaymentTerm(payment.id)
+                                                handleRemoveStudentPayment(payment.id)
                                               }
-                                              disabled={
-                                                !selectedPaymentTermDraft ||
-                                                !hasPaymentTermChange ||
-                                                assigningLegacyPaymentId !== null
-                                              }
+                                              disabled={isAnyBulkActionPending}
                                             >
-                                              {assigningLegacyPaymentId === payment.id
-                                                ? "Saving..."
-                                                : payment.academicYear && payment.semester
-                                                  ? "Save"
-                                                  : "Assign"}
+                                              Remove
                                             </button>
-                                          </div>
-                                        </td>
-                                        <td>{payment.receiptNumber}</td>
-                                        <td>{formatPeso(payment.amount)}</td>
-                                        <td>
-                                          {payment.encodedBy}
-                                          {payment.encodedRole
-                                            ? ` (${payment.encodedRole})`
-                                            : ""}
-                                        </td>
-                                        <td>{payment.notes || "-"}</td>
-                                        <td>
-                                          <button
-                                            type="button"
-                                            className="students-grade-action-btn danger"
-                                            onClick={() =>
-                                              handleRemoveStudentPayment(payment.id)
-                                            }
-                                            disabled={isAnyBulkActionPending}
-                                          >
-                                            Remove
-                                          </button>
-                                        </td>
-                                          </tr>
-                                        );
-                                      },
+                                          </td>
+                                        </tr>
+                                      ),
                                     )}
                                   </tbody>
                                 </table>
