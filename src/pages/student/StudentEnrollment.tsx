@@ -57,6 +57,7 @@ import {
   STUDENT_PAYMENTS_UPDATED_EVENT,
 } from "../../services/studentPayments";
 import { EnrollmentBalanceError, getStudentBillingSummary } from "../../services/studentBilling";
+import { getTransfereeCreditedSubjectCodes } from "../../services/studentPortalResolver";
 import type { Student } from "../../types/student";
 import "../../styles/main.css";
 
@@ -406,6 +407,14 @@ function StudentEnrollment() {
     [gradeRecordsVersion, storageProgram, student?.branch, student?.studentNumber],
   );
   const completedSubjectCodes = getCompletedSubjectCodes(studentGradeRecords);
+  const isShsTransferee = student?.programType === "SHS" && student.status === "Transferee";
+  const creditedSubjectCodes = isShsTransferee
+    ? getTransfereeCreditedSubjectCodes({
+        branch: student.branch,
+        id: student.studentNumber,
+        trackingNumber: student.trackingNumber,
+      })
+    : null;
   const assignedSubjects =
     student && nextPlacement.hasNextTerm
       ? getStudentPortalSubjectsForTerm({
@@ -418,7 +427,8 @@ function StudentEnrollment() {
           requireCourseMatch: true,
         }).filter(
           (subject) =>
-            !completedSubjectCodes.has(subject.code.trim().toUpperCase()),
+            !completedSubjectCodes.has(subject.code.trim().toUpperCase()) &&
+            !creditedSubjectCodes?.has(subject.code.trim().toUpperCase()),
         )
       : [];
   const currentTermSubjects = useMemo(
@@ -513,7 +523,8 @@ function StudentEnrollment() {
   ) =>
     activeEnrollmentRequest?.enrollmentStatus === "Pending" &&
     getEnrollmentRequirementAttachment(requirement)?.reviewStatus === "Rejected";
-  const isRegularFlowStudent = student?.status === "Regular";
+  const isRegularFlowStudent = student?.status === "Regular" ||
+    Boolean(isShsTransferee && student.section?.trim());
   const supportsIrregularEnrollmentRequest = Boolean(
     student && storageProgram === "College" && student.status === "Irregular",
   );
@@ -754,7 +765,7 @@ function StudentEnrollment() {
         : activeEnrollmentRequest?.enrollmentStatus === "Rejected"
           ? "Your last request was rejected. Reupload the required files and submit again."
           : !hasSupportedEnrollmentFlow
-            ? "This enrollment page currently supports regular students and eligible college irregular schedule requests only."
+            ? "Enrollment is available for regular students, SHS transferees with an assigned section, and eligible college irregular students."
             : hasBlockingShsCurrentFailures
               ? "At least one senior high grade is below 75. Failed subjects must be resolved before semester progression or year-level enrollment."
             : evaluationLockStatus.isLocked
@@ -1008,7 +1019,7 @@ function StudentEnrollment() {
 
     if (!isRegularFlowStudent && !supportsIrregularEnrollmentRequest) {
       addToast(
-        "This enrollment page currently supports regular students and eligible college irregular schedule requests only.",
+        "Enrollment is available for regular students, SHS transferees with an assigned section, and eligible college irregular students.",
         "warning",
       );
       return;
@@ -1441,7 +1452,7 @@ function StudentEnrollment() {
                 <span className="s-eligibility-label">Student Flow:</span>
                 <span className="s-eligibility-value">
                   {isRegularFlowStudent
-                    ? "Regular Student"
+                    ? isShsTransferee ? "Transferee" : "Regular Student"
                     : supportsIrregularEnrollmentRequest
                       ? "Irregular Schedule Request"
                       : student?.status || "-"}
