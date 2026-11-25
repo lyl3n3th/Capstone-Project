@@ -3616,9 +3616,14 @@ export const getStudentPortalSubjects = (
     | "studentStatus"
   > &
     Pick<StudentStorageRecord, "id" | "trackingNumber">,
-  recordedTerm?: { academicYear: string; semester: string },
+  recordedTerm?: { academicYear: string; semester: string; restrictToTerm?: boolean },
 ): StudentPortalSubject[] => {
   const branch = normalizeBranchName(student.branch);
+  const assignedTerm = recordedTerm?.restrictToTerm ? recordedTerm : undefined;
+  const matchesAssignedTerm = (assignment: { academicYear: string; semester: string }) =>
+    !assignedTerm ||
+    (assignment.academicYear.trim() === assignedTerm.academicYear &&
+      normalizeStoredSemester(assignment.semester) === normalizeStoredSemester(assignedTerm.semester));
   const storedSubjects =
     (readBranchScopedData<StoredAcademicSubject[]>("subjects", branch) ?? []).map(
       (subject) => ({
@@ -3633,7 +3638,7 @@ export const getStudentPortalSubjects = (
     ).map((assignment) => ({
       ...assignment,
       semester: normalizeStoredSemester(assignment.semester),
-    }));
+    })).filter(matchesAssignedTerm);
   const storedSections =
     readBranchScopedData<StoredClassSection[]>("class-sections", branch) ?? [];
   const storedSubjectPlans =
@@ -3659,6 +3664,7 @@ export const getStudentPortalSubjects = (
     ? recordedTerm
     : undefined;
   const defaultAcademicYear =
+    assignedTerm?.academicYear ||
     fallbackRecordedTerm?.academicYear ||
     storedAssignments[0]?.academicYear ||
     activeStudentSubjectPlan?.academicYear ||
@@ -3706,6 +3712,7 @@ export const getStudentPortalSubjects = (
       ? getPreferredStartingSemester(matchedSubjects)
       : undefined;
   const effectiveSemester =
+    (assignedTerm && normalizeStoredSemester(assignedTerm.semester)) ||
     plannedSemester ||
     activeSectionSemester ||
     ownScheduleSemester ||
@@ -3718,7 +3725,7 @@ export const getStudentPortalSubjects = (
     : matchedSubjects;
   const creditedPlanSubjects = activeStudentSubjectPlan?.creditedSubjects ?? [];
   const plannedScheduledAssignments =
-    activeStudentSubjectPlan?.scheduledAssignments ?? [];
+    (activeStudentSubjectPlan?.scheduledAssignments ?? []).filter(matchesAssignedTerm);
   const creditedScopedSubjects =
     creditedPlanSubjects.length > 0
       ? semesterScopedSubjects.filter(
@@ -3729,7 +3736,7 @@ export const getStudentPortalSubjects = (
         )
       : semesterScopedSubjects;
   const planAcademicYear =
-    activeStudentSubjectPlan?.academicYear?.trim() || defaultAcademicYear;
+    assignedTerm?.academicYear || activeStudentSubjectPlan?.academicYear?.trim() || defaultAcademicYear;
 
   if (plannedScheduledAssignments.length > 0) {
     const scheduledPortalSubjects = mapScheduledAssignmentsToPortalSubjects(
