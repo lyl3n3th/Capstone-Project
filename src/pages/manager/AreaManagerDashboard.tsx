@@ -17,13 +17,13 @@ import {
   MdAccountBalance,
 } from "react-icons/md";
 import {
-  fetchSupabaseAdmissionApplicants,
   normalizeBranchName,
   type AdminBranchName,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
 import { fetchInboxReports, type ReportRecord } from "../../services/reportApi";
 import { useManagedStudents } from "../../hooks/useManagedStudents";
+import { supabase } from "../../lib/supabase";
 import ChartNote from "../../components/common/ChartNote";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import "../../styles/manager/area-managerDashboard.css";
@@ -288,16 +288,11 @@ const AreaManagerDashboard = ({
     const refreshEnrollment = async () => {
       const currentRequest = ++request;
       try {
-        const entries = await Promise.all(managedBranches.map(async (branch) => {
-          const admissions = await fetchSupabaseAdmissionApplicants(branch);
-          const counts = { shs: 0, college: 0 };
-          for (const admission of admissions) {
-            if (admission.status !== "Approved" || admission.archivedAt) continue;
-            if (admission.program === "SHS") counts.shs += 1;
-            if (admission.program === "College") counts.college += 1;
-          }
-          return [branch, counts] as const;
-        }));
+        const { data, error } = await supabase
+          .rpc("get_manager_branch_enrollment_counts", { p_branches: managedBranches })
+          .returns<Array<BranchEnrollmentCounts & { branch: AdminBranchName }>>();
+        if (error) throw error;
+        const entries = (data ?? []).map(({ branch, shs, college }) => [branch, { shs, college }] as const);
         if (active && currentRequest === request) {
           setEnrollmentSnapshot({ branchKey, counts: Object.fromEntries(entries) });
           setEnrollmentError("");
