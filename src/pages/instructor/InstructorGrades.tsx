@@ -60,7 +60,7 @@ type GradePreviewWorksheetRow = Array<string | number | boolean | null | undefin
 
 type GradeFilePreviewRow = {
   sheetName: string;
-  rowNumber: number;
+  rowNumber: number | null;
   studentId: string;
   fullName: string;
   subjectCode: string;
@@ -347,6 +347,72 @@ const buildGradeFilePreview = (
   });
 
   return rows;
+};
+
+const buildStoredGradeFilePreview = (
+  submission: InstructorGradeSubmission,
+): GradeFilePreviewRow[] => {
+  const savedRows = submission.records.map((record) => ({
+    sheetName: "Saved grade records",
+    rowNumber: null,
+    studentId: record.studentId,
+    fullName: record.fullName,
+    subjectCode: record.subjectCode,
+    subjectTitle: record.subjectTitle,
+    unitsOrPeriod:
+      record.units == null
+        ? record.gradingPeriod
+        : `${record.units} / ${record.gradingPeriod}`,
+    grade: record.grade,
+    instructorName: record.instructorName || submission.instructorName,
+    academicYear: record.academicYear,
+    semester: record.semester,
+    programType: record.programType,
+    status: "Correct" as const,
+    errors: [],
+    errorCells: [],
+  }));
+  const savedErrorRows = (submission.errorRows ?? []).map((row) => ({
+    sheetName: row.sheetName,
+    rowNumber: row.rowNumber,
+    studentId: row.studentId,
+    fullName: row.fullName,
+    subjectCode: row.subjectCode,
+    subjectTitle: row.subjectTitle,
+    unitsOrPeriod:
+      row.units && row.gradingPeriod
+        ? `${row.units} / ${row.gradingPeriod}`
+        : row.units || row.gradingPeriod,
+    grade: row.grade,
+    instructorName: row.instructorName || submission.instructorName,
+    academicYear: row.academicYear,
+    semester: row.semester,
+    programType: row.programType,
+    status: "Error" as const,
+    errors: getDisplayGradeErrors(row.errors),
+    errorCells: getGradeErrorCells(row),
+  }));
+  const unstructuredErrors = savedErrorRows.length === 0
+    ? submission.errors.map((error) => ({
+        sheetName: "Saved error details",
+        rowNumber: null,
+        studentId: "",
+        fullName: "",
+        subjectCode: "",
+        subjectTitle: "",
+        unitsOrPeriod: "",
+        grade: "",
+        instructorName: submission.instructorName,
+        academicYear: "",
+        semester: "",
+        programType: "",
+        status: "Error" as const,
+        errors: [error],
+        errorCells: [],
+      }))
+    : [];
+
+  return [...savedRows, ...savedErrorRows, ...unstructuredErrors];
 };
 
 export default function InstructorGrades() {
@@ -658,21 +724,32 @@ export default function InstructorGrades() {
     setSubmissionActionNotice(null);
     try {
       const submission = await loadSubmissionDetails(submissionSummary.id);
-      if (!submission.fileDataBase64) {
-        setFilePreview({ submission, rows: [] });
-        setFilePreviewNotice(
-          "This submission does not have a saved uploaded file. The workbook preview and download are unavailable.",
-        );
-        setIsReviewingUpload(false);
-        setUploadReviewError("");
-        return;
+      const hasOriginalFile = Boolean(submission.fileDataBase64);
+      let originalRows: GradeFilePreviewRow[] = [];
+      if (hasOriginalFile) {
+        try {
+          originalRows = buildGradeFilePreview(submission);
+        } catch {
+          // Older saved grade records can still provide a useful preview if the
+          // original workbook bytes are unavailable or cannot be parsed.
+        }
       }
-
+      const rows = originalRows.length > 0
+        ? originalRows
+        : buildStoredGradeFilePreview(submission);
       setFilePreview({
         submission,
-        rows: buildGradeFilePreview(submission),
+        rows,
       });
-      setFilePreviewNotice("");
+      setFilePreviewNotice(
+        originalRows.length > 0
+          ? ""
+          : rows.length > 0
+            ? `${hasOriginalFile ? "The original workbook could not be previewed." : "The original workbook is not saved."} Showing ${rows.length.toLocaleString()} saved grade row(s).`
+            : hasOriginalFile
+              ? ""
+              : "The original workbook is not saved, and no grade row data is available for this submission.",
+      );
       setIsReviewingUpload(false);
       setUploadReviewError("");
     } catch (error) {
@@ -702,6 +779,10 @@ export default function InstructorGrades() {
   const handleOpenErrors = async (
     submissionSummary: InstructorGradeSubmissionSummary,
   ) => {
+    if (submissionSummary.errorCount === 0) {
+      return;
+    }
+
     setSubmissionActionNotice(null);
     try {
       const submission = await loadSubmissionDetails(submissionSummary.id);
@@ -998,7 +1079,10 @@ export default function InstructorGrades() {
                         <button
                           type="button"
                           onClick={() => void handleOpenErrors(submission)}
-                          disabled={Boolean(loadingSubmissionDetailId)}
+                          disabled={
+                            submission.errorCount === 0 ||
+                            Boolean(loadingSubmissionDetailId)
+                          }
                         >
                           <FiAlertTriangle />{" "}
                           {loadingSubmissionDetailId === submission.id
@@ -1091,7 +1175,7 @@ export default function InstructorGrades() {
                           : "Submit for approval"}
                     </button>
                   </>
-                ) : !filePreviewNotice ? (
+                ) : filePreview.submission.fileDataBase64 ? (
                   <button
                     type="button"
                     onClick={() => handleDownloadOriginal(filePreview.submission)}
@@ -1117,7 +1201,7 @@ export default function InstructorGrades() {
               </p>
             ) : null}
 
-            {!filePreviewNotice ? (
+            {filePreview.rows.length > 0 || !filePreviewNotice ? (
               <div className="instructor-file-table-wrap">
                 <table className="instructor-file-table">
                   <thead>
@@ -1157,7 +1241,7 @@ export default function InstructorGrades() {
                           </span>
                         </td>
                         <td>{row.sheetName}</td>
-                        <td>{row.rowNumber}</td>
+                        <td>{row.rowNumber ?? "-"}</td>
                         <td>
                           <div className="instructor-error-cell-list">
                             {row.errorCells.length > 0
@@ -1195,7 +1279,10 @@ export default function InstructorGrades() {
                     {filePreview.rows.length === 0 ? (
                       <tr>
                         <td colSpan={15}>
-                          No grade rows were found in this file. Choose a workbook with grade rows before submitting.
+                          {filePreviewNotice ||
+                            (isReviewingUpload
+                              ? "No grade rows were found in this file. Choose a workbook with grade rows before submitting."
+                              : "No grade rows are available in this submission.")}
                         </td>
                       </tr>
                     ) : null}

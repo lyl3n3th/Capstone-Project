@@ -277,6 +277,7 @@ type InstructorGradeSubmissionSummaryRow = {
   submitted_at: string;
   status: InstructorGradeSubmission["status"];
   records: StoredStudentGradeRecord[] | null;
+  errors: string[] | null;
 };
 
 type InstructorGradeApprovalPageRow = Pick<
@@ -564,7 +565,7 @@ export const fetchInstructorGradeSubmissionPage = async ({
       { p_branch: normalizeBranchName(branch) },
       { count: "exact" },
     )
-    .select("id,instructor_id,file_name,submitted_at,status,records")
+    .select("id,instructor_id,file_name,submitted_at,status,records,errors")
     .eq("instructor_id", instructorId)
     .order("submitted_at", { ascending: false })
     .order("id", { ascending: false })
@@ -584,7 +585,7 @@ export const fetchInstructorGradeSubmissionPage = async ({
       rowCount: Array.isArray(submission.records)
         ? submission.records.length
         : 0,
-      errorCount: submission.status === "Error" ? 1 : 0,
+      errorCount: Array.isArray(submission.errors) ? submission.errors.length : 0,
     })),
     totalItems: count ?? 0,
   };
