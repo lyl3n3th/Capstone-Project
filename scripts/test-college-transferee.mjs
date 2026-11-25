@@ -100,3 +100,39 @@ const standing = functionsFrom('../src/services/studentApi.ts', ['getPortalStude
 assert.equal(standing.getPortalStudentStatus({...existing,program:'College',studentStatus:'Transferee'}), 'Irregular');
 assert.equal(standing.getPortalStudentStatus({...existing,program:'SHS',studentStatus:'Transferee'}), 'Transferee');
 console.log('College transferee checks passed: automatic irregular planning, no section or assigned load, TOR credits preserved, credited prerequisite eligibility, SHS and regular admissions unchanged.');
+
+const placementApi = {};
+const resolverSource = readFileSync(new URL('../src/services/studentPortalResolver.ts', import.meta.url), 'utf8');
+const catalogSubjects = [{ id: 'future', academicYear: '2031-2032', semester: '1st Semester' }];
+const school = {
+  getStudentPortalSubjects: (_student, term) => term?.restrictToTerm
+    ? [{ id: 'placed', academicYear: term.academicYear, semester: term.semester }]
+    : catalogSubjects,
+  getStudentPortalSubjectsForTerm: () => [],
+  getStudentPortalSubjectsForSectionTerm: () => [],
+  getStudentGradeRecords: () => [],
+  hasCompletePassingShsSemesterGrades: () => false,
+  applyImportedScheduleDefaults: student => student,
+  getLatestApprovedEnrollmentRequestForStudent: ({ branch }) => branch === 'With Approved Enrollment'
+    ? { academicYear: '2027-2028', semester: '1st Semester' }
+    : undefined,
+};
+new Function('exports', 'require', ts.transpileModule(resolverSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText)(placementApi, () => school);
+
+const shsTransferee = {
+  id: 'test-transfer', program: 'SHS', yearLevel: 'Grade 11', section: 'ICT1-A',
+  studentStatus: 'Transferee', ownScheduleAcademicYear: '2026-2027',
+  ownScheduleSemester: '1st Semester', requestedOwnSchedule: false,
+};
+for (const branch of ['Commonwealth', 'Bacoor']) {
+  const result = placementApi.resolveStudentPortalContext({ ...shsTransferee, branch });
+  assert.equal(result.currentTerm.source, 'transferee_placement');
+  assert.equal(result.currentTerm.academicYear, '2026-2027');
+  assert.deepEqual(result.subjects.map(subject => subject.academicYear), ['2026-2027']);
+}
+assert.equal(placementApi.resolveStudentPortalContext({
+  ...shsTransferee, branch: 'With Approved Enrollment',
+}).currentTerm.academicYear, '2027-2028', 'Later approved enrollment takes priority');
+console.log('Transferee placement checks passed across branches.');
