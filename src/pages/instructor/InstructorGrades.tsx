@@ -4,6 +4,7 @@ import {
   FiAlertTriangle,
   FiCheckCircle,
   FiDownload,
+  FiEye,
   FiInfo,
   FiTrash2,
   FiUpload,
@@ -1069,9 +1070,12 @@ export default function InstructorGrades() {
                         <button
                           type="button"
                           onClick={() => void handleOpenFilePreview(submission)}
-                          disabled={Boolean(loadingSubmissionDetailId)}
+                          disabled={
+                            submission.errorCount > 0 ||
+                            Boolean(loadingSubmissionDetailId)
+                          }
                         >
-                          <FiDownload />{" "}
+                          <FiEye />{" "}
                           {loadingSubmissionDetailId === submission.id
                             ? "Loading..."
                             : "File"}
