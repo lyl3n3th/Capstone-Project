@@ -53,6 +53,16 @@ const evaluation = functionsFrom('../src/pages/admin/AdminEnrollees.tsx', [
   'normalizeStringList', 'normalizeSectionSemester', 'createDefaultTransfereeEvaluation',
   'normalizeTransfereeEvaluation', 'requiresSectionAssignment',
 ], { ...policy, DEFAULT_SECTION_SEMESTER:'1st Semester' });
+for (const applicantType of ['Transferee', 'Senior High Graduate', 'Junior High Completer']) {
+  const name = { firstName: 'Juan Miguel', lastName: 'Santos Reyes' };
+  const { student } = policy.promoteApplicantToStoredStudent({
+    ...applicant, studentStatus: applicantType, fullName: 'Juan Miguel Santos Reyes',
+  }, name);
+  assert.equal(student.name, 'Juan Miguel Santos Reyes');
+  assert.equal(student.firstName, 'Juan Miguel');
+  assert.equal(student.middleName, undefined);
+  assert.equal(student.lastName, 'Santos Reyes');
+}
 const stalePlan = { creditedSubjectIds:['math-1'], assignedSubjectIds:['math-2'], recommendedSectionId:'old-section' };
 const college = evaluation.normalizeTransfereeEvaluation(applicant, stalePlan);
 assert.deepEqual(college.creditedSubjectIds, ['math-1']);
