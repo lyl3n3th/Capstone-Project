@@ -10351,7 +10351,10 @@ export default function AdminEnrollees({
                                   </small>
                                 </span>
                                 {(question.type || "rating") === "essay" ? (
-                                  <span className="questionnaire-essay-preview">
+                                  <span
+                                    className="questionnaire-essay-preview"
+                                    style={{ gridColumn: "2 / span 5" }}
+                                  >
                                     Written response
                                   </span>
                                 ) : (
@@ -10365,6 +10368,7 @@ export default function AdminEnrollees({
                                 <button
                                   type="button"
                                   className="questionnaire-icon-btn"
+                                  style={{ gridColumn: 7, justifySelf: "center" }}
                                   onClick={() =>
                                     handleDeleteQuestionnaireQuestion(
                                       category.id,
