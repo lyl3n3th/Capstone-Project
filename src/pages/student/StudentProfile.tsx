@@ -339,47 +339,39 @@ function StudentProfile() {
         />
 
         <main className="s-profile-content">
-          <div className="s-card s-home-balance s-profile-balance">
-            <div className="s-card-header1">
-              <h3>Balance Overview</h3>
-            </div>
-            <div className="s-balance-content">
-              <div className="s-balance-amount">
-                {student.programType !== "SHS" &&
-                studentBalanceSummary.totalAssessment > 0
-                  ? balanceFormatter.format(studentBalanceSummary.currentBalance)
-                  : "Pending Assessment"}
+          {student.programType !== "SHS" && (
+            <div className="s-card s-home-balance s-profile-balance">
+              <div className="s-card-header1">
+                <h3>Balance Overview</h3>
               </div>
-              <p>
-                {currentTermSubjects.length > 0
-                  ? `${currentTermSubjects.length} official subject(s) loaded for ${currentSemester}.`
-                  : "No official subject load has been posted yet."}
-              </p>
-              {student.programType !== "SHS" ? (
-                <>
-                  <p>
-                    {balanceFormatter.format(studentBalanceSummary.totalPaid)} paid
-                    of {balanceFormatter.format(studentBalanceSummary.totalAssessment)}
-                  </p>
-                  <p>
-                    {studentBalanceSummary.totalUnits} unit(s) at{" "}
-                    {balanceFormatter.format(tuitionPerUnit)} per unit
-                  </p>
-                  {effectiveDiscountPercentage > 0 ? (
-                    <p>
-                      {effectiveDiscountPercentage}% {effectiveDiscountSourceLabel}{" "}
-                      applied
-                    </p>
-                  ) : null}
-                </>
-              ) : (
+              <div className="s-balance-content">
+                <div className="s-balance-amount">
+                  {studentBalanceSummary.totalAssessment > 0
+                    ? balanceFormatter.format(studentBalanceSummary.currentBalance)
+                    : "Pending Assessment"}
+                </div>
                 <p>
-                  SHS billing will appear here after the final subject load is
-                  confirmed.
+                  {currentTermSubjects.length > 0
+                    ? `${currentTermSubjects.length} official subject(s) loaded for ${currentSemester}.`
+                    : "No official subject load has been posted yet."}
                 </p>
-              )}
+                <p>
+                  {balanceFormatter.format(studentBalanceSummary.totalPaid)} paid
+                  of {balanceFormatter.format(studentBalanceSummary.totalAssessment)}
+                </p>
+                <p>
+                  {studentBalanceSummary.totalUnits} unit(s) at{" "}
+                  {balanceFormatter.format(tuitionPerUnit)} per unit
+                </p>
+                {effectiveDiscountPercentage > 0 ? (
+                  <p>
+                    {effectiveDiscountPercentage}% {effectiveDiscountSourceLabel}{" "}
+                    applied
+                  </p>
+                ) : null}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Edit Mode Controls */}
           {editing && (
