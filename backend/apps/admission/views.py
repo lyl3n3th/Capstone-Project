@@ -521,7 +521,7 @@ class AdmissionDraftRecoveryStartView(APIView):
             {
                 "message": (
                     "If those details match an unfinished application, a "
-                    "verification code has been sent to that email address."
+                    "verification code will be sent to that email address."
                 )
             },
             status=status.HTTP_202_ACCEPTED,

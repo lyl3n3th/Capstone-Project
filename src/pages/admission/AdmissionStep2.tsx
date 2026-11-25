@@ -526,7 +526,7 @@ function AdmissionStep2() {
     }
   };
 
-  const saveApplicationDraft = async (recoveredTrackingNumber?: string) => {
+  const saveApplicationAndContinue = async (recoveredTrackingNumber?: string) => {
     const savedDraft = saveDraft();
     const trackingNumberToSave =
       recoveredTrackingNumber || trackingNumber || initialTrackingNumber;
@@ -595,17 +595,13 @@ function AdmissionStep2() {
         status: studentStatus,
       };
       sessionStorage.setItem("enrollmentDraft", JSON.stringify(updatedDraft));
+      addToast("Application saved successfully!", "success");
     }
 
-    return nextTrackingNumber;
-  };
-
-  const saveApplicationAndContinue = async (recoveredTrackingNumber?: string) => {
-    const nextTrackingNumber = await saveApplicationDraft(recoveredTrackingNumber);
     window.location.href = `/requirements?branch=${encodeURIComponent(selectedBranch)}&status=${encodeURIComponent(studentStatus)}&trackingNumber=${nextTrackingNumber}&program=${encodeURIComponent(program)}`;
   };
 
-  const handleContinue = async (saveOnly = false) => {
+  const handleContinue = async () => {
     if (!isFormValid()) {
       const invalidFields = getFieldsToValidate().filter((fieldId) =>
         getFieldError(fieldId),
@@ -621,12 +617,7 @@ function AdmissionStep2() {
 
     setIsSubmitting(true);
     try {
-      if (saveOnly) {
-        await saveApplicationDraft();
-        addToast("Draft saved. You can resume later using your name and email.", "success");
-      } else {
-        await saveApplicationAndContinue();
-      }
+      await saveApplicationAndContinue();
     } catch (err) {
       console.error(err);
       const errorMessage =
@@ -1163,7 +1154,7 @@ function AdmissionStep2() {
                     aria-describedby="draftRecoveryHelp"
                   />
                   <small id="draftRecoveryHelp">
-                    Enter the 8-digit code. It expires after 10 minutes. Email recovery requires a draft previously saved with the same first name, last name, and email.
+                    Enter the 8-digit code. It expires after 10 minutes.
                   </small>
                 </div>
                 <div className="choices3">
@@ -1198,16 +1189,8 @@ function AdmissionStep2() {
               </button>
               <button
                 type="button"
-                className="btn3"
-                onClick={() => void handleContinue(true)}
-                disabled={isSubmitting || Boolean(offeringsError) || availablePrograms.length === 0}
-              >
-                Save Draft
-              </button>
-              <button
-                type="button"
                 className={`btn4 ${isSubmitting ? "disabled" : ""}`}
-                onClick={() => void handleContinue()}
+                onClick={handleContinue}
                 disabled={isSubmitting || Boolean(offeringsError) || availablePrograms.length === 0}
               >
                 {isSubmitting ? "Saving..." : "Continue"}

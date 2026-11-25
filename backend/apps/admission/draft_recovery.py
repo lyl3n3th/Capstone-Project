@@ -5,6 +5,7 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.utils import timezone
 
@@ -75,6 +76,9 @@ def _challenge_digest(challenge_id, code):
 
 def request_admission_draft_recovery(*, email, first_name, last_name):
     """Send a one-time code when strict draft matching finds an eligible record."""
+    if not is_email_delivery_configured():
+        raise ImproperlyConfigured("Admission draft recovery email delivery is not configured.")
+
     normalized_email = normalize_email(email)
     normalized_first_name = first_name.strip().casefold()
     normalized_last_name = last_name.strip().casefold()
@@ -90,6 +94,7 @@ def request_admission_draft_recovery(*, email, first_name, last_name):
     if recent_challenges.count() >= HOURLY_CHALLENGE_LIMIT or (
         recent_challenge and recent_challenge.created_at >= now - RESEND_COOLDOWN
     ):
+        logger.info("Admission draft recovery request limited by resend policy.")
         return
 
     draft = find_unsubmitted_draft(
@@ -98,10 +103,7 @@ def request_admission_draft_recovery(*, email, first_name, last_name):
         last_name=normalized_last_name,
     )
     if not draft:
-        return
-
-    if not is_email_delivery_configured():
-        logger.warning("Admission draft recovery email delivery is not configured.")
+        logger.info("Admission draft recovery found no eligible matching draft.")
         return
 
     AdmissionDraftRecoveryChallenge.objects.filter(
@@ -137,7 +139,9 @@ def request_admission_draft_recovery(*, email, first_name, last_name):
     except TrackingRecoveryDeliveryError:
         challenge.consumed_at = timezone.now()
         challenge.save(update_fields=["consumed_at"])
-        logger.exception("Unable to deliver an admission draft recovery code.")
+        logger.warning("Admission draft recovery email delivery failed.")
+    else:
+        logger.info("Admission draft recovery email accepted by the mail service.")
 
 
 def verify_admission_draft_recovery(*, email, first_name, last_name, code):
