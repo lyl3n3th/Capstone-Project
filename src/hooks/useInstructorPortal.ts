@@ -23,7 +23,7 @@ export function useInstructorPortal(options: {
   const includeStudents = options.includeStudents ?? true;
   const includeSubmissions = options.includeSubmissions ?? true;
   const deferSupplemental = options.deferSupplemental ?? false;
-  const showLoadingOnFocusRefresh = options.showLoadingOnFocusRefresh ?? true;
+  const showLoadingOnFocusRefresh = options.showLoadingOnFocusRefresh ?? false;
   const { currentUser } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [instructor, setInstructor] = useState<AcademicInstructorRecord | null>(
