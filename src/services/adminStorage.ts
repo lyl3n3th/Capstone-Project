@@ -5203,6 +5203,7 @@ export const isCollegeTransferee = (student: {
 
 export const promoteApplicantToStoredStudent = (
   applicant: AdminEnrolleeRecord,
+  approvedName?: { firstName: string; middleName?: string; lastName: string },
 ) => {
   const normalizedApplicant = normalizeAdminEnrolleeCapitalization(
     isCollegeTransferee(applicant) ? {
@@ -5221,7 +5222,7 @@ export const promoteApplicantToStoredStudent = (
     existingStudent?.id ||
     normalizedApplicant.studentNumber ||
     getNextStudentNumber(normalizedApplicant.branch, existingStudents);
-  const { firstName, middleName, lastName } = splitFullName(
+  const { firstName, middleName, lastName } = approvedName ?? splitFullName(
     normalizedApplicant.fullName,
   );
   const applicantSex = normalizedApplicant.personalInfo.sex;
@@ -5232,9 +5233,10 @@ export const promoteApplicantToStoredStudent = (
 
   const studentRecord: StudentStorageRecord = {
     id: studentNumber,
-    name:
-      normalizedApplicant.fullName ||
-      [firstName, middleName, lastName].filter(Boolean).join(" "),
+    name: approvedName
+      ? [firstName, middleName, lastName].filter(Boolean).join(" ")
+      : normalizedApplicant.fullName,
+    ...(approvedName ? { firstName, middleName, lastName } : {}),
     program: normalizedApplicant.program,
     yearLevel: normalizedApplicant.yearLevel,
     section: isCollegeTransferee(normalizedApplicant) ? "" : existingStudent?.section || "",
