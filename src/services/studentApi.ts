@@ -5,6 +5,7 @@ import { isCachedAlumniStudent } from "./backupApi";
 import {
   fetchSupabaseAdmissionApplicants,
   fetchAdmissionAcademicYearForTrackingNumber,
+  fetchInstructorEvaluationSubmissions,
   getStudentCredentialOverview,
   getStudentRequirementSnapshot,
   fetchStudentCredentialReviewDecisions,
@@ -206,6 +207,10 @@ const syncStudentPortalAcademicCache = async (
     fetchStudentSubjectPlans(branch),
     fetchStudentScheduleRequests(branch),
     fetchEnrollmentRequests(branch),
+    fetchInstructorEvaluationSubmissions(branch).catch((error) => {
+      console.warn("Unable to refresh instructor evaluation submissions.", error);
+      return [];
+    }),
   ]);
 };
 
