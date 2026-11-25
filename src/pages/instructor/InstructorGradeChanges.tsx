@@ -57,15 +57,12 @@ const getProgramType = (
   section?: AcademicClassSectionRecord,
 ): StudentGradeProgramType => (section?.program === "SHS" ? "SHS" : "College");
 
-const formatSemesterAndQuarter = (row: {
-  semester: string;
-  gradingPeriod: string;
-  programType: StudentGradeProgramType;
-}) => {
-  const quarter = row.programType === "SHS" && row.gradingPeriod !== "No approved grade"
-    ? row.gradingPeriod.trim()
-    : "";
-  return [row.semester.trim(), quarter].filter(Boolean).join(" / ") || "-";
+const formatUnitOrQuarter = (
+  row: { gradingPeriod: string; programType: StudentGradeProgramType },
+  units: number | null,
+) => {
+  if (row.programType !== "SHS") return units ?? "-";
+  return row.gradingPeriod === "No approved grade" ? "-" : row.gradingPeriod.trim() || "-";
 };
 
 const sanitizeRequestedGradeInput = (value: string) => {
@@ -742,11 +739,11 @@ export default function InstructorGradeChanges() {
                     <th>Section</th>
                     <th>Subject Code</th>
                     <th>Subject Title</th>
-                    <th>Units</th>
+                    <th>Unit/Quarter</th>
                     <th>Current Grade</th>
                     <th>Requested Grade</th>
                     <th>Academic Year</th>
-                    <th>Semester / Quarter</th>
+                    <th>Semester</th>
                     <th>Program</th>
                   </tr>
                 </thead>
@@ -758,7 +755,7 @@ export default function InstructorGradeChanges() {
                       <td>{row.section}</td>
                       <td>{row.subjectCode}</td>
                       <td>{row.subjectTitle}</td>
-                      <td>{row.units ?? "-"}</td>
+                      <td>{formatUnitOrQuarter(row, row.units)}</td>
                       <td>{row.currentGrade}</td>
                       <td>
                         <input
@@ -778,7 +775,7 @@ export default function InstructorGradeChanges() {
                         />
                       </td>
                       <td>{row.academicYear}</td>
-                      <td>{formatSemesterAndQuarter(row)}</td>
+                      <td>{row.semester.trim() || "-"}</td>
                       <td>{row.programType}</td>
                     </tr>
                   ))}
@@ -848,11 +845,11 @@ export default function InstructorGradeChanges() {
                     <th>Section</th>
                     <th>Subject Code</th>
                     <th>Subject Title</th>
-                    <th>Units</th>
+                    <th>Unit/Quarter</th>
                     <th>Current Grade</th>
                     <th>Requested Grade</th>
                     <th>Academic Year</th>
-                    <th>Semester / Quarter</th>
+                    <th>Semester</th>
                     <th>Program</th>
                   </tr>
                 </thead>
@@ -864,11 +861,11 @@ export default function InstructorGradeChanges() {
                       <td>{change.section}</td>
                       <td>{change.subjectCode}</td>
                       <td>{change.subjectTitle}</td>
-                      <td>{getRequestSubjectUnits(change) ?? "-"}</td>
+                      <td>{formatUnitOrQuarter(change, getRequestSubjectUnits(change))}</td>
                       <td>{change.currentGrade}</td>
                       <td>{change.requestedGrade}</td>
                       <td>{change.academicYear}</td>
-                      <td>{formatSemesterAndQuarter(change)}</td>
+                      <td>{change.semester.trim() || "-"}</td>
                       <td>{change.programType}</td>
                     </tr>
                   ))}
