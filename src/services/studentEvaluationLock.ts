@@ -41,7 +41,7 @@ export const getCurrentTermEvaluationLockStatus = ({
   currentTerm,
   submissions,
 }: {
-  student: Student | null;
+  student: Pick<Student, "id" | "studentNumber"> | null;
   subjects: StudentPortalSubject[];
   currentTerm: StudentPortalCurrentTerm | null;
   submissions: InstructorEvaluationSubmissionRecord[];
