@@ -385,10 +385,16 @@ export default function InstructorGrades() {
   }, [assignments]);
   const templateSubject = templateSubjects.find((subject) => subject.id === templateSubjectId);
   const [filePreview, setFilePreview] = useState<GradeFilePreview | null>(null);
+  const [filePreviewNotice, setFilePreviewNotice] = useState("");
   const [isReviewingUpload, setIsReviewingUpload] = useState(false);
   const [uploadReviewError, setUploadReviewError] = useState("");
   const [errorPreviewSubmission, setErrorPreviewSubmission] =
     useState<InstructorGradeSubmission | null>(null);
+  const [submissionActionNotice, setSubmissionActionNotice] = useState<{
+    title: string;
+    fileName: string;
+    message: string;
+  } | null>(null);
   const [isDeleteMode, setIsDeleteMode] = useState(false);
   const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<string[]>([]);
   const [submissionPage, setSubmissionPage] = useState(1);
@@ -558,6 +564,7 @@ export default function InstructorGrades() {
       };
 
       setFilePreview({ submission, rows: buildGradeFilePreview(submission) });
+      setFilePreviewNotice("");
       setIsReviewingUpload(true);
       setMessage(
         hasErrors
@@ -623,6 +630,7 @@ export default function InstructorGrades() {
       setMessage("Upload cancelled. No grades were submitted.");
     }
     setFilePreview(null);
+    setFilePreviewNotice("");
     setIsReviewingUpload(false);
     setUploadReviewError("");
   };
@@ -647,20 +655,35 @@ export default function InstructorGrades() {
   const handleOpenFilePreview = async (
     submissionSummary: InstructorGradeSubmissionSummary,
   ) => {
+    setSubmissionActionNotice(null);
     try {
       const submission = await loadSubmissionDetails(submissionSummary.id);
+      if (!submission.fileDataBase64) {
+        setFilePreview({ submission, rows: [] });
+        setFilePreviewNotice(
+          "This submission does not have a saved uploaded file. The workbook preview and download are unavailable.",
+        );
+        setIsReviewingUpload(false);
+        setUploadReviewError("");
+        return;
+      }
+
       setFilePreview({
         submission,
         rows: buildGradeFilePreview(submission),
       });
+      setFilePreviewNotice("");
       setIsReviewingUpload(false);
       setUploadReviewError("");
     } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to open the uploaded file preview.",
-      );
+      setSubmissionActionNotice({
+        title: "Unable to open uploaded file",
+        fileName: submissionSummary.fileName,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to open the uploaded file preview.",
+      });
     }
   };
 
@@ -679,20 +702,19 @@ export default function InstructorGrades() {
   const handleOpenErrors = async (
     submissionSummary: InstructorGradeSubmissionSummary,
   ) => {
-    if (submissionSummary.errorCount === 0) {
-      setMessage("This submission does not have row errors to review.");
-      return;
-    }
-
+    setSubmissionActionNotice(null);
     try {
       const submission = await loadSubmissionDetails(submissionSummary.id);
       setErrorPreviewSubmission(submission);
     } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to load submission errors.",
-      );
+      setSubmissionActionNotice({
+        title: "Unable to load submission errors",
+        fileName: submissionSummary.fileName,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to load submission errors.",
+      });
     }
   };
 
@@ -976,10 +998,7 @@ export default function InstructorGrades() {
                         <button
                           type="button"
                           onClick={() => void handleOpenErrors(submission)}
-                          disabled={
-                            submission.errorCount === 0 ||
-                            Boolean(loadingSubmissionDetailId)
-                          }
+                          disabled={Boolean(loadingSubmissionDetailId)}
                         >
                           <FiAlertTriangle />{" "}
                           {loadingSubmissionDetailId === submission.id
@@ -1034,11 +1053,15 @@ export default function InstructorGrades() {
                   {filePreview.submission.fileName}
                 </h2>
                 <p>
-                  {filePreview.rows.filter((row) => row.status === "Correct").length.toLocaleString()}{" "}
-                  correct row(s),{" "}
-                  {filePreview.rows.filter((row) => row.status === "Error").length.toLocaleString()}{" "}
-                  row(s) with errors.
-                  {isReviewingUpload && filePreview.rows.length > 0 &&
+                  {filePreviewNotice
+                    ? filePreviewNotice
+                    : <>
+                      {filePreview.rows.filter((row) => row.status === "Correct").length.toLocaleString()}{" "}
+                      correct row(s),{" "}
+                      {filePreview.rows.filter((row) => row.status === "Error").length.toLocaleString()}{" "}
+                      row(s) with errors.
+                    </>}
+                  {!filePreviewNotice && isReviewingUpload && filePreview.rows.length > 0 &&
                     filePreview.rows.some((row) => row.status === "Error")
                     ? " Rows with errors will be saved as Error and need correction before approval."
                     : ""}
@@ -1068,14 +1091,14 @@ export default function InstructorGrades() {
                           : "Submit for approval"}
                     </button>
                   </>
-                ) : (
+                ) : !filePreviewNotice ? (
                   <button
                     type="button"
                     onClick={() => handleDownloadOriginal(filePreview.submission)}
                   >
                     <FiDownload /> Download
                   </button>
-                )}
+                ) : null}
                 <button
                   type="button"
                   className="instructor-file-modal-close"
@@ -1094,90 +1117,92 @@ export default function InstructorGrades() {
               </p>
             ) : null}
 
-            <div className="instructor-file-table-wrap">
-              <table className="instructor-file-table">
-                <thead>
-                  <tr>
-                    <th>Status</th>
-                    <th>Sheet</th>
-                    <th>Excel Row</th>
-                    <th>Cells</th>
-                    <th>Student ID</th>
-                    <th>Full Name</th>
-                    <th>Subject Code</th>
-                    <th>Subject Title</th>
-                    <th>Units / Period</th>
-                    <th>Grade</th>
-                    <th>Instructor</th>
-                    <th>Academic Year</th>
-                    <th>Semester</th>
-                    <th>Program</th>
-                    <th>Errors</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filePreview.rows.map((row, index) => (
-                    <tr
-                      key={`${row.sheetName}-${row.rowNumber}-${index}`}
-                      className={
-                        row.status === "Error"
-                          ? "instructor-file-row-error"
-                          : "instructor-file-row-correct"
-                      }
-                    >
-                      <td>
-                        <span
-                          className={`instructor-file-status instructor-file-status-${row.status.toLowerCase()}`}
-                        >
-                          {row.status}
-                        </span>
-                      </td>
-                      <td>{row.sheetName}</td>
-                      <td>{row.rowNumber}</td>
-                      <td>
-                        <div className="instructor-error-cell-list">
-                          {row.errorCells.length > 0
-                            ? row.errorCells.map((cell) => (
-                                <span key={cell}>{cell}</span>
-                              ))
-                            : <span className="instructor-file-cell-ok">OK</span>}
-                        </div>
-                      </td>
-                      <td>{row.studentId || "-"}</td>
-                      <td>{row.fullName || "-"}</td>
-                      <td>{row.subjectCode || "-"}</td>
-                      <td>{row.subjectTitle || "-"}</td>
-                      <td>{row.unitsOrPeriod || "-"}</td>
-                      <td>{row.grade || "-"}</td>
-                      <td>{row.instructorName || "-"}</td>
-                      <td>{row.academicYear || "-"}</td>
-                      <td>{row.semester || "-"}</td>
-                      <td>{row.programType || "-"}</td>
-                      <td>
-                        {row.errors.length > 0 ? (
-                          <ul className="instructor-error-problems">
-                            {row.errors.map((error) => (
-                              <li key={error}>{error}</li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <span className="instructor-file-no-errors">
-                            No errors
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {filePreview.rows.length === 0 ? (
+            {!filePreviewNotice ? (
+              <div className="instructor-file-table-wrap">
+                <table className="instructor-file-table">
+                  <thead>
                     <tr>
-                      <td colSpan={15}>
-                        No grade rows were found in this file. Choose a workbook with grade rows before submitting.
-                      </td>
+                      <th>Status</th>
+                      <th>Sheet</th>
+                      <th>Excel Row</th>
+                      <th>Cells</th>
+                      <th>Student ID</th>
+                      <th>Full Name</th>
+                      <th>Subject Code</th>
+                      <th>Subject Title</th>
+                      <th>Units / Period</th>
+                      <th>Grade</th>
+                      <th>Instructor</th>
+                      <th>Academic Year</th>
+                      <th>Semester</th>
+                      <th>Program</th>
+                      <th>Errors</th>
                     </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filePreview.rows.map((row, index) => (
+                      <tr
+                        key={`${row.sheetName}-${row.rowNumber}-${index}`}
+                        className={
+                          row.status === "Error"
+                            ? "instructor-file-row-error"
+                            : "instructor-file-row-correct"
+                        }
+                      >
+                        <td>
+                          <span
+                            className={`instructor-file-status instructor-file-status-${row.status.toLowerCase()}`}
+                          >
+                            {row.status}
+                          </span>
+                        </td>
+                        <td>{row.sheetName}</td>
+                        <td>{row.rowNumber}</td>
+                        <td>
+                          <div className="instructor-error-cell-list">
+                            {row.errorCells.length > 0
+                              ? row.errorCells.map((cell) => (
+                                  <span key={cell}>{cell}</span>
+                                ))
+                              : <span className="instructor-file-cell-ok">OK</span>}
+                          </div>
+                        </td>
+                        <td>{row.studentId || "-"}</td>
+                        <td>{row.fullName || "-"}</td>
+                        <td>{row.subjectCode || "-"}</td>
+                        <td>{row.subjectTitle || "-"}</td>
+                        <td>{row.unitsOrPeriod || "-"}</td>
+                        <td>{row.grade || "-"}</td>
+                        <td>{row.instructorName || "-"}</td>
+                        <td>{row.academicYear || "-"}</td>
+                        <td>{row.semester || "-"}</td>
+                        <td>{row.programType || "-"}</td>
+                        <td>
+                          {row.errors.length > 0 ? (
+                            <ul className="instructor-error-problems">
+                              {row.errors.map((error) => (
+                                <li key={error}>{error}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <span className="instructor-file-no-errors">
+                              No errors
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {filePreview.rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={15}>
+                          No grade rows were found in this file. Choose a workbook with grade rows before submitting.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
           </section>
         </div>
       ) : null}
@@ -1279,8 +1304,57 @@ export default function InstructorGrades() {
                       </tr>
                     );
                   })}
+                  {(errorPreviewSubmission.errorRows ?? []).length === 0 ? (
+                    <tr>
+                      <td colSpan={15}>
+                        {errorPreviewSubmission.errors.length > 0 ? (
+                          <ul className="instructor-error-problems">
+                            {errorPreviewSubmission.errors.map((error) => (
+                              <li key={error}>{error}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          "No row errors are recorded for this submission."
+                        )}
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {submissionActionNotice ? (
+        <div
+          className="instructor-error-modal-overlay"
+          role="presentation"
+          onClick={() => setSubmissionActionNotice(null)}
+        >
+          <section
+            className="instructor-error-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="instructor-submission-action-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="instructor-error-modal-header">
+              <div>
+                <span>{submissionActionNotice.fileName}</span>
+                <h2 id="instructor-submission-action-title">
+                  {submissionActionNotice.title}
+                </h2>
+                <p role="status">{submissionActionNotice.message}</p>
+              </div>
+              <button
+                type="button"
+                className="instructor-error-modal-close"
+                aria-label="Close submission message"
+                onClick={() => setSubmissionActionNotice(null)}
+              >
+                <FiX />
+              </button>
             </div>
           </section>
         </div>
