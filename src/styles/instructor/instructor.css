@@ -1148,6 +1148,27 @@
   overflow-wrap: anywhere;
 }
 
+/* Keep instructor and term metadata readable in the grade upload preview. */
+.instructor-file-table th:nth-child(11),
+.instructor-file-table th:nth-child(12),
+.instructor-file-table th:nth-child(13),
+.instructor-file-table th:nth-child(14),
+.instructor-file-table td:nth-child(11),
+.instructor-file-table td:nth-child(12),
+.instructor-file-table td:nth-child(13),
+.instructor-file-table td:nth-child(14) {
+  min-width: 104px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.instructor-file-table th:nth-child(11),
+.instructor-file-table th:nth-child(12),
+.instructor-file-table th:nth-child(13),
+.instructor-file-table th:nth-child(14) {
+  width: auto;
+}
+
 .instructor-file-table .instructor-error-cell-list,
 .instructor-file-table .instructor-error-problems {
   box-sizing: border-box;
