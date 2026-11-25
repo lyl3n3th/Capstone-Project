@@ -25,6 +25,7 @@ export interface StudentPortalCurrentTerm {
   semester: string;
   source:
     | "approved_enrollment"
+    | "transferee_placement"
     | "own_schedule"
     | "subject_load"
     | "shs_auto_progression"
@@ -579,11 +580,26 @@ export const resolveStudentPortalContext = (
       ? ownScheduleSelectionStatusForApprovedTerm || "Not Submitted"
       : storedStudent.ownScheduleSelectionStatus,
   };
+  const placementAcademicYear = storedStudent.ownScheduleAcademicYear?.trim();
+  const placementSemester = storedStudent.ownScheduleSemester?.trim();
+  const transfereePlacement: StudentPortalCurrentTerm | undefined =
+    storedStudent.studentStatus?.trim().toLowerCase() === "transferee" &&
+    placementAcademicYear && placementSemester
+      ? {
+          yearLevel: resolvedYearLevel,
+          academicYear: placementAcademicYear,
+          semester: placementSemester,
+          source: "transferee_placement",
+        }
+      : undefined;
   // Imported students get their subjects from the actual import or approved term.
   // Generic catalog fallback can assign subjects to an unrelated academic year.
   const portalSubjects = storedStudent.importAcademicYear
     ? []
-    : getStudentPortalSubjects(resolvedStudentRecord);
+    : getStudentPortalSubjects(
+        resolvedStudentRecord,
+        transfereePlacement && { ...transfereePlacement, restrictToTerm: true },
+      );
 
   if (approvedEnrollmentRequest) {
     const isOwnScheduleEnrollment =
@@ -717,6 +733,7 @@ export const resolveStudentPortalContext = (
     ? getStudentPortalSubjects(resolvedStudentRecord, latestRecordedTerm)
     : portalSubjects;
   const defaultCurrentTerm =
+    transfereePlacement ||
     getLatestPortalTermFromSubjects(fallbackSubjects, resolvedStudentRecord.yearLevel) ||
     {
       yearLevel: resolvedStudentRecord.yearLevel,
