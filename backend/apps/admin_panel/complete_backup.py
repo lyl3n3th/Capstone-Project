@@ -167,6 +167,22 @@ def _exclude_archived_records(snapshot):
         if _normalized_backup_reference(row.get("status")) != "archived"
     ]
 
+    # An archived enrollee can still be the admission record for a retained
+    # student. Keep that application and its credential links in the backup.
+    retained_application_ids = {
+        _normalized_backup_reference(row.get("admission_application_id"))
+        for row in tables["student_profiles"]
+        if row.get("admission_application_id")
+    }
+    archived_application_ids.difference_update(retained_application_ids)
+    retained_references = set(retained_application_ids)
+    for row in tables["student_profiles"]:
+        _collect_archived_record_references(row, retained_references)
+    for row in applications:
+        if _normalized_backup_reference(row.get("id")) in retained_application_ids:
+            _collect_archived_record_references(row, retained_references)
+    archived_enrollee_references.difference_update(retained_references)
+
     for table_name in (
         "student_contact_details",
         "student_import_details",
@@ -198,6 +214,17 @@ def _exclude_archived_records(snapshot):
         if _normalized_backup_reference(row.get("id"))
         not in archived_application_ids
     ]
+    saved_application_ids = {
+        _normalized_backup_reference(row.get("id"))
+        for row in tables["admission_applications"]
+    }
+    missing_application_count = len(retained_application_ids - saved_application_ids)
+    if missing_application_count:
+        raise ValueError(
+            f"Backup is missing {missing_application_count} admission application(s) "
+            "required by retained student profiles."
+        )
+
     tables["admission_application_requirement_files"] = [
         row for row in tables.get("admission_application_requirement_files", [])
         if _normalized_backup_reference(row.get("application_id"))
