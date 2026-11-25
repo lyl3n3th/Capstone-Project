@@ -529,7 +529,7 @@ const getShsAutoProgressedContext = ({
   };
 };
 
-export const resolveStudentPortalContext = (
+const resolveStudentPortalContextWithLoad = (
   student: StudentStorageRecord,
 ): ResolvedStudentPortalContext => {
   const storedStudent = applyImportedScheduleDefaults(student);
@@ -754,4 +754,31 @@ export const resolveStudentPortalContext = (
       subjects: fallbackSubjects,
     }
   );
+};
+
+export const resolveStudentPortalContext = (
+  student: StudentStorageRecord,
+): ResolvedStudentPortalContext => {
+  const context = resolveStudentPortalContextWithLoad(student);
+  if (student.studentStatus?.trim().toLowerCase() !== "transferee") return context;
+
+  const branch = normalizeBranchName(student.branch);
+  const plans = readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
+    "student-subject-plans",
+    branch,
+  ) ?? {};
+  const creditedCodes = new Set(
+    Object.values(plans)
+      .filter(plan => plan.source === "transferee_validation" &&
+        (plan.studentNumber === student.id ||
+          (student.trackingNumber && plan.trackingNumber === student.trackingNumber)))
+      .flatMap(plan => plan.creditedSubjects.map(subject => subject.subjectCode.trim().toUpperCase()))
+      .filter(Boolean),
+  );
+  if (creditedCodes.size === 0) return context;
+
+  return {
+    ...context,
+    subjects: context.subjects.filter(subject => !creditedCodes.has(subject.code.trim().toUpperCase())),
+  };
 };
