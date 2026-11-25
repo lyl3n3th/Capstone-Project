@@ -113,15 +113,24 @@ console.log('College transferee checks passed: automatic irregular planning, no 
 
 const placementApi = {};
 const resolverSource = readFileSync(new URL('../src/services/studentPortalResolver.ts', import.meta.url), 'utf8');
-const catalogSubjects = [{ id: 'future', academicYear: '2031-2032', semester: '1st Semester' }];
+const catalogSubjects = [{ id: 'future', code: 'FUTURE', academicYear: '2031-2032', semester: '1st Semester' }];
+let enableProgression = false;
 const school = {
+  normalizeBranchName: branch => branch,
+  readBranchScopedData: (_key, branch) => branch === 'With Credits'
+    ? { approved: { source: 'transferee_validation', studentNumber: 'test-transfer',
+        creditedSubjects: [{ subjectCode: ' done ' }] } }
+    : {},
   getStudentPortalSubjects: (_student, term) => term?.restrictToTerm
-    ? [{ id: 'placed', academicYear: term.academicYear, semester: term.semester }]
+    ? [{ id: 'placed', code: 'PLACED', academicYear: term.academicYear, semester: term.semester }]
     : catalogSubjects,
   getStudentPortalSubjectsForTerm: () => [],
-  getStudentPortalSubjectsForSectionTerm: () => [],
+  getStudentPortalSubjectsForSectionTerm: ({ branch, academicYear, semester }) =>
+    branch === 'With Credits' ? ['DONE', 'REMAINING'].map(code => ({
+      id: code, code, title: code, academicYear, semester,
+    })) : [],
   getStudentGradeRecords: () => [],
-  hasCompletePassingShsSemesterGrades: () => false,
+  hasCompletePassingShsSemesterGrades: ({ subjects }) => subjects.length > 0 && enableProgression,
   applyImportedScheduleDefaults: student => student,
   getLatestApprovedEnrollmentRequestForStudent: ({ branch }) => branch === 'With Approved Enrollment'
     ? { academicYear: '2027-2028', semester: '1st Semester' }
@@ -145,4 +154,10 @@ for (const branch of ['Commonwealth', 'Bacoor']) {
 assert.equal(placementApi.resolveStudentPortalContext({
   ...shsTransferee, branch: 'With Approved Enrollment',
 }).currentTerm.academicYear, '2027-2028', 'Later approved enrollment takes priority');
-console.log('Transferee placement checks passed across branches.');
+enableProgression = true;
+const advanced = placementApi.resolveStudentPortalContext({ ...shsTransferee, branch: 'With Credits' });
+assert.equal(advanced.currentTerm.semester, '2nd Semester');
+assert.deepEqual(advanced.subjects.filter(subject => subject.semester === '2nd Semester').map(subject => subject.code), ['REMAINING']);
+const regular = placementApi.resolveStudentPortalContext({ ...shsTransferee, branch: 'With Credits', studentStatus: 'New Student' });
+assert.deepEqual(regular.subjects.filter(subject => subject.semester === '2nd Semester').map(subject => subject.code), ['DONE', 'REMAINING']);
+console.log('Transferee placement and second-semester credit checks passed.');
