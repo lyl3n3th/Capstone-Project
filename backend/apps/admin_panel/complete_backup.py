@@ -377,11 +377,21 @@ def create_archive(branch, backup_type, *, alumni=None):
         for record, path_key, bucket_key in _references(snapshot)
     ))
     counts = {name: len(rows) for name, rows in snapshot["tables"].items()}
+    # Student profiles are the authoritative restore records for both groups.
+    # The optional alumni display cache is not available in every backup job.
+    profile_statuses = [
+        _normalized_backup_reference(profile.get("status"))
+        for profile in snapshot["tables"]["student_profiles"]
+    ]
+    dataset_counts = {
+        "students": sum(status in {"active", "complete", "incomplete"} for status in profile_statuses),
+        "alumni": profile_statuses.count("graduated"),
+    }
     manifest = {
         "branch": branch, "snapshot_format": FORMAT, "version": 2,
         "backup_type": backup_type, "generated_at": timezone.now().isoformat(),
         "models": list(counts), "model_counts": counts,
-        "dataset_counts": {"students": counts["student_profiles"], "alumni": len(snapshot["alumni"])},
+        "dataset_counts": dataset_counts,
         "media_entries": [],
     }
     # Roll large ZIPs onto Render's temporary filesystem rather than retaining
