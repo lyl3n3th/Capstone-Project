@@ -2608,3 +2608,67 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Instructor review modals: keep names and subjects on one line while
+   reserving less width for numeric grade and unit columns. */
+.grades-content .preview-table-container .grades-table.instructor-upload-review-table,
+.grades-content .preview-table-container .grades-table.instructor-change-review-table {
+  width: 100% !important;
+  min-width: 1100px !important;
+  table-layout: fixed !important;
+}
+
+.grades-content .preview-table-container .grades-table.instructor-upload-review-table th,
+.grades-content .preview-table-container .grades-table.instructor-upload-review-table td,
+.grades-content .preview-table-container .grades-table.instructor-change-review-table th,
+.grades-content .preview-table-container .grades-table.instructor-change-review-table td {
+  min-width: 0 !important;
+  max-width: none !important;
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+.grades-content .preview-table-container .instructor-upload-review-table th:nth-child(1),
+.grades-content .preview-table-container .instructor-upload-review-table td:nth-child(1) { width: 9%; }
+.grades-content .preview-table-container .instructor-upload-review-table th:nth-child(2),
+.grades-content .preview-table-container .instructor-upload-review-table td:nth-child(2) { width: 20%; }
+.grades-content .preview-table-container .instructor-upload-review-table th:nth-child(3),
+.grades-content .preview-table-container .instructor-upload-review-table td:nth-child(3) { width: 31%; }
+.grades-content .preview-table-container .instructor-upload-review-table th:nth-child(4),
+.grades-content .preview-table-container .instructor-upload-review-table td:nth-child(4) { width: 8%; }
+.grades-content .preview-table-container .instructor-upload-review-table th:nth-child(5),
+.grades-content .preview-table-container .instructor-upload-review-table td:nth-child(5) { width: 7%; }
+.grades-content .preview-table-container .instructor-upload-review-table th:nth-child(6),
+.grades-content .preview-table-container .instructor-upload-review-table td:nth-child(6) { width: 15%; }
+.grades-content .preview-table-container .instructor-upload-review-table th:nth-child(7),
+.grades-content .preview-table-container .instructor-upload-review-table td:nth-child(7) { width: 10%; }
+
+.grades-content .preview-table-container .instructor-change-review-table th:nth-child(1),
+.grades-content .preview-table-container .instructor-change-review-table td:nth-child(1) { width: 9%; }
+.grades-content .preview-table-container .instructor-change-review-table th:nth-child(2),
+.grades-content .preview-table-container .instructor-change-review-table td:nth-child(2) { width: 18%; }
+.grades-content .preview-table-container .instructor-change-review-table th:nth-child(3),
+.grades-content .preview-table-container .instructor-change-review-table td:nth-child(3) { width: 25%; }
+.grades-content .preview-table-container .instructor-change-review-table th:nth-child(4),
+.grades-content .preview-table-container .instructor-change-review-table td:nth-child(4) { width: 8%; }
+.grades-content .preview-table-container .instructor-change-review-table th:nth-child(5),
+.grades-content .preview-table-container .instructor-change-review-table td:nth-child(5) { width: 8%; }
+.grades-content .preview-table-container .instructor-change-review-table th:nth-child(6),
+.grades-content .preview-table-container .instructor-change-review-table td:nth-child(6) { width: 10%; }
+.grades-content .preview-table-container .instructor-change-review-table th:nth-child(7),
+.grades-content .preview-table-container .instructor-change-review-table td:nth-child(7) { width: 14%; }
+.grades-content .preview-table-container .instructor-change-review-table th:nth-child(8),
+.grades-content .preview-table-container .instructor-change-review-table td:nth-child(8) { width: 8%; }
+
+.grades-content .preview-table-container .instructor-upload-review-table th:nth-child(2),
+.grades-content .preview-table-container .instructor-upload-review-table td:nth-child(2),
+.grades-content .preview-table-container .instructor-upload-review-table th:nth-child(3),
+.grades-content .preview-table-container .instructor-upload-review-table td:nth-child(3),
+.grades-content .preview-table-container .instructor-change-review-table th:nth-child(2),
+.grades-content .preview-table-container .instructor-change-review-table td:nth-child(2),
+.grades-content .preview-table-container .instructor-change-review-table th:nth-child(3),
+.grades-content .preview-table-container .instructor-change-review-table td:nth-child(3) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
