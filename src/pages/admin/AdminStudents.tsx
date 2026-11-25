@@ -2056,6 +2056,8 @@ export default function AdminStudents({
     }).finally(() => {
       if (credentialRequest === credentialLoadRequest.current) setCredentialActionKey(null);
     });
+    if (student.program === "SHS") return;
+
     void fetchAndCacheStudentPaymentsForBranch(branch)
       .then(() => fetchNextStudentPaymentReceiptNumber(branch))
       .then(setPaymentReceiptNumber)
@@ -3092,7 +3094,7 @@ export default function AdminStudents({
   );
   const viewingStudentPayments = useMemo(
     () =>
-      viewingStudent
+      viewingStudent && viewingStudent.program !== "SHS"
         ? getStudentPayments({
             branch: viewingStudent.branch || currentBranch,
             studentNumber: viewingStudent.id,
@@ -4948,7 +4950,7 @@ export default function AdminStudents({
                       </div>
                     </div>
                   ) : null}
-                  <div className="students-profile-field students-profile-field-full">
+                  {viewingStudentProgram !== "SHS" && <div className="students-profile-field students-profile-field-full">
                     <label>Financial Balance</label>
                     <div className="students-profile-value students-profile-list-box students-payment-ledger">
                       {shouldShowViewingStudentPaymentLedger ? (
@@ -5199,7 +5201,7 @@ export default function AdminStudents({
                         </div>
                       )}
                     </div>
-                  </div>
+                  </div>}
                   <div className="students-profile-field students-profile-field-full">
                     <label>Student Credentials</label>
                     <div className="students-profile-value students-profile-list-box">
