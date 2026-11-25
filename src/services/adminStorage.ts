@@ -4773,6 +4773,11 @@ export const updateStoredStudentOwnScheduleState = ({
       | "ownScheduleAcademicYear"
       | "ownScheduleSemester"
       | "ownScheduleSelectionStatus"
+      | "placementAcademicYear"
+      | "placementSemester"
+      | "currentAcademicYear"
+      | "currentSemester"
+      | "currentTermYearLevel"
     >
   >;
 }) => {
