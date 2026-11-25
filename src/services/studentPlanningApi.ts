@@ -33,6 +33,11 @@ type StudentPlanningStateRow = {
   own_schedule_academic_year: string | null;
   own_schedule_semester: string | null;
   own_schedule_selection_status: StudentPlanningSelectionStatus | null;
+  placement_academic_year: string | null;
+  placement_semester: string | null;
+  current_academic_year: string | null;
+  current_semester: string | null;
+  current_year_level: string | null;
 };
 
 type StudentSubjectPlanRow = {
@@ -63,6 +68,11 @@ export interface StudentPlanningStateRecord {
   ownScheduleAcademicYear?: string;
   ownScheduleSemester?: string;
   ownScheduleSelectionStatus?: StudentPlanningSelectionStatus;
+  placementAcademicYear?: string;
+  placementSemester?: string;
+  currentAcademicYear?: string;
+  currentSemester?: string;
+  currentTermYearLevel?: string;
 }
 
 const STUDENT_SUBJECT_PLAN_SCOPE = "student-subject-plans";
@@ -97,6 +107,11 @@ const mapStudentPlanningState = (
   ownScheduleAcademicYear: row.own_schedule_academic_year || undefined,
   ownScheduleSemester: row.own_schedule_semester || undefined,
   ownScheduleSelectionStatus: row.own_schedule_selection_status || undefined,
+  placementAcademicYear: row.placement_academic_year || undefined,
+  placementSemester: row.placement_semester || undefined,
+  currentAcademicYear: row.current_academic_year || undefined,
+  currentSemester: row.current_semester || undefined,
+  currentTermYearLevel: row.current_year_level || undefined,
 });
 
 const mapStudentSubjectPlan = (
@@ -169,6 +184,11 @@ const syncPlanningStateIntoLocalStudents = (
       ownScheduleAcademicYear: planningState.ownScheduleAcademicYear,
       ownScheduleSemester: planningState.ownScheduleSemester,
       ownScheduleSelectionStatus: planningState.ownScheduleSelectionStatus,
+      placementAcademicYear: planningState.placementAcademicYear,
+      placementSemester: planningState.placementSemester,
+      currentAcademicYear: planningState.currentAcademicYear,
+      currentSemester: planningState.currentSemester,
+      currentTermYearLevel: planningState.currentTermYearLevel,
     };
   });
 
@@ -306,6 +326,11 @@ export const mergeStudentPlanningStateIntoStudent = <
     | "ownScheduleAcademicYear"
     | "ownScheduleSemester"
     | "ownScheduleSelectionStatus"
+    | "placementAcademicYear"
+    | "placementSemester"
+    | "currentAcademicYear"
+    | "currentSemester"
+    | "currentTermYearLevel"
   >,
 >(
   student: T,
@@ -322,6 +347,11 @@ export const mergeStudentPlanningStateIntoStudent = <
     ownScheduleAcademicYear: planningState.ownScheduleAcademicYear,
     ownScheduleSemester: planningState.ownScheduleSemester,
     ownScheduleSelectionStatus: planningState.ownScheduleSelectionStatus,
+    placementAcademicYear: planningState.placementAcademicYear,
+    placementSemester: planningState.placementSemester,
+    currentAcademicYear: planningState.currentAcademicYear,
+    currentSemester: planningState.currentSemester,
+    currentTermYearLevel: planningState.currentTermYearLevel,
   };
 };
 
@@ -335,6 +365,11 @@ export const mergeStudentPlanningStatesIntoStudents = <
     | "ownScheduleAcademicYear"
     | "ownScheduleSemester"
     | "ownScheduleSelectionStatus"
+    | "placementAcademicYear"
+    | "placementSemester"
+    | "currentAcademicYear"
+    | "currentSemester"
+    | "currentTermYearLevel"
   >,
 >(
   students: T[],
@@ -388,6 +423,11 @@ export const saveStudentPlanningState = async ({
   ownScheduleAcademicYear,
   ownScheduleSemester,
   ownScheduleSelectionStatus,
+  placementAcademicYear,
+  placementSemester,
+  currentAcademicYear,
+  currentSemester,
+  currentTermYearLevel,
 }: {
   branch: string | null | undefined;
   studentNumber: string;
@@ -397,8 +437,29 @@ export const saveStudentPlanningState = async ({
   ownScheduleAcademicYear?: string | null;
   ownScheduleSemester?: string | null;
   ownScheduleSelectionStatus?: StudentPlanningSelectionStatus;
+  placementAcademicYear?: string | null;
+  placementSemester?: string | null;
+  currentAcademicYear?: string | null;
+  currentSemester?: string | null;
+  currentTermYearLevel?: string | null;
 }) => {
   const resolvedBranch = normalizeBranchName(branch);
+  const existingStudentTerm = readStoredStudents().find(
+    (student) =>
+      normalizeBranchName(student.branch) === resolvedBranch &&
+      (student.id === studentNumber ||
+        (trackingNumber && student.trackingNumber === trackingNumber)),
+  );
+  const resolvedPlacementAcademicYear =
+    placementAcademicYear ?? existingStudentTerm?.placementAcademicYear ?? null;
+  const resolvedPlacementSemester =
+    placementSemester ?? existingStudentTerm?.placementSemester ?? null;
+  const resolvedCurrentAcademicYear =
+    currentAcademicYear ?? existingStudentTerm?.currentAcademicYear ?? null;
+  const resolvedCurrentSemester =
+    currentSemester ?? existingStudentTerm?.currentSemester ?? null;
+  const resolvedCurrentTermYearLevel =
+    currentTermYearLevel ?? existingStudentTerm?.currentTermYearLevel ?? null;
   const optimisticPlanningState: StudentPlanningStateRecord = {
     studentNumber,
     trackingNumber: trackingNumber || undefined,
@@ -407,6 +468,11 @@ export const saveStudentPlanningState = async ({
     ownScheduleAcademicYear: ownScheduleAcademicYear || undefined,
     ownScheduleSemester: ownScheduleSemester || undefined,
     ownScheduleSelectionStatus,
+    placementAcademicYear: resolvedPlacementAcademicYear || undefined,
+    placementSemester: resolvedPlacementSemester || undefined,
+    currentAcademicYear: resolvedCurrentAcademicYear || undefined,
+    currentSemester: resolvedCurrentSemester || undefined,
+    currentTermYearLevel: resolvedCurrentTermYearLevel || undefined,
   };
 
   syncPlanningStateIntoLocalStudents(resolvedBranch, optimisticPlanningState);
@@ -422,6 +488,11 @@ export const saveStudentPlanningState = async ({
         own_schedule_academic_year: ownScheduleAcademicYear || null,
         own_schedule_semester: ownScheduleSemester || null,
         own_schedule_selection_status: ownScheduleSelectionStatus || null,
+        placement_academic_year: resolvedPlacementAcademicYear,
+        placement_semester: resolvedPlacementSemester,
+        current_academic_year: resolvedCurrentAcademicYear,
+        current_semester: resolvedCurrentSemester,
+        current_year_level: resolvedCurrentTermYearLevel,
       },
     })
     .returns<StudentPlanningStateRow[]>();

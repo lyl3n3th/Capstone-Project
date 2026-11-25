@@ -30,6 +30,7 @@ export interface StudentPortalCurrentTerm {
     | "subject_load"
     | "shs_auto_progression"
     | "import"
+    | "academic_placement"
     | "fallback";
 }
 
@@ -539,15 +540,35 @@ const resolveStudentPortalContextWithLoad = (
   student: StudentStorageRecord,
 ): ResolvedStudentPortalContext => {
   const storedStudent = applyImportedScheduleDefaults(student);
-  const approvedEnrollmentRequest = getLatestApprovedEnrollmentRequestForStudent({
+  const latestApprovedEnrollmentRequest = getLatestApprovedEnrollmentRequestForStudent({
     branch: storedStudent.branch,
     studentNumber: storedStudent.id,
     trackingNumber: storedStudent.trackingNumber,
   });
+  const isTransferee = storedStudent.studentStatus?.trim().toLowerCase() === "transferee";
+  const authoritativeAcademicYear =
+    storedStudent.currentAcademicYear?.trim() ||
+    storedStudent.importAcademicYear?.trim() ||
+    (isTransferee ? storedStudent.ownScheduleAcademicYear?.trim() : undefined) ||
+    storedStudent.placementAcademicYear?.trim();
+  const authoritativeSemester =
+    storedStudent.currentSemester?.trim() ||
+    storedStudent.importSemester?.trim() ||
+    (isTransferee ? storedStudent.ownScheduleSemester?.trim() : undefined) ||
+    storedStudent.placementSemester?.trim();
+  const approvedEnrollmentRequest =
+    latestApprovedEnrollmentRequest &&
+    (!authoritativeAcademicYear || !authoritativeSemester ||
+      (latestApprovedEnrollmentRequest.academicYear.trim() === authoritativeAcademicYear &&
+        normalizeSemesterValue(latestApprovedEnrollmentRequest.semester) ===
+          normalizeSemesterValue(authoritativeSemester)))
+      ? latestApprovedEnrollmentRequest
+      : undefined;
   const hasApprovedOwnScheduleRequest =
     approvedEnrollmentRequest?.irregularRequest?.mode === "own_schedule";
   const resolvedYearLevel =
-    approvedEnrollmentRequest?.requestedYearLevel || storedStudent.yearLevel;
+    approvedEnrollmentRequest?.requestedYearLevel ||
+    storedStudent.currentTermYearLevel || storedStudent.yearLevel;
   const ownScheduleSelectionStatusForApprovedTerm =
     approvedEnrollmentRequest && hasApprovedOwnScheduleRequest
       ? getOwnScheduleSelectionStatusForTerm({
@@ -674,7 +695,11 @@ const resolveStudentPortalContextWithLoad = (
   if (
     storedStudent.ownScheduleRequestStatus === "Approved" &&
     storedStudent.ownScheduleAcademicYear &&
-    storedStudent.ownScheduleSemester
+    storedStudent.ownScheduleSemester &&
+    (!authoritativeAcademicYear || !authoritativeSemester ||
+      (storedStudent.ownScheduleAcademicYear === authoritativeAcademicYear &&
+        normalizeSemesterValue(storedStudent.ownScheduleSemester) ===
+          normalizeSemesterValue(authoritativeSemester)))
   ) {
     const approvedOwnScheduleSubjects = getApprovedOwnScheduleSubjects({
       resolvedStudentRecord,
@@ -705,6 +730,63 @@ const resolveStudentPortalContextWithLoad = (
         ),
       ),
     };
+  }
+
+  if (authoritativeAcademicYear && authoritativeSemester) {
+    const exactPortalSubjects = portalSubjects.filter(
+      (subject) =>
+        subject.academicYear.trim() === authoritativeAcademicYear &&
+        normalizeSemesterValue(subject.semester) ===
+          normalizeSemesterValue(authoritativeSemester),
+    );
+    const termSubjects = storedStudent.importAcademicYear
+      ? getStudentPortalSubjectsForSectionTerm({
+          branch: resolvedStudentRecord.branch,
+          program: resolvedStudentRecord.program,
+          yearLevel: resolvedStudentRecord.yearLevel,
+          strandOrCourse: resolvedStudentRecord.strandOrCourse,
+          sectionCode: resolvedStudentRecord.section,
+          academicYear: authoritativeAcademicYear,
+          semester: authoritativeSemester,
+          requireCourseMatch: true,
+        })
+      : isTransferee
+        ? exactPortalSubjects
+        : exactPortalSubjects.length > 0
+          ? exactPortalSubjects
+          : getRegularStudentSubjectsForTerm({
+              resolvedStudentRecord,
+              academicYear: authoritativeAcademicYear,
+              semester: authoritativeSemester,
+            });
+    const authoritativeContext: ResolvedStudentPortalContext = {
+      resolvedStudentRecord,
+      currentTerm: {
+        yearLevel: storedStudent.currentTermYearLevel || resolvedStudentRecord.yearLevel,
+        academicYear: authoritativeAcademicYear,
+        semester: authoritativeSemester,
+        source: storedStudent.currentAcademicYear
+          ? "academic_placement"
+          : storedStudent.importAcademicYear
+          ? "import"
+          : isTransferee
+            ? "transferee_placement"
+            : "fallback",
+      },
+      subjects: mergePortalSubjects(
+        termSubjects,
+        excludeSubjectsForTerm(
+          portalSubjects,
+          authoritativeAcademicYear,
+          authoritativeSemester,
+        ),
+      ),
+    };
+    return getShsAutoProgressedContext({
+      resolvedStudentRecord,
+      currentTerm: authoritativeContext.currentTerm,
+      portalSubjects: authoritativeContext.subjects,
+    }) || authoritativeContext;
   }
 
   if (storedStudent.importAcademicYear && storedStudent.importSemester) {

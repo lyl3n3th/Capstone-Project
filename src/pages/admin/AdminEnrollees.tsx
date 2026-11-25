@@ -4553,6 +4553,9 @@ export default function AdminEnrollees({
       updatedStudentRecord = {
         ...student,
         yearLevel: request.requestedYearLevel,
+        currentAcademicYear: request.academicYear,
+        currentSemester: normalizeSectionSemester(request.semester),
+        currentTermYearLevel: request.requestedYearLevel,
         section:
           request.irregularRequest?.mode === "own_schedule"
             ? ""
@@ -4591,6 +4594,9 @@ export default function AdminEnrollees({
           ownScheduleAcademicYear: request.academicYear,
           ownScheduleSemester: normalizeSectionSemester(request.semester),
           ownScheduleSelectionStatus: "Not Submitted",
+          currentAcademicYear: request.academicYear,
+          currentSemester: normalizeSectionSemester(request.semester),
+          currentTermYearLevel: request.requestedYearLevel,
         },
       });
       void saveStudentPlanningState({
@@ -4602,6 +4608,13 @@ export default function AdminEnrollees({
         ownScheduleAcademicYear: request.academicYear,
         ownScheduleSemester: normalizeSectionSemester(request.semester),
         ownScheduleSelectionStatus: "Not Submitted",
+        placementAcademicYear:
+          matchedStoredStudent.placementAcademicYear || matchedStoredStudent.importAcademicYear,
+        placementSemester:
+          matchedStoredStudent.placementSemester || matchedStoredStudent.importSemester,
+        currentAcademicYear: request.academicYear,
+        currentSemester: normalizeSectionSemester(request.semester),
+        currentTermYearLevel: request.requestedYearLevel,
       }).catch((error) => {
         console.error("Failed to sync shared student planning state", error);
       });
@@ -4619,6 +4632,13 @@ export default function AdminEnrollees({
         ownScheduleAcademicYear: undefined,
         ownScheduleSemester: undefined,
         ownScheduleSelectionStatus: undefined,
+        placementAcademicYear:
+          matchedStoredStudent.placementAcademicYear || matchedStoredStudent.importAcademicYear,
+        placementSemester:
+          matchedStoredStudent.placementSemester || matchedStoredStudent.importSemester,
+        currentAcademicYear: request.academicYear,
+        currentSemester: normalizeSectionSemester(request.semester),
+        currentTermYearLevel: request.requestedYearLevel,
       },
     });
     void saveStudentPlanningState({
@@ -4630,6 +4650,13 @@ export default function AdminEnrollees({
       ownScheduleAcademicYear: undefined,
       ownScheduleSemester: undefined,
       ownScheduleSelectionStatus: undefined,
+      placementAcademicYear:
+        matchedStoredStudent.placementAcademicYear || matchedStoredStudent.importAcademicYear,
+      placementSemester:
+        matchedStoredStudent.placementSemester || matchedStoredStudent.importSemester,
+      currentAcademicYear: request.academicYear,
+      currentSemester: normalizeSectionSemester(request.semester),
+      currentTermYearLevel: request.requestedYearLevel,
     }).catch((error) => {
       console.error("Failed to clear shared student planning state", error);
     });
@@ -6575,18 +6602,34 @@ export default function AdminEnrollees({
             message: string;
             type: Toast["type"];
           } | null = null;
-          const transfereeEvaluation = isTransfereeAdmission(enrolleeToUpdate)
+          const isTransfereeApplicant = isTransfereeAdmission(enrolleeToUpdate);
+          const transfereeEvaluation = isTransfereeApplicant
             ? getTransfereeEvaluation(enrolleeToUpdate)
             : null;
+          const registrarAssignedAcademicYear = isTransfereeApplicant
+            ? transfereeEvaluation?.plannedAcademicYear.trim() || ""
+            : enrolleeToUpdate.academicYear?.trim() || "";
+          const assignedYearParts = registrarAssignedAcademicYear.match(
+            /^(\d{4})-(\d{4})$/,
+          );
+          if (
+            isApprove &&
+            (!assignedYearParts ||
+              Number(assignedYearParts[2]) !== Number(assignedYearParts[1]) + 1)
+          ) {
+            addToast(
+              isTransfereeApplicant
+                ? "Assign a valid academic year in Placement and section planning before approving this transferee."
+                : "This applicant has no valid registrar-assigned academic year. Assign the school year before approving.",
+              "warning",
+            );
+            return;
+          }
           const resolvedYearLevel =
             transfereeEvaluation?.resolvedYearLevel || enrolleeToUpdate.yearLevel;
-          const resolvedPlacementAcademicYear =
-            transfereeEvaluation
-              ? transfereeEvaluation.plannedAcademicYear.trim() ||
-                reflectedAcademicYear
-              : enrolleeToUpdate.ownScheduleAcademicYear;
-          const resolvedPlacementSemester = transfereeEvaluation
-            ? normalizeSectionSemester(transfereeEvaluation.plannedSemester)
+          const resolvedPlacementAcademicYear = registrarAssignedAcademicYear;
+          const resolvedPlacementSemester = isTransfereeApplicant
+            ? normalizeSectionSemester(transfereeEvaluation?.plannedSemester)
             : enrolleeToUpdate.ownScheduleSemester;
           const enrolleeForApproval: Enrollee = {
             ...enrolleeToUpdate,

@@ -105,6 +105,11 @@ export interface StudentStorageRecord {
   lastName?: string;
   importAcademicYear?: string;
   importSemester?: string;
+  placementAcademicYear?: string;
+  placementSemester?: string;
+  currentAcademicYear?: string;
+  currentSemester?: string;
+  currentTermYearLevel?: string;
   importAcademicStanding?: "Regular" | "Irregular";
   lastSchoolAttended?: string;
   yearCompletion?: string;
@@ -5266,6 +5271,15 @@ export const promoteApplicantToStoredStudent = (
     ownScheduleRequestStatus: normalizedApplicant.ownScheduleRequestStatus,
     ownScheduleAcademicYear: normalizedApplicant.ownScheduleAcademicYear,
     ownScheduleSemester: normalizedApplicant.ownScheduleSemester,
+    placementAcademicYear:
+      normalizedApplicant.ownScheduleAcademicYear || normalizedApplicant.academicYear || undefined,
+    placementSemester:
+      normalizedApplicant.ownScheduleSemester || "1st Semester",
+    currentAcademicYear:
+      normalizedApplicant.ownScheduleAcademicYear || normalizedApplicant.academicYear || undefined,
+    currentSemester:
+      normalizedApplicant.ownScheduleSemester || "1st Semester",
+    currentTermYearLevel: normalizedApplicant.yearLevel,
     ownScheduleSelectionStatus:
       normalizedApplicant.ownScheduleRequestStatus === "Approved"
         ? "Not Submitted"

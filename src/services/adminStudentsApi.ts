@@ -60,6 +60,11 @@ type AdminStudentApiRecord = {
     | "Approved"
     | "Rejected"
     | null;
+  placement_academic_year?: string | null;
+  placement_semester?: string | null;
+  current_academic_year?: string | null;
+  current_semester?: string | null;
+  current_year_level?: string | null;
   birth_date: string | null;
   guardian_name: string | null;
   guardian_contact: string | null;
@@ -119,6 +124,11 @@ const hasOwnPlanningField = (
     | "ownScheduleAcademicYear"
     | "ownScheduleSemester"
     | "ownScheduleSelectionStatus"
+    | "placementAcademicYear"
+    | "placementSemester"
+    | "currentAcademicYear"
+    | "currentSemester"
+    | "currentTermYearLevel"
   >,
 ) => Object.prototype.hasOwnProperty.call(student, field);
 
@@ -183,6 +193,11 @@ const mapAdminStudentRow = (
   ownScheduleAcademicYear: row.own_schedule_academic_year || undefined,
   ownScheduleSemester: row.own_schedule_semester || undefined,
   ownScheduleSelectionStatus: row.own_schedule_selection_status || undefined,
+  placementAcademicYear: row.placement_academic_year || undefined,
+  placementSemester: row.placement_semester || undefined,
+  currentAcademicYear: row.current_academic_year || undefined,
+  currentSemester: row.current_semester || undefined,
+  currentTermYearLevel: row.current_year_level || undefined,
   birthDate: toIsoDateInput(row.birth_date),
   guardianName: toNameCapitalization(row.guardian_name),
   guardianContact: row.guardian_contact || "",
@@ -430,6 +445,11 @@ export async function fetchAdminStudents(branch?: string | null) {
       if (detail) {
         student.importAcademicYear = detail.academic_year;
         student.importSemester = detail.semester;
+        student.placementAcademicYear = detail.academic_year;
+        student.placementSemester = detail.semester;
+        student.currentAcademicYear = student.currentAcademicYear || detail.academic_year;
+        student.currentSemester = student.currentSemester || detail.semester;
+        student.currentTermYearLevel = student.currentTermYearLevel || student.yearLevel;
         student.importAcademicStanding = detail.academic_standing;
         student.lastSchoolAttended = detail.last_school_attended || "";
         student.yearCompletion = detail.year_completion == null ? "" : String(detail.year_completion);
@@ -493,8 +513,15 @@ export async function saveAdminStudent(student: StudentStorageRecord) {
     hasOwnPlanningField(student, "ownScheduleAcademicYear") ||
     hasOwnPlanningField(student, "ownScheduleSemester") ||
     hasOwnPlanningField(student, "ownScheduleSelectionStatus");
+  const shouldSyncAcademicTerm = [
+    "placementAcademicYear",
+    "placementSemester",
+    "currentAcademicYear",
+    "currentSemester",
+    "currentTermYearLevel",
+  ].some((field) => Object.prototype.hasOwnProperty.call(student, field));
 
-  if (shouldSyncPlanningState) {
+  if (shouldSyncPlanningState || shouldSyncAcademicTerm) {
     try {
       await saveStudentPlanningState({
         branch: student.branch,
@@ -505,6 +532,11 @@ export async function saveAdminStudent(student: StudentStorageRecord) {
         ownScheduleAcademicYear: student.ownScheduleAcademicYear,
         ownScheduleSemester: student.ownScheduleSemester,
         ownScheduleSelectionStatus: student.ownScheduleSelectionStatus,
+        placementAcademicYear: student.placementAcademicYear,
+        placementSemester: student.placementSemester,
+        currentAcademicYear: student.currentAcademicYear,
+        currentSemester: student.currentSemester,
+        currentTermYearLevel: student.currentTermYearLevel,
       });
     } catch (planningError) {
       console.warn(
@@ -519,6 +551,11 @@ export async function saveAdminStudent(student: StudentStorageRecord) {
     importAcademicYear: student.importAcademicYear,
     importSemester: student.importSemester,
     importAcademicStanding: student.importAcademicStanding,
+    placementAcademicYear: student.placementAcademicYear,
+    placementSemester: student.placementSemester,
+    currentAcademicYear: student.currentAcademicYear,
+    currentSemester: student.currentSemester,
+    currentTermYearLevel: student.currentTermYearLevel,
     lastSchoolAttended: student.lastSchoolAttended,
     yearCompletion: student.yearCompletion,
     requestedOwnSchedule: hasOwnPlanningField(student, "requestedOwnSchedule")
