@@ -766,7 +766,7 @@ export const getTransfereeCreditedSubjectCodes = (
   ) ?? {};
   return new Set(
     Object.values(plans)
-      .filter(plan => plan.source === "transferee_validation" &&
+      .filter(plan => (plan.source === "transferee_validation" || plan.source === "enrollment_request") &&
         (plan.studentNumber === student.id ||
           (student.trackingNumber && plan.trackingNumber === student.trackingNumber)))
       .flatMap(plan => plan.creditedSubjects.map(subject => subject.subjectCode.trim().toUpperCase()))
