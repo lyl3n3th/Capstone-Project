@@ -235,7 +235,7 @@ export type AdminStudentPageFilters = {
   section?: string;
   gender?: string;
   requirementStatus?: string;
-  sortBy?: "student_number" | "full_name" | "program" | "year_level" | "strand_or_course" | "section" | "branch" | "email";
+  sortBy?: "student_number" | "full_name" | "program" | "year_level" | "strand_or_course" | "section" | "branch" | "email" | "status";
   sortAscending?: boolean;
 };
 

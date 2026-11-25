@@ -584,6 +584,18 @@ const getSemesterOrderIndex = (value: string) => {
   return index >= 0 ? index : SEMESTER_DISPLAY_ORDER.length;
 };
 
+const studentSortColumns = {
+  id: "student_number",
+  name: "full_name",
+  course: "strand_or_course",
+  year: "year_level",
+  section: "section",
+  requirements: "status",
+  standing: null,
+} as const;
+
+type StudentSortField = keyof typeof studentSortColumns;
+
 const sortAcademicTerms = <T extends { academicYear: string; semester: string }>(
   values: T[],
 ) =>
@@ -955,7 +967,7 @@ export default function AdminStudents({
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
   const [shsTrackType, setShsTrackType] = useState("");
   const [programSpecialization, setProgramSpecialization] = useState("");
-  const [sortField, setSortField] = useState<"id">("id");
+  const [sortField, setSortField] = useState<StudentSortField>("id");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [isScheduleNotificationModalOpen, setIsScheduleNotificationModalOpen] =
@@ -1084,15 +1096,31 @@ export default function AdminStudents({
     const timer = window.setTimeout(() => {
       setIsLoading(true);
       setStudentRecoveryMessage(null);
-      void fetchAdminStudentsPage(currentBranch, requestedStudentPage, studentsPerPage, {
-        search: normalizedSearchTerm,
-        program: filterProgram === "All Programs" ? undefined : filterProgram,
-        yearLevel: filterYearLevel || undefined,
-        section: filterSection || undefined,
-        requirementStatus: filterStatus === "All" ? undefined : filterStatus,
-        sortBy: "student_number",
-        sortAscending: sortDirection === "asc",
-      }).then((result) => {
+      const loadSortedStudentPage = async () => {
+        const filters = {
+          search: normalizedSearchTerm,
+          program: filterProgram === "All Programs" ? undefined : filterProgram,
+          yearLevel: filterYearLevel || undefined,
+          section: filterSection || undefined,
+          requirementStatus: filterStatus === "All" ? undefined : filterStatus,
+          sortBy: studentSortColumns[sortField] ?? "student_number",
+          sortAscending: sortDirection === "asc",
+        } as const;
+        if (sortField !== "standing") {
+          return fetchAdminStudentsPage(currentBranch, requestedStudentPage, studentsPerPage, filters);
+        }
+        const first = await fetchAdminStudentsPage(currentBranch, 1, studentsPerPage, filters);
+        const rows = [...first.students];
+        for (let page = 2; page <= Math.ceil(first.totalItems / studentsPerPage); page += 1) {
+          if (!isCurrentLoad()) return first;
+          rows.push(...(await fetchAdminStudentsPage(currentBranch, page, studentsPerPage, filters)).students);
+        }
+        const enriched = await fetchAdminStudentPageSupplemental(currentBranch, rows);
+        const sorted = enriched.map(resolveStudentWithApprovedEnrollment).sort(compareStudents);
+        const offset = (requestedStudentPage - 1) * studentsPerPage;
+        return { students: sorted.slice(offset, offset + studentsPerPage), totalItems: first.totalItems };
+      };
+      void loadSortedStudentPage().then((result) => {
         if (!isCurrentLoad()) return;
         const pageStudents = result.students.map(resolveStudentWithApprovedEnrollment) as Student[];
         setServerStudentPage(pageStudents);
@@ -1128,14 +1156,7 @@ export default function AdminStudents({
             (!filterYearLevel || student.yearLevel === filterYearLevel) &&
             (!filterSection || student.section === filterSection) &&
             (filterStatus === "All" || getStudentRequirementStatus(student) === filterStatus);
-        }).sort((left, right) => {
-          const leftNumber = Number(left.id);
-          const rightNumber = Number(right.id);
-          const order = Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
-            ? leftNumber - rightNumber
-            : left.id.localeCompare(right.id);
-          return sortDirection === "asc" ? order : -order;
-        });
+        }).sort(compareStudents);
         setServerStudentTotal(cached.length);
         const cachedPage = cached.slice(
           (requestedStudentPage - 1) * studentsPerPage,
@@ -1166,7 +1187,9 @@ export default function AdminStudents({
     filterYearLevel,
     filterSection,
     filterStatus,
+    sortField,
     sortDirection,
+    gradeRecordsVersion,
     studentListRefreshVersion,
   ]);
 
@@ -1527,7 +1550,28 @@ export default function AdminStudents({
         getStudentAcademicStandingLabel(student) === filterAcademicStanding),
     );
 
-  const toggleSort = (field: "id") => {
+  function compareStudents(left: Student, right: Student) {
+    const value = (student: Student) => {
+      switch (sortField) {
+        case "id": return student.id;
+        case "name": return student.name;
+        case "course": return student.strandOrCourse || "";
+        case "year": return student.yearLevel;
+        case "section": return student.section || "";
+        case "requirements": return getStudentRequirementStatus(student);
+        case "standing": return getDisplayedAcademicStandingLabel(student,
+          getStudentAcademicStanding({
+            branch: student.branch || currentBranch,
+            program: student.program,
+            studentId: student.id,
+          }).label);
+      }
+    };
+    const order = value(left).localeCompare(value(right), undefined, { numeric: true });
+    return (sortDirection === "asc" ? order : -order) || left.id.localeCompare(right.id);
+  }
+
+  const toggleSort = (field: StudentSortField) => {
     setRequestedStudentPage(1);
     if (sortField === field) {
       setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -1538,7 +1582,7 @@ export default function AdminStudents({
     setSortDirection("asc");
   };
 
-  const sortIndicator = (field: "id") => {
+  const sortIndicator = (field: StudentSortField) => {
     if (sortField !== field) return "↕";
     return sortDirection === "asc" ? "↑" : "↓";
   };
@@ -3838,12 +3882,13 @@ export default function AdminStudents({
           yearLevel: filterYearLevel || undefined,
           section: filterSection || undefined,
           requirementStatus: filterStatus === "All" ? undefined : filterStatus,
-          sortBy: sortField === "id" ? "student_number" : "student_number",
+          sortBy: studentSortColumns[sortField] ?? "student_number",
           sortAscending: sortDirection === "asc",
         });
         totalItems = result.totalItems;
         exportStudents.push(...result.students.map(resolveStudentWithApprovedEnrollment) as Student[]);
       }
+      if (sortField === "standing") exportStudents.sort(compareStudents);
       const visibleExportStudents = exportStudents.filter((student) =>
         isActiveStudentListRecord(student) &&
         getStudentLifecycleStatus(student) === filterStudentLifecycleStatus &&
@@ -4202,21 +4247,27 @@ export default function AdminStudents({
                     aria-label="Select all visible students"
                   />
                 </th>) : null}
-                <th>
-                  <button
-                    type="button"
-                    className="students-table-sort-btn"
-                    onClick={() => toggleSort("id")}
-                  >
-                    Student ID {sortIndicator("id")}
-                  </button>
-                </th>
-                <th>Name</th>
-                <th>Course / Strand</th>
-                <th>Grade Year</th>
-                <th>Section</th>
-                <th>Requirement Status</th>
-                <th>Academic Standing</th>
+                {([
+                  ["id", "Student ID"],
+                  ["name", "Name"],
+                  ["course", "Course / Strand"],
+                  ["year", "Grade Year"],
+                  ["section", "Section"],
+                  ["requirements", "Requirement Status"],
+                  ["standing", "Academic Standing"],
+                ] as const).map(([field, label]) => (
+                  <th key={field} aria-sort={sortField === field
+                    ? sortDirection === "asc" ? "ascending" : "descending"
+                    : undefined}>
+                    <button
+                      type="button"
+                      className="students-table-sort-btn"
+                      onClick={() => toggleSort(field)}
+                    >
+                      {label} <span aria-hidden="true">{sortIndicator(field)}</span>
+                    </button>
+                  </th>
+                ))}
                 <th>ACTION</th>
               </tr>
             </thead>
