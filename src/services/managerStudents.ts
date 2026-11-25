@@ -24,8 +24,20 @@ export const fetchManagedStudentPage = (
   branches: string[],
   page: number,
   filters: AdminStudentPageFilters = {},
-): Promise<AdminStudentPage> =>
-  fetchAdminStudentsPage(null, page, 10, { ...filters, branches });
+): Promise<AdminStudentPage> => {
+  const scopedBranches = filters.branches === undefined
+    ? branches
+    : branches.filter((managedBranch) =>
+      filters.branches?.some((selectedBranch) =>
+        normalizeBranchName(selectedBranch) === normalizeBranchName(managedBranch),
+      ),
+    );
+
+  return fetchAdminStudentsPage(null, page, 10, {
+    ...filters,
+    branches: scopedBranches,
+  });
+};
 
 export { fetchAdminStudentCounts };
 
