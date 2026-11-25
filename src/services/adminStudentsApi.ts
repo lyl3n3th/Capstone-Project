@@ -390,15 +390,11 @@ export async function fetchAdminStudentCounts(
   if (branches.length === 0) return { total: 0, female: 0, male: 0 };
 
   const fetchCount = async (gender?: "Female" | "Male") => {
-    let query = supabase.rpc(
-      "list_admin_students",
-      { p_branch: null },
-      { count: "exact", head: true },
-    ).in("status", ["Complete", "Incomplete"]).in("branch", branches);
-    if (gender) query = query.eq("sex", gender);
-    const { count, error } = await query;
-    if (error) throw new Error(getErrorMessage(error));
-    return count ?? 0;
+    const { totalItems } = await fetchAdminStudentsPage(null, 1, 1, {
+      branches,
+      gender,
+    });
+    return totalItems;
   };
 
   const [total, female, male] = await Promise.all([
