@@ -17,13 +17,13 @@ import {
   MdAccountBalance,
 } from "react-icons/md";
 import {
+  fetchSupabaseAdmissionApplicants,
   normalizeBranchName,
   type AdminBranchName,
   type StudentStorageRecord,
 } from "../../services/adminStorage";
 import { fetchInboxReports, type ReportRecord } from "../../services/reportApi";
 import { useManagedStudents } from "../../hooks/useManagedStudents";
-import { isManagerEnrollmentStudent } from "../../services/managerStudents";
 import ChartNote from "../../components/common/ChartNote";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import "../../styles/manager/area-managerDashboard.css";
@@ -44,6 +44,8 @@ interface AreaManagerDashboardProps {
   loggedInRole?: string;
   canAccessBackup?: boolean;
 }
+
+type BranchEnrollmentCounts = { shs: number; college: number };
 
 interface CourseCounts {
   labels: string[];
@@ -197,6 +199,7 @@ const buildDashboardState = (
   reports: ReportRecord[] = [],
   managedBranches: string[] = [],
   studentRecords: StudentStorageRecord[] = [],
+  enrollmentByBranch: Partial<Record<AdminBranchName, BranchEnrollmentCounts>> = {},
 ): DashboardState => {
   const dashboardBranches = getUniqueSortedBranches(managedBranches);
   const pendingReportCounts = buildPendingReportCounts(
@@ -206,21 +209,15 @@ const buildDashboardState = (
   const branches = dashboardBranches.map((branch) => {
     const students = studentRecords.filter((student) => normalizeBranchName(student.branch) === branch);
     const effectivePopulation = buildPopulationRecordsFromStudents(students);
-    const enrollmentStudents = students.filter(isManagerEnrollmentStudent);
-    const shsEnrollees = enrollmentStudents.filter(
-      (student) => student.program === "SHS",
-    ).length;
-    const collegeEnrollees = enrollmentStudents.filter(
-      (student) => student.program === "College",
-    ).length;
+    const enrollment = enrollmentByBranch[branch];
     const pendingReports = pendingReportCounts.countsByBranch.get(branch) || 0;
 
     return {
       branch_name: branch,
       total_students: effectivePopulation.length,
       course_counts: buildCourseCounts(effectivePopulation),
-      shs_enrollees: shsEnrollees,
-      college_enrollees: collegeEnrollees,
+      shs_enrollees: enrollment?.shs ?? 0,
+      college_enrollees: enrollment?.college ?? 0,
       pending_reports: pendingReports,
     };
   });
@@ -244,10 +241,19 @@ const AreaManagerDashboard = ({
 }: AreaManagerDashboardProps) => {
   const { students, branches, isLoading: loading, hasLoaded,
     error: studentLoadError, retry } = useManagedStudents();
+  const branchKey = JSON.stringify(branches);
+  const [enrollmentSnapshot, setEnrollmentSnapshot] = useState<{
+    branchKey: string;
+    counts: Partial<Record<AdminBranchName, BranchEnrollmentCounts>>;
+  } | null>(null);
+  const [enrollmentError, setEnrollmentError] = useState("");
+  const enrollmentCountsReady = enrollmentSnapshot?.branchKey === branchKey;
+  const enrollmentByBranch = enrollmentCountsReady ? enrollmentSnapshot.counts : undefined;
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [reportLoadError, setReportLoadError] = useState("");
   const { branches: dashboardData, barData, reportsCount, enrollmentStats } = useMemo(
-    () => buildDashboardState(reports, branches, students), [reports, branches, students],
+    () => buildDashboardState(reports, branches, students, enrollmentByBranch),
+    [reports, branches, students, enrollmentByBranch],
   );
 
   useEffect(() => {
@@ -273,6 +279,44 @@ const AreaManagerDashboard = ({
       window.removeEventListener("focus", sync);
     };
   }, []);
+
+  useEffect(() => {
+    const managedBranches = JSON.parse(branchKey) as AdminBranchName[];
+    let active = true;
+    let request = 0;
+
+    const refreshEnrollment = async () => {
+      const currentRequest = ++request;
+      try {
+        const entries = await Promise.all(managedBranches.map(async (branch) => {
+          const admissions = await fetchSupabaseAdmissionApplicants(branch);
+          const counts = { shs: 0, college: 0 };
+          for (const admission of admissions) {
+            if (admission.status !== "Approved" || admission.archivedAt) continue;
+            if (admission.program === "SHS") counts.shs += 1;
+            if (admission.program === "College") counts.college += 1;
+          }
+          return [branch, counts] as const;
+        }));
+        if (active && currentRequest === request) {
+          setEnrollmentSnapshot({ branchKey, counts: Object.fromEntries(entries) });
+          setEnrollmentError("");
+        }
+      } catch {
+        if (active && currentRequest === request) {
+          setEnrollmentError("Unable to refresh approved enrollment counts.");
+        }
+      }
+    };
+
+    const sync = () => { void refreshEnrollment(); };
+    sync();
+    window.addEventListener("focus", sync);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", sync);
+    };
+  }, [branchKey]);
 
   const totalStudentsCount = dashboardData.reduce(
     (accumulator, currentBranch) =>
@@ -335,7 +379,7 @@ const AreaManagerDashboard = ({
             <div className="kpi-info">
               <span className="kpi-label">SHS Enrollees</span>
               <h2 className="kpi-value">
-                {enrollmentStats.shs.toLocaleString()}
+                {enrollmentCountsReady ? enrollmentStats.shs.toLocaleString() : "—"}
               </h2>
             </div>
           </div>
@@ -346,7 +390,7 @@ const AreaManagerDashboard = ({
             <div className="kpi-info">
               <span className="kpi-label">College Enrollees</span>
               <h2 className="kpi-value">
-                {enrollmentStats.college.toLocaleString()}
+                {enrollmentCountsReady ? enrollmentStats.college.toLocaleString() : "—"}
               </h2>
             </div>
           </div>
@@ -367,12 +411,13 @@ const AreaManagerDashboard = ({
 
         <div className="dashboard-card main-bar-chart">
           <ChartNote>
-            Each stacked bar compares SHS and College enrollees for a branch.
-            Taller columns mean higher combined enrollment, and hovering a bar
-            segment shows its exact count.
+            Each bar counts approved New Admission and Transferee entries by program.
+            Archived entries are excluded.
           </ChartNote>
           <div className="chart-wrapper-mobile">
-            {barData && (
+            {enrollmentError && <p role="alert">{enrollmentError}</p>}
+            {!enrollmentCountsReady && !enrollmentError && <p>Loading enrollment counts…</p>}
+            {enrollmentCountsReady && barData && (
               <div
                 className="bar-chart-scroll-inner"
                 style={{ minWidth: `${barChartMinWidth}px` }}
