@@ -4,6 +4,7 @@ import { AUTH_STORAGE_KEY, type AuthSession } from "../types/user";
 import { isCachedAlumniStudent } from "./backupApi";
 import {
   fetchSupabaseAdmissionApplicants,
+  fetchAdmissionAcademicYearForTrackingNumber,
   getStudentCredentialOverview,
   getStudentRequirementSnapshot,
   fetchStudentCredentialReviewDecisions,
@@ -275,9 +276,13 @@ const fetchRemoteStudentRecordForCurrentSession = async (
     return null;
   }
 
-  const [planningStates, scheduleRequests] = await Promise.all([
+  const [planningStates, scheduleRequests, admissionAcademicYear] = await Promise.all([
     fetchStudentPlanningStates(sessionUser.branch),
     fetchStudentScheduleRequests(sessionUser.branch, { authoritative: true }),
+    fetchAdmissionAcademicYearForTrackingNumber(
+      sessionUser.branch,
+      remoteStudent.trackingNumber || sessionUser.trackingNumber,
+    ),
   ]);
   const matchingPlanningState =
     planningStates.find(
@@ -302,18 +307,44 @@ const fetchRemoteStudentRecordForCurrentSession = async (
   const studentWithPlanningState = matchingPlanningState
     ? mergeStudentPlanningStateIntoStudent(remoteStudent, matchingPlanningState)
     : remoteStudent;
+  const hasIrregularGradeStanding =
+    getStudentAcademicStanding({
+      branch: studentWithPlanningState.branch,
+      program: studentWithPlanningState.program,
+      studentId: studentWithPlanningState.id,
+    }).label === "Irregular";
+  const isRegularCollegeAdmission =
+    studentWithPlanningState.program.trim().toLowerCase() === "college" &&
+    studentWithPlanningState.studentStatus?.trim().toLowerCase() !== "transferee" &&
+    !studentWithPlanningState.importAcademicYear &&
+    studentWithPlanningState.importAcademicStanding !== "Irregular" &&
+    !hasIrregularGradeStanding &&
+    !studentWithPlanningState.requestedOwnSchedule &&
+    !hasLatestApprovedIrregularEnrollmentRequestForStudent({
+      branch: studentWithPlanningState.branch,
+      studentNumber: studentWithPlanningState.id,
+      trackingNumber: studentWithPlanningState.trackingNumber,
+    });
+  const studentWithAdmissionYear =
+    isRegularCollegeAdmission && admissionAcademicYear
+      ? {
+          ...studentWithPlanningState,
+          admissionAcademicYear,
+          admissionSemester: "1st Semester",
+        }
+      : studentWithPlanningState;
   // An approved request is the server-confirmed source for the official
   // schedule. It must take precedence over a stale planning-state row.
   const remoteStudentWithPlanning = approvedScheduleRequest
     ? {
-        ...studentWithPlanningState,
+        ...studentWithAdmissionYear,
         requestedOwnSchedule: true,
         ownScheduleRequestStatus: "Approved" as const,
         ownScheduleAcademicYear: approvedScheduleRequest.academicYear,
         ownScheduleSemester: approvedScheduleRequest.semester,
         ownScheduleSelectionStatus: "Approved" as const,
       }
-    : studentWithPlanningState;
+    : studentWithAdmissionYear;
   const cachedRemoteStudent = mergeStudentIntoLocalCache(
     remoteStudentWithPlanning,
   );

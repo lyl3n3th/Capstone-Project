@@ -550,11 +550,17 @@ const resolveStudentPortalContextWithLoad = (
     storedStudent.currentAcademicYear?.trim() ||
     storedStudent.importAcademicYear?.trim() ||
     (isTransferee ? storedStudent.ownScheduleAcademicYear?.trim() : undefined) ||
+    (!isTransferee && !storedStudent.requestedOwnSchedule
+      ? storedStudent.admissionAcademicYear?.trim()
+      : undefined) ||
     storedStudent.placementAcademicYear?.trim();
   const authoritativeSemester =
     storedStudent.currentSemester?.trim() ||
     storedStudent.importSemester?.trim() ||
     (isTransferee ? storedStudent.ownScheduleSemester?.trim() : undefined) ||
+    (!isTransferee && !storedStudent.requestedOwnSchedule
+      ? storedStudent.admissionSemester?.trim()
+      : undefined) ||
     storedStudent.placementSemester?.trim();
   const approvedEnrollmentRequest =
     latestApprovedEnrollmentRequest &&

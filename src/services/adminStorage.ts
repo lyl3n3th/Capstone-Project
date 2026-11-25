@@ -105,6 +105,8 @@ export interface StudentStorageRecord {
   lastName?: string;
   importAcademicYear?: string;
   importSemester?: string;
+  admissionAcademicYear?: string;
+  admissionSemester?: string;
   placementAcademicYear?: string;
   placementSemester?: string;
   currentAcademicYear?: string;
@@ -5019,6 +5021,26 @@ export const fetchSupabaseAdmissionApplicants = async (
   );
   writeBranchScopedData("enrollees", branch, records, { skipSupabaseSync: true });
   return records;
+};
+
+export const fetchAdmissionAcademicYearForTrackingNumber = async (
+  branch: string | null | undefined,
+  trackingNumber: string | null | undefined,
+) => {
+  if (!trackingNumber?.trim()) return undefined;
+
+  await fetchBranchDirectory();
+  const branchName = normalizeBranchName(branch);
+  const branchCode =
+    findRegisteredBranch(branchName)?.code ?? normalizeBranchCode(branchName);
+  const { data, error } = await supabase
+    .rpc("list_admission_academic_years", { p_branch_code: branchCode })
+    .eq("tracking_number", trackingNumber.trim())
+    .limit(1)
+    .returns<SupabaseAdmissionAcademicYearRow[]>();
+
+  if (error) throw new Error(error.message);
+  return Array.isArray(data) ? data[0]?.academic_year?.trim() || undefined : undefined;
 };
 
 // Refresh the same saved credential records for active students and alumni.
