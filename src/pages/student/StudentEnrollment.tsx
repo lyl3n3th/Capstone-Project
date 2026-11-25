@@ -1785,7 +1785,7 @@ function StudentEnrollment() {
                     <th>Subject Code</th>
                     <th>Subject Title</th>
                     <th>Semester</th>
-                    <th>Units</th>
+                    <th>{supportsIrregularEnrollmentRequest ? "Units" : "Instructor"}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1795,7 +1795,7 @@ function StudentEnrollment() {
                         <td className="s-subject-code">{subject.code}</td>
                         <td className="s-subject-title">{subject.title}</td>
                         <td className="s-subject-semester">{subject.semester}</td>
-                        <td>{subject.units ?? "-"}</td>
+                        <td>{supportsIrregularEnrollmentRequest ? subject.units ?? "-" : "TBA"}</td>
                       </tr>
                     ))
                   ) : (
