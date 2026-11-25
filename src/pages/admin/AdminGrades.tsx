@@ -493,35 +493,74 @@ export default function AdminGrades({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    void Promise.all([
-      fetchAndCacheInstructorGradeChangeRequests(currentBranch),
-      fetchAndCacheGradeChangeRequestSettings(currentBranch),
-    ])
-      .then(() => {
+    let isActive = true;
+    let hasLoggedLoadError = false;
+
+    const refreshGradeChangeRequests = async () => {
+      try {
+        await Promise.all([
+          fetchAndCacheInstructorGradeChangeRequests(currentBranch),
+          fetchAndCacheGradeChangeRequestSettings(currentBranch),
+        ]);
+        if (!isActive) {
+          return;
+        }
+
+        hasLoggedLoadError = false;
         setGradeChangeSettingsVersion((previousValue) => previousValue + 1);
-      })
-      .catch((error) => {
-        console.warn("Unable to load instructor grade approvals from Supabase.", error);
-      });
+      } catch (error) {
+        if (!hasLoggedLoadError) {
+          console.warn(
+            "Unable to load instructor grade approvals from Supabase.",
+            error,
+          );
+          hasLoggedLoadError = true;
+        }
+      }
+    };
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshGradeChangeRequests();
+      }
+    };
+
+    void refreshGradeChangeRequests();
+    const refreshInterval = window.setInterval(refreshWhenVisible, 30_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
 
     void fetchAndCacheStudentGradeRecordsForBranch(currentBranch).catch((error) => {
       console.warn("Unable to load student grades from Supabase.", error);
     });
+
+    return () => {
+      isActive = false;
+      window.clearInterval(refreshInterval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, [currentBranch]);
 
   useEffect(() => {
     let isActive = true;
+    let requestRevision = 0;
     const requestedPage = instructorUploadPage;
-    setIsLoadingInstructorGradeSubmissions(true);
-    setInstructorGradeSubmissionLoadError(null);
 
-    void fetchAdminInstructorGradeSubmissionPage({
-      branch: currentBranch,
-      page: requestedPage,
-      pageSize: INSTRUCTOR_APPROVAL_PAGE_SIZE,
-    })
-      .then((result) => {
-        if (!isActive) {
+    const loadSubmissionPage = async (showLoading: boolean) => {
+      const currentRequestRevision = ++requestRevision;
+      if (showLoading) {
+        setIsLoadingInstructorGradeSubmissions(true);
+      }
+      setInstructorGradeSubmissionLoadError(null);
+
+      try {
+        const result = await fetchAdminInstructorGradeSubmissionPage({
+          branch: currentBranch,
+          page: requestedPage,
+          pageSize: INSTRUCTOR_APPROVAL_PAGE_SIZE,
+        });
+        if (!isActive || currentRequestRevision !== requestRevision) {
           return;
         }
 
@@ -537,9 +576,8 @@ export default function AdminGrades({
         setInstructorGradeSubmissionPage(result.submissions);
         setInstructorGradeSubmissionTotal(result.totalItems);
         setInstructorGradeSubmissionStatusCounts(result.statusCounts);
-      })
-      .catch((error) => {
-        if (!isActive) {
+      } catch (error) {
+        if (!isActive || currentRequestRevision !== requestRevision) {
           return;
         }
         console.warn("Unable to load instructor grade submissions.", error);
@@ -548,15 +586,30 @@ export default function AdminGrades({
             ? error.message
             : "Unable to load instructor grade submissions.",
         );
-      })
-      .finally(() => {
-        if (isActive) {
+      } finally {
+        if (isActive && currentRequestRevision === requestRevision) {
           setIsLoadingInstructorGradeSubmissions(false);
         }
-      });
+      }
+    };
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void loadSubmissionPage(false);
+      }
+    };
+
+    void loadSubmissionPage(true);
+    const refreshInterval = window.setInterval(refreshWhenVisible, 30_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
 
     return () => {
       isActive = false;
+      requestRevision += 1;
+      window.clearInterval(refreshInterval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [currentBranch, instructorUploadPage, instructorSubmissionVersion]);
 
