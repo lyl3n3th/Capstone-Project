@@ -6619,15 +6619,16 @@ export default function AdminEnrollees({
                 })
               : null;
 
-          let syncedStudentNumber = enrolleeForApproval.studentNumber;
+          const activatedStudent = isApprove
+            ? await activateApprovedStudent(
+                enrolleeForApproval.trackingNumber,
+                enrolleeForApproval.studentNumber,
+              )
+            : null;
+          const syncedStudentNumber =
+            activatedStudent?.studentNumber || enrolleeForApproval.studentNumber;
 
-          if (isApprove) {
-            const activatedStudent = await activateApprovedStudent(
-              enrolleeForApproval.trackingNumber,
-              enrolleeForApproval.studentNumber,
-            );
-            syncedStudentNumber =
-              activatedStudent.studentNumber || syncedStudentNumber;
+          if (activatedStudent) {
 
             try {
               await updateAdmissionProgress({
@@ -6660,7 +6661,7 @@ export default function AdminEnrollees({
           }
 
           let promotedStudentRecord: StudentStorageRecord | null = null;
-          const updatedEnrollee: Enrollee = isApprove
+          const updatedEnrollee: Enrollee = activatedStudent
             ? (() => {
                 const promotionResult = promoteApplicantToStoredStudent({
                   ...enrolleeForApproval,
@@ -6682,7 +6683,7 @@ export default function AdminEnrollees({
                   effectiveDiscountSource:
                     resolvedAdmissionTuition?.effectiveDiscountSource ?? "none",
                   rejectionReason: undefined,
-                });
+                }, activatedStudent);
 
                 promotedStudentRecord = promotionResult.student;
                 return { ...promotionResult.applicant };
