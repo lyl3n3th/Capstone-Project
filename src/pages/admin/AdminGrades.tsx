@@ -3816,7 +3816,7 @@ export default function AdminGrades({
                   </div>
 
                   <div className="table-container preview-table-container">
-                    <table className="grades-table">
+                    <table className="grades-table instructor-upload-review-table">
                       <thead>
                         <tr>
                           <th>Student ID</th>
@@ -3835,8 +3835,7 @@ export default function AdminGrades({
                               <td>{record.studentId}</td>
                               <td>{record.fullName}</td>
                               <td>
-                                <strong>{record.subjectCode}</strong>
-                                <br />
+                                <strong>{record.subjectCode}</strong>{" "}
                                 <span>{record.subjectTitle}</span>
                               </td>
                               <td>{record.normalizedGrade}</td>
@@ -3943,7 +3942,7 @@ export default function AdminGrades({
                   </div>
 
                   <div className="table-container preview-table-container">
-                    <table className="grades-table">
+                    <table className="grades-table instructor-change-review-table">
                       <thead>
                         <tr>
                           <th>Student ID</th>
@@ -3963,8 +3962,7 @@ export default function AdminGrades({
                               <td>{change.studentId}</td>
                               <td>{change.fullName}</td>
                               <td>
-                                <strong>{change.subjectCode}</strong>
-                                <br />
+                                <strong>{change.subjectCode}</strong>{" "}
                                 <span>{change.subjectTitle}</span>
                               </td>
                               <td>{change.currentGrade}</td>
