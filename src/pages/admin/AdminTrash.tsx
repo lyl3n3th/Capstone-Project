@@ -7,6 +7,7 @@ import { MdArchive } from "react-icons/md";
 import AdminSidebar from "../../components/admin/AdminSidebar";
 import { ToastContainer } from "../../components/common/Toast";
 import { useAuth } from "../../hooks/useAuth";
+import { supabase } from "../../lib/supabase";
 import { deleteAdmissionApplication } from "../../services/admission";
 import {
   getStudentsForBranch,
@@ -96,6 +97,14 @@ const API_BASE_URL =
 const STUDENTS_API_URL = `${API_BASE_URL}/api/students/`;
 const ITEMS_PER_PAGE = 10;
 
+const enrolleeArchiveScope = (enrollee: Enrollee, branch: string) =>
+  JSON.stringify([
+    "hidden-enrollee-archive",
+    branch,
+    enrollee.id,
+    enrollee.archivedAt,
+  ]);
+
 export default function AdminTrash({
   onLogout,
   loggedInUsername,
@@ -116,6 +125,9 @@ export default function AdminTrash({
   const [enrollmentRequests, setEnrollmentRequests] = useState<
     EnrollmentRequestRecord[]
   >(() => readEnrollmentRequestsForBranch(currentBranch));
+  const [hiddenEnrolleeScopes, setHiddenEnrolleeScopes] = useState<
+    Record<string, boolean>
+  >({});
   const [searchTerm, setSearchTerm] = useState("");
   const [recordTypeFilter, setRecordTypeFilter] = useState<
     "All Records" | ArchivedTrashItem["kind"]
@@ -185,7 +197,55 @@ export default function AdminTrash({
   const archivedStudents = students.filter(
     (student) => student.status === "Archived",
   );
-  const archivedEnrollees = enrollees.filter((enrollee) => enrollee.archivedAt);
+  useEffect(() => {
+    let cancelled = false;
+    const archivedLinkedEnrollees = enrollees.filter(
+      (enrollee) =>
+        enrollee.archivedAt &&
+        enrollee.studentNumber?.trim() &&
+        normalizeBranchName(enrollee.branch || currentBranch) === currentBranch,
+    );
+
+    void (async () => {
+      // Limit concurrent requests when opening a large archive.
+      for (let offset = 0; offset < archivedLinkedEnrollees.length && !cancelled; offset += 4) {
+        const results = await Promise.allSettled(
+          archivedLinkedEnrollees.slice(offset, offset + 4).map(async (enrollee) => {
+            const scope = enrolleeArchiveScope(enrollee, currentBranch);
+            const { data, error } = await supabase.rpc("get_branch_local_storage_record", {
+              p_branch: currentBranch,
+              p_scope: scope,
+            });
+            if (error) throw error;
+            return data === true ? scope : null;
+          }),
+        );
+        if (cancelled) return;
+
+        const hiddenScopes: Record<string, boolean> = {};
+        for (const result of results) {
+          if (result.status === "fulfilled" && result.value) {
+            hiddenScopes[result.value] = true;
+          } else if (result.status === "rejected") {
+            console.warn("Unable to load archived enrollee visibility.", result.reason);
+          }
+        }
+        if (Object.keys(hiddenScopes).length > 0) {
+          setHiddenEnrolleeScopes((previous) => ({ ...previous, ...hiddenScopes }));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentBranch, enrollees]);
+
+  const archivedEnrollees = enrollees.filter(
+    (enrollee) =>
+      enrollee.archivedAt &&
+      !hiddenEnrolleeScopes[enrolleeArchiveScope(enrollee, currentBranch)],
+  );
   const archivedEnrollmentRequests = enrollmentRequests.filter(
     (request) => request.archivedAt,
   );
@@ -478,26 +538,30 @@ export default function AdminTrash({
   };
 
   const deleteEnrolleeRecord = async (enrollee: Enrollee) => {
-    if (enrollee.studentNumber) {
-      const protection = await getStudentRecordProtection({
-        branch: enrollee.branch || currentBranch,
-        studentNumber: enrollee.studentNumber,
-        trackingNumber: enrollee.trackingNumber,
-      });
-      if (protection.isProtected) {
-        throw new Error(
-          getStudentRecordProtectionMessage(protection, "deleted"),
-        );
+    if (enrollee.studentNumber?.trim()) {
+      if (
+        !enrollee.archivedAt ||
+        normalizeBranchName(enrollee.branch || currentBranch) !== currentBranch
+      ) {
+        throw new Error("This enrollee is outside the current branch archive.");
       }
+
+      const scope = enrolleeArchiveScope(enrollee, currentBranch);
+      const { error } = await supabase.rpc("upsert_branch_local_storage_record", {
+        p_branch: currentBranch,
+        p_scope: scope,
+        p_payload: true,
+      });
+      if (error) throw new Error(error.message);
+
+      setHiddenEnrolleeScopes((previous) => ({ ...previous, [scope]: true }));
+      return { warnings: [] as string[] };
     }
 
     const warnings: string[] = [];
-    let linkedAdmissionWasDeleted = false;
-
     if (enrollee.trackingNumber) {
       try {
         await deleteAdmissionApplication(enrollee.trackingNumber);
-        linkedAdmissionWasDeleted = true;
       } catch (error) {
         if (!isMissingSupabaseAdmissionError(error)) {
           throw error;
@@ -505,33 +569,9 @@ export default function AdminTrash({
       }
     }
 
-    if (enrollee.studentNumber && !linkedAdmissionWasDeleted) {
-      try {
-        await deleteAdminStudent({
-          branch: enrollee.branch || currentBranch,
-          studentNumber: enrollee.studentNumber,
-          trackingNumber: enrollee.trackingNumber,
-        });
-      } catch (error) {
-        if (!isMissingSupabaseStudentError(error)) {
-          throw error;
-        }
-      }
-    }
-
-    if (enrollee.studentNumber) {
-      rememberDeletedStoredStudent({
-        branch: enrollee.branch || currentBranch,
-        id: enrollee.studentNumber,
-        trackingNumber: enrollee.trackingNumber,
-        name: enrollee.fullName,
-      });
-    }
-
     removeLinkedRecordsLocally({
       enrolleeId: enrollee.id,
       trackingNumber: enrollee.trackingNumber,
-      studentNumber: enrollee.studentNumber,
     });
 
     return { warnings };
@@ -712,13 +752,16 @@ export default function AdminTrash({
   };
 
   const handleDeleteEnrollee = (enrollee: Enrollee) => {
+    const hideOnly = Boolean(enrollee.studentNumber?.trim());
     void (async () => {
       const confirmed = (await requestConfirmation(
-        `Delete ${enrollee.fullName} permanently? This action cannot be undone.`,
+        hideOnly
+          ? `Hide ${enrollee.fullName} from Archive and keep the linked student and admission records?`
+          : `Delete ${enrollee.fullName} permanently? This action cannot be undone.`,
         {
-          title: "Permanently Delete Enrollee",
-          confirmLabel: "Delete permanently",
-          destructive: true,
+          title: hideOnly ? "Hide from Archive" : "Permanently Delete Enrollee",
+          confirmLabel: hideOnly ? "Hide from Archive" : "Delete permanently",
+          destructive: !hideOnly,
         },
       ));
 
@@ -729,12 +772,12 @@ export default function AdminTrash({
       setIsProcessingTrash(true);
 
       try {
-        const result = await deleteEnrolleeRecord(enrollee);
+        await deleteEnrolleeRecord(enrollee);
         addToast(
-          result.warnings.length > 0
-            ? `${enrollee.fullName} was deleted from Archive, but the linked shared student still needs cleanup.`
+          hideOnly
+            ? `${enrollee.fullName} was hidden from Archive.`
             : `${enrollee.fullName} has been permanently deleted.`,
-          result.warnings.length > 0 ? "warning" : "success",
+          "success",
         );
       } catch (error) {
         console.error("Failed to delete enrollee", error);
@@ -797,7 +840,7 @@ export default function AdminTrash({
     }
 
     const confirmed = (await requestConfirmation(
-      "Clear Archive and permanently delete all archived records? This action cannot be undone.",
+      "Clear Archive? Enrollees linked to students will be hidden. Other archived records will be permanently deleted if eligible.",
       {
         title: "Clear Archive",
         confirmLabel: "Clear archive",
@@ -837,15 +880,15 @@ export default function AdminTrash({
       const message =
         warningCount > 0
           ? `${deletedLabel} removed from Archive, but ${warningCount} legacy student record${warningCount === 1 ? "" : "s"} still need API cleanup.`
-          : `${deletedLabel} permanently deleted from Archive.`;
+          : `${deletedLabel} removed from Archive.`;
       addToast(message, warningCount > 0 ? "warning" : "success");
     }
 
     if (failedCount > 0) {
       addToast(
         firstFailureMessage
-          ? `Failed to delete ${failedCount} record${failedCount === 1 ? "" : "s"} from Archive. ${firstFailureMessage}`
-          : `Failed to delete ${failedCount} record${failedCount === 1 ? "" : "s"} from Archive.`,
+          ? `Failed to remove ${failedCount} record${failedCount === 1 ? "" : "s"} from Archive. ${firstFailureMessage}`
+          : `Failed to remove ${failedCount} record${failedCount === 1 ? "" : "s"} from Archive.`,
         "error",
       );
     }
@@ -1048,10 +1091,14 @@ export default function AdminTrash({
                           className="delete-btn icon-only"
                           onClick={() => handleDeleteRecord(record)}
                           disabled={isProcessingTrash}
-                          aria-label={`Delete ${record.name}`}
-                          title={`Delete ${record.name}`}
+                          aria-label={record.enrollee?.studentNumber?.trim()
+                            ? `Hide ${record.name} from Archive`
+                            : `Delete ${record.name}`}
+                          title={record.enrollee?.studentNumber?.trim()
+                            ? "Hide from Archive"
+                            : `Delete ${record.name}`}
                         >
-                          <FaTrash />
+                          {record.enrollee?.studentNumber?.trim() ? <MdArchive /> : <FaTrash />}
                         </button>
                       </div>
                     </td>
