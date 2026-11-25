@@ -7,6 +7,7 @@ import {
   getStudentScheduleSelectionRequest,
   normalizeBranchName,
   readBranchScopedData,
+  readInstructorEvaluationSubmissions,
   type StudentPortalSubject,
   type StudentStorageRecord,
   type StudentSubjectPlanRecord,
@@ -19,7 +20,6 @@ import {
   hasCompletePassingShsSemesterGrades,
 } from "./studentGrades";
 import { getCurrentTermEvaluationLockStatus } from "./studentEvaluationLock";
-import { readInstructorEvaluationSubmissions } from "./adminStorage";
 
 export interface StudentPortalCurrentTerm {
   yearLevel: string;
