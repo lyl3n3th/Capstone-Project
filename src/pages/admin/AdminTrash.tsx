@@ -129,6 +129,11 @@ export default function AdminTrash({
   const [hiddenEnrolleeScopes, setHiddenEnrolleeScopes] = useState<
     Record<string, boolean>
   >({});
+  const [checkedEnrolleeScopes, setCheckedEnrolleeScopes] = useState<
+    Record<string, boolean>
+  >({});
+  const [visibilityLoadFailed, setVisibilityLoadFailed] = useState(false);
+  const [visibilityRetry, setVisibilityRetry] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
   const [recordTypeFilter, setRecordTypeFilter] = useState<
     "All Records" | ArchivedTrashItem["kind"]
@@ -207,6 +212,11 @@ export default function AdminTrash({
         normalizeBranchName(enrollee.branch || currentBranch) === currentBranch,
     );
 
+    setVisibilityLoadFailed(false);
+    const checkedScopes: Record<string, boolean> = {};
+    const hiddenScopes: Record<string, boolean> = {};
+    let loadFailed = false;
+
     void (async () => {
       // Limit concurrent requests when opening a large archive.
       for (let offset = 0; offset < archivedLinkedEnrollees.length && !cancelled; offset += 4) {
@@ -218,35 +228,43 @@ export default function AdminTrash({
               p_scope: scope,
             });
             if (error) throw error;
-            return data === true ? scope : null;
+            return { scope, hidden: data === true };
           }),
         );
         if (cancelled) return;
 
-        const hiddenScopes: Record<string, boolean> = {};
         for (const result of results) {
-          if (result.status === "fulfilled" && result.value) {
-            hiddenScopes[result.value] = true;
-          } else if (result.status === "rejected") {
+          if (result.status === "fulfilled") {
+            checkedScopes[result.value.scope] = true;
+            if (result.value.hidden) hiddenScopes[result.value.scope] = true;
+          } else {
+            loadFailed = true;
             console.warn("Unable to load archived enrollee visibility.", result.reason);
           }
         }
-        if (Object.keys(hiddenScopes).length > 0) {
-          setHiddenEnrolleeScopes((previous) => ({ ...previous, ...hiddenScopes }));
-        }
       }
+      if (cancelled) return;
+      setHiddenEnrolleeScopes((previous) => ({ ...previous, ...hiddenScopes }));
+      setCheckedEnrolleeScopes((previous) => ({ ...previous, ...checkedScopes }));
+      setVisibilityLoadFailed(loadFailed);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [currentBranch, enrollees]);
+  }, [currentBranch, enrollees, visibilityRetry]);
 
-  const archivedEnrollees = enrollees.filter(
-    (enrollee) =>
-      enrollee.archivedAt &&
-      !hiddenEnrolleeScopes[enrolleeArchiveScope(enrollee, currentBranch)],
+  const pendingEnrolleeVisibility = enrollees.some((enrollee) =>
+    enrollee.archivedAt && enrollee.studentNumber?.trim() &&
+    normalizeBranchName(enrollee.branch || currentBranch) === currentBranch &&
+    !checkedEnrolleeScopes[enrolleeArchiveScope(enrollee, currentBranch)],
   );
+  const archivedEnrollees = enrollees.filter((enrollee) => {
+    if (!enrollee.archivedAt) return false;
+    if (!enrollee.studentNumber?.trim()) return true;
+    const scope = enrolleeArchiveScope(enrollee, currentBranch);
+    return checkedEnrolleeScopes[scope] && !hiddenEnrolleeScopes[scope];
+  });
   const archivedEnrollmentRequests = enrollmentRequests.filter(
     (request) => request.archivedAt,
   );
@@ -836,7 +854,7 @@ export default function AdminTrash({
   };
 
   const handleClearTrash = async () => {
-    if (archivedRecords.length === 0) {
+    if (pendingEnrolleeVisibility || archivedRecords.length === 0) {
       return;
     }
 
@@ -952,13 +970,21 @@ export default function AdminTrash({
       </button>
 
       <main className="archive-content">
+        {visibilityLoadFailed && (
+          <p role="alert">
+            Some archive entries could not be loaded.{" "}
+            <button type="button" onClick={() => setVisibilityRetry((retry) => retry + 1)}>
+              Try again
+            </button>
+          </p>
+        )}
         <header className="page-header">
           <h1>
             <MdArchive />
             Archive
           </h1>
           <p>
-            {isLoading
+            {isLoading || (pendingEnrolleeVisibility && !visibilityLoadFailed)
               ? "Loading archived records..."
               : "Archived students, enrollees, and enrollment requests for this branch appear here."}
           </p>
@@ -1033,7 +1059,7 @@ export default function AdminTrash({
             onClick={() => {
               void handleClearTrash();
             }}
-            disabled={isProcessingTrash || archivedRecords.length === 0}
+            disabled={isProcessingTrash || pendingEnrolleeVisibility || archivedRecords.length === 0}
           >
             <MdArchive />
             {isProcessingTrash ? "Processing..." : "Clear Archive"}
@@ -1108,7 +1134,7 @@ export default function AdminTrash({
               ) : (
                 <tr>
                   <td colSpan={7} className="no-archive">
-                    {isLoading
+                    {isLoading || (pendingEnrolleeVisibility && !visibilityLoadFailed)
                       ? "Loading archived records..."
                       : archivedRecords.length > 0
                         ? "No archived records match the selected filters."
