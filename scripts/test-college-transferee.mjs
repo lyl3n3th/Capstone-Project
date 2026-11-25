@@ -117,8 +117,8 @@ const catalogSubjects = [{ id: 'future', code: 'FUTURE', academicYear: '2031-203
 let enableProgression = false;
 const school = {
   normalizeBranchName: branch => branch,
-  readBranchScopedData: (_key, branch) => branch === 'With Credits'
-    ? { approved: { source: 'transferee_validation', studentNumber: 'test-transfer',
+  readBranchScopedData: (_key, branch) => ['With Credits', 'With Approved Enrollment'].includes(branch)
+    ? { approved: { source: branch === 'With Credits' ? 'transferee_validation' : 'enrollment_request', studentNumber: 'test-transfer',
         creditedSubjects: [{ subjectCode: ' done ' }] } }
     : {},
   getStudentPortalSubjects: (_student, term) => term?.restrictToTerm
@@ -126,14 +126,15 @@ const school = {
     : catalogSubjects,
   getStudentPortalSubjectsForTerm: () => [],
   getStudentPortalSubjectsForSectionTerm: ({ branch, academicYear, semester }) =>
-    branch === 'With Credits' ? ['DONE', 'REMAINING'].map(code => ({
+    ['With Credits', 'With Approved Enrollment'].includes(branch) ? ['DONE', 'REMAINING'].map(code => ({
       id: code, code, title: code, academicYear, semester,
     })) : [],
   getStudentGradeRecords: () => [],
-  hasCompletePassingShsSemesterGrades: ({ subjects }) => subjects.length > 0 && enableProgression,
+  hasCompletePassingShsSemesterGrades: ({ subjects, academicYear }) => enableProgression &&
+    (academicYear === '2031-2032' || subjects.some(subject => subject.code === 'PLACED') || subjects.map(subject => subject.code).join() === 'REMAINING'),
   applyImportedScheduleDefaults: student => student,
   getLatestApprovedEnrollmentRequestForStudent: ({ branch }) => branch === 'With Approved Enrollment'
-    ? { academicYear: '2027-2028', semester: '1st Semester' }
+    ? { academicYear: '2027-2028', semester: '1st Semester', requestedYearLevel: 'Grade 12' }
     : undefined,
 };
 new Function('exports', 'require', ts.transpileModule(resolverSource, {
@@ -155,6 +156,13 @@ assert.equal(placementApi.resolveStudentPortalContext({
   ...shsTransferee, branch: 'With Approved Enrollment',
 }).currentTerm.academicYear, '2027-2028', 'Later approved enrollment takes priority');
 enableProgression = true;
+const promoted = placementApi.resolveStudentPortalContext({
+  ...shsTransferee, branch: 'With Approved Enrollment',
+});
+assert.equal(promoted.currentTerm.yearLevel, 'Grade 12');
+assert.equal(promoted.currentTerm.academicYear, '2027-2028');
+assert.equal(promoted.currentTerm.semester, '2nd Semester');
+assert.deepEqual(promoted.subjects.filter(subject => subject.semester === '2nd Semester').map(subject => subject.code), ['REMAINING']);
 const advanced = placementApi.resolveStudentPortalContext({ ...shsTransferee, branch: 'With Credits' });
 assert.equal(advanced.currentTerm.semester, '2nd Semester');
 assert.deepEqual(advanced.subjects.filter(subject => subject.semester === '2nd Semester').map(subject => subject.code), ['REMAINING']);

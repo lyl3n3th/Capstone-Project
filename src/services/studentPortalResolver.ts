@@ -487,6 +487,12 @@ const getShsAutoProgressedContext = ({
           academicYear: currentTerm.academicYear,
           semester: "1st Semester",
         });
+  const creditedCodes = resolvedStudentRecord.studentStatus?.trim().toLowerCase() === "transferee"
+    ? getTransfereeCreditedSubjectCodes(resolvedStudentRecord)
+    : new Set<string>();
+  const requiredSubjects = firstSemesterSubjects.filter(
+    (subject) => !creditedCodes.has(subject.code.trim().toUpperCase()),
+  );
   const gradeRecords = getStudentGradeRecords({
     branch: resolvedStudentRecord.branch,
     studentId: resolvedStudentRecord.id,
@@ -494,7 +500,7 @@ const getShsAutoProgressedContext = ({
 
   if (
     !hasCompletePassingShsSemesterGrades({
-      subjects: firstSemesterSubjects,
+      subjects: requiredSubjects,
       gradeRecords,
       academicYear: currentTerm.academicYear,
       semester: "1st Semester",
@@ -636,7 +642,7 @@ const resolveStudentPortalContextWithLoad = (
       approvedEnrollmentRequest.semester,
     );
 
-    return {
+    const approvedContext: ResolvedStudentPortalContext = {
       resolvedStudentRecord,
       currentTerm: {
         yearLevel: resolvedYearLevel,
@@ -658,6 +664,11 @@ const resolveStudentPortalContextWithLoad = (
         nonCurrentTermPortalSubjects,
       ),
     };
+    return (!isOwnScheduleEnrollment && getShsAutoProgressedContext({
+      resolvedStudentRecord,
+      currentTerm: approvedContext.currentTerm,
+      portalSubjects: approvedContext.subjects,
+    })) || approvedContext;
   }
 
   if (
