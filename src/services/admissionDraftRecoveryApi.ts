@@ -12,6 +12,7 @@ type DraftRecoveryPayload = {
 type DraftRecoveryErrorResponse = {
   detail?: string;
   errors?: Record<string, string[]>;
+  retry_after_seconds?: number;
 };
 
 const requestDraftRecovery = async <T>(path: string, body: object): Promise<T> => {
@@ -26,7 +27,9 @@ const requestDraftRecovery = async <T>(path: string, body: object): Promise<T> =
     try {
       const payload = (await response.json()) as DraftRecoveryErrorResponse;
       if (payload.detail) {
-        message = payload.detail;
+        message = payload.retry_after_seconds
+          ? `${payload.detail} Try again in ${payload.retry_after_seconds} seconds.`
+          : payload.detail;
       } else if (payload.errors) {
         message = Object.values(payload.errors)[0]?.[0] || message;
       }

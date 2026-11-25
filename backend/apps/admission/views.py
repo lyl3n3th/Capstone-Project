@@ -18,6 +18,7 @@ from .draft_recovery import (
     verify_admission_draft_recovery,
 )
 from .tracking_recovery import (
+    TrackingRecoveryDeliveryError,
     build_decision_notification_target,
     build_tracking_notification_target,
     deliver_admission_decision_notification,
@@ -506,15 +507,32 @@ class AdmissionDraftRecoveryStartView(APIView):
             return Response({"errors": errors}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            request_admission_draft_recovery(
+            recovery_result = request_admission_draft_recovery(
                 email=cleaned["email"],
                 first_name=cleaned["first_name"],
                 last_name=cleaned["last_name"],
             )
-        except (ImproperlyConfigured, SupabaseRestError):
+        except (ImproperlyConfigured, SupabaseRestError, TrackingRecoveryDeliveryError):
             return Response(
-                {"detail": "Unable to start draft recovery right now. Please try again."},
+                {
+                    "detail": (
+                        "Unable to send a verification code right now. "
+                        "Please try again later."
+                    )
+                },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        retry_after_seconds = recovery_result["retry_after_seconds"]
+        if retry_after_seconds:
+            return Response(
+                {
+                    "detail": (
+                        "Please wait before requesting another verification code."
+                    ),
+                    "retry_after_seconds": retry_after_seconds,
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
         return Response(

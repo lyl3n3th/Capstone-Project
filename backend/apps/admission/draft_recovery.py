@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import logging
+import math
 import secrets
 from datetime import timedelta
 
@@ -74,6 +75,10 @@ def _challenge_digest(challenge_id, code):
     ).hexdigest()
 
 
+def _retry_after_seconds(created_at, window, now):
+    return max(1, math.ceil((created_at + window - now).total_seconds()))
+
+
 def request_admission_draft_recovery(*, email, first_name, last_name):
     """Send a one-time code when strict draft matching finds an eligible record."""
     if not is_email_delivery_configured():
@@ -91,11 +96,24 @@ def request_admission_draft_recovery(*, email, first_name, last_name):
         created_at__gte=now - timedelta(hours=1),
     ).order_by("-created_at")
     recent_challenge = recent_challenges.first()
-    if recent_challenges.count() >= HOURLY_CHALLENGE_LIMIT or (
-        recent_challenge and recent_challenge.created_at >= now - RESEND_COOLDOWN
-    ):
+    if recent_challenges.count() >= HOURLY_CHALLENGE_LIMIT:
         logger.info("Admission draft recovery request limited by resend policy.")
-        return
+        oldest_challenge = recent_challenges.order_by("created_at").first()
+        retry_after = (
+            _retry_after_seconds(oldest_challenge.created_at, timedelta(hours=1), now)
+            if oldest_challenge
+            else 1
+        )
+        return {"sent": False, "retry_after_seconds": retry_after}
+
+    if recent_challenge and recent_challenge.created_at >= now - RESEND_COOLDOWN:
+        logger.info("Admission draft recovery request limited by resend policy.")
+        retry_after = _retry_after_seconds(
+            recent_challenge.created_at,
+            RESEND_COOLDOWN,
+            now,
+        )
+        return {"sent": False, "retry_after_seconds": retry_after}
 
     draft = find_unsubmitted_draft(
         email=normalized_email,
@@ -104,14 +122,7 @@ def request_admission_draft_recovery(*, email, first_name, last_name):
     )
     if not draft:
         logger.info("Admission draft recovery found no eligible matching draft.")
-        return
-
-    AdmissionDraftRecoveryChallenge.objects.filter(
-        email=normalized_email,
-        first_name=normalized_first_name,
-        last_name=normalized_last_name,
-        consumed_at__isnull=True,
-    ).update(consumed_at=now)
+        return {"sent": False, "retry_after_seconds": 0}
 
     code = f"{secrets.randbelow(100_000_000):08d}"
     challenge = AdmissionDraftRecoveryChallenge.objects.create(
@@ -137,11 +148,18 @@ def request_admission_draft_recovery(*, email, first_name, last_name):
             ),
         )
     except TrackingRecoveryDeliveryError:
-        challenge.consumed_at = timezone.now()
-        challenge.save(update_fields=["consumed_at"])
-        logger.warning("Admission draft recovery email delivery failed.")
-    else:
-        logger.info("Admission draft recovery email accepted by the mail service.")
+        challenge.delete()
+        logger.exception("Unable to deliver an admission draft recovery code.")
+        raise
+
+    AdmissionDraftRecoveryChallenge.objects.filter(
+        email=normalized_email,
+        first_name=normalized_first_name,
+        last_name=normalized_last_name,
+        consumed_at__isnull=True,
+    ).exclude(pk=challenge.pk).update(consumed_at=timezone.now())
+    logger.info("Admission draft recovery email accepted by the mail service.")
+    return {"sent": True, "retry_after_seconds": 0}
 
 
 def verify_admission_draft_recovery(*, email, first_name, last_name, code):

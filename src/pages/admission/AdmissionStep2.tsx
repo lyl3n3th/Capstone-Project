@@ -601,6 +601,17 @@ function AdmissionStep2() {
     window.location.href = `/requirements?branch=${encodeURIComponent(selectedBranch)}&status=${encodeURIComponent(studentStatus)}&trackingNumber=${nextTrackingNumber}&program=${encodeURIComponent(program)}`;
   };
 
+  const sendDraftRecoveryCode = async () => {
+    const response = await requestAdmissionDraftRecoveryCode({
+      email,
+      firstName: fname,
+      lastName: lname,
+    });
+    setDraftRecoveryMessage(response.message);
+    setDraftRecoveryCode("");
+    setShowDraftRecovery(true);
+  };
+
   const handleContinue = async () => {
     if (!isFormValid()) {
       const invalidFields = getFieldsToValidate().filter((fieldId) =>
@@ -624,22 +635,16 @@ function AdmissionStep2() {
         err instanceof Error ? err.message : "Unable to save the application.";
       if (/email or contact number already exists/i.test(errorMessage)) {
         try {
-          const response = await requestAdmissionDraftRecoveryCode({
-            email,
-            firstName: fname,
-            lastName: lname,
-          });
-          setDraftRecoveryMessage(response.message);
-          setDraftRecoveryCode("");
-          setShowDraftRecovery(true);
+          await sendDraftRecoveryCode();
           return;
         } catch (recoveryError) {
-          addToast(
+          setDraftRecoveryMessage(
             recoveryError instanceof Error
               ? recoveryError.message
-              : errorMessage,
-            "error",
+              : "Unable to send a verification code. Try again.",
           );
+          setDraftRecoveryCode("");
+          setShowDraftRecovery(true);
           return;
         }
       }
@@ -647,6 +652,21 @@ function AdmissionStep2() {
       addToast(
         errorMessage || "Cannot connect to Supabase right now. Please try again.",
         "error",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResendDraftRecoveryCode = async () => {
+    setIsSubmitting(true);
+    try {
+      await sendDraftRecoveryCode();
+    } catch (err) {
+      setDraftRecoveryMessage(
+        err instanceof Error
+          ? err.message
+          : "Unable to send a verification code. Try again.",
       );
     } finally {
       setIsSubmitting(false);
@@ -1154,7 +1174,7 @@ function AdmissionStep2() {
                     aria-describedby="draftRecoveryHelp"
                   />
                   <small id="draftRecoveryHelp">
-                    Enter the 8-digit code. It expires after 10 minutes.
+                    Enter the 8-digit code. It expires after 10 minutes. You can request a new code once per minute.
                   </small>
                 </div>
                 <div className="choices3">
@@ -1165,6 +1185,14 @@ function AdmissionStep2() {
                     disabled={isSubmitting}
                   >
                     Dismiss
+                  </button>
+                  <button
+                    type="button"
+                    className="btn3"
+                    onClick={handleResendDraftRecoveryCode}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? "Sending..." : "Resend code"}
                   </button>
                   <button
                     type="button"
