@@ -166,6 +166,7 @@ export interface InstructorGradeSubmissionErrorRow {
   subjectTitle: string;
   units: string;
   grade: string;
+  gradeColumn?: string;
   instructorName: string;
   academicYear: string;
   semester: string;
@@ -1133,12 +1134,17 @@ export const getInstructorEvaluationProgress = ({
 const getProgramType = (section?: AcademicClassSectionRecord): StudentGradeProgramType =>
   section?.program === "SHS" ? "SHS" : "College";
 
-const getGradingPeriod = (programType: StudentGradeProgramType, semester: string) =>
-  programType === "SHS"
-    ? semester.toLowerCase().includes("2nd")
-      ? "3rd Quarter"
-      : "1st Quarter"
-    : semester;
+export const SHS_GRADE_PERIOD_LABELS = [
+  "1st Quarter",
+  "2nd Quarter",
+  "3rd Quarter",
+  "4th Quarter",
+] as const;
+
+const getShsQuarterLabelsForSemester = (semester: string) =>
+  semester.toLowerCase().includes("2nd")
+    ? [SHS_GRADE_PERIOD_LABELS[2], SHS_GRADE_PERIOD_LABELS[3]] as const
+    : [SHS_GRADE_PERIOD_LABELS[0], SHS_GRADE_PERIOD_LABELS[1]] as const;
 
 const getUniqueSheetName = (name: string, usedNames: Set<string>) => {
   const sanitizedBase =
@@ -1241,7 +1247,7 @@ const buildInstructorTemplateRows = ({
             student.name,
             assignment.subjectCode,
             assignment.subjectName,
-            getGradingPeriod(programType, assignment.semester),
+            "",
             "",
             "",
             assignment.instructorName,
@@ -1333,6 +1339,7 @@ const getRowHasRelevantGradeData = (row: Record<string, unknown>) =>
     "UNITS",
     "Quarter",
     "QUARTER",
+    ...SHS_GRADE_PERIOD_LABELS,
     "Instructor",
     "INSTRUCTOR",
   ].some((alias) => getValueByAliases(row, [alias]).trim() !== "");
@@ -1485,6 +1492,8 @@ export const downloadInstructorGradeTemplate = ({
           left.student.id.localeCompare(right.student.id),
       );
     const sectionStudents = sectionStudentAssignments.map(({ student }) => student);
+    const sectionSemester = sectionAssignments[0]?.semester || section.semester || "";
+    const shsQuarterLabels = getShsQuarterLabelsForSemester(sectionSemester);
 
     const usedSheetNames =
       usedSheetNamesByProgram.get(programType) ?? new Set<string>();
@@ -1494,15 +1503,16 @@ export const downloadInstructorGradeTemplate = ({
     existingSheets.push({
       academicYear: sectionAssignments[0]?.academicYear || "2026-2027",
       descriptor: getSectionAcademicDescriptor(section, sectionStudents),
-      headerOverrides:
-        programType === "College" ? { F: "GRADE (50-100)" } : undefined,
+      headerOverrides: programType === "College"
+        ? { F: "GRADE (50-100)" }
+        : { E: shsQuarterLabels[0], F: shsQuarterLabels[1] },
       rows: buildInstructorTemplateRows({
         programType,
         subjects,
         studentAssignments: sectionStudentAssignments,
       }),
       sectionCode: section.code,
-      semester: sectionAssignments[0]?.semester || section.semester || "",
+      semester: sectionSemester,
       sheetName: getUniqueSheetName(section.code, usedSheetNames),
       yearLevel: section.yearLevel,
     });
@@ -2074,6 +2084,9 @@ export const parseInstructorGradeWorkbook = async ({
     }
 
     const headerRow = sheetRows[headerRowIndex] ?? [];
+    const shsQuarterColumns = SHS_GRADE_PERIOD_LABELS.filter((period) =>
+      headerRow.some((header) => normalizeHeaderKey(header) === normalizeHeaderKey(period)),
+    );
     const templateAcademicYear = getMetadataValue(sheetRows, headerRowIndex, [
       "ACADEMIC_YEAR",
       "ACADEMIC YEAR",
@@ -2113,92 +2126,109 @@ export const parseInstructorGradeWorkbook = async ({
         rowProgramType.trim() === "SHS" ? "SHS" : "College";
       const semester =
         getValueByAliases(row, ["Semester", "SEMESTER"]) || templateSemester;
-      const gradingPeriod =
+      const legacyGradingPeriod =
         getValueByAliases(row, [
           "Grading Period",
           "Quarter",
           "QUARTER",
         ]) || (normalizedProgramType === "College" ? semester : "");
-      const errorRow: InstructorGradeSubmissionErrorRow = {
-        sheetName,
-        rowNumber,
-        studentId: getValueByAliases(row, ["Student ID", "STUDENT_ID"]),
-        fullName: getValueByAliases(row, ["Full Name", "FULL NAME"]),
-        subjectCode,
-        subjectTitle: getValueByAliases(row, [
-          "Subject Title",
-          "SUBJECT_TITLE",
-        ]),
-        units: getValueByAliases(row, ["Unit", "Units", "UNITS"]),
-        grade: getValueByAliases(row, [
-          "Grade",
-          "Grade (50-100)",
-          "Grade (0-100)",
-          "Grades",
-          "GRADES",
-        ]),
-        instructorName: getValueByAliases(row, ["Instructor", "INSTRUCTOR"]),
-        academicYear:
-          getValueByAliases(row, ["Academic Year", "ACADEMIC_YEAR"]) ||
-          templateAcademicYear,
-        semester,
-        gradingPeriod,
-        programType: normalizedProgramType,
-        errors: [],
-      };
-      const matchedStudent = branchStudents.find(student => valuesMatch(student.id, errorRow.studentId));
-      const result = validateAndNormalizeUploadedGradeRow({
-        studentId: errorRow.studentId,
-        fullName: errorRow.fullName,
-        subjectCode,
-        subjectTitle: errorRow.subjectTitle,
-        grade: errorRow.grade,
-        unit: errorRow.units,
-        gradingPeriod,
-        programType: normalizedProgramType,
-        academicYear: errorRow.academicYear,
-        semester,
-        branch,
-      }, undefined, { preserveStudentNumber: Boolean(matchedStudent?.importAcademicYear) });
-      const rowErrors = getInstructorRowValidationErrors({
-        allowedAssignments,
-        branchStudents,
-        instructor,
-        row: errorRow,
-        subjects,
-        validationErrorReason: result.errorReason,
-      });
-      const approvedGradeConflict = result.normalizedRecord
-        ? findApprovedStudentGradeConflict({
-            branch: resolvedBranch,
-            record: result.normalizedRecord,
-            existingRecords: approvedGradeRecords,
-          })
-        : undefined;
+      const quarterGradeEntries = normalizedProgramType === "SHS" && shsQuarterColumns.length > 0
+        ? shsQuarterColumns
+          .map((gradingPeriod) => ({
+            gradingPeriod,
+            grade: getValueByAliases(row, [gradingPeriod]),
+            gradeColumn: gradingPeriod === "2nd Quarter" || gradingPeriod === "4th Quarter" ? "F" : "E",
+          }))
+          .filter(({ grade }) => grade.trim() !== "")
+        : [{
+            gradingPeriod: legacyGradingPeriod,
+            gradeColumn: "F",
+            grade: getValueByAliases(row, [
+              "Grade",
+              "Grade (50-100)",
+              "Grade (0-100)",
+              "Grades",
+              "GRADES",
+            ]),
+          }];
 
-      if (approvedGradeConflict) {
-        rowErrors.push(
-          getApprovedStudentGradeConflictMessage(approvedGradeConflict),
-        );
-      }
-
-      if (result.normalizedRecord && rowErrors.length === 0) {
-        const assignment = allowedAssignments.find(item =>
-          valuesMatch(item.subjectCode, subjectCode) && item.academicYear === errorRow.academicYear && item.semester === semester &&
-          matchedStudent && studentHasAssignedInstructorSubject(matchedStudent, item));
-        records.push({ ...result.normalizedRecord, assignmentId: assignment?.id, sectionId: assignment?.sectionId, sectionCode: assignment?.sectionCode, instructorId: instructor.id, instructorName: instructor.name, instructorEmployeeId: instructor.employeeId });
-        return;
-      }
-
-      if (rowErrors.length > 0) {
-        errorRows.push({
-          ...errorRow,
-          errors: rowErrors,
+      quarterGradeEntries.forEach(({ gradingPeriod, grade, gradeColumn }) => {
+        const errorRow: InstructorGradeSubmissionErrorRow = {
+          sheetName,
+          rowNumber,
+          studentId: getValueByAliases(row, ["Student ID", "STUDENT_ID"]),
+          fullName: getValueByAliases(row, ["Full Name", "FULL NAME"]),
+          subjectCode,
+          subjectTitle: getValueByAliases(row, [
+            "Subject Title",
+            "SUBJECT_TITLE",
+          ]),
+          units: getValueByAliases(row, ["Unit", "Units", "UNITS"]),
+          grade,
+          gradeColumn,
+          instructorName: getValueByAliases(row, ["Instructor", "INSTRUCTOR"]),
+          academicYear:
+            getValueByAliases(row, ["Academic Year", "ACADEMIC_YEAR"]) ||
+            templateAcademicYear,
+          semester,
+          gradingPeriod,
+          programType: normalizedProgramType,
+          errors: [],
+        };
+        const matchedStudent = branchStudents.find(student => valuesMatch(student.id, errorRow.studentId));
+        const result = validateAndNormalizeUploadedGradeRow({
+          studentId: errorRow.studentId,
+          fullName: errorRow.fullName,
+          subjectCode,
+          subjectTitle: errorRow.subjectTitle,
+          grade: errorRow.grade,
+          unit: errorRow.units,
+          gradingPeriod,
+          programType: normalizedProgramType,
+          academicYear: errorRow.academicYear,
+          semester,
+          branch,
+        }, undefined, { preserveStudentNumber: Boolean(matchedStudent?.importAcademicYear) });
+        const rowErrors = getInstructorRowValidationErrors({
+          allowedAssignments,
+          branchStudents,
+          instructor,
+          row: errorRow,
+          subjects,
+          validationErrorReason: result.errorReason,
         });
-        errors.push(
-          `${sheetName} row ${errorRow.rowNumber}: ${rowErrors.join("; ")}`,
-        );
-      }
+        const approvedGradeConflict = result.normalizedRecord
+          ? findApprovedStudentGradeConflict({
+              branch: resolvedBranch,
+              record: result.normalizedRecord,
+              existingRecords: approvedGradeRecords,
+            })
+          : undefined;
+
+        if (approvedGradeConflict) {
+          rowErrors.push(
+            getApprovedStudentGradeConflictMessage(approvedGradeConflict),
+          );
+        }
+
+        if (result.normalizedRecord && rowErrors.length === 0) {
+          const assignment = allowedAssignments.find(item =>
+            valuesMatch(item.subjectCode, subjectCode) && item.academicYear === errorRow.academicYear && item.semester === semester &&
+            matchedStudent && studentHasAssignedInstructorSubject(matchedStudent, item));
+          records.push({ ...result.normalizedRecord, assignmentId: assignment?.id, sectionId: assignment?.sectionId, sectionCode: assignment?.sectionCode, instructorId: instructor.id, instructorName: instructor.name, instructorEmployeeId: instructor.employeeId });
+          return;
+        }
+
+        if (rowErrors.length > 0) {
+          errorRows.push({
+            ...errorRow,
+            errors: rowErrors,
+          });
+          errors.push(
+            `${sheetName} row ${errorRow.rowNumber} (${gradingPeriod || "grade"}): ${rowErrors.join("; ")}`,
+          );
+        }
+      });
     });
   });
 

@@ -97,6 +97,9 @@ assert.equal(downloads.length, 1);
 const workbook = XLSX.read(downloads[0], { type: 'array' });
 assert.deepEqual(workbook.SheetNames, ['A']);
 assert.equal(workbook.Sheets.A.D4.v, 'Commonwealth', 'The generated workbook contains the new branch');
+const firstSemesterHeaders = XLSX.utils.sheet_to_json(workbook.Sheets.A, { header: 1, range: 5, defval: '' })[0];
+assert.equal(firstSemesterHeaders[4], '1st Quarter', 'First semester SHS templates expose a 1st Quarter grade column');
+assert.equal(firstSemesterHeaders[5], '2nd Quarter', 'First semester SHS templates expose a 2nd Quarter grade column');
 
 const selectedSections = ['A', 'B', 'C'].map(code => ({ id: `section-${code}`, code, program: 'SHS', yearLevel: 'Grade 11' }));
 const selectedAssignments = selectedSections.flatMap(section => [
@@ -114,6 +117,14 @@ for (const name of subjectWorkbook.SheetNames) {
   assert.ok(rows.every(row => row[2] === 'PE1'), 'Other subjects cannot leak into the selected subject workbook');
   assert.equal(rows[0][0], `student-${name}`);
 }
+await portal.downloadInstructorGradeTemplate({ ...base,
+  assignments: selectedAssignments.map(assignment => ({ ...assignment, semester: '2nd Semester' })),
+  sections: selectedSections.map(section => ({ ...section, semester: '2nd Semester' })),
+  students: selectedSections.map(section => ({ id: `student-${section.code}`, name: `Student ${section.code}`, section: section.code })) });
+const secondSemesterWorkbook = XLSX.read(downloads[2], { type: 'array' });
+const secondSemesterHeaders = XLSX.utils.sheet_to_json(secondSemesterWorkbook.Sheets.A, { header: 1, range: 5, defval: '' })[0];
+assert.equal(secondSemesterHeaders[4], '3rd Quarter', 'Second semester SHS templates expose a 3rd Quarter grade column');
+assert.equal(secondSemesterHeaders[5], '4th Quarter', 'Second semester SHS templates expose a 4th Quarter grade column');
 assert.throws(() => portal.downloadInstructorGradeTemplate({ ...base, subjectId: 'missing-subject', assignments: selectedAssignments, sections: selectedSections }), /No assigned subjects or sections/);
 globalThis.fetch = originalFetch;
 console.log('New branch checks passed: registered prefixes, collisions, archival, branch inference, exam-room persistence/isolation/deletion/errors, missing-assignment errors, and actual Excel workbooks with subject filtering and separate section rosters.');

@@ -20,7 +20,7 @@ const scopes=(scope,branch='Bacoor')=>`${branch}:${scope}`;
 let failRequestSave=false;
 const supabase={from:()=>({select:()=>({returns:async()=>({data:[{code:'bacoor',name:'Bacoor',student_number_prefix:'BAC',is_active:true}]})})}),rpc(name,args){let data=name==='list_student_grade_records'?remoteGrades.map(payload=>({payload})):[];let error=null;
 if(name==='upsert_student_schedule_request'){if(failRequestSave)error={message:'Backend unavailable'};else{const request=args.p_payload;data=[{id:request.id,student_number:request.studentNumber,tracking_number:null,academic_year:request.academicYear,semester:request.semester,status:request.status,payload:request}];}}
-return {returns:async()=>({data,error}),then:(resolve,reject)=>Promise.resolve({data,error}).then(resolve,reject)};}};
+const response={data,error};const query={range:()=>query,returns:async()=>response,then:(resolve,reject)=>Promise.resolve(response).then(resolve,reject)};return query;}};
 const overrides={
  '../lib/supabase':{supabase},
  './admission':{getAdmissionRequirements:()=>[],normalizeAdmissionYearLevel:value=>value,normalizeBranchCode:value=>value?.toLowerCase(),getEstimatedCollegeTuition:()=>0},
@@ -103,3 +103,33 @@ cache.set(scopes('student-subject-plans'),{'stale-plan':remotePlan});
 await planning.fetchStudentSubjectPlans('Bacoor',{authoritative:true});
 assert.deepEqual(cache.get(scopes('student-subject-plans')),{},'Removed subject plans must not survive an authoritative instructor refresh');
 console.log('Instructor refresh checks passed: removed requests and subject plans cannot retain stale roster membership.');
+
+Object.assign(base,{program:'SHS',yearLevel:'Grade 11',strandOrCourse:'STEM',importSemester:'1st Semester'});
+Object.assign(subject,{code:'SHS-ENG11',name:'Oral Communication',program:'SHS',yearLevel:'Grade 11',semester:'1st Semester',units:undefined});
+Object.assign(section,{program:'SHS',yearLevel:'Grade 11',semester:'1st Semester'});
+Object.assign(assignment,{subjectCode:subject.code,subjectName:subject.name,semester:'1st Semester'});
+const shsSelection={...assignment,assignmentId:assignment.id,units:null};
+remoteRequest={id:'shs-request',studentNumber:base.id,studentName:base.name,branch:'Bacoor',program:'SHS',yearLevel:'Grade 11',strandOrCourse:'STEM',academicYear:'2026-2027',semester:'1st Semester',status:'Approved',selections:[shsSelection]};
+remoteStudent={...base,requestedOwnSchedule:true,ownScheduleRequestStatus:'Approved',ownScheduleAcademicYear:'2026-2027',ownScheduleSemester:'1st Semester',ownScheduleSelectionStatus:'Approved'};
+remotePlan={id:base.id,studentNumber:base.id,academicYear:'2026-2027',semester:'1st Semester',source:'student_schedule_request',assignedSubjects:[{subjectId:subject.id,subjectCode:subject.code,subjectName:subject.name}],creditedSubjects:[],scheduledAssignments:[shsSelection]};
+remoteGrades=[];
+scoped=await portal.getInstructorScopedData({branch:'Bacoor',instructorId:teacher.id});
+assert.equal(scoped.students.length,1,'The SHS quarter upload fixture is scoped to the assigned student');
+portal.downloadInstructorGradeTemplate({instructor:teacher,branch:'Bacoor',assignments:scoped.assignments,sections:scoped.sections,students:scoped.students});
+const shsTemplate=templateSheets.at(-1).sheets[0];
+assert.deepEqual([shsTemplate.headerOverrides.E,shsTemplate.headerOverrides.F],['1st Quarter','2nd Quarter']);
+assert.equal(shsTemplate.rows[0][4],'');
+assert.equal(shsTemplate.rows[0][5],'');
+const shsHeaders=['Student ID','Full Name','Subject Code','Subject Title','1st Quarter','2nd Quarter','Instructor','Academic Year','Semester','Program Type','Section'];
+const shsUploadValues=[base.id,base.name,subject.code,subject.name,'88','',teacher.name,'2026-2027','1st Semester','SHS',section.code];
+const firstQuarterUpload=await portal.parseInstructorGradeWorkbook({file:excel(shsHeaders,shsUploadValues),branch:'Bacoor',instructor:teacher,allowedAssignments:scoped.assignments});
+assert.deepEqual(firstQuarterUpload.errors,[],'A blank second quarter must not block a first quarter upload');
+assert.equal(firstQuarterUpload.records.length,1);
+assert.equal(firstQuarterUpload.records[0].gradingPeriod,'1st Quarter');
+assert.equal(firstQuarterUpload.records[0].normalizedGrade,'88');
+const secondQuarterUpload=await portal.parseInstructorGradeWorkbook({file:excel(shsHeaders,shsUploadValues.map((value,index)=>index===4?'':index===5?'91':value)),branch:'Bacoor',instructor:teacher,allowedAssignments:scoped.assignments});
+assert.deepEqual(secondQuarterUpload.errors,[],'A blank first quarter must not block a second quarter upload');
+assert.equal(secondQuarterUpload.records.length,1);
+assert.equal(secondQuarterUpload.records[0].gradingPeriod,'2nd Quarter');
+assert.equal(secondQuarterUpload.records[0].normalizedGrade,'91');
+console.log('SHS quarter upload checks passed: semester-specific template columns and independent first/second quarter uploads.');

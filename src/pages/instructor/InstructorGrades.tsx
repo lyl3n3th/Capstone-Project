@@ -20,6 +20,7 @@ import {
   fetchInstructorGradeSubmissionPage,
   parseInstructorGradeWorkbook,
   saveInstructorGradeSubmission,
+  SHS_GRADE_PERIOD_LABELS,
   type InstructorGradeSubmission,
   type InstructorGradeSubmissionErrorRow,
   type InstructorGradeSubmissionSummary,
@@ -151,6 +152,7 @@ const getPreviewRowHasData = (row: Record<string, unknown>) =>
     "UNITS",
     "Quarter",
     "QUARTER",
+    ...SHS_GRADE_PERIOD_LABELS,
     "Instructor",
     "INSTRUCTOR",
   ].some((alias) => getValueByAliases(row, [alias]) !== "");
@@ -207,7 +209,9 @@ const getGradeErrorCells = (row: InstructorGradeSubmissionErrorRow) => {
     if (normalized.includes("grading period")) {
       cells.add(rowCell("Grading Period", "E"));
     }
-    if (normalized.includes("grade")) cells.add(rowCell("Grade", "F"));
+    if (normalized.includes("grade")) {
+      cells.add(rowCell("Grade", row.gradeColumn || "F"));
+    }
     if (normalized.includes("instructor")) cells.add(rowCell("Instructor", "H"));
     if (normalized.includes("academic year")) cells.add("Academic Year header");
     if (normalized.includes("semester")) cells.add("Semester header");
@@ -226,7 +230,7 @@ const buildGradeFilePreview = (
   const workbook = XLSX.read(submission.fileDataBase64, { type: "base64" });
   const errorRowsByLocation = new Map(
     (submission.errorRows ?? []).map((row) => [
-      `${row.sheetName}::${row.rowNumber}`,
+      `${row.sheetName}::${row.rowNumber}::${normalizeHeaderKey(row.gradingPeriod)}`,
       row,
     ]),
   );
@@ -277,38 +281,68 @@ const buildGradeFilePreview = (
         return;
       }
 
-      const errorRow = errorRowsByLocation.get(`${sheetName}::${rowNumber}`);
-      const errors = errorRow ? getDisplayGradeErrors(errorRow.errors) : [];
-      const gradePreviewRow: GradeFilePreviewRow = {
-        sheetName,
-        rowNumber,
-        studentId: getValueByAliases(values, ["Student ID", "STUDENT_ID"]),
-        fullName: getValueByAliases(values, ["Full Name", "FULL NAME"]),
-        subjectCode: getValueByAliases(values, ["Subject Code", "SUBJECT_CODE"]),
-        subjectTitle: getValueByAliases(values, [
-          "Subject Title",
-          "SUBJECT_TITLE",
-        ]),
-        unitsOrPeriod:
-          getValueByAliases(values, ["Unit", "Units", "UNITS"]) ||
-          getValueByAliases(values, ["Grading Period", "Quarter", "QUARTER"]),
-        grade: getValueByAliases(values, [
-          "Grade",
-          "Grade (50-100)",
-          "Grade (0-100)",
-          "Grades",
-          "GRADES",
-        ]),
-        instructorName: getValueByAliases(values, ["Instructor", "INSTRUCTOR"]),
-        academicYear,
-        semester,
-        programType,
-        status: errorRow ? "Error" : "Correct",
-        errors,
-        errorCells: errorRow ? getGradeErrorCells(errorRow) : [],
-      };
+      const rowProgramType =
+        getValueByAliases(values, ["Program Type", "PROGRAM"]) || programType;
+      const normalizedProgramType = rowProgramType.trim() === "SHS" ? "SHS" : "College";
+      const shsQuarterColumns = SHS_GRADE_PERIOD_LABELS.filter((period) =>
+        headerRow.some((header) => normalizeHeaderKey(header) === normalizeHeaderKey(period)),
+      );
+      const isShsQuarterColumns = normalizedProgramType === "SHS" && shsQuarterColumns.length > 0;
+      const legacyGradingPeriod = getValueByAliases(values, [
+        "Grading Period",
+        "Quarter",
+        "QUARTER",
+      ]) || (normalizedProgramType === "College" ? semester : "");
+      const gradeEntries = isShsQuarterColumns
+        ? shsQuarterColumns
+          .map((gradingPeriod) => ({
+            gradingPeriod,
+            grade: getValueByAliases(values, [gradingPeriod]),
+          }))
+          .filter(({ grade }) => grade.trim() !== "")
+        : [{
+            gradingPeriod: legacyGradingPeriod,
+            grade: getValueByAliases(values, [
+              "Grade",
+              "Grade (50-100)",
+              "Grade (0-100)",
+              "Grades",
+              "GRADES",
+            ]),
+          }];
 
-      rows.push(gradePreviewRow);
+      if (isShsQuarterColumns && gradeEntries.length === 0) {
+        return;
+      }
+
+      gradeEntries.forEach(({ gradingPeriod, grade }) => {
+        const errorRow = errorRowsByLocation.get(
+          `${sheetName}::${rowNumber}::${normalizeHeaderKey(gradingPeriod)}`,
+        );
+        const errors = errorRow ? getDisplayGradeErrors(errorRow.errors) : [];
+        rows.push({
+          sheetName,
+          rowNumber,
+          studentId: getValueByAliases(values, ["Student ID", "STUDENT_ID"]),
+          fullName: getValueByAliases(values, ["Full Name", "FULL NAME"]),
+          subjectCode: getValueByAliases(values, ["Subject Code", "SUBJECT_CODE"]),
+          subjectTitle: getValueByAliases(values, [
+            "Subject Title",
+            "SUBJECT_TITLE",
+          ]),
+          unitsOrPeriod:
+            getValueByAliases(values, ["Unit", "Units", "UNITS"]) ||
+            gradingPeriod,
+          grade,
+          instructorName: getValueByAliases(values, ["Instructor", "INSTRUCTOR"]),
+          academicYear,
+          semester,
+          programType: normalizedProgramType,
+          status: errorRow ? "Error" : "Correct",
+          errors,
+          errorCells: errorRow ? getGradeErrorCells(errorRow) : [],
+        });
+      });
     });
   });
 
