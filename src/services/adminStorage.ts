@@ -1,7 +1,7 @@
 import type {
   AdmissionApplicationSummary,
   AdmissionDiscountSource,
-  AdmissionDraft,
+  AdmissionSessionData,
 } from "../types/application";
 import { supabase } from "../lib/supabase";
 import { withSignedUrlRequestLimit } from "./storageRequestLimiter";
@@ -5052,7 +5052,7 @@ export const upsertSubmittedApplicant = ({
   draft,
 }: {
   application: AdmissionApplicationSummary;
-  draft: AdmissionDraft | null;
+  draft: AdmissionSessionData | null;
 }) => {
   const branch = normalizeBranchName(application.branchName || draft?.branch);
   const storageKey = getBranchStorageKey("enrollees", branch);

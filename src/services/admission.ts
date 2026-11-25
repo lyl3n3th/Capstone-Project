@@ -4,7 +4,7 @@ import type {
   AdmissionApplicationSummary,
   AdmissionBranchCode,
   AdmissionDiscountSource,
-  AdmissionDraft,
+  AdmissionSessionData,
   AdmissionProgramLevel,
   AdmissionRequirementDefinition,
   AdmissionRequirementUploadInput,
@@ -572,34 +572,34 @@ export const generateAicsTrackingNumber = (date = new Date()) => {
   return `AICS-${datePart}-${randomPart}`;
 };
 
-export const getAdmissionDraft = (): AdmissionDraft | null => {
-  const savedDraft = sessionStorage.getItem(ENROLLMENT_DRAFT_KEY);
-  if (!savedDraft) {
+export const getAdmissionSessionData = (): AdmissionSessionData | null => {
+  const savedSession = sessionStorage.getItem(ENROLLMENT_DRAFT_KEY);
+  if (!savedSession) {
     return null;
   }
 
   try {
-    return JSON.parse(savedDraft) as AdmissionDraft;
+    return JSON.parse(savedSession) as AdmissionSessionData;
   } catch (error) {
-    console.warn("Failed to parse admission draft", error);
+    console.warn("Failed to parse current-tab admission data", error);
     return null;
   }
 };
 
-export const saveAdmissionDraft = (draft: AdmissionDraft) => {
-  sessionStorage.setItem(ENROLLMENT_DRAFT_KEY, JSON.stringify(draft));
+export const saveAdmissionSessionData = (sessionData: AdmissionSessionData) => {
+  sessionStorage.setItem(ENROLLMENT_DRAFT_KEY, JSON.stringify(sessionData));
 };
 
-export const mergeAdmissionDraft = (partialDraft: AdmissionDraft) => {
-  const nextDraft = {
-    ...(getAdmissionDraft() ?? {}),
-    ...partialDraft,
+export const mergeAdmissionSessionData = (partialSessionData: AdmissionSessionData) => {
+  const nextSessionData = {
+    ...(getAdmissionSessionData() ?? {}),
+    ...partialSessionData,
   };
-  saveAdmissionDraft(nextDraft);
-  return nextDraft;
+  saveAdmissionSessionData(nextSessionData);
+  return nextSessionData;
 };
 
-export const clearAdmissionDraft = () => {
+export const clearAdmissionSessionData = () => {
   sessionStorage.removeItem(ENROLLMENT_DRAFT_KEY);
 };
 
@@ -609,7 +609,7 @@ export const saveAdmissionApplication = async (
   const parsedYearCompletion = Number.parseInt(input.yearCompletion ?? "", 10);
 
   const { data, error } = await supabase
-    .rpc("upsert_admission_application", {
+    .rpc("create_admission_submission_draft", {
       p_tracking_number: input.trackingNumber
         ? normalizeTrackingNumber(input.trackingNumber)
         : null,
@@ -851,4 +851,19 @@ export const deleteAdmissionApplication = async (trackingNumber: string) => {
     trackingNumber: row.tracking_number,
     deletedStudentNumber: row.deleted_student_number || undefined,
   };
+};
+
+export const removeAdmissionRequirementFiles = async (storagePaths: string[]) => {
+  const paths = storagePaths.filter(Boolean);
+  if (paths.length === 0) {
+    return;
+  }
+
+  const { error } = await supabase.storage
+    .from(REQUIREMENTS_BUCKET)
+    .remove(paths);
+
+  if (error) {
+    throw new Error(getErrorMessage(error));
+  }
 };

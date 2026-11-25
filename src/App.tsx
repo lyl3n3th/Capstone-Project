@@ -58,6 +58,11 @@ import {
   DEFAULT_ADMISSION_BRANCH_CODE,
   resolveAdmissionPortalBranchCode,
 } from "./services/admissionPortal";
+import { clearAdmissionSessionData, getAdmissionSessionData } from "./services/admission";
+import {
+  clearStagedAdmissionRequirements,
+  consumeAdmissionNavigationMarker,
+} from "./services/admissionSessionUploads";
 import { useAuth } from "./hooks/useAuth";
 import { STAFF_PORTAL_ROLES } from "./types/user";
 
@@ -170,6 +175,38 @@ function AdmissionApplicationRoute({ children }: { children: ReactNode }) {
 
 function AppRoutes() {
   const { currentUser, logout } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    consumeAdmissionNavigationMarker();
+    const isAdmissionRoute = [
+      "/enroll",
+      "/information",
+      "/requirements",
+      "/confirmation",
+      "/scholarship-exam",
+    ].includes(location.pathname);
+    if (!isAdmissionRoute) {
+      return;
+    }
+
+    const handleAdmissionTabExit = () => {
+      if (consumeAdmissionNavigationMarker()) {
+        return;
+      }
+
+      const draft = getAdmissionSessionData();
+      clearAdmissionSessionData();
+      if (draft?.trackingNumber) {
+        void clearStagedAdmissionRequirements(draft.trackingNumber).catch(
+          (error) => console.warn("Unable to clear staged admission files on tab exit", error),
+        );
+      }
+    };
+
+    window.addEventListener("pagehide", handleAdmissionTabExit);
+    return () => window.removeEventListener("pagehide", handleAdmissionTabExit);
+  }, [location.pathname]);
 
   // Admin props
   const adminProps = {

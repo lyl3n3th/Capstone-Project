@@ -55,27 +55,3 @@ class AdmissionRequirement(models.Model):
 
     def __str__(self):
         return f"{self.application.tracking_number} - {self.requirement_name}"
-
-
-class AdmissionDraftRecoveryChallenge(models.Model):
-    email = models.EmailField(db_index=True)
-    first_name = models.CharField(max_length=100)
-    last_name = models.CharField(max_length=100)
-    tracking_number = models.CharField(max_length=32)
-    code_digest = models.CharField(max_length=64)
-    expires_at = models.DateTimeField(db_index=True)
-    attempts = models.PositiveSmallIntegerField(default=0)
-    consumed_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(
-                fields=["email", "first_name", "last_name", "created_at"],
-                name="admission_d_email_f31a78_idx",
-            ),
-        ]
-
-    def __str__(self):
-        return f"Draft recovery for {self.email}"

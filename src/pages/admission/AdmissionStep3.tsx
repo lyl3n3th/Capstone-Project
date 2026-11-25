@@ -8,11 +8,17 @@ import Progress from "../../components/Progress";
 import React, { useEffect, useRef, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
 import {
+  getAdmissionSessionData,
   getAdmissionRequirements,
   getAdmissionProgress,
   updateAdmissionProgress,
   uploadAdmissionRequirementFile,
 } from "../../services/admission";
+import {
+  getStagedAdmissionRequirements,
+  saveStagedAdmissionRequirement,
+  navigateAdmissionPage,
+} from "../../services/admissionSessionUploads";
 import {
   fetchSupabaseAdmissionApplicants,
   getStudentCredentialOverview,
@@ -43,8 +49,16 @@ function AdmissionStep3() {
   const studentStatus = getQueryParam("status") || "";
   const trackingNumber = getQueryParam("trackingNumber") || "";
   const program = getQueryParam("program") || "";
+  const activeDraft = getAdmissionSessionData();
+  const isNewSubmissionSession = Boolean(
+    activeDraft?.trackingNumber &&
+      activeDraft.trackingNumber.toUpperCase() === trackingNumber.toUpperCase() &&
+      !activeDraft.submitted,
+  );
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingApplication, setIsCheckingApplication] = useState(true);
+  const [pageError, setPageError] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState<
     Record<string, UploadedRequirementFile>
   >({});
@@ -75,51 +89,22 @@ function AdmissionStep3() {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   };
 
-  // Load and verify draft data on component mount
+  // Restore the in-tab application details used to determine requirements.
   useEffect(() => {
-    const draft = sessionStorage.getItem("enrollmentDraft");
+    const draft = getAdmissionSessionData();
     const isCollege = program === "College";
 
     if (draft) {
-      try {
-        const parsedDraft = JSON.parse(draft);
-        console.log("Draft loaded in requirements page:", {
-          fname: parsedDraft.fname,
-          lname: parsedDraft.lname,
-          program: parsedDraft.program,
-          strand: parsedDraft.strand_or_course,
-          trackingNumber: parsedDraft.trackingNumber,
-          honor: parsedDraft.honor,
-          isCollege: isCollege,
-        });
-
-        // Only set honor if it's a College program and honor exists
-        if (
-          isCollege &&
-          parsedDraft.honor &&
-          parsedDraft.honor !== "No Honor"
-        ) {
-          setStudentHonor(parsedDraft.honor);
-        } else {
-          // Reset honor for non-college programs
-          setStudentHonor("No Honor");
-
-          // Also update the draft to clear honor if it exists
-          if (parsedDraft.honor && !isCollege) {
-            const updatedDraft = {
-              ...parsedDraft,
-              honor: "No Honor",
-              apply_scholarship: false,
-            };
-            sessionStorage.setItem(
-              "enrollmentDraft",
-              JSON.stringify(updatedDraft),
-            );
-            console.log("Cleared honor data for non-college program");
-          }
+      if (isCollege && draft.honor && draft.honor !== "No Honor") {
+        setStudentHonor(draft.honor);
+      } else {
+        setStudentHonor("No Honor");
+        if (draft.honor && !isCollege) {
+          sessionStorage.setItem(
+            "enrollmentDraft",
+            JSON.stringify({ ...draft, honor: "No Honor", apply_scholarship: false }),
+          );
         }
-      } catch (err) {
-        console.warn("Failed to parse draft", err);
       }
     } else {
       // No draft, ensure honor is reset for non-college
@@ -138,9 +123,42 @@ function AdmissionStep3() {
   }, []);
 
   useEffect(() => {
+    if (isNewSubmissionSession) {
+      setAllowPartialRequirementUpload(false);
+      setExistingCredentialItems([]);
+      setRedoRequirementCodeOverrides([]);
+      setIsCheckingApplication(false);
+      let isActive = true;
+      void getStagedAdmissionRequirements(trackingNumber)
+        .then((requirements) => {
+          if (!isActive) {
+            return;
+          }
+          const restoredFiles = Object.fromEntries(
+            requirements.map((requirement) => {
+              const previewUrl = URL.createObjectURL(requirement.file);
+              previewUrlsRef.current[requirement.requirementCode] = previewUrl;
+              return [requirement.requirementCode, {
+                name: requirement.file.name,
+                previewUrl,
+              }];
+            }),
+          );
+          setUploadedFiles(restoredFiles);
+        })
+        .catch((error) => {
+          console.warn("Unable to restore selected admission files", error);
+        });
+      return () => {
+        isActive = false;
+      };
+    }
+
     if (!trackingNumber) {
       setAllowPartialRequirementUpload(false);
       setRedoRequirementCodeOverrides([]);
+      setPageError("This application session has expired. Please start a new application.");
+      setIsCheckingApplication(false);
       return;
     }
 
@@ -150,6 +168,14 @@ function AdmissionStep3() {
       try {
         const application = await getAdmissionProgress(trackingNumber);
         if (!isActive) {
+          return;
+        }
+        if (
+          !application ||
+          (application.applicationStatus === "draft" && !application.submittedAt)
+        ) {
+          setPageError("This unfinished application can’t be resumed. Please start a new application.");
+          setIsCheckingApplication(false);
           return;
         }
 
@@ -255,12 +281,15 @@ function AdmissionStep3() {
         );
         setExistingCredentialItems(mergedItems);
         setRedoRequirementCodeOverrides(rejectedRequirementCodes);
+        setIsCheckingApplication(false);
       } catch (error) {
         console.warn("Unable to load requirement upload mode", error);
         if (isActive) {
           setAllowPartialRequirementUpload(false);
           setExistingCredentialItems([]);
           setRedoRequirementCodeOverrides([]);
+          setPageError("Unable to verify this application. Please start a new application.");
+          setIsCheckingApplication(false);
         }
       }
     };
@@ -270,7 +299,7 @@ function AdmissionStep3() {
     return () => {
       isActive = false;
     };
-  }, [selectedBranch, trackingNumber]);
+  }, [isNewSubmissionSession, selectedBranch, trackingNumber]);
 
   const currentRequirements = getAdmissionRequirements(
     studentStatus,
@@ -383,33 +412,28 @@ function AdmissionStep3() {
     }
 
     try {
-      await updateAdmissionProgress({
-        trackingNumber,
-        currentStep: 3,
-      });
-
-      const existing = sessionStorage.getItem("enrollmentDraft");
-      if (existing) {
-        const draft = JSON.parse(existing);
-        const updated = {
-          ...draft,
-          step: 3,
-          requirementsSkipped: true,
-          timestamp: draft.timestamp || new Date().toISOString(),
-        };
-        sessionStorage.setItem("enrollmentDraft", JSON.stringify(updated));
+      if (!isNewSubmissionSession) {
+        await updateAdmissionProgress({ trackingNumber, currentStep: 3 });
       }
 
-      addToast("Continuing without uploading requirements", "info");
+      const draft = getAdmissionSessionData();
+      if (draft && isNewSubmissionSession) {
+        sessionStorage.setItem(
+          "enrollmentDraft",
+          JSON.stringify({ ...draft, step: 3, requirementsSkipped: true }),
+        );
+      }
+
+      addToast("Continuing to the application summary", "info");
       setTimeout(() => {
-        window.location.href = `/confirmation?trackingNumber=${encodeURIComponent(trackingNumber)}`;
+        navigateAdmissionPage(`/confirmation?trackingNumber=${encodeURIComponent(trackingNumber)}`);
       }, 500);
     } catch (err) {
       console.error(err);
       addToast(
         err instanceof Error
           ? err.message
-          : "Unable to update the admission record right now.",
+          : "Unable to continue with this application right now.",
         "error",
       );
     }
@@ -424,12 +448,14 @@ function AdmissionStep3() {
       return;
     }
 
-    const hasFiles = visibleRequirements.some((requirement) => {
-      const input = document.getElementById(
-        requirement.code,
-      ) as HTMLInputElement | null;
-      return input?.files?.[0] != null;
-    });
+    const hasFiles = isNewSubmissionSession
+      ? Object.keys(uploadedFiles).length > 0
+      : visibleRequirements.some((requirement) => {
+          const input = document.getElementById(
+            requirement.code,
+          ) as HTMLInputElement | null;
+          return input?.files?.[0] != null;
+        });
 
     if (!hasFiles) {
       if (allowPartialRequirementUpload) {
@@ -448,6 +474,40 @@ function AdmissionStep3() {
     setIsSubmitting(true);
 
     try {
+      if (isNewSubmissionSession) {
+        const uploads = visibleRequirements.flatMap((requirement) => {
+          const input = document.getElementById(
+            requirement.code,
+          ) as HTMLInputElement | null;
+          const file = input?.files?.[0];
+          return file
+            ? [
+                saveStagedAdmissionRequirement({
+                  trackingNumber,
+                  requirementCode: requirement.code,
+                  requirementName: requirement.name,
+                  file,
+                }),
+              ]
+            : [];
+        });
+        await Promise.all(uploads);
+
+        const draft = getAdmissionSessionData();
+        if (draft) {
+          sessionStorage.setItem(
+            "enrollmentDraft",
+            JSON.stringify({
+              ...draft,
+              step: 3,
+              requirementsUploaded: Object.keys(uploadedFiles).length > 0,
+            }),
+          );
+        }
+        navigateAdmissionPage(`/confirmation?trackingNumber=${encodeURIComponent(trackingNumber)}`);
+        return;
+      }
+
       const uploadableRequirements = visibleRequirements.filter((requirement) =>
         canEditRequirement(requirement.code),
       );
@@ -504,7 +564,7 @@ function AdmissionStep3() {
       }
 
       setTimeout(() => {
-        window.location.href = `/confirmation?trackingNumber=${encodeURIComponent(trackingNumber)}`;
+        navigateAdmissionPage(`/confirmation?trackingNumber=${encodeURIComponent(trackingNumber)}`);
       }, 500);
     } catch (err) {
       console.error(err);
@@ -520,6 +580,11 @@ function AdmissionStep3() {
   };
 
   const handleCancel = () => {
+    if (isNewSubmissionSession) {
+      navigateAdmissionPage(`/information?branch=${encodeURIComponent(selectedBranch)}&status=${encodeURIComponent(studentStatus)}&trackingNumber=${encodeURIComponent(trackingNumber)}&program=${encodeURIComponent(program)}&from=requirements`);
+      return;
+    }
+
     const existing = sessionStorage.getItem("enrollmentDraft");
     const draft = existing ? JSON.parse(existing) : {};
 
@@ -543,11 +608,40 @@ function AdmissionStep3() {
     sessionStorage.setItem("enrollmentDraft", JSON.stringify(updatedDraft));
     addToast("Returning to information page", "info");
     setTimeout(() => {
-      window.location.href = `/information?branch=${encodeURIComponent(selectedBranch)}&status=${encodeURIComponent(studentStatus)}&trackingNumber=${trackingNumber || draft.trackingNumber}&program=${encodeURIComponent(program)}&from=requirements`;
+      navigateAdmissionPage(`/information?branch=${encodeURIComponent(selectedBranch)}&status=${encodeURIComponent(studentStatus)}&trackingNumber=${trackingNumber || draft.trackingNumber}&program=${encodeURIComponent(program)}&from=requirements`);
     }, 500);
   };
 
   // If no requirements for this status
+  if (isCheckingApplication) {
+    return (
+      <div className="container admission-req-container admission-step3-page">
+        <Progress current={3} />
+        <div className="mcontainer admission-step3-content">
+          <div className="header2 admission-step3-card">
+            <p>Loading your application requirements…</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (pageError) {
+    return (
+      <div className="container admission-req-container admission-step3-page">
+        <Progress current={3} />
+        <div className="mcontainer admission-step3-content">
+          <div className="header2 admission-step3-card">
+            <p role="alert">{pageError}</p>
+            <button className="btn6" onClick={() => { navigateAdmissionPage("/enroll"); }}>
+              Start a New Application
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (currentRequirements.length === 0) {
     return (
       <div className="container admission-req-container admission-step3-page">
@@ -587,8 +681,9 @@ function AdmissionStep3() {
           <div className="syb">
             <h2>Upload Requirements</h2>
             <p>
-              You may upload any available documents now. Missing files can be
-              followed up later once you are enrolled.
+              {isNewSubmissionSession
+                ? "Select the available documents to include. They will be uploaded when you submit your application. Closing this tab clears your progress."
+                : "You may upload any available documents now. Missing files can be followed up later once you are enrolled."}
             </p>
             {hasHonorCertificateRequirement && (
               <div className="honor-notice">
@@ -788,7 +883,7 @@ function AdmissionStep3() {
                 Cancel
               </button>
               <button type="submit" className="btn6" disabled={isSubmitting}>
-                {isSubmitting ? "Uploading..." : "Upload & Continue"}
+                {isSubmitting ? "Continuing..." : "Continue to Review"}
               </button>
             </div>
           </form>

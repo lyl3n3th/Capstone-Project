@@ -1,17 +1,11 @@
 import json
-import re
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
-from apps.admission.draft_recovery import (
-    request_admission_draft_recovery,
-    verify_admission_draft_recovery,
-)
 from apps.admission.models import (
     AdmissionApplication,
-    AdmissionDraftRecoveryChallenge,
     AdmissionRequirement,
 )
 from apps.admission.tracking_recovery import (
@@ -173,104 +167,6 @@ class AdmissionTrackingRecoveryApiTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertIn("detail", response.json())
-
-
-class AdmissionDraftRecoveryTests(TestCase):
-    @override_settings(SECRET_KEY="draft-recovery-test-key")
-    def test_matching_unsubmitted_draft_can_be_recovered_once_after_email_code(self):
-        client = type(
-            "SupabaseClientStub",
-            (),
-            {
-                "select": lambda self, table, **kwargs: (
-                    [
-                        {
-                            "id": "application-id",
-                            "tracking_number": "AICS-20261122-DRAFT1",
-                            "first_name": "Jane",
-                            "last_name": "Doe",
-                        }
-                    ]
-                    if table == "admission_applications"
-                    else []
-                )
-            },
-        )()
-
-        with (
-            patch(
-                "apps.admission.draft_recovery.SupabaseRestClient.from_settings",
-                return_value=client,
-            ),
-            patch(
-                "apps.admission.draft_recovery.is_email_delivery_configured",
-                return_value=True,
-            ),
-            patch("apps.admission.draft_recovery.send_delivery_email") as send_email,
-        ):
-            request_admission_draft_recovery(
-                email="Jane@example.com",
-                first_name="Jane",
-                last_name="Doe",
-            )
-
-        challenge = AdmissionDraftRecoveryChallenge.objects.get()
-        self.assertEqual(challenge.tracking_number, "AICS-20261122-DRAFT1")
-        self.assertEqual(send_email.call_args.kwargs["destination_email"], "jane@example.com")
-        code_match = re.search(r"\b(\d{8})\b", send_email.call_args.kwargs["message"])
-        self.assertIsNotNone(code_match)
-
-        tracking_number = verify_admission_draft_recovery(
-            email="jane@example.com",
-            first_name="Jane",
-            last_name="Doe",
-            code=code_match.group(1),
-        )
-        self.assertEqual(tracking_number, "AICS-20261122-DRAFT1")
-        self.assertIsNone(
-            verify_admission_draft_recovery(
-                email="jane@example.com",
-                first_name="Jane",
-                last_name="Doe",
-                code=code_match.group(1),
-            )
-        )
-
-    def test_unmatched_name_does_not_create_or_send_a_recovery_code(self):
-        client = type(
-            "SupabaseClientStub",
-            (),
-            {
-                "select": lambda self, table, **kwargs: [
-                    {
-                        "id": "application-id",
-                        "tracking_number": "AICS-20261122-DRAFT1",
-                        "first_name": "Jane",
-                        "last_name": "Doe",
-                    }
-                ]
-            },
-        )()
-
-        with (
-            patch(
-                "apps.admission.draft_recovery.SupabaseRestClient.from_settings",
-                return_value=client,
-            ),
-            patch(
-                "apps.admission.draft_recovery.is_email_delivery_configured",
-                return_value=True,
-            ),
-            patch("apps.admission.draft_recovery.send_delivery_email") as send_email,
-        ):
-            request_admission_draft_recovery(
-                email="jane@example.com",
-                first_name="Janet",
-                last_name="Doe",
-            )
-
-        self.assertEqual(AdmissionDraftRecoveryChallenge.objects.count(), 0)
-        send_email.assert_not_called()
 
 
 class AdmissionSubmissionNotificationApiTests(TestCase):

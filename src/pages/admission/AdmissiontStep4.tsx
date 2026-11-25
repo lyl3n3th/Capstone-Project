@@ -6,15 +6,24 @@ import { useEffect, useMemo, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import {
-  clearAdmissionDraft,
-  getAdmissionDraft,
+  clearAdmissionSessionData,
+  getAdmissionSessionData,
   getAdmissionOwnScheduleRequest,
   getEstimatedCollegeTuition,
   getAdmissionProgress,
-  mergeAdmissionDraft,
+  getAdmissionBranchName,
+  mergeAdmissionSessionData,
+  saveAdmissionApplication,
+  uploadAdmissionRequirementFile,
+  removeAdmissionRequirementFiles,
   setAdmissionOwnScheduleRequest,
   updateAdmissionProgress,
 } from "../../services/admission";
+import {
+  clearStagedAdmissionRequirements,
+  getStagedAdmissionRequirements,
+  navigateAdmissionPage,
+} from "../../services/admissionSessionUploads";
 import {
   sendAdmissionSubmissionNotification,
   type AdmissionSubmissionNotificationResponse,
@@ -122,7 +131,7 @@ function AdmissionStep4() {
       (applicationData?.programLevel !== "college" || isCollegeTransferee)
     ) {
       setRequestOwnSchedule(false);
-      mergeAdmissionDraft({
+      mergeAdmissionSessionData({
         requestOwnSchedule: false,
       });
       setStoredOwnScheduleRequest(trackingNumber, false);
@@ -136,13 +145,25 @@ function AdmissionStep4() {
       throw new Error("No admission record was found for this request.");
     }
 
+    const draft = getAdmissionSessionData();
+    if (
+      applicationData?.applicationStatus === "draft" &&
+      draft?.trackingNumber &&
+      normalizeTrackingNumber(draft.trackingNumber) ===
+        normalizeTrackingNumber(requestTrackingNumber)
+    ) {
+      setRequestOwnSchedule(nextValue);
+      mergeAdmissionSessionData({ requestOwnSchedule: nextValue });
+      return;
+    }
+
     await setAdmissionOwnScheduleRequest({
       trackingNumber: requestTrackingNumber,
       requested: nextValue,
     });
 
     setRequestOwnSchedule(nextValue);
-    mergeAdmissionDraft({
+    mergeAdmissionSessionData({
       requestOwnSchedule: nextValue,
     });
     setStoredOwnScheduleRequest(requestTrackingNumber, nextValue);
@@ -190,7 +211,7 @@ function AdmissionStep4() {
 
   useEffect(() => {
     const loadApplication = async () => {
-      const draft = getAdmissionDraft();
+      const draft = getAdmissionSessionData();
       const draftTrackingNumber = draft?.trackingNumber || "";
       const resolvedTrackingNumber = urlTrackingNumber || draftTrackingNumber;
       const draftMatchesTrackingNumber =
@@ -213,11 +234,58 @@ function AdmissionStep4() {
           : getStoredOwnScheduleRequest(resolvedTrackingNumber),
       );
 
+      if (draftMatchesTrackingNumber && draft && !draft.submitted) {
+        const programName = draft.program || "";
+        const honorLabel = draft.honor || "No Honor";
+        const localApplication: AdmissionApplicationSummary = {
+          applicationId: "",
+          trackingNumber: resolvedTrackingNumber,
+          branchCode: draft.branch || "",
+          branchName: getAdmissionBranchName(draft.branch || ""),
+          academicYear: draft.academicYear,
+          studentStatus: draft.status || "",
+          programName,
+          programLevel: programName === "College" ? "college" : "senior_high_school",
+          trackName: draft.strand_or_course || "",
+          requestedYearLevel: draft.requested_year_level || undefined,
+          honorLabel,
+          honorDiscountPercentage: 0,
+          appliedForScholarship: Boolean(draft.apply_scholarship),
+          scholarshipExamScore: null,
+          effectiveDiscountPercentage: 0,
+          effectiveDiscountSource: "none",
+          applicationStatus: "draft",
+          currentStep: 3,
+          firstName: draft.fname || "",
+          lastName: draft.lname || "",
+          middleName: draft.middle_name || "",
+          sex: draft.sex === "Male" || draft.sex === "Female" ? draft.sex : undefined,
+          civilStatus: draft.civil_status as AdmissionApplicationSummary["civilStatus"],
+          address: draft.address || "",
+          email: draft.email || "",
+          phoneNumber: draft.contact || "",
+          lastSchoolAttended: draft.last_school_attended || "",
+          yearCompletion: draft.year_completion || undefined,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          submittedAt: null,
+          requirementsUploadedAt: null,
+        };
+        setApplicationData(localApplication);
+        setApplyScholarship(Boolean(draft.apply_scholarship));
+        setRequestOwnSchedule(Boolean(draft.requestOwnSchedule));
+        setIsLoading(false);
+        return;
+      }
+
       try {
         const application = await getAdmissionProgress(resolvedTrackingNumber);
 
-        if (!application) {
-          setPageError("Tracking number not found.");
+        if (
+          !application ||
+          (application.applicationStatus === "draft" && !application.submittedAt)
+        ) {
+          setPageError("This unfinished application can’t be resumed. Please start a new application.");
           setIsLoading(false);
           return;
         }
@@ -263,7 +331,7 @@ function AdmissionStep4() {
         }
         setRequestOwnSchedule(restoredOwnScheduleRequest);
         if (isCollegeTransferee) {
-          mergeAdmissionDraft({
+          mergeAdmissionSessionData({
             trackingNumber: application.trackingNumber,
             requestOwnSchedule: false,
           });
@@ -282,7 +350,7 @@ function AdmissionStep4() {
             }
           }
         } else if (restoredOwnScheduleRequest) {
-          mergeAdmissionDraft({
+          mergeAdmissionSessionData({
             trackingNumber: application.trackingNumber,
             requestOwnSchedule: true,
           });
@@ -315,7 +383,7 @@ function AdmissionStep4() {
 
     addToast("Returning to requirements page", "info");
     setTimeout(() => {
-      window.location.href = `/requirements?branch=${encodeURIComponent(applicationData.branchCode)}&status=${encodeURIComponent(applicationData.studentStatus)}&trackingNumber=${encodeURIComponent(applicationData.trackingNumber)}&program=${encodeURIComponent(applicationData.programName)}`;
+      navigateAdmissionPage(`/requirements?branch=${encodeURIComponent(applicationData.branchCode)}&status=${encodeURIComponent(applicationData.studentStatus)}&trackingNumber=${encodeURIComponent(applicationData.trackingNumber)}&program=${encodeURIComponent(applicationData.programName)}`);
     }, 400);
   };
 
@@ -335,19 +403,101 @@ function AdmissionStep4() {
         getStoredOwnScheduleRequest(applicationData.trackingNumber));
 
     try {
+      const currentDraft = getAdmissionSessionData();
+      const sessionTrackingNumber = currentDraft?.trackingNumber || "";
+      const isNewApplication = Boolean(
+        sessionTrackingNumber &&
+          normalizeTrackingNumber(sessionTrackingNumber) ===
+            normalizeTrackingNumber(applicationData.trackingNumber) &&
+          applicationData.applicationStatus === "draft",
+      );
+
+      let applicationToSubmit = applicationData;
+      if (isNewApplication && currentDraft) {
+        const stagedApplication = await getAdmissionProgress(
+          sessionTrackingNumber,
+        );
+        applicationToSubmit =
+          stagedApplication?.applicationStatus === "draft" &&
+          !stagedApplication.submittedAt
+            ? stagedApplication
+            : await saveAdmissionApplication({
+                trackingNumber: currentDraft.trackingNumber,
+                branchCode: currentDraft.branch || "",
+                academicYear: currentDraft.academicYear,
+                studentStatus: currentDraft.status || "",
+                programName: currentDraft.program || "",
+                trackName: currentDraft.strand_or_course || "",
+                requestedYearLevel: currentDraft.requested_year_level,
+                firstName: currentDraft.fname || "",
+                lastName: currentDraft.lname || "",
+                middleName: currentDraft.middle_name,
+                sex: currentDraft.sex || "",
+                civilStatus: currentDraft.civil_status || "",
+                address: currentDraft.address || "",
+                email: currentDraft.email || "",
+                phoneNumber: currentDraft.contact || "",
+                lastSchoolAttended: currentDraft.last_school_attended || "",
+                yearCompletion: currentDraft.year_completion,
+                honorLabel: currentDraft.honor || "No Honor",
+                applyScholarship: Boolean(currentDraft.apply_scholarship),
+                currentStep: 3,
+                applicationStatus: "draft",
+              });
+        setApplicationData(applicationToSubmit);
+        setTrackingNumber(applicationToSubmit.trackingNumber);
+      }
+
+      let uploadedStoragePaths: string[] = [];
+      if (isNewApplication && !currentDraft?.requirementsCommitted) {
+        try {
+          const stagedRequirements = await getStagedAdmissionRequirements(
+            currentDraft?.trackingNumber || applicationData.trackingNumber,
+          );
+          const uploadResults = await Promise.allSettled(
+            stagedRequirements.map((requirement) =>
+              uploadAdmissionRequirementFile({
+                trackingNumber: applicationToSubmit.trackingNumber,
+                requirementCode: requirement.requirementCode,
+                requirementName: requirement.requirementName,
+                file: requirement.file,
+              }),
+            ),
+          );
+          uploadedStoragePaths = uploadResults.flatMap((result) =>
+            result.status === "fulfilled" ? [result.value.storagePath] : [],
+          );
+          const failedUpload = uploadResults.find(
+            (result) => result.status === "rejected",
+          );
+          if (failedUpload?.status === "rejected") {
+            throw failedUpload.reason;
+          }
+          sessionStorage.setItem(
+            "enrollmentDraft",
+            JSON.stringify({ ...currentDraft, requirementsCommitted: true }),
+          );
+        } catch (uploadError) {
+          await removeAdmissionRequirementFiles(uploadedStoragePaths).catch((cleanupError) => {
+            console.warn("Unable to remove a partially uploaded admission credential", cleanupError);
+          });
+          throw uploadError;
+        }
+      }
+
       await setAdmissionOwnScheduleRequest({
-        trackingNumber: applicationData.trackingNumber,
+        trackingNumber: applicationToSubmit.trackingNumber,
         requested: effectiveRequestOwnSchedule,
       });
 
       const updatedApplication = await updateAdmissionProgress({
-        trackingNumber: applicationData.trackingNumber,
+        trackingNumber: applicationToSubmit.trackingNumber,
         currentStep: shouldProceedToScholarshipExam ? 5 : 4,
         applicationStatus: "submitted",
         markSubmitted: true,
       });
 
-      const draft = getAdmissionDraft();
+      const draft = getAdmissionSessionData();
       const submissionDraft = draft
         ? {
             ...draft,
@@ -373,6 +523,13 @@ function AdmissionStep4() {
 
       setApplicationData(updatedApplication);
       setTrackingNumber(updatedApplication.trackingNumber);
+
+      if (isNewApplication && currentDraft?.trackingNumber) {
+        await clearStagedAdmissionRequirements(currentDraft.trackingNumber).catch((error) => {
+          console.warn("Unable to clear staged admission credentials", error);
+        });
+        clearAdmissionSessionData();
+      }
 
       try {
         const notificationResult = await sendAdmissionSubmissionNotification({
@@ -412,7 +569,7 @@ function AdmissionStep4() {
 
       if (shouldProceedToScholarshipExam) {
         setTimeout(() => {
-          window.location.href = `/scholarship-exam?trackingNumber=${encodeURIComponent(updatedApplication.trackingNumber)}`;
+          navigateAdmissionPage(`/scholarship-exam?trackingNumber=${encodeURIComponent(updatedApplication.trackingNumber)}`);
         }, 700);
       }
     } catch (err) {
@@ -504,7 +661,7 @@ function AdmissionStep4() {
       case "rejected":
         return "Application Requires Follow-up";
       default:
-        return "Application Draft Saved";
+        return "Ready to Submit";
     }
   }, [applicationData]);
 
@@ -577,6 +734,7 @@ function AdmissionStep4() {
   const supportsOwnScheduleAdmissionRequest =
     isCollege && !isCollegeTransferee;
   const canEdit = applicationData?.applicationStatus === "draft";
+  const isUnsubmittedSession = canEdit && !applicationData?.submittedAt;
   const canRequestOwnSchedule = canEdit && supportsOwnScheduleAdmissionRequest;
 
   useEffect(() => {
@@ -632,7 +790,7 @@ function AdmissionStep4() {
               <button
                 className="conf-btn-continue"
                 onClick={() => {
-                  window.location.href = "/";
+                  navigateAdmissionPage("/");
                 }}
               >
                 Go to Home
@@ -662,16 +820,20 @@ function AdmissionStep4() {
             <p className="conf-status-text">{applicationStatusMessage}</p>
           </div>
 
-          <div className="conf-track-wrapper">
-            <label className="conf-track-label">Tracking Number:</label>
-            <div className="conf-track-number">{trackingNumber}</div>
-          </div>
+          {!isUnsubmittedSession && (
+            <>
+              <div className="conf-track-wrapper">
+                <label className="conf-track-label">Tracking Number:</label>
+                <div className="conf-track-number">{trackingNumber}</div>
+              </div>
 
-          <div className="conf-copy-wrapper">
-            <button className="conf-copy-btn" onClick={() => void handleCopy()}>
-              <FaCopy /> Copy Tracking Number
-            </button>
-          </div>
+              <div className="conf-copy-wrapper">
+                <button className="conf-copy-btn" onClick={() => void handleCopy()}>
+                  <FaCopy /> Copy Tracking Number
+                </button>
+              </div>
+            </>
+          )}
 
           {canEdit && (
             <div className="conf-notice conf-notice-warning">
@@ -915,18 +1077,18 @@ function AdmissionStep4() {
               className="conf-btn-continue"
               onClick={() => {
                 if (isAccepted && studentPortalLink) {
-                  window.location.href = studentPortalLink;
+                  navigateAdmissionPage(studentPortalLink);
                   return;
                 }
 
                 if (!canEdit) {
                   if (shouldShowScholarshipExam) {
-                    window.location.href = `/scholarship-exam?trackingNumber=${encodeURIComponent(applicationData.trackingNumber)}`;
+                    navigateAdmissionPage(`/scholarship-exam?trackingNumber=${encodeURIComponent(applicationData.trackingNumber)}`);
                     return;
                   }
 
-                  clearAdmissionDraft();
-                  window.location.href = "/";
+                  clearAdmissionSessionData();
+                  navigateAdmissionPage("/");
                   return;
                 }
 

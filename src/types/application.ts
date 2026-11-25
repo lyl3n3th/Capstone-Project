@@ -27,7 +27,7 @@ export type AdmissionApplicationStatus =
 
 export type AdmissionDiscountSource = "none" | "honor" | "scholarship_exam";
 
-export interface AdmissionDraft {
+export interface AdmissionSessionData {
   trackingNumber?: string;
   branch?: string;
   academicYear?: string;

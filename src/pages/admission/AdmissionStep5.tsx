@@ -5,12 +5,13 @@ import { useEffect, useState } from "react";
 import { ToastContainer } from "../../components/common/Toast";
 import SkeletonPage from "../../components/common/SkeletonPage";
 import {
-  clearAdmissionDraft,
-  getAdmissionDraft,
+  clearAdmissionSessionData,
+  getAdmissionSessionData,
   getAdmissionProgress,
 } from "../../services/admission";
 import type { AdmissionApplicationSummary } from "../../types/application";
 import { fetchScholarshipExamRoom } from "../../services/scholarshipExamRoom";
+import { navigateAdmissionPage } from "../../services/admissionSessionUploads";
 
 function getQueryParam(name: string): string | null {
   const params = new URLSearchParams(window.location.search);
@@ -41,7 +42,7 @@ function AdmissionStep5() {
 
   useEffect(() => {
     const loadApplication = async () => {
-      const draft = getAdmissionDraft();
+      const draft = getAdmissionSessionData();
       const trackingNumber = trackingNumberFromUrl || draft?.trackingNumber || "";
 
       if (!trackingNumber) {
@@ -54,6 +55,12 @@ function AdmissionStep5() {
         const result = await getAdmissionProgress(trackingNumber);
         if (!result) {
           setPageError("Tracking number not found.");
+          setIsLoading(false);
+          return;
+        }
+
+        if (result.applicationStatus === "draft" && !result.submittedAt) {
+          setPageError("This application has not been submitted. Please start a new application.");
           setIsLoading(false);
           return;
         }
@@ -85,8 +92,8 @@ function AdmissionStep5() {
   }, [trackingNumberFromUrl]);
 
   const handleBackToHome = () => {
-    clearAdmissionDraft();
-    window.location.href = "/";
+    clearAdmissionSessionData();
+    navigateAdmissionPage("/");
   };
 
   if (isLoading) {

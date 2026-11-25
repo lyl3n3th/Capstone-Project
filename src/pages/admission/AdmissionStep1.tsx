@@ -14,6 +14,7 @@ import {
 } from "../../services/admission";
 import { formatAdmissionCloseDate } from "../../services/admissionPortal";
 import { fetchBranchOfferings, getProgramsForOfferings, type BranchOffering } from "../../services/branchOfferings";
+import { navigateAdmissionPage } from "../../services/admissionSessionUploads";
 
 interface Toast {
   id: string;
@@ -258,12 +259,13 @@ function AdmissionStep1() {
     sessionStorage.setItem("enrollmentDraft", JSON.stringify(draftData));
     setTimeout(() => {
       setLoading(false);
-      window.location.href = `/information?branch=${encodeURIComponent(activeSelectedBranch)}&status=${encodeURIComponent(status)}&trackingNumber=${draftData.trackingNumber}`;
+      navigateAdmissionPage(`/information?branch=${encodeURIComponent(activeSelectedBranch)}&status=${encodeURIComponent(status)}&trackingNumber=${draftData.trackingNumber}`);
     }, 600);
   };
 
   const handleCancel = () => {
-    window.location.href = "/admission";
+    sessionStorage.removeItem("enrollmentDraft");
+    navigateAdmissionPage("/admission");
   };
 
   return (

@@ -504,7 +504,7 @@ def find_matching_admission_applications(*, email, phone_number):
             "phone_number": f"eq.{normalized_phone_number}",
             "application_status": "neq.cancelled",
         },
-        select="tracking_number,application_status,created_at",
+        select="tracking_number,application_status,submitted_at,created_at",
         order="created_at.desc",
         limit=5,
     )
@@ -512,11 +512,20 @@ def find_matching_admission_applications(*, email, phone_number):
     return [
         TrackingRecoveryMatch(
             tracking_number=row["tracking_number"],
-            application_status=row.get("application_status") or "draft",
+            application_status=(
+                "submitted"
+                if (row.get("application_status") or "").strip().lower() == "draft"
+                and row.get("submitted_at")
+                else row.get("application_status") or "draft"
+            ),
             created_at=row.get("created_at"),
         )
         for row in (rows or [])
         if row.get("tracking_number")
+        and (
+            (row.get("application_status") or "").strip().lower() != "draft"
+            or row.get("submitted_at")
+        )
     ]
 
 

@@ -3,10 +3,14 @@ import { FaRegPaperPlane } from "react-icons/fa6";
 import logow from "../../assets/images/logow.png";
 import { useAdmissionPortalOverview } from "../../hooks/useAdmissionPortalStatus";
 import {
-  clearAdmissionDraft,
-  getAdmissionDraft,
+  clearAdmissionSessionData,
   getAdmissionProgress,
+  getAdmissionSessionData,
 } from "../../services/admission";
+import {
+  clearStagedAdmissionRequirements,
+  navigateAdmissionPage,
+} from "../../services/admissionSessionUploads";
 import "../../styles/admission/admission-home.css";
 
 const TRACKING_NUMBER_MAX_LENGTH = 20;
@@ -68,31 +72,17 @@ function AdmissionHome() {
     try {
       const application = await getAdmissionProgress(trackingNumber);
       if (application) {
-        if (
-          application.currentStep <= 3 &&
-          application.applicationStatus === "draft"
-        ) {
-          const params = new URLSearchParams({
-            branch: application.branchCode,
-            status: application.studentStatus,
-            trackingNumber: application.trackingNumber,
-            program: application.programName,
-          });
-          window.location.href = `/requirements?${params.toString()}`;
+        if (application.applicationStatus === "draft" && !application.submittedAt) {
+          setError("This application was not submitted. Please start a new application.");
           return;
         }
 
-        window.location.href = `/confirmation?trackingNumber=${encodeURIComponent(application.trackingNumber)}`;
-        return;
-      }
+        if (application.applicationStatus === "cancelled") {
+          setError("No submitted application was found for that tracking number.");
+          return;
+        }
 
-      const draft = getAdmissionDraft();
-      if (
-        draft?.trackingNumber &&
-        draft.trackingNumber.toUpperCase() ===
-          trackingNumber.trim().toUpperCase()
-      ) {
-        window.location.href = `/confirmation?trackingNumber=${encodeURIComponent(trackingNumber.trim())}`;
+        navigateAdmissionPage(`/confirmation?trackingNumber=${encodeURIComponent(application.trackingNumber)}`);
         return;
       }
 
@@ -103,6 +93,20 @@ function AdmissionHome() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const startNewApplication = () => {
+    const currentDraft = getAdmissionSessionData();
+    clearAdmissionSessionData();
+    if (currentDraft?.trackingNumber) {
+      void clearStagedAdmissionRequirements(currentDraft.trackingNumber)
+        .catch((error) => console.warn("Unable to clear old staged admission files", error))
+        .finally(() => {
+          navigateAdmissionPage("/enroll");
+        });
+      return;
+    }
+    navigateAdmissionPage("/enroll");
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -152,13 +156,7 @@ function AdmissionHome() {
           <button
             type="button"
             className="admission-primary-action"
-            onClick={() => {
-              const draft = getAdmissionDraft();
-              if (draft?.submitted) {
-                clearAdmissionDraft();
-              }
-              window.location.href = "/enroll";
-            }}
+            onClick={startNewApplication}
             disabled={!isAnyOpen}
           >
             Enroll Now

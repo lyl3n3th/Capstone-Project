@@ -5,13 +5,13 @@ import SkeletonPage from "../../components/common/SkeletonPage";
 import "../../styles/main.css";
 import {
   civilStatusOptions,
+  clearAdmissionSessionData,
   getAdmissionBranchName,
-  getAdmissionDraft,
+  getAdmissionSessionData,
   getAdmissionYearLevelOptions,
   getAdmissionProgress,
   normalizeAdmissionYearLevel,
   honorOptions,
-  saveAdmissionApplication,
   sexOptions,
 } from "../../services/admission";
 import {
@@ -20,13 +20,13 @@ import {
 } from "../../services/admissionPortal";
 import { fetchBranchOfferings, getProgramsForOfferings, type BranchOffering } from "../../services/branchOfferings";
 import {
+  clearStagedAdmissionRequirements,
+  navigateAdmissionPage,
+} from "../../services/admissionSessionUploads";
+import {
   formatContactNumber as formatSharedContactNumber,
   getContactNumberDigits,
 } from "../../utils/contactNumber";
-import {
-  requestAdmissionDraftRecoveryCode,
-  verifyAdmissionDraftRecoveryCode,
-} from "../../services/admissionDraftRecoveryApi";
 
 const EDUCATIONAL_LEVEL_PLACEHOLDER = "Educational Level";
 const TRACK_SELECTION_PLACEHOLDER = "Strand / Program";
@@ -107,9 +107,6 @@ function AdmissionStep2() {
 
   // submit handle
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showDraftRecovery, setShowDraftRecovery] = useState(false);
-  const [draftRecoveryCode, setDraftRecoveryCode] = useState("");
-  const [draftRecoveryMessage, setDraftRecoveryMessage] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const [touchedFields, setTouchedFields] = useState<
@@ -129,7 +126,7 @@ function AdmissionStep2() {
   const [trackingNumber, setTrackingNumber] = useState(initialTrackingNumber);
 
   // draft
-  const [isLoadingDraft, setIsLoadingDraft] = useState(true);
+  const [isLoadingSessionData, setIsLoadingDraft] = useState(true);
 
   // branch admission data
   const selectedBranch = getQueryParam("branch") || "";
@@ -351,15 +348,15 @@ function AdmissionStep2() {
     setApplyScholarship(application.appliedForScholarship);
   };
 
-  // Save draft to sessionStorage
-  const saveDraft = () => {
-    const previousDraft = getAdmissionDraft() ?? {};
+  // Keep form progress in the current browser tab
+  const saveSessionData = () => {
+    const previousSessionData = getAdmissionSessionData() ?? {};
     const academicYear =
-      previousDraft.academicYear ||
+      previousSessionData.academicYear ||
       getAdmissionPortalStatus(selectedBranch)?.academicYear ||
       getDefaultAdmissionAcademicYear();
-    const draftData = {
-      ...previousDraft,
+    const sessionData = {
+      ...previousSessionData,
       step: 2,
       trackingNumber,
       branch: selectedBranch,
@@ -383,12 +380,12 @@ function AdmissionStep2() {
       honor,
       apply_scholarship: applyScholarship,
     };
-    sessionStorage.setItem("enrollmentDraft", JSON.stringify(draftData));
-    return draftData;
+    sessionStorage.setItem("enrollmentDraft", JSON.stringify(sessionData));
+    return sessionData;
   };
 
-  // Load draft from sessionStorage
-  const loadDraft = async () => {
+  // Restore form progress from the current browser tab
+  const loadSessionData = async () => {
     const saved = sessionStorage.getItem("enrollmentDraft");
     const loadSavedApplication = async () => {
       const resolvedTrackingNumber = trackingNumber || initialTrackingNumber;
@@ -398,6 +395,13 @@ function AdmissionStep2() {
 
       try {
         const application = await getAdmissionProgress(resolvedTrackingNumber);
+        if (
+          application?.applicationStatus === "draft" &&
+          !application.submittedAt
+        ) {
+          navigateAdmissionPage("/enroll");
+          return;
+        }
         applyApplicationToForm(application);
       } catch (error) {
         console.warn("Failed to load saved admission progress", error);
@@ -451,7 +455,7 @@ function AdmissionStep2() {
       }
       await loadSavedApplication();
     } catch (err) {
-      console.warn("Failed to load draft", err);
+      console.warn("Failed to load current-tab application data", err);
       await loadSavedApplication();
     } finally {
       setIsLoadingDraft(false);
@@ -460,15 +464,15 @@ function AdmissionStep2() {
 
   useEffect(() => {
     if (fromRequirements) {
-      void loadDraft();
+      void loadSessionData();
     }
   }, [fromRequirements]);
 
-  // Auto-save draft
+  // Update the current-tab application data
   useEffect(() => {
-    if (!isLoadingDraft) {
+    if (!isLoadingSessionData) {
       const timeoutId = setTimeout(() => {
-        saveDraft();
+        saveSessionData();
       }, 1000);
       return () => clearTimeout(timeoutId);
     }
@@ -492,7 +496,7 @@ function AdmissionStep2() {
   ]);
 
   useEffect(() => {
-    void loadDraft();
+    void loadSessionData();
   }, []);
 
   // Handle input changes
@@ -526,92 +530,6 @@ function AdmissionStep2() {
     }
   };
 
-  const saveApplicationAndContinue = async (recoveredTrackingNumber?: string) => {
-    const savedDraft = saveDraft();
-    const trackingNumberToSave =
-      recoveredTrackingNumber || trackingNumber || initialTrackingNumber;
-
-    if (recoveredTrackingNumber) {
-      setTrackingNumber(recoveredTrackingNumber);
-      savedDraft.trackingNumber = recoveredTrackingNumber;
-      sessionStorage.setItem("enrollmentDraft", JSON.stringify(savedDraft));
-    }
-
-    const savedApplication = await saveAdmissionApplication({
-      trackingNumber: trackingNumberToSave,
-      branchCode: selectedBranch,
-      academicYear: savedDraft.academicYear,
-      studentStatus,
-      programName: program,
-      trackName: program1,
-      firstName: fname,
-      lastName: lname,
-      middleName: mname,
-      sex,
-      civilStatus,
-      address,
-      email,
-      phoneNumber: contact,
-      lastSchoolAttended: lastSchool,
-      yearCompletion: isTransferee ? "" : yearCompletion,
-      requestedYearLevel:
-        normalizeAdmissionYearLevel(program, requestedYearLevel) || undefined,
-      honorLabel: honor === "Select Honor" ? "No Honor" : honor,
-      applyScholarship,
-      currentStep: 2,
-      applicationStatus: "draft",
-    });
-
-    const nextTrackingNumber = savedApplication.trackingNumber;
-
-    if (nextTrackingNumber) {
-      setTrackingNumber(nextTrackingNumber);
-      const currentDraft = JSON.parse(
-        sessionStorage.getItem("enrollmentDraft") || "{}",
-      );
-      const updatedDraft = {
-        ...currentDraft,
-        trackingNumber: nextTrackingNumber,
-        step: 2.5,
-        timestamp: new Date().toISOString(),
-        fname,
-        lname,
-        middle_name: mname,
-        address,
-        email,
-        contact,
-        last_school_attended: lastSchool,
-        year_completion: isTransferee ? "" : yearCompletion,
-        requested_year_level:
-          normalizeAdmissionYearLevel(program, requestedYearLevel) ||
-          undefined,
-        program,
-        strand_or_course: program1,
-        sex,
-        civil_status: civilStatus,
-        honor,
-        apply_scholarship: applyScholarship,
-        branch: selectedBranch,
-        status: studentStatus,
-      };
-      sessionStorage.setItem("enrollmentDraft", JSON.stringify(updatedDraft));
-      addToast("Application saved successfully!", "success");
-    }
-
-    window.location.href = `/requirements?branch=${encodeURIComponent(selectedBranch)}&status=${encodeURIComponent(studentStatus)}&trackingNumber=${nextTrackingNumber}&program=${encodeURIComponent(program)}`;
-  };
-
-  const sendDraftRecoveryCode = async () => {
-    const response = await requestAdmissionDraftRecoveryCode({
-      email,
-      firstName: fname,
-      lastName: lname,
-    });
-    setDraftRecoveryMessage(response.message);
-    setDraftRecoveryCode("");
-    setShowDraftRecovery(true);
-  };
-
   const handleContinue = async () => {
     if (!isFormValid()) {
       const invalidFields = getFieldsToValidate().filter((fieldId) =>
@@ -628,71 +546,30 @@ function AdmissionStep2() {
 
     setIsSubmitting(true);
     try {
-      await saveApplicationAndContinue();
-    } catch (err) {
-      console.error(err);
-      const errorMessage =
-        err instanceof Error ? err.message : "Unable to save the application.";
-      if (/email or contact number already exists/i.test(errorMessage)) {
-        try {
-          await sendDraftRecoveryCode();
-          return;
-        } catch (recoveryError) {
-          setDraftRecoveryMessage(
-            recoveryError instanceof Error
-              ? recoveryError.message
-              : "Unable to send a verification code. Try again.",
-          );
-          setDraftRecoveryCode("");
-          setShowDraftRecovery(true);
-          return;
-        }
+      const savedSessionData = saveSessionData();
+      const nextTrackingNumber = trackingNumber || initialTrackingNumber;
+      if (!nextTrackingNumber) {
+        throw new Error("Your application session expired. Please start again.");
       }
 
-      addToast(
-        errorMessage || "Cannot connect to Supabase right now. Please try again.",
-        "error",
+      setTrackingNumber(nextTrackingNumber);
+      sessionStorage.setItem(
+        "enrollmentDraft",
+        JSON.stringify({
+          ...savedSessionData,
+          trackingNumber: nextTrackingNumber,
+          step: 2,
+          branch: selectedBranch,
+          status: studentStatus,
+        }),
       );
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleResendDraftRecoveryCode = async () => {
-    setIsSubmitting(true);
-    try {
-      await sendDraftRecoveryCode();
+      navigateAdmissionPage(`/requirements?branch=${encodeURIComponent(selectedBranch)}&status=${encodeURIComponent(studentStatus)}&trackingNumber=${encodeURIComponent(nextTrackingNumber)}&program=${encodeURIComponent(program)}`);
     } catch (err) {
-      setDraftRecoveryMessage(
-        err instanceof Error
-          ? err.message
-          : "Unable to send a verification code. Try again.",
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleVerifyDraftRecovery = async () => {
-    if (!/^\d{8}$/.test(draftRecoveryCode)) {
-      addToast("Enter the 8-digit code sent to your email.", "error");
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const result = await verifyAdmissionDraftRecoveryCode({
-        email,
-        firstName: fname,
-        lastName: lname,
-        code: draftRecoveryCode,
-      });
-      await saveApplicationAndContinue(result.tracking_number);
-    } catch (err) {
+      console.error(err);
       addToast(
         err instanceof Error
           ? err.message
-          : "Unable to verify the unfinished application right now.",
+          : "Unable to continue with this application.",
         "error",
       );
     } finally {
@@ -701,11 +578,14 @@ function AdmissionStep2() {
   };
 
   const handleCancel = () => {
-    saveDraft();
-    addToast("Returning to enrollment page", "info");
-    setTimeout(() => {
-      window.location.href = `/enroll?from=information`;
-    }, 300);
+    const draft = getAdmissionSessionData();
+    clearAdmissionSessionData();
+    if (draft?.trackingNumber) {
+      void clearStagedAdmissionRequirements(draft.trackingNumber).catch((error) => {
+        console.warn("Unable to clear staged admission files", error);
+      });
+    }
+    navigateAdmissionPage("/enroll");
   };
 
   useEffect(() => {
@@ -750,10 +630,10 @@ function AdmissionStep2() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  if (isLoadingDraft || offeringsLoading) {
+  if (isLoadingSessionData || offeringsLoading) {
     return (
       <div className="container admission-step2-page">
-        <SkeletonPage eyebrow="Admission" title="Saved Data" variant="form" />
+        <SkeletonPage eyebrow="Admission" title="Personal Information" variant="form" />
       </div>
     );
   }
@@ -779,6 +659,7 @@ function AdmissionStep2() {
               <br />
             </p>
             <p>Please fill in all the required fields. </p>
+            <p>Your progress stays in this tab until submission. Closing the tab clears it.</p>
           </div>
 
           <form action="" className="pinfo">
@@ -1000,7 +881,7 @@ function AdmissionStep2() {
                           onClick={() => {
                             setHonor(opt);
                             setIsMenuOpenHonor(false);
-                            saveDraft();
+                            saveSessionData();
                           }}
                         >
                           {opt}
@@ -1108,7 +989,7 @@ function AdmissionStep2() {
                         setProgram1(opt);
                         markFieldTouched("program1");
                         setIsMenuOpen1(false);
-                        saveDraft();
+                        saveSessionData();
                       }}
                     >
                       {opt}
@@ -1156,56 +1037,6 @@ function AdmissionStep2() {
               </div>
             )}
 
-            {showDraftRecovery && (
-              <section className="draft-recovery-panel" aria-live="polite">
-                <p>{draftRecoveryMessage}</p>
-                <div className="form-group">
-                  <label htmlFor="draftRecoveryCode">Email verification code</label>
-                  <input
-                    id="draftRecoveryCode"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={8}
-                    value={draftRecoveryCode}
-                    onChange={(event) =>
-                      setDraftRecoveryCode(event.target.value.replace(/\D/g, ""))
-                    }
-                    aria-describedby="draftRecoveryHelp"
-                  />
-                  <small id="draftRecoveryHelp">
-                    Enter the 8-digit code. It expires after 10 minutes. You can request a new code once per minute.
-                  </small>
-                </div>
-                <div className="choices3">
-                  <button
-                    type="button"
-                    className="btn3"
-                    onClick={() => setShowDraftRecovery(false)}
-                    disabled={isSubmitting}
-                  >
-                    Dismiss
-                  </button>
-                  <button
-                    type="button"
-                    className="btn3"
-                    onClick={handleResendDraftRecoveryCode}
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting ? "Sending..." : "Resend code"}
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn4 ${isSubmitting ? "disabled" : ""}`}
-                    onClick={handleVerifyDraftRecovery}
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting ? "Verifying..." : "Verify & Continue"}
-                  </button>
-                </div>
-              </section>
-            )}
-
             <div className="choices3">
               <button
                 type="button"
@@ -1221,7 +1052,7 @@ function AdmissionStep2() {
                 onClick={handleContinue}
                 disabled={isSubmitting || Boolean(offeringsError) || availablePrograms.length === 0}
               >
-                {isSubmitting ? "Saving..." : "Continue"}
+                {isSubmitting ? "Continuing..." : "Continue"}
               </button>
             </div>
           </form>
