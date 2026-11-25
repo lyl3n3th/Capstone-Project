@@ -5627,7 +5627,16 @@
 }
 
 .questionnaire-table-row.essay {
-  grid-template-columns: minmax(0, 1fr) minmax(130px, 0.45fr) auto;
+  grid-template-columns: minmax(180px, 1fr) repeat(5, 64px) 68px;
+}
+
+.questionnaire-table-row.essay .questionnaire-essay-preview {
+  grid-column: 2 / span 5;
+}
+
+.questionnaire-table-row.essay .questionnaire-icon-btn {
+  grid-column: 7;
+  justify-self: center;
 }
 
 .questionnaire-essay-preview {
