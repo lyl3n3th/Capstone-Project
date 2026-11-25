@@ -756,18 +756,15 @@ const resolveStudentPortalContextWithLoad = (
   );
 };
 
-export const resolveStudentPortalContext = (
-  student: StudentStorageRecord,
-): ResolvedStudentPortalContext => {
-  const context = resolveStudentPortalContextWithLoad(student);
-  if (student.studentStatus?.trim().toLowerCase() !== "transferee") return context;
-
+export const getTransfereeCreditedSubjectCodes = (
+  student: Pick<StudentStorageRecord, "branch" | "id" | "trackingNumber">,
+) => {
   const branch = normalizeBranchName(student.branch);
   const plans = readBranchScopedData<Record<string, StudentSubjectPlanRecord>>(
     "student-subject-plans",
     branch,
   ) ?? {};
-  const creditedCodes = new Set(
+  return new Set(
     Object.values(plans)
       .filter(plan => plan.source === "transferee_validation" &&
         (plan.studentNumber === student.id ||
@@ -775,6 +772,15 @@ export const resolveStudentPortalContext = (
       .flatMap(plan => plan.creditedSubjects.map(subject => subject.subjectCode.trim().toUpperCase()))
       .filter(Boolean),
   );
+};
+
+export const resolveStudentPortalContext = (
+  student: StudentStorageRecord,
+): ResolvedStudentPortalContext => {
+  const context = resolveStudentPortalContextWithLoad(student);
+  if (student.studentStatus?.trim().toLowerCase() !== "transferee") return context;
+
+  const creditedCodes = getTransfereeCreditedSubjectCodes(student);
   if (creditedCodes.size === 0) return context;
 
   return {
