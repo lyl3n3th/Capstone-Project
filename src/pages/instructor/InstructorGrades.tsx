@@ -181,7 +181,7 @@ const getDisplayGradeErrors = (errors: string[]) => {
 
     const instructorMismatch = trimmedError.match(instructorMismatchPattern);
     if (instructorMismatch) {
-      displayErrors.push(`Instructor "${instructorMismatch[1]}" does not exist.`);
+      displayErrors.push("Wrong instructor for this account.");
       return;
     }
 
