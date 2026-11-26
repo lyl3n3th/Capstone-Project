@@ -1103,45 +1103,14 @@
 
 .instructor-error-table,
 .instructor-file-table {
-  width: 100%;
+  width: max-content;
   min-width: 1420px;
   border-collapse: collapse;
 }
 
 .instructor-file-table {
-  table-layout: fixed;
+  table-layout: auto;
 }
-
-.instructor-file-table th:nth-child(1),
-.instructor-file-table td:nth-child(1) { width: 6%; }
-.instructor-file-table th:nth-child(2),
-.instructor-file-table td:nth-child(2) { width: 6%; }
-.instructor-file-table th:nth-child(3),
-.instructor-file-table td:nth-child(3) { width: 5%; }
-.instructor-file-table th:nth-child(4),
-.instructor-file-table td:nth-child(4) { width: 8%; }
-.instructor-file-table th:nth-child(5),
-.instructor-file-table td:nth-child(5) { width: 7%; }
-.instructor-file-table th:nth-child(6),
-.instructor-file-table td:nth-child(6) { width: 7%; }
-.instructor-file-table th:nth-child(7),
-.instructor-file-table td:nth-child(7) { width: 6%; }
-.instructor-file-table th:nth-child(8),
-.instructor-file-table td:nth-child(8) { width: 8%; }
-.instructor-file-table th:nth-child(9),
-.instructor-file-table td:nth-child(9) { width: 5%; }
-.instructor-file-table th:nth-child(10),
-.instructor-file-table td:nth-child(10) { width: 5%; }
-.instructor-file-table th:nth-child(11),
-.instructor-file-table td:nth-child(11) { width: 7%; }
-.instructor-file-table th:nth-child(12),
-.instructor-file-table td:nth-child(12) { width: 6%; }
-.instructor-file-table th:nth-child(13),
-.instructor-file-table td:nth-child(13) { width: 5%; }
-.instructor-file-table th:nth-child(14),
-.instructor-file-table td:nth-child(14) { width: 5%; }
-.instructor-file-table th:nth-child(15),
-.instructor-file-table td:nth-child(15) { width: 14%; }
 
 .instructor-file-table th,
 .instructor-file-table td {
@@ -1166,7 +1135,11 @@
 .instructor-file-table th:nth-child(12),
 .instructor-file-table th:nth-child(13),
 .instructor-file-table th:nth-child(14) {
-  width: auto;
+  min-width: 112px;
+}
+
+.instructor-file-table th {
+  white-space: nowrap;
 }
 
 .instructor-file-table .instructor-error-cell-list,
