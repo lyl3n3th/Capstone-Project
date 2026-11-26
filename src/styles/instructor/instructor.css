@@ -1175,6 +1175,16 @@
   line-height: 1.45;
 }
 
+.instructor-file-table th,
+.instructor-file-table td {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.instructor-file-table .instructor-error-cell-list {
+  justify-content: center;
+}
+
 .instructor-error-table th,
 .instructor-file-table th {
   position: sticky;
